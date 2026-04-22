@@ -1,0 +1,73 @@
+<style>
+  body {
+    font-family: Inter, sans-serif;
+    padding: 20px;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: #222;
+    color: white;
+  }
+  button {
+    background-color: #18A0FB;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+  button:hover {
+    background-color: #0D8DE2;
+  }
+  button:disabled {
+    background-color: #555;
+    cursor: not-allowed;
+  }
+  #status {
+    margin-top: 12px;
+    font-size: 12px;
+    color: #aaa;
+  }
+</style>
+
+<button id="sync-btn">Sync to MCP</button>
+<div id="status">Ready</div>
+
+<script>
+  document.getElementById('sync-btn').onclick = () => {
+    document.getElementById('sync-btn').disabled = true;
+    document.getElementById('status').innerText = 'Extracting data...';
+    parent.postMessage({ pluginMessage: { type: 'extract-data' } }, '*');
+  }
+
+  onmessage = async (event) => {
+    const msg = event.data.pluginMessage;
+    if (msg.type === 'data-extracted') {
+      document.getElementById('status').innerText = 'Sending to local server...';
+      try {
+        const response = await fetch('http://localhost:1337/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg.data)
+        });
+        
+        if (response.ok) {
+          document.getElementById('status').innerText = 'Sync complete!';
+          document.getElementById('sync-btn').disabled = false;
+          parent.postMessage({ pluginMessage: { type: 'sync-success' } }, '*');
+        } else {
+          document.getElementById('status').innerText = 'Server error: ' + response.status;
+          document.getElementById('sync-btn').disabled = false;
+        }
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed. Is the receiver running?';
+        document.getElementById('sync-btn').disabled = false;
+      }
+    }
+  }
+</script>

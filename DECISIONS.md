@@ -108,3 +108,17 @@ Running log of non-obvious project decisions and the reasons behind them.
 **Constraint:** Per Figma’s official docs, `GET /v1/files/:file_key/variables/local` requires the `file_variables:read` scope and is available only to full members of Enterprise orgs.
 
 **Consequence:** The exporter should degrade gracefully when the Variables API is unavailable and still emit useful file/style data plus warnings.
+
+---
+
+## [2026-04-22] Build a dedicated local-first Figma bridge plugin to bypass REST limitations
+
+**Decision:** Create a simple Figma plugin (`packages/figma-bridge-plugin`) that extracts local variables and styles and POSTs them to a local HTTP receiver (`src/receiver.js`) to save in `.local/figma-data.json`.
+
+**Why:**
+- Figma's REST API gatekeeps the Local Variables API behind an Enterprise plan.
+- Running a plugin inside the Figma editor canvas is the only reliable way for all users to read `figma.variables`.
+- By having the plugin act strictly as an extractor that POSTs standard JSON to `localhost`, the core MCP server remains completely agent-agnostic and transport-agnostic.
+- The Claude/Codex adapters don't need to know how the data was fetched, only that it exists locally.
+
+**Consequence:** Users will need to install and run this local plugin in Figma desktop to sync variables before running the MCP tools. The REST exporter is kept as an option for Enterprise users or those who only need styles.

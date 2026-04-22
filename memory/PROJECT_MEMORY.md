@@ -47,6 +47,7 @@ These were chosen because they are useful across agents and are mostly determini
 - `memory/` for durable project context
 - `packages/figlets-core/` for shared logic
 - `packages/figlets-mcp-server/` for MCP exposure
+- `packages/figma-bridge-plugin/` for the local Figma data extractor
 - `packages/figlets-adapter-codex/` for the Codex adapter
 - `packages/figlets-adapter-claude/` for the Claude adapter
 
@@ -68,6 +69,16 @@ These were chosen because they are useful across agents and are mostly determini
 - Added the first real exporter path: a Figma REST CLI that can turn a file URL or key into the JSON contract used by `detect_design_system`
 - Added a local-only config layer with `.env`, `.env.example`, and `.local/` support so private testing can stay on the user’s machine
 - Verified the server entrypoint runs directly from source with Node
+
+### [2026-04-22]
+
+- Evaluated native Figma MCP capabilities vs the current architecture.
+- Identified the Enterprise limitation for Figma REST API Local Variables.
+- Scaffolded `packages/figma-bridge-plugin` to bypass this limitation using a Figma Plugin that extracts variables via Plugin API.
+- Implemented a plain JS plugin with a "Sync" UI that uses `fetch` to POST data to localhost.
+- Created `receiver.js`, a tiny Node HTTP server that listens on port `1337` and saves the payload to `.local/figma-data.json`.
+- Upgraded `tests/run-tests.js` to support `async` tests and await exported promises.
+- Added a unit test (`receiver.test.js`) to verify the local HTTP receiver logic works and saves to the correct path.
 
 ---
 

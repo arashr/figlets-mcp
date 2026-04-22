@@ -1,0 +1,32 @@
+{
+  "target": "example-file",
+  "collections": [
+    {
+      "id": "1",
+      "name": "Primitives",
+      "modeNames": ["Value"],
+      "varCount": 120,
+      "colorVarCount": 88,
+      "floatVarCount": 32,
+      "isPrimitive": true,
+      "isAlias": false
+    },
+    {
+      "id": "2",
+      "name": "Semantics",
+      "modeNames": ["Light", "Dark"],
+      "varCount": 64,
+      "colorVarCount": 64,
+      "floatVarCount": 0,
+      "isPrimitive": false,
+      "isAlias": true
+    }
+  ],
+  "textStyles": [
+    { "name": "display/lg" },
+    { "name": "body/md" }
+  ],
+  "effectStyles": [
+    { "name": "elevation/100" }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "figlets-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-agnostic MCP-first toolkit for Figma design system workflows.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev -w @figlets/mcp-server",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "node tests/run-tests.js"
+  },
+  "engines": {
+    "node": ">=10"
+  },
+  "license": "MIT"
+}

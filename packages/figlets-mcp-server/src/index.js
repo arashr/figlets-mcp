@@ -5,6 +5,7 @@ const { z } = require("zod");
 const { detectDesignSystemTool } = require("./tools/detect-design-system.js");
 const { inspectComponentTool, handleInspectComponent } = require("./tools/inspect-component.js");
 const { syncFigmaDataTool, handleSyncFigmaData } = require("./tools/sync-figma-data.js");
+const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
@@ -60,6 +61,25 @@ server.tool(
   async () => {
     try {
       return await handleInspectComponent();
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- audit_tokens ---
+server.tool(
+  auditTokensTool.name,
+  auditTokensTool.description,
+  {
+    figmaDataPath: z.string().optional().describe("Optional path to the figma-data.json snapshot.")
+  },
+  async (args) => {
+    try {
+      return handleAuditTokens(args);
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

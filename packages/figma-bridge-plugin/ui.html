@@ -10,64 +10,101 @@
     background-color: #222;
     color: white;
   }
-  button {
+  .pulse {
+    width: 12px;
+    height: 12px;
     background-color: #18A0FB;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 10px 20px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.2s;
+    border-radius: 50%;
+    margin-bottom: 12px;
+    animation: pulse 2s infinite;
   }
-  button:hover {
-    background-color: #0D8DE2;
-  }
-  button:disabled {
-    background-color: #555;
-    cursor: not-allowed;
+  @keyframes pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(24, 160, 251, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(24, 160, 251, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(24, 160, 251, 0); }
   }
   #status {
-    margin-top: 12px;
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #eee;
+  }
+  #substatus {
+    margin-top: 6px;
+    font-size: 11px;
     color: #aaa;
   }
 </style>
 
-<button id="sync-btn">Sync to MCP</button>
-<div id="status">Ready</div>
+<div class="pulse"></div>
+<div id="status">Listening for Agent</div>
+<div id="substatus">Keep this plugin open...</div>
 
 <script>
-  document.getElementById('sync-btn').onclick = () => {
-    document.getElementById('sync-btn').disabled = true;
-    document.getElementById('status').innerText = 'Extracting data...';
-    parent.postMessage({ pluginMessage: { type: 'extract-data' } }, '*');
+  let isExtracting = false;
+
+  async function poll() {
+    if (isExtracting) return; // Wait until extraction is done before polling again
+
+    try {
+      const res = await fetch('http://localhost:1337/poll');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.command === 'extract' || data.command === 'extract-all') {
+          isExtracting = true;
+          document.getElementById('status').innerText = 'Extracting data...';
+          document.getElementById('substatus').innerText = 'Sync triggered by agent.';
+          parent.postMessage({ pluginMessage: { type: 'extract-all' } }, '*');
+        } else if (data.command === 'extract-selection') {
+          isExtracting = true;
+          document.getElementById('status').innerText = 'Extracting selection...';
+          document.getElementById('substatus').innerText = 'Inspect triggered by agent.';
+          parent.postMessage({ pluginMessage: { type: 'extract-selection' } }, '*');
+        }
+      }
+    } catch (err) {
+      document.getElementById('status').innerText = 'Offline';
+      document.getElementById('substatus').innerText = 'Receiver not running. Retrying...';
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    // Poll again
+    if (!isExtracting) {
+      poll();
+    }
   }
 
   onmessage = async (event) => {
     const msg = event.data.pluginMessage;
-    if (msg.type === 'data-extracted') {
-      document.getElementById('status').innerText = 'Sending to local server...';
+    
+    if (msg.type === 'data-extracted' || msg.type === 'selection-extracted') {
+      document.getElementById('status').innerText = 'Sending payload...';
+      const endpoint = msg.type === 'selection-extracted' ? '/sync-selection' : '/sync';
+      
       try {
-        const response = await fetch('http://localhost:1337/sync', {
+        const response = await fetch(`http://localhost:1337${endpoint}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(msg.data)
         });
         
         if (response.ok) {
-          document.getElementById('status').innerText = 'Sync complete!';
-          document.getElementById('sync-btn').disabled = false;
+          document.getElementById('status').innerText = 'Listening for Agent';
+          document.getElementById('substatus').innerText = 'Last sync successful.';
           parent.postMessage({ pluginMessage: { type: 'sync-success' } }, '*');
         } else {
-          document.getElementById('status').innerText = 'Server error: ' + response.status;
-          document.getElementById('sync-btn').disabled = false;
+          document.getElementById('status').innerText = 'Server Error';
+          document.getElementById('substatus').innerText = 'Status: ' + response.status;
         }
       } catch (err) {
-        document.getElementById('status').innerText = 'Connection failed. Is the receiver running?';
-        document.getElementById('sync-btn').disabled = false;
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
       }
+      
+      isExtracting = false;
+      poll(); // Resume polling
     }
   }
+
+  // Start polling immediately
+  poll();
 </script>

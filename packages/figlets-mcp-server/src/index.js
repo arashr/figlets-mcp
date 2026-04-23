@@ -1,6 +1,8 @@
 const path = require("path");
 const { CORE_VERSION } = require("../../figlets-core/src/index.js");
 const { detectDesignSystemTool } = require("./tools/detect-design-system.js");
+const { inspectComponentTool } = require("./tools/inspect-component.js");
+const { syncFigmaDataTool } = require("./tools/sync-figma-data.js");
 
 function main() {
   const examplePath = path.resolve(__dirname, "../../../examples/detect-design-system.figma-data.json");
@@ -17,6 +19,16 @@ function main() {
         name: detectDesignSystemTool.name,
         description: detectDesignSystemTool.description,
         inputSchema: detectDesignSystemTool.inputSchema
+      },
+      {
+        name: inspectComponentTool.name,
+        description: inspectComponentTool.description,
+        inputSchema: inspectComponentTool.inputSchema
+      },
+      {
+        name: syncFigmaDataTool.name,
+        description: syncFigmaDataTool.description,
+        inputSchema: syncFigmaDataTool.inputSchema
       }
     ],
     examples: {

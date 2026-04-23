@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node src/index.js",
     "detect-ds": "node src/cli/detect-design-system.js",
-    "export-figma-file": "node src/cli/export-figma-file.js"
+    "export-figma-file": "node src/cli/export-figma-file.js",
+    "inspect-component": "node src/cli/inspect-component.js"
   }
 }

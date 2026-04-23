@@ -1,4 +1,5 @@
 const { analyzeDesignSystemData } = require("./analyze-design-system.js");
+const { inspectComponentData } = require("./inspect-component.js");
 
 const CORE_VERSION = "0.1.0";
 
@@ -69,6 +70,7 @@ module.exports = {
   CORE_VERSION,
   detectDesignSystem,
   detectDesignSystemFromFigmaData,
+  inspectComponentData,
   normalizeDesignSystemSnapshot,
   summarizeDesignSystem
 };

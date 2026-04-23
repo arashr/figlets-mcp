@@ -122,3 +122,32 @@ Running log of non-obvious project decisions and the reasons behind them.
 - The Claude/Codex adapters don't need to know how the data was fetched, only that it exists locally.
 
 **Consequence:** Users will need to install and run this local plugin in Figma desktop to sync variables before running the MCP tools. The REST exporter is kept as an option for Enterprise users or those who only need styles.
+
+---
+
+## [2026-04-22] Switch plugin from a manual Sync button to always-listening long polling
+
+**Decision:** Remove the "Sync to MCP" button from the plugin UI. Instead, the plugin continuously long-polls `GET /poll` on the local receiver, and the MCP agent triggers extraction via `POST /request-sync`.
+
+**Why:**
+- A manual button requires the designer to be present and remember to sync before asking the agent anything.
+- With long polling, the plugin is permanently ready — the agent controls the workflow end-to-end.
+- `POST /request-sync` is a blocking call that only resolves after Figma has finished extracting and saving. This gives the agent a clean synchronisation point before reading the data.
+- The same long-poll channel supports multiple command types (`extract-all`, `extract-selection`) without needing separate infrastructure.
+
+**Consequence:** The plugin must be open in Figma Desktop for agent-triggered workflows to function. The receiver returns `503` if the plugin is not currently connected, giving agents a clear error to surface to the user.
+
+---
+
+## [2026-04-22] Use Figma selection as the input for component inspection
+
+**Decision:** The `inspect_component` MCP tool takes no arguments. When called, it triggers the plugin to serialize `figma.currentPage.selection` and return it as the inspection payload. The selection is saved to `.local/figma-selection.json`.
+
+**Why:**
+- Asking the agent to search a large component list by name is fragile (fuzzy match, ambiguity, wrong file scope).
+- Letting the user point directly at the component they care about in Figma is more reliable and more intuitive.
+- A zero-argument tool is simpler for agents to call and requires no schema negotiation.
+- The selection can contain frames, instances, component sets, or any other node type — making the tool flexible beyond just named components.
+
+**Consequence:** The designer must have the target component selected in Figma before the agent calls `inspect_component`. Agents should be prompted to ask the user to select the target first if context is ambiguous.
+

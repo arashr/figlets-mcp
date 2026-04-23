@@ -3,39 +3,120 @@
 How to wire `figlets-mcp` into your AI agent host.
 
 > [!NOTE]
-> The MCP server uses **stdio transport** — the host spawns the process and communicates over stdin/stdout. You do not need to run a separate server manually.
+> The server speaks the standard MCP protocol over **stdio** — every host below uses the same binary. No agent-specific code is needed.
+
+## Quick Install
+
+From the repo root, link the server globally so every agent can find it by name:
+
+```bash
+npm link --workspace=@figlets/mcp-server
+```
+
+After linking, `figlets-mcp` is available as a global command. All configs below use it this way — no absolute paths needed.
 
 ---
 
 ## Claude Desktop
 
-Add the following to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+File: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "figlets": {
-      "command": "node",
-      "args": ["/Users/<you>/Projects/figlets-mcp/packages/figlets-mcp-server/src/index.js"]
+      "command": "figlets-mcp"
     }
   }
 }
 ```
 
-Restart Claude Desktop after saving. You should see the figlets tools available in the tool picker.
+Restart Claude Desktop after saving.
 
 ---
 
 ## Cursor
 
-Add the following to `.cursor/mcp.json` in your project root (or the global Cursor settings):
+File: `.cursor/mcp.json` in your project root (or global Cursor settings):
 
 ```json
 {
   "mcpServers": {
     "figlets": {
-      "command": "node",
-      "args": ["/Users/<you>/Projects/figlets-mcp/packages/figlets-mcp-server/src/index.js"]
+      "command": "figlets-mcp"
+    }
+  }
+}
+```
+
+---
+
+## Windsurf
+
+File: `~/.codeium/windsurf/mcp_config.json`
+
+```json
+{
+  "mcpServers": {
+    "figlets": {
+      "command": "figlets-mcp"
+    }
+  }
+}
+```
+
+---
+
+## VS Code (GitHub Copilot)
+
+File: `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "figlets": {
+      "type": "stdio",
+      "command": "figlets-mcp"
+    }
+  }
+}
+```
+
+---
+
+## Codex CLI (OpenAI)
+
+File: `~/.codex/config.toml` (global) or `.codex/config.toml` (project):
+
+```toml
+[[mcp_servers]]
+name = "figlets"
+command = "figlets-mcp"
+```
+
+Or in JSON format if your version of Codex uses `config.json`:
+
+```json
+{
+  "mcpServers": {
+    "figlets": {
+      "command": "figlets-mcp"
+    }
+  }
+}
+```
+
+---
+
+## Gemini CLI
+
+File: `~/.gemini/settings.json`
+
+```json
+{
+  "mcpServers": {
+    "figlets": {
+      "command": "figlets-mcp"
     }
   }
 }
@@ -50,18 +131,22 @@ Once connected, the agent will have access to:
 | Tool | Description |
 |---|---|
 | `sync_figma_data` | Triggers the Figma bridge plugin to extract and save the full design system snapshot. Blocks until complete. |
-| `inspect_component` | Grabs the currently selected Figma node(s) and returns their structure, layout, and variant properties. |
-| `detect_design_system` | Analyzes a saved Figma data snapshot and returns a structured design system summary. |
+| `inspect_component` | Grabs the currently selected Figma node(s) and returns structure, layout, and variant properties. |
+| `detect_design_system` | Analyzes a saved snapshot and returns a structured design system summary. |
+| `audit_tokens` | Audits the snapshot for unaliased values, duplicate values, and naming inconsistencies. |
 
 ---
 
 ## Prerequisites
 
-Both workflows require the local bridge receiver to be running first:
+All tools that interact with Figma require the local bridge receiver to be running:
 
 ```bash
-# Start the bridge receiver (keep this running in the background)
+# Start the bridge receiver (keep running in the background)
 npm run start -w @figlets/figma-bridge-plugin
 ```
 
-Then open the **Figlets Bridge** plugin in Figma Desktop (run in development mode from `packages/figma-bridge-plugin/manifest.json`). The plugin will show "Listening for Agent" when it is ready.
+Then open the **Figlets Bridge** plugin in Figma Desktop. The plugin will show **"Listening for Agent"** when ready.
+
+`detect_design_system` and `audit_tokens` can also work offline if `.local/figma-data.json` already exists from a previous sync.
+

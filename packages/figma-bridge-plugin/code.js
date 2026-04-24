@@ -343,6 +343,7 @@ async function _buildShowcase() {
     bg:             _bgRaw  && _bgRaw.v   ? _bgRaw.v   : null,
     text:           _textRaw && _textRaw.v ? _textRaw.v : null,
     acc:            _accRaw  && _accRaw.v  ? _accRaw.v  : null,
+    surfaceBrand:   _findVar('color/surface/brand', 'surface/brand', 'color/brand/default', 'brand/default', 'color/primary', 'primary'),
     textSub:        _findVar('color/on-surface/variant', 'on-surface/variant', 'color/text/subtle', 'text/subtle', 'color/text/muted', 'text/muted') || (_textRaw && _textRaw.v ? _textRaw.v : null),
     outlineSubtle:  _findVar('color/outline/subtle',           'outline/subtle'),
     surfaceDefault: _findVar('color/surface/default',          'surface/default'),
@@ -359,21 +360,72 @@ async function _buildShowcase() {
     warningText:    _findVar('color/on-surface/warning',       'on-surface/warning'),
   };
 
-  const _hexToVar = new Map();
-  for (const v of Object.values(varByName)) {
-    if (v.resolvedType !== 'COLOR') continue;
-    const raw = resolveVarValue(v);
-    if (!raw || !('r' in raw)) continue;
-    const h = _hex(raw);
-    if (!_hexToVar.has(h)) _hexToVar.set(h, v);
+  // Find a COLOR variable whose first-mode resolved value provides sufficient contrast
+  // against bgRGB. Prefers on-surface/text/foreground tokens; falls back to any token.
+  // Used when a structural variable isn't found by name — guarantees accessibility and
+  // ensures mode-switching works (it's a real DS variable, not a hex coincidence).
+  function _findContrastVar(bgRGB, minRatio) {
+    minRatio = minRatio || 4.5;
+    var best = null, bestRatio = 0;
+    // Prefer semantically appropriate on-surface / text / foreground variables
+    var preferred = Object.values(varByName).filter(function(v) {
+      return v.resolvedType === 'COLOR' &&
+        /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_/]|$))/i.test(v.name);
+    });
+    var candidates = preferred.length ? preferred : Object.values(varByName).filter(function(v) {
+      return v.resolvedType === 'COLOR';
+    });
+    for (var i = 0; i < candidates.length; i++) {
+      var v = candidates[i];
+      var raw = resolveVarValue(v);
+      if (!raw || !('r' in raw)) continue;
+      var ratio = _contrastRatio({ r: raw.r, g: raw.g, b: raw.b }, bgRGB);
+      if (ratio >= minRatio && ratio > bestRatio) { bestRatio = ratio; best = v; }
+    }
+    return best;
   }
 
-  if (!_V.brandVariant)   _V.brandVariant   = _hexToVar.get(_hex(_C.brandVariant))   || _V.surfaceVariant || null;
-  if (!_V.onBrandVariant) _V.onBrandVariant = _hexToVar.get(_hex(_C.onBrandVariant)) || _V.acc            || null;
+  // Brand-variant background — prefer surface/brand-variant naming, fall back to surfaceVariant
+  if (!_V.brandVariant) {
+    _V.brandVariant = _findVar(
+      'color/surface/brand', 'surface/brand',
+      'color/brand/surface', 'brand/surface',
+      'color/primary/container', 'primary/container'
+    ) || _V.surfaceVariant || null;
+  }
+
+  // On-brand-variant text — try wider naming patterns, then contrast-based search
+  if (!_V.onBrandVariant) {
+    _V.onBrandVariant = _findVar(
+      'color/on-surface/brand', 'on-surface/brand',
+      'color/on-brand/default', 'on-brand/default',
+      'color/brand/on-brand',   'brand/on-brand',
+      'color/on-primary/container', 'on-primary/container'
+    );
+    if (!_V.onBrandVariant) {
+      // Resolve the actual background we'll be painting on
+      var _bvRaw = _V.brandVariant ? resolveVarValue(_V.brandVariant) : null;
+      var _bvRGB = _bvRaw && 'r' in _bvRaw
+        ? { r: _bvRaw.r, g: _bvRaw.g, b: _bvRaw.b }
+        : _C.brandVariant;
+      _V.onBrandVariant = _findContrastVar(_bvRGB) || _V.text || null;
+    }
+  }
+
+  // Surface-brand fallback — used for spacing visuals (bars, radius, border shapes)
+  if (!_V.surfaceBrand) {
+    _V.surfaceBrand = _findVar('color/accent', 'accent', 'color/brand', 'brand') || _V.acc || null;
+  }
+
+  // textSub fallback — if not found by name, use best contrast on the default surface
+  if (!_V.textSub) {
+    _V.textSub = _findContrastVar(_bgColor, 3) || _V.text || null;
+  }
 
   function _textFill(color, v) {
-    const varToUse = v != null ? v : (_hexToVar.get(_hex(color)) || null);
-    return [_paint(color, varToUse)];
+    // Use the explicit variable when provided. No hex auto-lookup — that binds
+    // semantically wrong variables on DSes with non-standard naming.
+    return [_paint(color, v != null ? v : null)];
   }
 
   function _t(str, size, color, medium, v) {
@@ -611,7 +663,7 @@ async function _buildShowcase() {
 
   function _buildSwatch(swatchRGB, fgRGB, sampleText, opts) {
     opts = opts || {};
-    const { stepLabel = null, hexLabel = null, swatchVar = null, sampleFontSize = 10 } = opts;
+    const { stepLabel = null, hexLabel = null, swatchVar = null, fgVar = null, sampleFontSize = 10, forceIndicator = false } = opts;
 
     const swatch = _f('Color Swatch 1.0.0', 'VERTICAL');
     swatch.itemSpacing = 8;
@@ -628,8 +680,8 @@ async function _buildShowcase() {
     container.strokeAlign  = 'INSIDE';
 
     const ratio = _contrastRatio(swatchRGB, fgRGB);
-    if (ratio >= 4.5 && sampleText) {
-      const aaText = _tDS(sampleText, sampleFontSize, fgRGB, true);
+    if ((forceIndicator || ratio >= 4.5) && sampleText) {
+      const aaText = _tDS(sampleText, sampleFontSize, fgRGB, true, fgVar);
       aaText.name = 'Aa';
       aaText.x = 7; aaText.y = 7;
       container.appendChild(aaText);
@@ -639,7 +691,7 @@ async function _buildShowcase() {
       dot.resize(6, 6);
       dot.cornerRadius = 9999;
       dot.layoutMode = 'NONE';
-      dot.fills = [{ type: 'SOLID', color: fgRGB }];
+      dot.fills = [_paint(fgRGB, fgVar)];
       dot.x = 80 - 6.75 - 6;
       dot.y = 56 - 7 - 6;
       dot.constraints = { horizontal: 'MAX', vertical: 'MAX' };
@@ -718,8 +770,58 @@ async function _buildShowcase() {
     return row;
   }
 
+  // Outline/border token row — surface bg fill + outline color as stroke, no contrast columns.
+  function _buildOutlineRow(token, description, outlineRGB, outlineVar) {
+    const row = _f('Table / Row / Outline Token 1.0.0', 'HORIZONTAL');
+    row.paddingLeft = 16; row.paddingRight  = 16;
+    row.paddingTop  = 16; row.paddingBottom = 16;
+    row.itemSpacing = 16;
+    row.counterAxisAlignItems = 'CENTER';
+    row.fills = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+
+    const tokenCell = _f('TokenCell', 'VERTICAL');
+    tokenCell.itemSpacing = 8;
+    tokenCell.counterAxisAlignItems = 'MIN';
+    tokenCell.primaryAxisAlignItems = 'CENTER';
+    const _outTag = _buildTag(token);
+    tokenCell.appendChild(_outTag);
+    _outTag.layoutSizingHorizontal = 'HUG';
+    const _outDesc = _tDS(description || _TABLE_DESC, 12, _subColor, false, _V.textSub);
+    _outDesc.name = 'DS Description';
+    tokenCell.appendChild(_outDesc);
+    _outDesc.layoutSizingHorizontal = 'FILL';
+    row.appendChild(tokenCell);
+    tokenCell.layoutSizingHorizontal = 'FILL';
+    tokenCell.layoutSizingVertical   = 'HUG';
+
+    const container = figma.createFrame();
+    container.name = 'Outline Container';
+    container.layoutMode = 'NONE';
+    container.resize(80, 56);
+    container.cornerRadius = 8;
+    container.fills   = [_paint(_bgColor, _V.bg)];
+    container.strokes = [_paint(outlineRGB, outlineVar)];
+    container.strokeWeight = 2;
+    container.strokeAlign  = 'INSIDE';
+
+    const swatchCell = _f('SwatchCell', 'VERTICAL');
+    swatchCell.primaryAxisAlignItems = 'CENTER';
+    swatchCell.counterAxisAlignItems = 'CENTER';
+    swatchCell.appendChild(container);
+    container.layoutSizingHorizontal = 'FILL';
+    container.layoutSizingVertical   = 'FIXED';
+    container.resize(container.width, 56);
+    row.appendChild(swatchCell);
+    swatchCell.layoutSizingHorizontal = 'FILL';
+    swatchCell.layoutSizingVertical   = 'HUG';
+
+    return row;
+  }
+
   function _buildSemColorRow(token, description, bgRGB, fgRGB, bgVar, opts) {
     opts = opts || {};
+    var fgVar    = opts.fgVar    !== undefined ? opts.fgVar    : null;
+    var hasPairing = opts.hasPairing !== undefined ? opts.hasPairing : true;
     const ratio = _contrastRatio(bgRGB, fgRGB);
     const row = _f('Table / Row / Semantic Color Pairs 1.0.0', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
@@ -748,7 +850,9 @@ async function _buildShowcase() {
     swatchCell.counterAxisAlignItems = 'CENTER';
     const swatch = _buildSwatch(bgRGB, fgRGB, opts.isIcon ? '☻' : token, {
       swatchVar: bgVar,
+      fgVar: fgVar,
       sampleFontSize: opts.isIcon ? 16 : 10,
+      forceIndicator: opts.isIcon ? true : false,
     });
     swatchCell.appendChild(swatch);
     swatch.layoutSizingHorizontal = 'FILL';
@@ -756,23 +860,25 @@ async function _buildShowcase() {
     swatchCell.layoutSizingHorizontal = 'FILL';
     swatchCell.layoutSizingVertical   = 'FILL';
 
-    const metricCell = _f('MetricCell', 'HORIZONTAL');
-    metricCell.primaryAxisAlignItems = 'CENTER';
-    metricCell.counterAxisAlignItems = 'CENTER';
-    metricCell.appendChild(_tDS(`${ratio.toFixed(2)}:1`, 14, _textColor, false, _V.text));
-    row.appendChild(metricCell);
-    metricCell.layoutSizingHorizontal = 'FIXED';
-    metricCell.resize(128, 1);
-    metricCell.layoutSizingVertical   = 'FILL';
+    if (hasPairing) {
+      const metricCell = _f('MetricCell', 'HORIZONTAL');
+      metricCell.primaryAxisAlignItems = 'CENTER';
+      metricCell.counterAxisAlignItems = 'CENTER';
+      metricCell.appendChild(_tDS(`${ratio.toFixed(2)}:1`, 14, _textColor, false, _V.text));
+      row.appendChild(metricCell);
+      metricCell.layoutSizingHorizontal = 'FIXED';
+      metricCell.resize(128, 1);
+      metricCell.layoutSizingVertical   = 'FILL';
 
-    const badgeCell = _f('BadgeCell', 'HORIZONTAL');
-    badgeCell.primaryAxisAlignItems = 'CENTER';
-    badgeCell.counterAxisAlignItems = 'CENTER';
-    badgeCell.appendChild(_buildBadge(ratio));
-    row.appendChild(badgeCell);
-    badgeCell.layoutSizingHorizontal = 'FIXED';
-    badgeCell.resize(128, 1);
-    badgeCell.layoutSizingVertical   = 'FILL';
+      const badgeCell = _f('BadgeCell', 'HORIZONTAL');
+      badgeCell.primaryAxisAlignItems = 'CENTER';
+      badgeCell.counterAxisAlignItems = 'CENTER';
+      badgeCell.appendChild(_buildBadge(ratio));
+      row.appendChild(badgeCell);
+      badgeCell.layoutSizingHorizontal = 'FIXED';
+      badgeCell.resize(128, 1);
+      badgeCell.layoutSizingVertical   = 'FILL';
+    }
 
     return row;
   }
@@ -856,7 +962,7 @@ async function _buildShowcase() {
       const size = Math.min(Math.max(px, 2), 128);
       const sq = figma.createRectangle();
       sq.resize(size, size);
-      sq.fills = [_paint(_C.onBrandVariant, _V.onBrandVariant)];
+      sq.fills = [_paint(_accColor, _V.surfaceBrand)];
       sq.cornerRadius = 2;
       return sq;
     }
@@ -865,8 +971,8 @@ async function _buildShowcase() {
       const size = Math.max(px, 16);
       const el = figma.createEllipse();
       el.resize(size, size);
-      el.fills       = [_paint(_C.brandVariant,   _V.brandVariant)];
-      el.strokes     = [_paint(_C.onBrandVariant, _V.onBrandVariant)];
+      el.fills       = [_paint(_C.brandVariant, _V.brandVariant)];
+      el.strokes     = [_paint(_accColor,        _V.surfaceBrand)];
       el.strokeWeight = 2;
       el.strokeAlign  = 'INSIDE';
       el.dashPattern  = [4, 4];
@@ -876,8 +982,8 @@ async function _buildShowcase() {
     if (type === 'radius') {
       const sq = figma.createRectangle();
       sq.resize(56, 56);
-      sq.fills        = [_paint(_C.brandVariant,   _V.brandVariant)];
-      sq.strokes      = [_paint(_C.onBrandVariant, _V.onBrandVariant)];
+      sq.fills        = [_paint(_C.brandVariant, _V.brandVariant)];
+      sq.strokes      = [_paint(_accColor,        _V.surfaceBrand)];
       sq.strokeWeight  = 1;
       sq.strokeAlign   = 'INSIDE';
       sq.cornerRadius  = Math.min(px, 28);
@@ -886,8 +992,8 @@ async function _buildShowcase() {
 
     const sq = figma.createRectangle();
     sq.resize(56, 56);
-    sq.fills        = [_paint(_C.brandVariant,   _V.brandVariant)];
-    sq.strokes      = [_paint(_C.onBrandVariant, _V.onBrandVariant)];
+    sq.fills        = [_paint(_C.brandVariant, _V.brandVariant)];
+    sq.strokes      = [_paint(_accColor,        _V.surfaceBrand)];
     sq.strokeWeight  = Math.max(px, 0.5);
     sq.strokeAlign   = 'INSIDE';
     sq.cornerRadius  = 2;
@@ -934,7 +1040,7 @@ async function _buildShowcase() {
     valueCell.counterAxisAlignItems = 'CENTER';
     const valStr = px !== null ? `${pxNum}px` : '—';
     const rawStr = px !== null ? `(${pxNum})` : '';
-    const valText = _tDS(valStr, 12, _C.onBrandVariant, false, _V.onBrandVariant);
+    const valText = _tDS(valStr, 12, _accColor, false, _V.surfaceBrand);
     valueCell.appendChild(valText);
     if (rawStr) {
       const rawText = _tDS(rawStr, 12, _subColor, false, _V.textSub);
@@ -1120,25 +1226,94 @@ async function _buildShowcase() {
           if (raw.a !== undefined && raw.a < 0.95) continue;
 
           const isIcon    = /(?:^|\/)icon(?:\/|$)/i.test(v.name);
+          const isOutline = /(?:^|\/)(?:outline|border|stroke)(?:\/|$)/i.test(v.name);
           const tokenLeaf = v.name.split('/').pop();
           const desc      = _tokenDesc(v.name);
 
-          if (isIcon) {
-            const pathParts    = v.name.split('/');
-            const iconIdx      = pathParts.findIndex(p => /^icon$/i.test(p));
-            const surfacePath  = pathParts.map((p, i) => i === iconIdx ? 'surface' : p).join('/');
-            const surfaceRGB   = _semVarRGB.get(surfacePath) || _bgColor;
-            const surfaceVar   = varByName[surfacePath] || _V.surfaceDefault || null;
-            fgRows.push(_buildSemColorRow(`icon/${tokenLeaf}`, desc, surfaceRGB, { r: raw.r, g: raw.g, b: raw.b }, surfaceVar, { isIcon: true }));
+          if (isOutline) {
+            // Outline tokens: surface bg + stroke — no contrast columns
+            const outlineRGB = { r: raw.r, g: raw.g, b: raw.b };
+            const row = _buildOutlineRow(tokenLeaf, desc, outlineRGB, v);
+            bgUnpairedRows.push(row);
+          } else if (isIcon) {
+            // Icons are foreground colors — find the best surface to show them on.
+            // Priority 1: semantic pairing (replace 'icon' with 'surface' in the path),
+            //   e.g. color/icon/inverse → color/surface/inverse (a dark surface).
+            //   Use if it gives ≥ 3:1 contrast against the icon color.
+            // Priority 2: default surface (the neutral page background).
+            //   Use when no semantic pairing exists or its contrast is poor.
+            var iconRGB = { r: raw.r, g: raw.g, b: raw.b };
+            var iconPathParts = v.name.split('/');
+            var iconSegIdx    = iconPathParts.findIndex(function(p) { return /^icon$/i.test(p); });
+            var semSurfacePath = iconSegIdx >= 0
+              ? iconPathParts.map(function(p, i) { return i === iconSegIdx ? 'surface' : p; }).join('/')
+              : null;
+            var semSurfaceRaw = semSurfacePath ? (_semVarRGB.get(semSurfacePath) || null) : null;
+            var semSurfaceVar = semSurfacePath ? (varByName[semSurfacePath] || null) : null;
+            var semContrast   = semSurfaceRaw ? _contrastRatio(iconRGB, semSurfaceRaw) : 0;
+
+            var defSurfaceVar = _V.surfaceDefault || _V.bg || null;
+            var defSurfaceRaw = defSurfaceVar ? resolveVarValue(defSurfaceVar) : null;
+            var defSurfaceRGB = defSurfaceRaw && 'r' in defSurfaceRaw
+              ? { r: defSurfaceRaw.r, g: defSurfaceRaw.g, b: defSurfaceRaw.b }
+              : _bgColor;
+            var defContrast   = _contrastRatio(iconRGB, defSurfaceRGB);
+
+            // Use semantic surface if it gives meaningfully better contrast; otherwise default.
+            var useSemanticPair = semSurfaceRaw && semContrast >= 3 && semContrast >= defContrast * 0.8;
+            var iconSurfaceRGB = useSemanticPair ? semSurfaceRaw : defSurfaceRGB;
+            var iconSurfaceVar = useSemanticPair ? semSurfaceVar : defSurfaceVar;
+
+            // Luminance-based fallback for light icons (e.g. icon/inverse, icon/on-dark).
+            // If the icon is very light and neither the semantic surface nor the default
+            // surface provides good contrast, scan for the darkest available surface variable.
+            if (!useSemanticPair && _lum(iconRGB) > 0.6) {
+              var _darkestVar = null, _darkestLum = Infinity;
+              var _allVarValues = Object.values(varByName);
+              for (var _di = 0; _di < _allVarValues.length; _di++) {
+                var _dv = _allVarValues[_di];
+                if (_dv.resolvedType !== 'COLOR') continue;
+                if (!/(?:surface|background|base|page)/i.test(_dv.name)) continue;
+                if (/(?:^|\/)on[-_]/i.test(_dv.name)) continue; // exclude on-surface, on-background, etc.
+                var _dRaw = resolveVarValue(_dv);
+                if (!_dRaw || !('r' in _dRaw)) continue;
+                var _dLum = _lum({ r: _dRaw.r, g: _dRaw.g, b: _dRaw.b });
+                if (_dLum < _darkestLum) { _darkestLum = _dLum; _darkestVar = { v: _dv, raw: _dRaw }; }
+              }
+              if (_darkestVar) {
+                var _darkRGB = { r: _darkestVar.raw.r, g: _darkestVar.raw.g, b: _darkestVar.raw.b };
+                if (_contrastRatio(iconRGB, _darkRGB) > _contrastRatio(iconRGB, iconSurfaceRGB)) {
+                  iconSurfaceRGB = _darkRGB;
+                  iconSurfaceVar = _darkestVar.v;
+                }
+              }
+            }
+
+            fgRows.push(_buildSemColorRow(
+              tokenLeaf, desc,
+              iconSurfaceRGB, iconRGB,
+              iconSurfaceVar, { isIcon: true, fgVar: v, hasPairing: true }
+            ));
           } else {
-            const bgRGB       = { r: raw.r, g: raw.g, b: raw.b };
-            const fgRGB       = _findFgPair(v.name);
-            const effectiveFg = fgRGB || (() => {
-              const ind = _swatchIndicator(bgRGB);
+            const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
+            // Try to find the fg pairing both as RGB and as a variable
+            var fgPairName = null;
+            var fgPairParts = v.name.split('/');
+            for (var pi = fgPairParts.length - 1; pi >= 0; pi--) {
+              var cand = fgPairParts.slice();
+              cand[pi] = 'on-' + cand[pi];
+              var candName = cand.join('/');
+              if (_semVarRGB.has(candName)) { fgPairName = candName; break; }
+            }
+            const fgRGB    = fgPairName ? _semVarRGB.get(fgPairName) : null;
+            const fgVar    = fgPairName ? (varByName[fgPairName] || null) : null;
+            const hasPairing = !!fgRGB;
+            const effectiveFg = fgRGB || (function() {
+              var ind = _swatchIndicator(bgRGB);
               return ind.show ? ind.fg : _textColor;
             })();
-            const row = _buildSemColorRow(tokenLeaf, desc, bgRGB, effectiveFg, v);
-            if (fgRGB) bgPairedRows.push(row);
+            const row = _buildSemColorRow(tokenLeaf, desc, bgRGB, effectiveFg, v, { fgVar: fgVar, hasPairing: hasPairing });
+            if (hasPairing) bgPairedRows.push(row);
             else bgUnpairedRows.push(row);
           }
         }
@@ -1183,10 +1358,8 @@ async function _buildShowcase() {
       for (const { label, rows } of _bottomGroups) {
         const _btTable = _buildTable(label, _TABLE_DESC);
         const _btHeading = _buildTableHeading([
-          { text: 'Token',    flex: true },
-          { text: 'Example',  flex: true },
-          { text: 'Contrast', width: 128, center: true },
-          { text: 'WCAG',     width: 128, center: true },
+          { text: 'Token',   flex: true },
+          { text: 'Example', flex: true },
         ], 16);
         _btTable.appendChild(_btHeading);
         _btHeading.layoutSizingHorizontal = 'FILL';
@@ -1261,7 +1434,7 @@ async function _buildShowcase() {
         if (/^(?:type|typo|typography|font|text(?:[\/-]|$)|label|body|heading|display|caption|letter|tracking|leading|line[-_]?height|font[-_]?size|font[-_]?weight)/i.test(groupPath)) continue;
         const _resolved  = vars.map(v => { const n = resolveVarValue(v); return typeof n === 'number' ? n : null; });
         const _sorted    = vars.map((v, i) => ({ v, val: _resolved[i] }))
-                               .sort((a, b) => (a.val ?? Infinity) - (b.val ?? Infinity));
+                               .sort((a, b) => (a.val != null ? a.val : Infinity) - (b.val != null ? b.val : Infinity));
         const sortedVars   = _sorted.map(p => p.v);
         const sortedValues = _sorted.map(p => p.val);
         const type = _groupVisualType(groupPath, sortedValues);
@@ -1398,7 +1571,7 @@ async function _buildShowcase() {
 
       const offsetY = shadow ? `${shadow.offset.y}px`   : '—';
       const blur    = shadow ? `${shadow.radius}px`      : '—';
-      const spread  = shadow ? `${shadow.spread ?? 0}px` : '—';
+      const spread  = shadow ? `${shadow.spread != null ? shadow.spread : 0}px` : '—';
       for (const val of [offsetY, blur, spread]) {
         const mc = _metaCell(val);
         row.appendChild(mc);
@@ -1425,8 +1598,8 @@ async function _buildShowcase() {
       return (c.a !== undefined ? c.a : 1) < 0.95;
     })
     .sort((a, b) => {
-      const aA = (() => { const c = resolveVarValue(a); return c ? (c.a ?? 1) : 1; })();
-      const bA = (() => { const c = resolveVarValue(b); return c ? (c.a ?? 1) : 1; })();
+      const aA = (() => { const c = resolveVarValue(a); return c ? (c.a != null ? c.a : 1) : 1; })();
+      const bA = (() => { const c = resolveVarValue(b); return c ? (c.a != null ? c.a : 1) : 1; })();
       return Math.abs(aA - bA) > 0.01 ? aA - bA : a.name.localeCompare(b.name);
     });
 

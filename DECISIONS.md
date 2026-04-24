@@ -108,3 +108,60 @@ Running log of non-obvious project decisions and the reasons behind them.
 **Constraint:** Per Figma’s official docs, `GET /v1/files/:file_key/variables/local` requires the `file_variables:read` scope and is available only to full members of Enterprise orgs.
 
 **Consequence:** The exporter should degrade gracefully when the Variables API is unavailable and still emit useful file/style data plus warnings.
+
+---
+
+## [2026-04-22] Build a dedicated local-first Figma bridge plugin to bypass REST limitations
+
+**Decision:** Create a simple Figma plugin (`packages/figma-bridge-plugin`) that extracts local variables and styles and POSTs them to a local HTTP receiver (`src/receiver.js`) to save in `.local/figma-data.json`.
+
+**Why:**
+- Figma's REST API gatekeeps the Local Variables API behind an Enterprise plan.
+- Running a plugin inside the Figma editor canvas is the only reliable way for all users to read `figma.variables`.
+- By having the plugin act strictly as an extractor that POSTs standard JSON to `localhost`, the core MCP server remains completely agent-agnostic and transport-agnostic.
+- The Claude/Codex adapters don't need to know how the data was fetched, only that it exists locally.
+
+**Consequence:** Users will need to install and run this local plugin in Figma desktop to sync variables before running the MCP tools. The REST exporter is kept as an option for Enterprise users or those who only need styles.
+
+---
+
+## [2026-04-22] Switch plugin from a manual Sync button to always-listening long polling
+
+**Decision:** Remove the "Sync to MCP" button from the plugin UI. Instead, the plugin continuously long-polls `GET /poll` on the local receiver, and the MCP agent triggers extraction via `POST /request-sync`.
+
+**Why:**
+- A manual button requires the designer to be present and remember to sync before asking the agent anything.
+- With long polling, the plugin is permanently ready — the agent controls the workflow end-to-end.
+- `POST /request-sync` is a blocking call that only resolves after Figma has finished extracting and saving. This gives the agent a clean synchronisation point before reading the data.
+- The same long-poll channel supports multiple command types (`extract-all`, `extract-selection`) without needing separate infrastructure.
+
+**Consequence:** The plugin must be open in Figma Desktop for agent-triggered workflows to function. The receiver returns `503` if the plugin is not currently connected, giving agents a clear error to surface to the user.
+
+---
+
+## [2026-04-22] Use Figma selection as the input for component inspection
+
+**Decision:** The `inspect_component` MCP tool takes no arguments. When called, it triggers the plugin to serialize `figma.currentPage.selection` and return it as the inspection payload. The selection is saved to `.local/figma-selection.json`.
+
+**Why:**
+- Asking the agent to search a large component list by name is fragile (fuzzy match, ambiguity, wrong file scope).
+- Letting the user point directly at the component they care about in Figma is more reliable and more intuitive.
+- A zero-argument tool is simpler for agents to call and requires no schema negotiation.
+- The selection can contain frames, instances, component sets, or any other node type — making the tool flexible beyond just named components.
+
+**Consequence:** The designer must have the target component selected in Figma before the agent calls `inspect_component`. Agents should be prompted to ask the user to select the target first if context is ambiguous.
+
+---
+
+## [2026-04-23] Upgrade MCP server to use the official `@modelcontextprotocol/sdk`
+
+**Decision:** Replace the hand-rolled JSON stdout output in `figlets-mcp-server/src/index.js` with the official `@modelcontextprotocol/sdk` (`McpServer` + `StdioServerTransport`).
+
+**Why:**
+- The old entrypoint just printed a JSON capability manifest to stdout — it was not a real MCP server and could not be connected to by any host.
+- The official SDK handles the full JSON-RPC 2.0 protocol over stdio automatically, including capability negotiation, tool dispatch, and error framing.
+- Using the SDK means zero custom protocol code: tool registration is a one-liner and handlers return plain `content` arrays.
+- Any MCP-compatible host (Claude Desktop, Cursor, Windsurf, etc.) can now connect by simply pointing at the `node src/index.js` entrypoint.
+
+**Consequence:** The server now speaks real MCP over stdio. Users add it to their host config (see `docs/mcp-config-examples.md`) and get all three tools — `sync_figma_data`, `inspect_component`, `detect_design_system` — without any CLI glue.
+

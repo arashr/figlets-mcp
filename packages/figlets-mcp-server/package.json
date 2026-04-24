@@ -1,11 +1,18 @@
 {
   "name": "@figlets/mcp-server",
   "version": "0.1.0",
-  "private": true,
+  "description": "Agent-agnostic MCP server for Figma design system workflows",
   "main": "src/index.js",
+  "bin": {
+    "figlets-mcp": "bin/figlets-mcp.js"
+  },
   "scripts": {
-    "dev": "node src/index.js",
+    "start": "node src/index.js",
     "detect-ds": "node src/cli/detect-design-system.js",
-    "export-figma-file": "node src/cli/export-figma-file.js"
+    "export-figma-file": "node src/cli/export-figma-file.js",
+    "inspect-component": "node src/cli/inspect-component.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

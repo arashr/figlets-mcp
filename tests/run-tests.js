@@ -22,7 +22,7 @@ function getTestFiles(dirPath) {
   return files.sort();
 }
 
-function main() {
+async function main() {
   const testDir = path.join(__dirname);
   const testFiles = getTestFiles(testDir).filter(filePath => filePath !== __filename);
   let passed = 0;
@@ -30,7 +30,10 @@ function main() {
 
   for (const filePath of testFiles) {
     try {
-      require(filePath);
+      const result = require(filePath);
+      if (result instanceof Promise) {
+        await result;
+      }
       process.stdout.write(`PASS ${path.relative(process.cwd(), filePath)}\n`);
       passed += 1;
     } catch (error) {

@@ -1,0 +1,179 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const PORT = 1337;
+const DEST_DIR = path.resolve(__dirname, '../../../.local');
+const DEST_FILE = path.join(DEST_DIR, 'figma-data.json');
+
+let pendingPollResponse = null;
+let pendingSyncRequest = null;
+let pendingSelectionRequest = null;
+
+const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
+
+const server = http.createServer((req, res) => {
+  // Handle CORS for Figma Plugin UI
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  // 1. Figma Plugin long-polls this endpoint
+  if (req.method === 'GET' && req.url === '/poll') {
+    pendingPollResponse = res;
+    
+    // Keep connection alive: if no sync requested within 30 seconds, send ping
+    setTimeout(() => {
+      if (pendingPollResponse === res) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ command: 'ping' }));
+        pendingPollResponse = null;
+      }
+    }, 30000);
+    return;
+  }
+
+  // 2. MCP Agent calls this to trigger a global sync
+  if (req.method === 'POST' && req.url === '/request-sync') {
+    if (pendingPollResponse) {
+      // Tell Figma to wake up and extract everything
+      pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+      pendingPollResponse.end(JSON.stringify({ command: 'extract-all' }));
+      pendingPollResponse = null;
+      
+      // Hold the agent's request open until Figma posts the payload back
+      pendingSyncRequest = res;
+      
+      // Timeout after 60 seconds if Figma doesn't respond
+      setTimeout(() => {
+        if (pendingSyncRequest === res) {
+          res.writeHead(504, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Sync timed out' }));
+          pendingSyncRequest = null;
+        }
+      }, 60000);
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Figma plugin is not connected or listening.' }));
+    }
+    return;
+  }
+
+  // 3. MCP Agent calls this to trigger a selection sync
+  if (req.method === 'POST' && req.url === '/request-selection') {
+    if (pendingPollResponse) {
+      pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+      pendingPollResponse.end(JSON.stringify({ command: 'extract-selection' }));
+      pendingPollResponse = null;
+      
+      pendingSelectionRequest = res;
+      
+      setTimeout(() => {
+        if (pendingSelectionRequest === res) {
+          res.writeHead(504, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Selection sync timed out' }));
+          pendingSelectionRequest = null;
+        }
+      }, 15000); // Selection is usually very fast
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Figma plugin is not connected or listening.' }));
+    }
+    return;
+  }
+
+  // 4. Figma Plugin posts the global extracted data here
+  if (req.method === 'POST' && req.url === '/sync') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        if (!fs.existsSync(DEST_DIR)) {
+          fs.mkdirSync(DEST_DIR, { recursive: true });
+        }
+        
+        fs.writeFileSync(DEST_FILE, body);
+        console.log(`[success] Wrote payload to ${DEST_FILE}`);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+
+        if (pendingSyncRequest) {
+          pendingSyncRequest.writeHead(200, { 'Content-Type': 'application/json' });
+          pendingSyncRequest.end(JSON.stringify({ success: true, message: 'Sync complete' }));
+          pendingSyncRequest = null;
+        }
+      } catch (err) {
+        console.error('[error] Failed to write file:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+
+        if (pendingSyncRequest) {
+          pendingSyncRequest.writeHead(500, { 'Content-Type': 'application/json' });
+          pendingSyncRequest.end(JSON.stringify({ error: err.message }));
+          pendingSyncRequest = null;
+        }
+      }
+    });
+    return;
+  }
+
+  // 5. Figma Plugin posts the selection data here
+  if (req.method === 'POST' && req.url === '/sync-selection') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        if (!fs.existsSync(DEST_DIR)) {
+          fs.mkdirSync(DEST_DIR, { recursive: true });
+        }
+        
+        fs.writeFileSync(DEST_FILE_SELECTION, body);
+        console.log(`[success] Wrote selection to ${DEST_FILE_SELECTION}`);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+
+        if (pendingSelectionRequest) {
+          pendingSelectionRequest.writeHead(200, { 'Content-Type': 'application/json' });
+          pendingSelectionRequest.end(JSON.stringify({ success: true, message: 'Selection synced', path: DEST_FILE_SELECTION }));
+          pendingSelectionRequest = null;
+        }
+      } catch (err) {
+        console.error('[error] Failed to write file:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+
+        if (pendingSelectionRequest) {
+          pendingSelectionRequest.writeHead(500, { 'Content-Type': 'application/json' });
+          pendingSelectionRequest.end(JSON.stringify({ error: err.message }));
+          pendingSelectionRequest = null;
+        }
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404);
+  res.end();
+});
+
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`Figma Bridge Receiver listening on http://localhost:${PORT}`);
+    console.log(`Will write data to: ${DEST_FILE}`);
+    console.log(`Run the Figlets Bridge plugin in Figma and click Sync!`);
+  });
+}
+
+module.exports = server;

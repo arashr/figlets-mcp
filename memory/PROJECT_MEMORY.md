@@ -47,6 +47,7 @@ These were chosen because they are useful across agents and are mostly determini
 - `memory/` for durable project context
 - `packages/figlets-core/` for shared logic
 - `packages/figlets-mcp-server/` for MCP exposure
+- `packages/figma-bridge-plugin/` for the local Figma data extractor
 - `packages/figlets-adapter-codex/` for the Codex adapter
 - `packages/figlets-adapter-claude/` for the Claude adapter
 
@@ -66,24 +67,71 @@ These were chosen because they are useful across agents and are mostly determini
 - Added the first server-side bridge seam: inline data, file-backed JSON payloads, and env-configured file loading for fetch-then-analyze workflows
 - Expanded the bridge seam with a command-based source so an external exporter can feed real data into the same MCP path
 - Added the first real exporter path: a Figma REST CLI that can turn a file URL or key into the JSON contract used by `detect_design_system`
-- Added a local-only config layer with `.env`, `.env.example`, and `.local/` support so private testing can stay on the user’s machine
+- Added a local-only config layer with `.env`, `.env.example`, and `.local/` support so private testing can stay on the user's machine
 - Verified the server entrypoint runs directly from source with Node
+
+### [2026-04-22]
+
+- Evaluated native Figma MCP capabilities vs the current architecture. Decided to keep the local bridge because it: (1) eliminates token-heavy round-trips, (2) works without Enterprise plan, (3) provides a deterministic, offline-capable snapshot.
+- Scaffolded `packages/figma-bridge-plugin`: a Figma plugin that extracts Variables, Collections, Styles, and Component schemas from an open Figma file.
+- Created `src/receiver.js`: a Node HTTP server on port `1337` that receives JSON payloads from the plugin and writes them to `.local/figma-data.json`.
+- `.local/` is in `.gitignore` to prevent proprietary design system data from being committed.
+- Upgraded `tests/run-tests.js` to support async tests.
+- Added unit tests: `tests/bridge/receiver.test.js` and `tests/core/inspect-component.test.js`.
+- Added `inspect_component` MCP tool and CLI wrapper.
+- Added `sync_figma_data` MCP tool.
+
+### [2026-04-22 — Agent-driven workflow]
+
+- **Removed the Sync button** from the plugin UI. The plugin is now always-listening using long polling.
+- Plugin polls `GET /poll`. When the agent calls `POST /request-sync`, the receiver wakes the plugin and tells it to extract the full design system. The receiver then holds the agent's request open until the payload is saved, at which point it returns `200 OK` to the agent.
+- This makes `sync_figma_data` a blocking, end-to-end trigger: agent calls → Figma extracts → file is saved → agent proceeds.
+
+### [2026-04-22 — Selection-based inspection]
+
+- Added `extract-selection` command to the polling protocol alongside `extract-all`.
+- The plugin can now serialize `figma.currentPage.selection` recursively into a structured payload including: `id`, `name`, `type`, `description`, `componentPropertyDefinitions`, `componentProperties`, `layoutMode`, `padding`, `itemSpacing`, and `children`.
+- Added `POST /request-selection` and `POST /sync-selection` endpoints to `receiver.js`. Selection payloads are saved to `.local/figma-selection.json`.
+- Updated `inspect_component` to take no arguments. It triggers a selection extraction, reads the saved JSON, and returns the clean structural analysis.
+- Rewritten `figlets-core/src/inspect-component.js` to process the `selection[]` format rather than searching a global component list.
+- Confirmed end-to-end: CLI prints exact layout and child structure of any selected Figma node.
 
 ---
 
-## Near-Term Next Steps
+## Milestone 1 — Complete (merged to main 2026-04-24)
 
-1. Port the shared design system detection logic into `figlets-core`
-2. Replace the snapshot-based placeholder with live Figma-backed detection
-3. Add a structured schema for DS summaries and capabilities across more workflows
-4. Decide how Figma-specific execution will be bridged into the MCP tool layer
+All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
-Progress note: Step 1 has started and now exists in a first usable form. The next meaningful move is bridging real Figma data into the same analysis path.
+1. **[DONE]** Port shared design system detection logic into `figlets-core`.
+2. **[DONE]** Bridge real Figma data via local plugin (variables, styles, components, selection).
+3. **[DONE]** Upgrade `figlets-mcp-server` to official `@modelcontextprotocol/sdk` (stdio, Claude Desktop / Cursor compatible).
+4. **[DONE]** Build `audit_tokens` tool: hardcoded values, missing aliases, naming inconsistencies.
+5. **[DONE]** Make `figlets-mcp` globally installable as a CLI command for all agents.
+
+---
+
+## Session Notes
+
+### [2026-04-23]
+
+- Upgraded MCP server from hand-rolled JSON stdout to official `@modelcontextprotocol/sdk` (`McpServer` + `StdioServerTransport`). Server now speaks full JSON-RPC 2.0 over stdio and is connectable from Claude Desktop, Cursor, Windsurf, etc.
+- Added `audit_tokens` MCP tool: surfaces unaliased values, duplicate tokens, and naming inconsistencies from a design system snapshot.
+- Made `figlets-mcp` installable as a global command (`npm install -g`) so any agent can invoke it via `figlets-mcp` in their MCP config.
+
+---
+
+## Near-Term Next Steps (Milestone 2)
+
+1. **[NEXT]** Fill in adapter stubs — `figlets-adapter-claude` and `figlets-adapter-codex` are currently empty READMEs. Write the thin orchestration prompt layers that call MCP tools and handle user-facing intake.
+2. **[NEXT]** End-to-end test with Claude Desktop or Cursor against the live MCP server using a real Figma file.
+3. **[QUEUED]** Decide on `figma-selection.json` vs `figma-data.json` merge strategy (namespaced single file vs separate files).
+4. **[QUEUED]** Expand test coverage — especially integration tests that run bridge + core end-to-end.
+5. **[QUEUED]** Add `generate_component_doc` tool (fourth migration target from initial list).
 
 ---
 
 ## Open Questions
 
-- Should the long-term public package name stay `figlets-mcp`, or should this become an internal repo name under the broader `figlets` brand?
-- Should Figma execution happen through a dedicated bridge layer inside this repo or through an external Figma MCP/runtime dependency?
-- Which workflow should be the first full vertical slice after DS detection: `fig-document` or `fig-qa`?
+- Should the long-term public package name stay `figlets-mcp`, or become a scoped name under the `figlets` brand?
+- Should `figma-selection.json` and `figma-data.json` be merged into one file with namespaced keys, or stay separate?
+- Which adapter to build first — Claude or Codex?

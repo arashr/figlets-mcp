@@ -1,30 +1,101 @@
-const path = require("path");
-const { CORE_VERSION } = require("../../figlets-core/src/index.js");
+const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
+const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
+const { z } = require("zod");
+
 const { detectDesignSystemTool } = require("./tools/detect-design-system.js");
+const { inspectComponentTool, handleInspectComponent } = require("./tools/inspect-component.js");
+const { syncFigmaDataTool, handleSyncFigmaData } = require("./tools/sync-figma-data.js");
+const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js");
 
-function main() {
-  const examplePath = path.resolve(__dirname, "../../../examples/detect-design-system.figma-data.json");
-  const example = detectDesignSystemTool.handler({
-    figmaDataPath: examplePath
-  });
+const server = new McpServer({
+  name: "figlets-mcp",
+  version: "0.1.0"
+});
 
-  const server = {
-    name: "figlets-mcp",
-    version: "0.1.0",
-    coreVersion: CORE_VERSION,
-    tools: [
-      {
-        name: detectDesignSystemTool.name,
-        description: detectDesignSystemTool.description,
-        inputSchema: detectDesignSystemTool.inputSchema
-      }
-    ],
-    examples: {
-      detect_design_system: example
+// --- detect_design_system ---
+server.tool(
+  detectDesignSystemTool.name,
+  detectDesignSystemTool.description,
+  {
+    target: z.string().optional().describe("A file key, node id, or adapter-specific target reference."),
+    figmaDataPath: z.string().optional().describe("Path to a local JSON file containing Figma data."),
+    figmaDataCommand: z.string().optional().describe("Shell command that prints a Figma-like JSON payload to stdout.")
+  },
+  async (args) => {
+    try {
+      const result = detectDesignSystemTool.handler(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
     }
-  };
+  }
+);
 
-  process.stdout.write(`${JSON.stringify(server, null, 2)}\n`);
+// --- sync_figma_data ---
+server.tool(
+  syncFigmaDataTool.name,
+  syncFigmaDataTool.description,
+  {},
+  async () => {
+    try {
+      return await handleSyncFigmaData();
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- inspect_component ---
+server.tool(
+  inspectComponentTool.name,
+  inspectComponentTool.description,
+  {},
+  async () => {
+    try {
+      return await handleInspectComponent();
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- audit_tokens ---
+server.tool(
+  auditTokensTool.name,
+  auditTokensTool.description,
+  {
+    figmaDataPath: z.string().optional().describe("Optional path to the figma-data.json snapshot.")
+  },
+  async (args) => {
+    try {
+      return handleAuditTokens(args);
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  process.stderr.write("figlets-mcp server running on stdio\n");
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`Fatal: ${err.message}\n`);
+  process.exit(1);
+});

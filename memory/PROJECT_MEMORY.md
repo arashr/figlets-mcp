@@ -98,17 +98,40 @@ These were chosen because they are useful across agents and are mostly determini
 
 ---
 
-## Near-Term Next Steps
+## Milestone 1 — Complete (merged to main 2026-04-24)
+
+All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
 1. **[DONE]** Port shared design system detection logic into `figlets-core`.
 2. **[DONE]** Bridge real Figma data via local plugin (variables, styles, components, selection).
-3. **[NEXT]** Upgrade `figlets-mcp-server` to use `@modelcontextprotocol/sdk` so it speaks the real stdio MCP protocol and can be added to Claude Desktop / Cursor config directly.
-4. **[QUEUED]** Build `audit_tokens` tool: analyze the design system snapshot for hardcoded values, missing aliases, and inconsistent naming.
+3. **[DONE]** Upgrade `figlets-mcp-server` to official `@modelcontextprotocol/sdk` (stdio, Claude Desktop / Cursor compatible).
+4. **[DONE]** Build `audit_tokens` tool: hardcoded values, missing aliases, naming inconsistencies.
+5. **[DONE]** Make `figlets-mcp` globally installable as a CLI command for all agents.
+
+---
+
+## Session Notes
+
+### [2026-04-23]
+
+- Upgraded MCP server from hand-rolled JSON stdout to official `@modelcontextprotocol/sdk` (`McpServer` + `StdioServerTransport`). Server now speaks full JSON-RPC 2.0 over stdio and is connectable from Claude Desktop, Cursor, Windsurf, etc.
+- Added `audit_tokens` MCP tool: surfaces unaliased values, duplicate tokens, and naming inconsistencies from a design system snapshot.
+- Made `figlets-mcp` installable as a global command (`npm install -g`) so any agent can invoke it via `figlets-mcp` in their MCP config.
+
+---
+
+## Near-Term Next Steps (Milestone 2)
+
+1. **[NEXT]** Fill in adapter stubs — `figlets-adapter-claude` and `figlets-adapter-codex` are currently empty READMEs. Write the thin orchestration prompt layers that call MCP tools and handle user-facing intake.
+2. **[NEXT]** End-to-end test with Claude Desktop or Cursor against the live MCP server using a real Figma file.
+3. **[QUEUED]** Decide on `figma-selection.json` vs `figma-data.json` merge strategy (namespaced single file vs separate files).
+4. **[QUEUED]** Expand test coverage — especially integration tests that run bridge + core end-to-end.
+5. **[QUEUED]** Add `generate_component_doc` tool (fourth migration target from initial list).
 
 ---
 
 ## Open Questions
 
 - Should the long-term public package name stay `figlets-mcp`, or become a scoped name under the `figlets` brand?
-- Once on the official MCP SDK, which agents should we test first — Claude Desktop or Cursor?
 - Should `figma-selection.json` and `figma-data.json` be merged into one file with namespaced keys, or stay separate?
+- Which adapter to build first — Claude or Codex?

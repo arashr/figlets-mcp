@@ -59,6 +59,11 @@
           document.getElementById('status').innerText = 'Extracting selection...';
           document.getElementById('substatus').innerText = 'Inspect triggered by agent.';
           parent.postMessage({ pluginMessage: { type: 'extract-selection' } }, '*');
+        } else if (data.command === 'build-showcase') {
+          isExtracting = true;
+          document.getElementById('status').innerText = 'Building showcase...';
+          document.getElementById('substatus').innerText = 'Rendering token tables in Figma.';
+          parent.postMessage({ pluginMessage: { type: 'build-showcase' } }, '*');
         }
       }
     } catch (err) {
@@ -76,6 +81,25 @@
   onmessage = async (event) => {
     const msg = event.data.pluginMessage;
     
+    if (msg.type === 'showcase-built') {
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch('http://localhost:1337/sync-showcase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = 'Showcase built successfully.';
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
     if (msg.type === 'data-extracted' || msg.type === 'selection-extracted') {
       document.getElementById('status').innerText = 'Sending payload...';
       const endpoint = msg.type === 'selection-extracted' ? '/sync-selection' : '/sync';

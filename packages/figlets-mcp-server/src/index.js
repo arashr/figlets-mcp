@@ -7,6 +7,7 @@ const { detectDesignSystemTool, handleDetectDesignSystem } = require("./tools/de
 const { inspectComponentTool, handleInspectComponent } = require("./tools/inspect-component.js");
 const { syncFigmaDataTool, handleSyncFigmaData } = require("./tools/sync-figma-data.js");
 const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js");
+const { buildShowcaseTool, handleBuildShowcase } = require("./tools/build-showcase.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
@@ -79,6 +80,23 @@ server.tool(
   async (args) => {
     try {
       return handleAuditTokens(args);
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- build_ds_showcase ---
+server.tool(
+  buildShowcaseTool.name,
+  buildShowcaseTool.description,
+  {},
+  async () => {
+    try {
+      return await handleBuildShowcase();
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

@@ -20,6 +20,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `detect_design_system` | Analyzes the snapshot: collections, variables, styles, inferred capabilities | After syncing, or when a snapshot already exists on disk |
 | `inspect_component` | Extracts layout, variants, and properties of the currently selected Figma node | When the user wants to inspect a specific component or frame |
 | `audit_tokens` | Reports unaliased values, duplicate tokens, and naming violations in the snapshot | When the user wants a token health check |
+| `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
 
 ---
 
@@ -43,6 +44,13 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 4. Report violations by type: unaliased values → duplicate tokens → naming inconsistencies
 5. Surface the highest-impact fixes first
 
+### Build token showcase
+1. Call `sync_figma_data` if fresh data is needed (or skip if already synced)
+2. Ask the user to keep the Figma plugin open — rendering happens inside Figma
+3. Call `build_ds_showcase`
+4. Report which sections were built (Colors, Typography, Spacing, Elevation, Scrims)
+5. Tell the user to look at the "00 · Tokens" page in their Figma file
+
 ### Full design system health check
 1. Call `sync_figma_data`
 2. Call `detect_design_system`
@@ -59,6 +67,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `inspect_component` returns empty selection | Nothing selected in Figma | "Select a component or frame in Figma, then try again." |
 | `detect_design_system` returns no collections | No snapshot on disk | "Run a sync first to pull data from Figma." |
 | `audit_tokens` returns no violations | Clean token set or no snapshot | Confirm snapshot exists; if it does, report the all-clear to the user |
+| `build_ds_showcase` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 
 ---
 
@@ -69,3 +78,4 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 - Never call `inspect_component` without first confirming the user has selected a node in Figma
 - Never call `detect_design_system` or `audit_tokens` without checking whether a sync is needed first
 - Never present raw JSON tool output directly — always summarize into plain language
+- Never add reasoning steps to `build_ds_showcase` — it renders exactly what it detects, no decisions needed

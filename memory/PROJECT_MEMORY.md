@@ -122,11 +122,24 @@ All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
 ## Near-Term Next Steps (Milestone 2)
 
-1. **[DONE]** Merged `figlets-adapter-claude` and `figlets-adapter-codex` into a single `figlets-adapter` package. Contains `CLAUDE.md` (Claude Code) and `AGENTS.md` (Codex CLI) with identical workflows — one place to maintain.
+1. **[DONE]** Merged `figlets-adapter-claude` and `figlets-adapter-codex` into a single `figlets-adapter` package.
 2. **[DONE]** End-to-end test with real Figma file: sync confirmed (272 variables, 4 collections, 15 text styles, 6 effect styles). `detect_design_system` now saves full DS context to `.local/figma-ds-context.json` and returns compact summary only.
-3. **[QUEUED]** Decide on `figma-selection.json` vs `figma-data.json` merge strategy (namespaced single file vs separate files).
-4. **[QUEUED]** Expand test coverage — especially integration tests that run bridge + core end-to-end.
-5. **[QUEUED]** Add `generate_component_doc` tool (fourth migration target from initial list).
+3. **[DONE]** `build_ds_showcase` tool — all rendering inside Figma plugin, no agent reasoning needed.
+4. **[QUEUED]** Decide on `figma-selection.json` vs `figma-data.json` merge strategy (namespaced single file vs separate files).
+5. **[QUEUED]** Expand test coverage — especially integration tests that run bridge + core end-to-end.
+6. **[QUEUED]** Add `generate_component_doc` tool (fourth migration target from initial list).
+
+---
+
+### [2026-04-24 — build_ds_showcase]
+
+- Added `build_ds_showcase` MCP tool: all rendering lives inside `code.js` in the Figma plugin. The agent just calls the tool; no analysis, no decisions — it renders what it detects.
+- Architecture: `/request-showcase` → plugin runs `_buildShowcase()` → `/sync-showcase` → MCP tool receives sections list.
+- `_buildShowcase()` in `code.js` contains: detect-ds-structure analysis, showcase-shared helpers, colors section (primitives + semantic pairs with WCAG), typography table, spacing/radius/border scale, elevation table, scrims table, finale scroll-into-view.
+- Receiver updated: added `/request-showcase` and `/sync-showcase` endpoints (same long-poll pattern).
+- Plugin UI updated: handles `build-showcase` command from poll, routes `showcase-built` response to `/sync-showcase`.
+- Adapter docs updated: `CLAUDE.md` and `AGENTS.md` both document the new tool and workflow.
+- 16/16 tests passing.
 
 ---
 

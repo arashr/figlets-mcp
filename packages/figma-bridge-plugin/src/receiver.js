@@ -9,6 +9,7 @@ const DEST_FILE = path.join(DEST_DIR, 'figma-data.json');
 let pendingPollResponse = null;
 let pendingSyncRequest = null;
 let pendingSelectionRequest = null;
+let pendingShowcaseRequest = null;
 
 const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
 
@@ -88,7 +89,49 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 4. Figma Plugin posts the global extracted data here
+  // 4. MCP Agent calls this to trigger a showcase build
+  if (req.method === 'POST' && req.url === '/request-showcase') {
+    if (pendingPollResponse) {
+      pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+      pendingPollResponse.end(JSON.stringify({ command: 'build-showcase' }));
+      pendingPollResponse = null;
+
+      pendingShowcaseRequest = res;
+
+      setTimeout(() => {
+        if (pendingShowcaseRequest === res) {
+          res.writeHead(504, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Showcase build timed out' }));
+          pendingShowcaseRequest = null;
+        }
+      }, 120000); // Showcase can take a while
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Figma plugin is not connected or listening.' }));
+    }
+    return;
+  }
+
+  // 5. Figma Plugin posts the showcase result here
+  if (req.method === 'POST' && req.url === '/sync-showcase') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingShowcaseRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        pendingShowcaseRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingShowcaseRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingShowcaseRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 7. Figma Plugin posts the global extracted data here
   if (req.method === 'POST' && req.url === '/sync') {
     let body = '';
     req.on('data', chunk => {
@@ -126,7 +169,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 5. Figma Plugin posts the selection data here
+  // 8. Figma Plugin posts the selection data here
   if (req.method === 'POST' && req.url === '/sync-selection') {
     let body = '';
     req.on('data', chunk => {

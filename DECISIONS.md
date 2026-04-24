@@ -153,6 +153,19 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-04-24] Auto-start the bridge receiver from the MCP server
+
+**Decision:** The MCP server spawns the bridge receiver (`figma-bridge-plugin/src/receiver.js`) automatically on startup if port 1337 is not already in use.
+
+**Why:**
+- The target audience is designers with little or no terminal experience. Requiring `npm run start` before every session is a barrier that breaks the UX.
+- The receiver is infrastructure, not a user task. The agent should own its own infrastructure.
+- If the receiver is already running the auto-start is a no-op — no double-spawn risk.
+
+**Consequence:** Designers only need to open the Figlets Bridge plugin in Figma Desktop when instructed. Everything else is automatic.
+
+---
+
 ## [2026-04-24] Merge agent adapters into one shared package
 
 **Decision:** Collapse `figlets-adapter-claude` and `figlets-adapter-codex` into a single `figlets-adapter` package containing both `CLAUDE.md` and `AGENTS.md` side by side.

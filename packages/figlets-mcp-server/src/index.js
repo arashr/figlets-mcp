@@ -1,6 +1,7 @@
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { z } = require("zod");
+const { ensureReceiverRunning } = require("./utils/ensure-receiver.js");
 
 const { detectDesignSystemTool } = require("./tools/detect-design-system.js");
 const { inspectComponentTool, handleInspectComponent } = require("./tools/inspect-component.js");
@@ -90,6 +91,7 @@ server.tool(
 );
 
 async function main() {
+  await ensureReceiverRunning();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.stderr.write("figlets-mcp server running on stdio\n");

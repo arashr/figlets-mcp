@@ -3,7 +3,7 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const { z } = require("zod");
 const { ensureReceiverRunning } = require("./utils/ensure-receiver.js");
 
-const { detectDesignSystemTool } = require("./tools/detect-design-system.js");
+const { detectDesignSystemTool, handleDetectDesignSystem } = require("./tools/detect-design-system.js");
 const { inspectComponentTool, handleInspectComponent } = require("./tools/inspect-component.js");
 const { syncFigmaDataTool, handleSyncFigmaData } = require("./tools/sync-figma-data.js");
 const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js");
@@ -24,10 +24,8 @@ server.tool(
   },
   async (args) => {
     try {
-      const result = detectDesignSystemTool.handler(args);
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
-      };
+      const result = handleDetectDesignSystem(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

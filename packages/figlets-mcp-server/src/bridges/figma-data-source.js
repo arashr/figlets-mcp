@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
+const { FIGMA_DATA_PATH } = require("../utils/paths.js");
 
 function readJsonFile(filePath) {
   const absolutePath = path.resolve(filePath);
@@ -95,9 +96,8 @@ function loadFigmaDataSource(input = {}) {
   }
 
   // Last resort: use the well-known local snapshot written by sync_figma_data
-  const localSnapshotPath = path.resolve(__dirname, "../../../../.local/figma-data.json");
-  if (fs.existsSync(localSnapshotPath)) {
-    const { absolutePath, json } = readJsonFile(localSnapshotPath);
+  if (fs.existsSync(FIGMA_DATA_PATH)) {
+    const { absolutePath, json } = readJsonFile(FIGMA_DATA_PATH);
     return {
       kind: "local-snapshot",
       target: input.target !== undefined

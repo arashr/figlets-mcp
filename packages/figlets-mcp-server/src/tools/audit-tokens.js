@@ -1,13 +1,11 @@
 const fs = require("fs");
-const path = require("path");
 const { auditTokens } = require("../../../figlets-core/src/index.js");
-
-const DEST_FILE = path.resolve(__dirname, "../../../../.local/figma-data.json");
+const { FIGMA_DATA_PATH, DS_CONTEXT_PATH } = require("../utils/paths.js");
 
 const auditTokensTool = {
   name: "audit_tokens",
   description:
-    "Analyzes the local Figma design system snapshot for token health issues: unaliased raw values (hardcoded colors/numbers that should reference tokens), duplicate values defined across multiple variables, and naming convention inconsistencies within collections. Run sync_figma_data first to ensure the snapshot is current.",
+    "Analyzes the local Figma design system snapshot for token health issues: unaliased raw values (hardcoded colors/numbers that should reference tokens), duplicate values defined across multiple variables, and naming convention inconsistencies within collections. Run sync_figma_data and detect_design_system first to ensure the snapshot is current.",
   inputSchema: {
     type: "object",
     properties: {
@@ -21,10 +19,19 @@ const auditTokensTool = {
   }
 };
 
+function loadDsContext() {
+  if (!fs.existsSync(DS_CONTEXT_PATH)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(DS_CONTEXT_PATH, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
 function handleAuditTokens(args = {}) {
   const dataPath = args.figmaDataPath
-    ? path.resolve(args.figmaDataPath)
-    : DEST_FILE;
+    ? require("path").resolve(args.figmaDataPath)
+    : FIGMA_DATA_PATH;
 
   if (!fs.existsSync(dataPath)) {
     throw new Error(
@@ -32,25 +39,24 @@ function handleAuditTokens(args = {}) {
     );
   }
 
-  const rawData = fs.readFileSync(dataPath, "utf-8");
-  const parsedData = JSON.parse(rawData);
+  const rawData = JSON.parse(fs.readFileSync(dataPath, "utf-8"));
+
+  // Load the saved DS context indexes for richer token matching
+  // (produced by detect_design_system — if missing, audit still runs but without match suggestions)
+  const dsContext = loadDsContext();
+  const contextIndexes = dsContext && dsContext.context && dsContext.context.indexes
+    ? dsContext.context.indexes
+    : null;
 
   const result = auditTokens({
-    variables: parsedData.variables || [],
-    collections: parsedData.collections || []
+    variables: rawData.variables || [],
+    collections: rawData.collections || [],
+    contextIndexes
   });
 
   return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(result, null, 2)
-      }
-    ]
+    content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
   };
 }
 
-module.exports = {
-  auditTokensTool,
-  handleAuditTokens
-};
+module.exports = { auditTokensTool, handleAuditTokens };

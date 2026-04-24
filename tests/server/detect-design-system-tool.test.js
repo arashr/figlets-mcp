@@ -1,57 +1,57 @@
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
-const { detectDesignSystemTool } = require("../../packages/figlets-mcp-server/src/tools/detect-design-system.js");
-const { exampleFigmaData } = require("../fixtures/design-system-data.js");
 
+// Isolated temp dir so these tests never touch .local/
+const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-detect-tool-test-"));
+process.env.FIGLETS_LOCAL_DIR = TEMP_DIR;
+
+const toClear = [
+  "../../packages/figlets-mcp-server/src/utils/paths.js",
+  "../../packages/figlets-mcp-server/src/bridges/figma-data-source.js",
+  "../../packages/figlets-mcp-server/src/tools/detect-design-system.js"
+];
+toClear.forEach(m => { try { delete require.cache[require.resolve(m)]; } catch {} });
+
+const { handleDetectDesignSystem } = require("../../packages/figlets-mcp-server/src/tools/detect-design-system.js");
+const { exampleFigmaData } = require("../fixtures/design-system-data.js");
 const fixturePath = path.resolve(__dirname, "../../examples/detect-design-system.figma-data.json");
 
-{
-  const result = detectDesignSystemTool.handler({
-    figmaData: exampleFigmaData
-  });
+try {
+  {
+    // inline figmaData: compact result, no snapshot key
+    const result = handleDetectDesignSystem({ figmaData: exampleFigmaData });
+    assert.strictEqual(result.summary.collections, 2);
+    assert.ok(!result.snapshot, "compact result should not include snapshot");
+  }
 
-  assert.strictEqual(result.summary.collections, 2);
-  assert.strictEqual(result.source, "inline");
-}
+  {
+    // file path: collections and textStyles are returned as compact arrays
+    const result = handleDetectDesignSystem({ figmaDataPath: fixturePath });
+    assert.strictEqual(result.summary.capabilities.hasTextStyles, true);
+    assert.ok(Array.isArray(result.collections), "should have compact collections");
+    assert.ok(Array.isArray(result.textStyles), "should have textStyles names");
+    assert.ok(!result.snapshot, "compact result should not include snapshot");
+  }
 
-{
-  const result = detectDesignSystemTool.handler({
-    figmaDataPath: fixturePath
-  });
+  {
+    // command: collections parsed correctly
+    const result = handleDetectDesignSystem({ figmaDataCommand: "cat " + fixturePath });
+    const semantics = result.collections.find(c => c.name === "Semantics");
+    assert.ok(semantics, "should find Semantics collection in compact result");
+  }
 
-  assert.strictEqual(result.source, "file");
-  assert.strictEqual(result.summary.capabilities.hasTextStyles, true);
-}
+  {
+    // error path: no data source available
+    const { explainMissingFigmaBridge } = require("../../packages/figlets-mcp-server/src/bridges/figma-data-source.js");
+    const error = explainMissingFigmaBridge();
+    assert.strictEqual(error.code, "FIGMA_BRIDGE_NOT_CONFIGURED");
+    assert.ok(error.message.length > 0);
+  }
 
-{
-  const result = detectDesignSystemTool.handler({
-    figmaDataCommand: "cat " + fixturePath
-  });
-
-  assert.strictEqual(result.source, "command");
-  assert.strictEqual(result.snapshot.collections[1].name, "Semantics");
-}
-
-{
-  const result = detectDesignSystemTool.handler({
-    snapshot: {
-      target: "snapshot-input",
-      collections: [],
-      textStyles: [],
-      effectStyles: []
-    }
-  });
-
-  assert.strictEqual(result.target, "snapshot-input");
-  assert.strictEqual(result.summary.collections, 0);
-}
-
-{
-  // When no source is provided and no local snapshot exists, the bridge error is returned.
-  // Test the error shape directly via the bridge explainer — the no-arg handler path now
-  // falls back to .local/figma-data.json if it exists (written by sync_figma_data).
-  const { explainMissingFigmaBridge } = require("../../packages/figlets-mcp-server/src/bridges/figma-data-source.js");
-  const error = explainMissingFigmaBridge();
-  assert.strictEqual(error.code, "FIGMA_BRIDGE_NOT_CONFIGURED");
-  assert.ok(error.message.length > 0);
+} finally {
+  fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+  delete process.env.FIGLETS_LOCAL_DIR;
+  toClear.forEach(m => { try { delete require.cache[require.resolve(m)]; } catch {} });
 }

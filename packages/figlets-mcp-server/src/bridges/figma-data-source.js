@@ -94,6 +94,20 @@ function loadFigmaDataSource(input = {}) {
     };
   }
 
+  // Last resort: use the well-known local snapshot written by sync_figma_data
+  const localSnapshotPath = path.resolve(__dirname, "../../../../.local/figma-data.json");
+  if (fs.existsSync(localSnapshotPath)) {
+    const { absolutePath, json } = readJsonFile(localSnapshotPath);
+    return {
+      kind: "local-snapshot",
+      target: input.target !== undefined
+        ? input.target
+        : (json.target !== undefined ? json.target : "local-snapshot"),
+      figmaData: json,
+      meta: { path: absolutePath }
+    };
+  }
+
   return null;
 }
 

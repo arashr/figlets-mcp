@@ -47,10 +47,11 @@ const fixturePath = path.resolve(__dirname, "../../examples/detect-design-system
 }
 
 {
-  const result = detectDesignSystemTool.handler({
-    target: "no-bridge"
-  });
-
-  assert.strictEqual(result.target, "no-bridge");
-  assert.strictEqual(result.error.code, "FIGMA_BRIDGE_NOT_CONFIGURED");
+  // When no source is provided and no local snapshot exists, the bridge error is returned.
+  // Test the error shape directly via the bridge explainer — the no-arg handler path now
+  // falls back to .local/figma-data.json if it exists (written by sync_figma_data).
+  const { explainMissingFigmaBridge } = require("../../packages/figlets-mcp-server/src/bridges/figma-data-source.js");
+  const error = explainMissingFigmaBridge();
+  assert.strictEqual(error.code, "FIGMA_BRIDGE_NOT_CONFIGURED");
+  assert.ok(error.message.length > 0);
 }

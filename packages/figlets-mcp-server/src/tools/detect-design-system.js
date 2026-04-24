@@ -37,6 +37,15 @@ const detectDesignSystemTool = {
     additionalProperties: false
   },
   handler(input = {}) {
+    // Explicit snapshot input takes priority over any automatic data source
+    if (input.snapshot && typeof input.snapshot === "object") {
+      const snapshot = {
+        ...input.snapshot,
+        target: input.target !== undefined ? input.target : input.snapshot.target
+      };
+      return detectDesignSystem(snapshot);
+    }
+
     const dataSource = loadFigmaDataSource(input);
 
     if (dataSource) {
@@ -46,14 +55,6 @@ const detectDesignSystemTool = {
         source: dataSource.kind,
         sourceMeta: dataSource.meta !== undefined ? dataSource.meta : null
       });
-    }
-
-    if (input.snapshot && typeof input.snapshot === "object") {
-      const snapshot = {
-        ...input.snapshot,
-        target: input.target !== undefined ? input.target : input.snapshot.target
-      };
-      return detectDesignSystem(snapshot);
     }
 
     return {

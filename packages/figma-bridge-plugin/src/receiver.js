@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 1337;
-const DEST_DIR = path.resolve(__dirname, '../../../.local');
+const DEST_DIR = process.env.FIGLETS_LOCAL_DIR || path.resolve(__dirname, '../../../.local');
 const DEST_FILE = path.join(DEST_DIR, 'figma-data.json');
 
 let pendingPollResponse = null;
@@ -169,10 +169,20 @@ const server = http.createServer((req, res) => {
 });
 
 if (require.main === module) {
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.log(`Port ${PORT} is already in use — receiver is already running. Nothing to do.`);
+      process.exit(0);
+    } else {
+      console.error(`Receiver error: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
   server.listen(PORT, () => {
     console.log(`Figma Bridge Receiver listening on http://localhost:${PORT}`);
     console.log(`Will write data to: ${DEST_FILE}`);
-    console.log(`Run the Figlets Bridge plugin in Figma and click Sync!`);
+    console.log(`Open the Figlets Bridge plugin in Figma Desktop to connect.`);
   });
 }
 

@@ -1,11 +1,15 @@
 const assert = require("assert");
 const http = require("http");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
-const server = require("../../packages/figma-bridge-plugin/src/receiver.js");
 
-const DEST_DIR = path.resolve(__dirname, "../../.local");
-const DEST_FILE = path.join(DEST_DIR, "figma-data.json");
+// Use an isolated temp dir so tests never touch .local/figma-data.json
+const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-receiver-test-"));
+const TEMP_FILE = path.join(TEMP_DIR, "figma-data.json");
+process.env.FIGLETS_LOCAL_DIR = TEMP_DIR;
+
+const server = require("../../packages/figma-bridge-plugin/src/receiver.js");
 
 module.exports = new Promise((resolve, reject) => {
   // Start server on a random port for testing
@@ -29,22 +33,34 @@ module.exports = new Promise((resolve, reject) => {
           try {
             assert.strictEqual(res.statusCode, 200);
             assert.strictEqual(JSON.parse(responseBody).success, true);
-            
-            // Verify file was written
-            assert.strictEqual(fs.existsSync(DEST_FILE), true);
-            const writtenData = fs.readFileSync(DEST_FILE, "utf-8");
+
+            // Verify file was written to the isolated temp location
+            assert.strictEqual(fs.existsSync(TEMP_FILE), true);
+            const writtenData = fs.readFileSync(TEMP_FILE, "utf-8");
             assert.strictEqual(writtenData, testData);
 
-            server.close(() => resolve());
+            server.close(() => {
+              fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+              delete process.env.FIGLETS_LOCAL_DIR;
+              resolve();
+            });
           } catch (err) {
-            server.close(() => reject(err));
+            server.close(() => {
+              fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+              delete process.env.FIGLETS_LOCAL_DIR;
+              reject(err);
+            });
           }
         });
       }
     );
 
     req.on("error", (err) => {
-      server.close(() => reject(err));
+      server.close(() => {
+        fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+        delete process.env.FIGLETS_LOCAL_DIR;
+        reject(err);
+      });
     });
 
     req.write(testData);

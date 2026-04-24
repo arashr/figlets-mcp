@@ -1,3 +1,3 @@
-# figlets Claude Adapter
+# figlets Claude adapter
 
-This package will hold Claude-specific prompts, workflow wrappers, and examples that call the shared MCP tools instead of embedding large logic blobs in prompt context.
+Moved to `packages/figlets-adapter/`. See `CLAUDE.md` there.

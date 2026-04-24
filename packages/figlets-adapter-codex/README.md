@@ -1,3 +1,3 @@
-# figlets Codex Adapter
+# figlets Codex adapter
 
-This package will hold Codex-specific prompts, workflow wrappers, and examples that call the shared MCP tools instead of embedding large logic blobs in prompt context.
+Moved to `packages/figlets-adapter/`. See `AGENTS.md` there.

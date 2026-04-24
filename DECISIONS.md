@@ -153,6 +153,19 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-04-24] Merge agent adapters into one shared package
+
+**Decision:** Collapse `figlets-adapter-claude` and `figlets-adapter-codex` into a single `figlets-adapter` package containing both `CLAUDE.md` and `AGENTS.md` side by side.
+
+**Why:**
+- The tool inventory, workflows, error handling, and rules are ~90% identical across agents.
+- Separate packages would require duplicating and synchronising the same content on every workflow change.
+- As long as figlets-mcp remains agent-agnostic, there is no structural reason to separate the orchestration prompts.
+
+**Consequence:** One package to update when MCP tools change. If the adapters diverge significantly in the future (agent-specific tools, divergent intake flows), splitting back out is straightforward.
+
+---
+
 ## [2026-04-23] Upgrade MCP server to use the official `@modelcontextprotocol/sdk`
 
 **Decision:** Replace the hand-rolled JSON stdout output in `figlets-mcp-server/src/index.js` with the official `@modelcontextprotocol/sdk` (`McpServer` + `StdioServerTransport`).

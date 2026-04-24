@@ -11,9 +11,10 @@ const syncFigmaDataTool = {
 };
 
 function handleSyncFigmaData() {
+  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
   return new Promise((resolve, reject) => {
     const req = http.request(
-      "http://localhost:1337/request-sync",
+      `${receiverUrl}/request-sync`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" }

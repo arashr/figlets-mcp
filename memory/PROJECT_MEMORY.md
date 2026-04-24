@@ -122,7 +122,7 @@ All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
 ## Near-Term Next Steps (Milestone 2)
 
-1. **[NEXT]** Fill in adapter stubs — `figlets-adapter-claude` and `figlets-adapter-codex` are currently empty READMEs. Write the thin orchestration prompt layers that call MCP tools and handle user-facing intake.
+1. **[DONE]** Merged `figlets-adapter-claude` and `figlets-adapter-codex` into a single `figlets-adapter` package. Contains `CLAUDE.md` (Claude Code) and `AGENTS.md` (Codex CLI) with identical workflows — one place to maintain.
 2. **[NEXT]** End-to-end test with Claude Desktop or Cursor against the live MCP server using a real Figma file.
 3. **[QUEUED]** Decide on `figma-selection.json` vs `figma-data.json` merge strategy (namespaced single file vs separate files).
 4. **[QUEUED]** Expand test coverage — especially integration tests that run bridge + core end-to-end.

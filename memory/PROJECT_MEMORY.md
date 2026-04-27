@@ -239,6 +239,33 @@ All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
 ---
 
+### [2026-04-27 — variable purpose lock]
+
+**Problem:** The segment scoring system assigned positive scores to wrong-purpose variables when the status keyword dominated. `color/icon/warning` (FG+WARNING) scored positively for `warningBorder` because WARNING outweighed the FG penalty. Result: badge borders bound to icon tokens instead of outline tokens, or fell back to surface/text colors.
+
+**What was done:**
+
+1. **Refactored `_segScore` into `_pathCats` + dot-product** — `_pathCats(name)` returns the accumulated category map for a path; `_segScore` calls it then dot-products with the role weight vector. This makes the category map available for constraint checking without recomputing it.
+
+2. **Added `requiredCats` parameter to `_semPick`** — a hard category filter applied before score comparison. A candidate variable must contribute > 0 to every listed category or it is skipped entirely.
+
+3. **`requiredCats` also blocks the functional fallback** — `if (nameOnly || requiredCats) return null` prevents cross-purpose guessing. If no purpose-correct variable exists, the slot is null.
+
+4. **Applied consistently across all purpose-constrained roles:**
+   - Outline roles (`outlineSubtle`, `outlineBrand`, `successBorder`, `warningBorder`) → `['OUTLINE']`
+   - Status fill roles (`successBg`, `warningBg`) → `['BG']`
+   - Status text roles (`successText`, `warningText`) → `['FG']`
+
+5. **`_buildBadge` null-guards the border stroke** — when `bdV` is null, `badge.strokes = []` rather than binding a fallback color.
+
+6. **Added test scenarios 15 and 16** covering BG and FG purpose locks respectively. Scenario 14 (OUTLINE lock) was already present.
+
+**This is also a QA contract:** variable path purpose is expected of designers. Future QA tools will enforce the same rule.
+
+**20/20 test scenarios passing (18 test files).**
+
+---
+
 ## Open Questions
 
 - Should the long-term public package name stay `figlets-mcp`, or become a scoped name under the `figlets` brand?

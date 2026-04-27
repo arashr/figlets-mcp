@@ -406,6 +406,7 @@ async function _buildShowcase() {
     'foreground':    { FG: 3 },
     'fg':            { FG: 2 },
     'text':          { FG: 2 },
+    'icon':          { FG: 1 },
     'label':         { FG: 1 },
     'content':       { FG: 1 },
     'on':            { FG: 1 },
@@ -439,15 +440,17 @@ async function _buildShowcase() {
     'divider':       { OUTLINE: 3 },
     'separator':     { OUTLINE: 3 },
     'line':          { OUTLINE: 1 },
-    // Status families — combined with BG/FG/OUTLINE to resolve bg/text/border
+    // Status families — combined with BG/FG/OUTLINE to resolve bg/text/border.
+    // Note: 'danger' and 'error' get their own DANGER category, not WARNING, so
+    // they never bleed into warning badge slots when warning tokens are missing.
     'success':       { SUCCESS: 3 },
     'positive':      { SUCCESS: 2 },
     'confirm':       { SUCCESS: 1 },
     'warning':       { WARNING: 3 },
     'caution':       { WARNING: 2 },
     'alert':         { WARNING: 1 },
-    'danger':        { WARNING: 2 },
-    'error':         { WARNING: 2 },
+    'danger':        { DANGER: 2 },
+    'error':         { DANGER: 2 },
   };
 
   // _ROLE: semantic role → category weights. Positive rewards, negative penalises.
@@ -462,25 +465,31 @@ async function _buildShowcase() {
     onBrandVariant: { FG: 3, BG: -4, BRAND: 3, BVAR: 2 },
     outlineSubtle:  { OUTLINE: 3, FG: -2, BG: -2 },
     outlineBrand:   { OUTLINE: 3, FG: -2, BG: -2, BRAND: 3 },
-    successBg:      { SUCCESS: 3, BG: 2, FG: -3, OUTLINE: -2 },
-    successBorder:  { SUCCESS: 3, OUTLINE: 2, BG: -2, FG: -1 },
-    successText:    { SUCCESS: 3, FG: 2, BG: -3, OUTLINE: -2 },
-    warningBg:      { WARNING: 3, BG: 2, FG: -3, OUTLINE: -2 },
-    warningBorder:  { WARNING: 3, OUTLINE: 2, BG: -2, FG: -1 },
-    warningText:    { WARNING: 3, FG: 2, BG: -3, OUTLINE: -2 },
+    successBg:      { SUCCESS: 3, BG: 2, FG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+    successBorder:  { SUCCESS: 3, OUTLINE: 2, BG: -2, FG: -1, WARNING: -6, DANGER: -6 },
+    successText:    { SUCCESS: 3, FG: 2, BG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+    warningBg:      { WARNING: 3, BG: 2, FG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
+    warningBorder:  { WARNING: 3, OUTLINE: 2, BG: -2, FG: -1, SUCCESS: -6, DANGER: -6 },
+    warningText:    { WARNING: 3, FG: 2, BG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
   };
 
-  // Accumulate category scores from each path segment, then dot-product with role weights.
-  function _segScore(name, role) {
+  // Accumulate category scores from each slash-separated path segment.
+  function _pathCats(name) {
     var segments = name.toLowerCase().split('/');
-    var pathCats = {};
+    var cats = {};
     for (var i = 0; i < segments.length; i++) {
-      var cats = _SEG[segments[i]];
-      if (!cats) continue;
-      for (var cat in cats) {
-        pathCats[cat] = (pathCats[cat] || 0) + cats[cat];
+      var segCats = _SEG[segments[i]];
+      if (!segCats) continue;
+      for (var cat in segCats) {
+        cats[cat] = (cats[cat] || 0) + segCats[cat];
       }
     }
+    return cats;
+  }
+
+  // Dot-product of a path's accumulated categories with a role's weight vector.
+  function _segScore(name, role) {
+    var pathCats = _pathCats(name);
     var roleWeights = _ROLE[role];
     if (!roleWeights) return 0;
     var total = 0;
@@ -492,22 +501,33 @@ async function _buildShowcase() {
 
   // Pick the best variable for a semantic role:
   //   1. Score every COLOR var by summing its path segment scores for the role.
-  //   2. Take the variable with the highest positive score (scorer breaks ties).
-  //   3. If nothing scores > 0: status tokens return null (nameOnly=true);
+  //   2. Optionally require certain categories to be present (requiredCats array).
+  //      A variable that doesn't contribute to a required category is skipped.
+  //   3. Take the variable with the highest positive score (scorer breaks ties).
+  //   4. If nothing qualifies: status tokens return null (nameOnly=true);
   //      structural tokens fall back to the functional scorer as a last resort.
-  function _semPick(role, scorer, nameOnly) {
+  function _semPick(role, scorer, nameOnly, requiredCats) {
     var best = null, bestSeg = 0;
     for (var i = 0; i < _scored.length; i++) {
       var s = _scored[i];
       var seg = _segScore(s.name, role);
       if (seg <= 0) continue;
+      if (requiredCats) {
+        var pCats = _pathCats(s.name);
+        var ok = true;
+        for (var ci = 0; ci < requiredCats.length; ci++) {
+          if ((pCats[requiredCats[ci]] || 0) <= 0) { ok = false; break; }
+        }
+        if (!ok) continue;
+      }
       if (best === null || seg > bestSeg || (seg === bestSeg && scorer(s) > scorer(best))) {
         best = s; bestSeg = seg;
       }
     }
     if (best !== null) return best.v;
 
-    if (nameOnly) return null;
+    // Purpose-locked roles: never cross purpose boundaries via functional fallback
+    if (nameOnly || requiredCats) return null;
 
     // Functional last resort — DS has no recognisable semantic naming at all
     var funcBest = null, funcScore = 0;
@@ -552,21 +572,23 @@ async function _buildShowcase() {
       var dist = Math.abs(s.lum - 0.6);
       if (dist > 0.5) return 0;
       return (1 - s.sat) * (1 - dist * 2);
-    }),
+    }, false, ['OUTLINE']),
     outlineBrand: _semPick('outlineBrand', s => {
       if (s.lum < 0.05 || s.lum > 0.95) return 0;
       var dist = Math.abs(s.lum - 0.4);
       if (dist > 0.5) return 0;
       return s.sat * (1 - dist * 1.5);
-    }),
+    }, false, ['OUTLINE']),
 
-    // Status tokens — null if the DS has no recognisable status-named variables
-    successBg:     _semPick('successBg',     s => s.sat,                          true),
-    successBorder: _semPick('successBorder', s => s.sat,                          true),
-    successText:   _semPick('successText',   s => s.contrast >= 4.5 ? s.contrast : 0, true),
-    warningBg:     _semPick('warningBg',     s => s.sat,                          true),
-    warningBorder: _semPick('warningBorder', s => s.sat,                          true),
-    warningText:   _semPick('warningText',   s => s.contrast >= 4.5 ? s.contrast : 0, true),
+    // Status tokens — null if the DS has no recognisable status-named variables.
+    // requiredCats enforces purpose: fills must come from surface/bg tokens,
+    // borders from outline/border tokens, text from fg/text tokens.
+    successBg:     _semPick('successBg',     s => s.sat,                               true, ['BG',      'SUCCESS']),
+    successBorder: _semPick('successBorder', s => s.sat,                               true, ['OUTLINE', 'SUCCESS']),
+    successText:   _semPick('successText',   s => s.contrast >= 4.5 ? s.contrast : 0, true, ['FG',      'SUCCESS']),
+    warningBg:     _semPick('warningBg',     s => s.sat,                               true, ['BG',      'WARNING']),
+    warningBorder: _semPick('warningBorder', s => s.sat,                               true, ['OUTLINE', 'WARNING']),
+    warningText:   _semPick('warningText',   s => s.contrast >= 4.5 ? s.contrast : 0, true, ['FG',      'WARNING']),
   };
 
   // textSub alias — same variable, two reference names used across the file
@@ -635,6 +657,7 @@ async function _buildShowcase() {
     outlineSubtle:  _resolvedOrFallback(_V.outlineSubtle,  _C.outlineSubtle),
     surfaceDefault: _resolvedOrFallback(_V.surfaceDefault, _C.surfaceDefault),
     surfaceVariant: _resolvedOrFallback(_V.surfaceVariant, _C.surfaceVariant),
+    surfaceBrand:   _resolvedOrFallback(_V.surfaceBrand,   _accColor),
     brandVariant:   _resolvedOrFallback(_V.brandVariant,   _C.brandVariant),
     onBrandVariant: _resolvedOrFallback(_V.onBrandVariant, _C.onBrandVariant),
     onSurface:      _resolvedOrFallback(_V.onSurface,      _C.onSurface),
@@ -758,10 +781,14 @@ async function _buildShowcase() {
     badge.cornerRadius = 8;
     badge.primaryAxisAlignItems = 'CENTER';
     badge.counterAxisAlignItems = 'CENTER';
-    badge.fills   = [_paint(bg, bgV)];
-    badge.strokes = [_paint(border, bdV)];
-    badge.strokeWeight = 1;
-    badge.strokeAlign  = 'INSIDE';
+    badge.fills = [_paint(bg, bgV)];
+    if (bdV) {
+      badge.strokes = [_paint(border, bdV)];
+      badge.strokeWeight = 1;
+      badge.strokeAlign  = 'INSIDE';
+    } else {
+      badge.strokes = [];
+    }
     badge.appendChild(_tDS(sign,  10, fg, true, fgV));
     badge.appendChild(_tDS(score, 10, fg, true, fgV));
     return badge;
@@ -1264,7 +1291,7 @@ async function _buildShowcase() {
       const size = Math.min(Math.max(px, 2), 128);
       const sq = figma.createRectangle();
       sq.resize(size, size);
-      sq.fills = [_paint(_RC.onSurface, _V.onSurface)];
+      sq.fills = [_paint(_RC.surfaceBrand, _V.surfaceBrand)];
       sq.cornerRadius = 2;
       return sq;
     }

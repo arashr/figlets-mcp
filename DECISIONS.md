@@ -299,6 +299,26 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-04-27] Variable purpose is a semantic contract — purpose locks enforced via requiredCats
+
+**Decision:** Every `_semPick` call that targets a specific-purpose slot (outline/border, surface/fill, text/fg) passes a `requiredCats` array. A candidate variable must contribute to all required categories to be considered — regardless of its role score. The functional fallback is also blocked when `requiredCats` is set. If no purpose-correct variable exists, the slot returns null.
+
+Applied consistently:
+- `outlineSubtle`, `outlineBrand`, `successBorder`, `warningBorder` → `['OUTLINE']`
+- `successBg`, `warningBg` → `['BG']`
+- `successText`, `warningText` → `['FG']`
+
+Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats` — they retain the functional fallback for DSes with entirely non-semantic naming.
+
+**Why:**
+- A variable path encodes its intended purpose. `color/outline/warning` is a border token; `color/icon/warning` is an icon-fill token. Using a wrong-purpose variable is a semantic error even if it scores positively for a role.
+- The scoring system can assign a positive score to a variable with the wrong purpose if the status keyword (e.g. `warning`) dominates over the purpose keyword (e.g. `icon` vs `outline`). `requiredCats` is a hard filter that scoring alone cannot provide.
+- This is also a QA contract: designers are expected to name variables according to their purpose. The showcase and future QA tools enforce the same rule.
+
+**Consequence:** Status badge borders and fills only bind to variables that are explicitly named for that purpose. If the DS has no `outline/warning` variable, the badge renders without a border rather than borrowing an icon or surface token. Unit-tested in scenarios 14–16 of `tests/core/semantic-var-picker.test.js`.
+
+---
+
 ## [2026-04-27] Bind showcase variables by path-segment scoring, not regex name matching
 
 **Decision:** Replace all regex-based name pattern matching in `_buildShowcase()` with a segment-weighted scoring system (`_SEG` dictionary + `_segScore`). Every `/`-separated segment in a variable path contributes a positive or negative score to each semantic role. The variable with the highest total score wins. Functional scoring (contrast, luminance, saturation) runs only as a last resort when no variable scores above zero.

@@ -75,6 +75,7 @@ const _SEG = {
   'foreground':    { FG: 3 },
   'fg':            { FG: 2 },
   'text':          { FG: 2 },
+  'icon':          { FG: 1 },
   'label':         { FG: 1 },
   'content':       { FG: 1 },
   'on':            { FG: 1 },
@@ -115,8 +116,8 @@ const _SEG = {
   'warning':       { WARNING: 3 },
   'caution':       { WARNING: 2 },
   'alert':         { WARNING: 1 },
-  'danger':        { WARNING: 2 },
-  'error':         { WARNING: 2 },
+  'danger':        { DANGER: 2 },
+  'error':         { DANGER: 2 },
 };
 
 // _ROLE: semantic role → category weights. Positive rewards, negative penalises.
@@ -130,24 +131,29 @@ const _ROLE = {
   onBrandVariant: { FG: 3, BG: -4, BRAND: 3, BVAR: 2 },
   outlineSubtle:  { OUTLINE: 3, FG: -2, BG: -2 },
   outlineBrand:   { OUTLINE: 3, FG: -2, BG: -2, BRAND: 3 },
-  successBg:      { SUCCESS: 3, BG: 2, FG: -3, OUTLINE: -2 },
-  successBorder:  { SUCCESS: 3, OUTLINE: 2, BG: -2, FG: -1 },
-  successText:    { SUCCESS: 3, FG: 2, BG: -3, OUTLINE: -2 },
-  warningBg:      { WARNING: 3, BG: 2, FG: -3, OUTLINE: -2 },
-  warningBorder:  { WARNING: 3, OUTLINE: 2, BG: -2, FG: -1 },
-  warningText:    { WARNING: 3, FG: 2, BG: -3, OUTLINE: -2 },
+  successBg:      { SUCCESS: 3, BG: 2, FG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+  successBorder:  { SUCCESS: 3, OUTLINE: 2, BG: -2, FG: -1, WARNING: -6, DANGER: -6 },
+  successText:    { SUCCESS: 3, FG: 2, BG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+  warningBg:      { WARNING: 3, BG: 2, FG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
+  warningBorder:  { WARNING: 3, OUTLINE: 2, BG: -2, FG: -1, SUCCESS: -6, DANGER: -6 },
+  warningText:    { WARNING: 3, FG: 2, BG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
 };
 
-function _segScore(name, role) {
+function _pathCats(name) {
   var segments = name.toLowerCase().split('/');
-  var pathCats = {};
+  var cats = {};
   for (var i = 0; i < segments.length; i++) {
-    var cats = _SEG[segments[i]];
-    if (!cats) continue;
-    for (var cat in cats) {
-      pathCats[cat] = (pathCats[cat] || 0) + cats[cat];
+    var segCats = _SEG[segments[i]];
+    if (!segCats) continue;
+    for (var cat in segCats) {
+      cats[cat] = (cats[cat] || 0) + segCats[cat];
     }
   }
+  return cats;
+}
+
+function _segScore(name, role) {
+  var pathCats = _pathCats(name);
   var roleWeights = _ROLE[role];
   if (!roleWeights) return 0;
   var total = 0;
@@ -160,19 +166,28 @@ function _segScore(name, role) {
 // ── _semPick (verbatim from code.js) ──────────────────────────────────────
 
 function makeSemPick(_scored) {
-  return function _semPick(role, scorer, nameOnly) {
+  return function _semPick(role, scorer, nameOnly, requiredCats) {
     var best = null, bestSeg = 0;
     for (var i = 0; i < _scored.length; i++) {
       var s = _scored[i];
       var seg = _segScore(s.name, role);
       if (seg <= 0) continue;
+      if (requiredCats) {
+        var pCats = _pathCats(s.name);
+        var ok = true;
+        for (var ci = 0; ci < requiredCats.length; ci++) {
+          if ((pCats[requiredCats[ci]] || 0) <= 0) { ok = false; break; }
+        }
+        if (!ok) continue;
+      }
       if (best === null || seg > bestSeg || (seg === bestSeg && scorer(s) > scorer(best))) {
         best = s; bestSeg = seg;
       }
     }
     if (best !== null) return best.v;
 
-    if (nameOnly) return null;
+    // Purpose-locked roles: never cross purpose boundaries via functional fallback
+    if (nameOnly || requiredCats) return null;
 
     var funcBest = null, funcScore = 0;
     for (var j = 0; j < _scored.length; j++) {
@@ -360,9 +375,9 @@ const score = {
     v("color/outline/success",    0.06, 0.4,  0.18),  // OUTLINE:3 + SUCCESS:3 → successBorder: 15
   ]);
 
-  const bgResult   = pick("successBg",     s => s.sat, true);
-  const textResult = pick("successText",   s => s.contrast >= 4.5 ? s.contrast : 0, true);
-  const bdResult   = pick("successBorder", s => s.sat, true);
+  const bgResult   = pick("successBg",     s => s.sat,                               true, ['BG',      'SUCCESS']);
+  const textResult = pick("successText",   s => s.contrast >= 4.5 ? s.contrast : 0, true, ['FG',      'SUCCESS']);
+  const bdResult   = pick("successBorder", s => s.sat,                               true, ['OUTLINE', 'SUCCESS']);
 
   assert.strictEqual(bgResult.name,   "color/surface/success",
     "Scenario 9a: success background found by surface+success segment combination");
@@ -442,4 +457,85 @@ const score = {
 
   assert.strictEqual(result, null,
     "Scenario 12: status token (nameOnly) returns null when no segment matches — never guesses");
+}
+
+// Scenario 14
+// A DS has icon/warning and surface/warning but NO outline/warning.
+// warningBorder requires OUTLINE category contribution (requiredCats=['OUTLINE']).
+// Neither icon/warning (FG:1, WARNING:3) nor surface/warning (BG:3, WARNING:3)
+// has any OUTLINE contribution, so both are filtered out → null.
+// If the DS adds outline/warning, it would score 15 and be picked.
+{
+  const pick = createPicker([
+    v("color/icon/warning",    0.75, 0.45, 0.02), // FG:1 + WARNING:3 — no OUTLINE
+    v("color/surface/warning", 0.99, 0.94, 0.80), // BG:3 + WARNING:3 — no OUTLINE
+  ]);
+
+  const resultNoOutline = pick("warningBorder", s => s.sat, true, ['OUTLINE', 'WARNING']);
+  assert.strictEqual(resultNoOutline, null,
+    "Scenario 14a: warningBorder returns null when DS has no outline/warning variable");
+
+  // Same DS with outline/warning added → it wins
+  const pickWithOutline = createPicker([
+    v("color/icon/warning",    0.75, 0.45, 0.02), // FG:1 + WARNING:3 — no OUTLINE
+    v("color/surface/warning", 0.99, 0.94, 0.80), // BG:3 + WARNING:3 — no OUTLINE
+    v("color/outline/brand",   0.15, 0.45, 0.95), // OUTLINE:3 + BRAND:2 — no WARNING
+    v("color/outline/warning", 0.80, 0.55, 0.10), // OUTLINE:3 + WARNING:3 → both required ✓
+  ]);
+
+  const resultWithOutline = pickWithOutline("warningBorder", s => s.sat, true, ['OUTLINE', 'WARNING']);
+  assert.strictEqual(resultWithOutline.name, "color/outline/warning",
+    "Scenario 14b: warningBorder picks outline/warning, ignoring icon/warning and outline/brand");
+}
+
+// Scenario 15
+// Purpose lock — BG requirement for status fill roles.
+// A DS has on-surface/success (FG) and outline/success (OUTLINE) but NO surface/success (BG).
+// successBg with requiredCats=['BG'] returns null — won't use a foreground or outline token as fill.
+// Adding surface/success makes it pick the correct token.
+{
+  const pick = createPicker([
+    v("color/on-surface/success", 0.04, 0.35, 0.18), // FG:3 + SUCCESS:3 — no BG
+    v("color/outline/success",    0.10, 0.55, 0.28), // OUTLINE:3 + SUCCESS:3 — no BG
+  ]);
+
+  const resultNoBg = pick("successBg", s => s.sat, true, ['BG', 'SUCCESS']);
+  assert.strictEqual(resultNoBg, null,
+    "Scenario 15a: successBg returns null when DS has no surface/success — won't use fg or outline token as fill");
+
+  const pickWithBg = createPicker([
+    v("color/on-surface/success", 0.04, 0.35, 0.18), // FG:3 + SUCCESS:3 — no BG
+    v("color/outline/success",    0.10, 0.55, 0.28), // OUTLINE:3 + SUCCESS:3 — no BG
+    v("color/surface/success",    0.88, 0.97, 0.91), // BG:3 + SUCCESS:3 → both required ✓
+  ]);
+
+  const resultWithBg = pickWithBg("successBg", s => s.sat, true, ['BG', 'SUCCESS']);
+  assert.strictEqual(resultWithBg.name, "color/surface/success",
+    "Scenario 15b: successBg picks surface/success when it exists");
+}
+
+// Scenario 16
+// Purpose lock — FG requirement for status text roles.
+// A DS has surface/warning (BG) and outline/warning (OUTLINE) but NO on-surface/warning (FG).
+// warningText with requiredCats=['FG'] returns null — won't use a background or outline token as text.
+// Adding on-surface/warning or icon/warning (both have FG contribution) makes it pick correctly.
+{
+  const pick = createPicker([
+    v("color/surface/warning", 0.99, 0.94, 0.80), // BG:3 + WARNING:3 — no FG
+    v("color/outline/warning", 0.80, 0.55, 0.10), // OUTLINE:3 + WARNING:3 — no FG
+  ]);
+
+  const resultNoFg = pick("warningText", s => s.contrast >= 4.5 ? s.contrast : 0, true, ['FG', 'WARNING']);
+  assert.strictEqual(resultNoFg, null,
+    "Scenario 16a: warningText returns null when DS has no fg/text/on-surface warning variable");
+
+  const pickWithFg = createPicker([
+    v("color/surface/warning",    0.99, 0.94, 0.80), // BG:3 + WARNING:3 — no FG
+    v("color/outline/warning",    0.80, 0.55, 0.10), // OUTLINE:3 + WARNING:3 — no FG
+    v("color/on-surface/warning", 0.40, 0.22, 0.01), // FG:3 + WARNING:3 → both required ✓
+  ]);
+
+  const resultWithFg = pickWithFg("warningText", s => s.contrast >= 4.5 ? s.contrast : 0, true, ['FG', 'WARNING']);
+  assert.strictEqual(resultWithFg.name, "color/on-surface/warning",
+    "Scenario 16b: warningText picks on-surface/warning when it exists");
 }

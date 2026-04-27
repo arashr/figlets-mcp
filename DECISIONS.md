@@ -191,3 +191,137 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Consequence:** The server now speaks real MCP over stdio. Users add it to their host config (see `docs/mcp-config-examples.md`) and get all three tools — `sync_figma_data`, `inspect_component`, `detect_design_system` — without any CLI glue.
 
+---
+
+## [2026-04-24] Render the DS showcase entirely inside the Figma plugin — zero agent tokens
+
+**Decision:** The `build_ds_showcase` MCP tool sends a single trigger command to the bridge plugin and receives back only a list of built section names. All design decisions — DS detection, variable selection, rendering, layout — happen inside `code.js` in the Figma plugin sandbox.
+
+**Why:**
+- Passing token values, variable lists, and color data to the agent for analysis would consume significant context on every run without adding value; the rendering logic is deterministic.
+- The plugin already has direct access to the live Figma API, which is required for variable binding (mode-aware colors) and style application. Server-side JSON snapshots cannot substitute for live Figma objects.
+- A zero-argument, zero-reasoning tool is more reliable: there is nothing for the agent to misinterpret and no intermediate representation to keep in sync.
+
+**Consequence:** `build_ds_showcase` cannot be partially guided by the agent (e.g., "only show colors"). It renders exactly what it detects. Future per-section control would require a plugin-side filter, not agent-side reasoning.
+
+---
+
+## [2026-04-24] Use contrast-based variable fallbacks instead of hex-matching for structural tokens
+
+**Decision:** When structural token variables (`onBrandVariant`, `textSub`, etc.) cannot be found by their expected name, `_buildShowcase()` calls `_findContrastVar(bgRGB, minRatio)` to scan DS variables by semantic type (on-surface / foreground / text) and pick the one with the best contrast ratio against the paired background. It does not fall back to a hardcoded hex value.
+
+**Why:**
+- Hex-based auto-lookup (`colorVarByHex`) would match the first variable that happens to share a hex value. In practice this matched `color/icon/brand` (same hex as `onBrandVariant`) — a semantically wrong binding that would break mode switching.
+- Contrast-based fallback finds a variable that is semantically appropriate (on-surface class) and measurably readable (≥ 4.5:1). The result is a real DS variable, so it responds correctly to Figma mode changes.
+- This makes the showcase resilient to DS files that use different naming conventions without requiring per-file configuration.
+
+**Consequence:** The showcase may select a slightly different on-surface token on each DS file, but it will always be readable and mode-aware. If a DS has no on-surface variables at all, it falls back to any COLOR variable with the best contrast.
+
+---
+
+## [2026-04-24] Use a three-tier surface pairing strategy for icon tokens
+
+**Decision:** Icon tokens are treated as foreground colors and paired with a surface background using the following priority chain: (1) semantic surface pairing — replace `icon` with `surface` in the token path; use if contrast ≥ 3:1 and it beats the default by at least 80%; (2) luminance-based dark surface scan — if the icon is light (luminance > 0.6), scan `surface/*` variables (excluding `on-*` prefixed names) and pick the darkest one; (3) default surface fallback.
+
+**Why:**
+- Pairing an icon token against a generic light background gives visually correct results for most icons, but fails for inverse/on-dark icons (e.g., `icon/inverse` is white, needs a dark background).
+- A semantic path substitution (`icon/brand` → `surface/brand`) captures deliberate DS pairings when the naming convention supports it.
+- A luminance-based fallback handles icons that are semantically "on dark" without requiring the DS to follow any specific naming convention.
+- Excluding `on-*` prefixed variables from the dark surface scan prevents mistakenly pairing a foreground token (like `on-surface`) as the background.
+
+**Consequence:** Icon swatches in the showcase will show a meaningful background in nearly all cases. The WCAG badge still grades the actual contrast, so the pairing quality is visible. Edge cases in unconventional DS files will produce the default surface, which is still a valid rendering.
+
+---
+
+## [2026-04-25] Resolve semibold font style by candidate loop, never hardcode
+
+**Decision:** Font loading for the DS font family uses a priority list of semibold style name candidates (`['SemiBold', 'Semi Bold', 'Semibold', 'Demi Bold', 'DemiBold', 'Bold']`) tried one at a time via `loadFontAsync`. The first that succeeds is stored as `_semiboldStyle` and used throughout `_tDS`. All other fonts are bulk-loaded with `.catch(() => {})` per entry so a single missing variant cannot crash the showcase.
+
+**Why:**
+- Figma ships the Inter family with `'Semi Bold'` (space), not `'SemiBold'` (no space). Hardcoding either form breaks on one half of common font libraries.
+- Custom typefaces vary freely between foundries. A candidate loop is the only robust approach.
+- A rejected `loadFontAsync` promise throws a non-Error string in the Figma sandbox. If caught with a plain `catch (err)` and forwarded as `{ error: err.message }`, `err.message` is `undefined` → `JSON.stringify` silently drops the field → the MCP handler sees an empty success object instead of an error. The candidate loop sidesteps this by treating font load failure as a normal fallback, not an exception.
+
+**Consequence:** The showcase always renders with a valid font. DSes using any common semibold naming convention — including custom foundries — load correctly without configuration.
+
+---
+
+## [2026-04-27] Show parent+leaf token path in semantic color row labels
+
+**Decision:** Semantic color row tags display the last two slash-separated segments of the variable path (e.g. `surface/brand`, `on-surface/brand-variant`, `outline/subtle`) rather than only the leaf segment. A `_tokenLabel(name)` helper computes this. The swatch preview text (inside the 80×56 color box) continues to show the leaf only to avoid overflow. Pairing information is appended to the description line at the call site after `fgPairName` is resolved: "Paired with on-surface/brand." for background tokens, "Shown on surface/inverse." for icon tokens. `_buildSemColorRow` accepts `opts.previewText` to decouple these two display contexts.
+
+**Why:**
+- Leaf-only labels (`brand`, `default`) give designers no path context — two tokens from different roles can share the same leaf, making the table ambiguous.
+- The two-segment form is the natural human-readable name for a token in a slash-structured DS. Designers can immediately identify the role (surface, on-surface, outline) and the qualifier (brand, default, subtle) without reading the full path.
+- Pairing notes make the contrast column self-explanatory: `surface/brand` paired with `on-surface/brand` is legible without needing to know the underlying structure.
+
+**Consequence:** All semantic color rows, outline rows, and icon rows in the showcase now show context-bearing labels. The change is applied at the call sites, not inside `_buildSemColorRow`, so the function remains reusable without enforcing a specific label format.
+
+---
+
+## [2026-04-27] Variable-based typography rows are a fallback, not an additive layer
+
+**Decision:** `_buildTypoVarRow` rows (derived from `type/{role}/{size}/*` float variables) only render when `_sortedStyles.length === 0`. When a DS has text styles, only `_buildTypoRow` rows are shown. The variable-based path remains the fallback for DSes that define type scale purely as variables with no Figma text styles.
+
+**Why:**
+- Previously both loops ran unconditionally, producing a duplicate typography table when a DS had both text styles and type variables (common in DSes built with `apply_ds_setup`).
+- Text styles are the canonical Figma typography representation and carry richer metadata (description, style name). They take precedence when present.
+- The variable path adds value only when styles are absent — allowing the section to appear for variable-only DSes.
+
+**Consequence:** A DS with text styles shows one row per style. A DS with only type variables shows one row per role+size group. A DS with both shows only the text style rows. Font family binding in var rows now also resolves via `_sharedFamilyVar` (first STRING variable containing "family" in any float collection) as a fallback when per-token `/family` variables are absent, and pre-loads the resolved font family before building rows.
+
+---
+
+## [2026-04-25] Typography section renders from variables when text styles are absent
+
+**Decision:** `_buildShowcase()` scans `_floatColls` for variables following the `type/{role}/{size}/{property}` naming pattern (roles: display, headline, title, body, label). When found, it groups them by role+size and renders a variable-bound typography table row for each group using `_buildTypoVarRow`. Text-style rows (`_buildTypoRow`) and variable rows share the same table and column schema.
+
+**Why:**
+- Many DSes built with the `apply_ds_setup` flow store typography as float variables with responsive modes, not Figma text styles. A showcase that only renders when `textStyles.length > 0` would skip the Typography section entirely for those files.
+- Variable-bound text rows let the preview respond to mode changes (Mobile → Desktop) exactly as the DS author intended, which is more valuable than a static snapshot.
+- Supporting both paths in one section keeps the table unified — mixed DSes (some text styles, some vars) render correctly without duplication.
+
+**Consequence:** The Typography section now appears for any DS that has `type/{role}/{size}/size` variables, regardless of whether text styles exist. DSes that have neither text styles nor typed variables continue to skip the section.
+
+---
+
+## [2026-04-27] Two-layer category scoring replaces flat per-role segment dictionary
+
+**Decision:** Replace the flat `_SEG` dictionary (segment → role → score) with a two-layer system: `_SEG` maps segments to semantic categories (`BG`, `FG`, `BRAND`, `BVAR`, `VARIANT`, `OUTLINE`, `SUCCESS`, `WARNING`, etc.), and `_ROLE` maps each semantic role to category weights. The final score is the dot product of the path's accumulated category map with the role's weight vector.
+
+**Why:**
+- The flat dictionary required manually enumerating every qualifier combination. `brand-variant → onBrandVariant: 2` was correct, but `fg/brand-variant`, `text/brand-variant`, or any other FG-family segment beside `brand-variant` would still fail without an explicit entry.
+- The two-layer system is compositional: `on-surface/brand-variant` accumulates `{FG: 3, BRAND: 1, BVAR: 3}` from its segments, and the `onBrandVariant` role weights `{FG: 3, BRAND: 3, BVAR: 2}` produce a score of 18. `on-surface/default` scores 9. No manual disambiguation needed.
+- `surface/brand-variant` (the background) scores −3 because `BG × −4` dominates — structurally excluded regardless of what other categories it carries.
+- Adding a new naming convention is a single `_SEG` entry. The role logic never changes.
+
+**Consequence:** ANY foreground qualifier beside a brand marker correctly identifies the `onBrandVariant` token, regardless of exact wording. The same principle applies to all roles — qualifier specificity is naturally encoded by category accumulation, not by exhaustive per-role enumeration. Unit-tested in `tests/core/semantic-var-picker.test.js`.
+
+---
+
+## [2026-04-27] Bind showcase variables by path-segment scoring, not regex name matching
+
+**Decision:** Replace all regex-based name pattern matching in `_buildShowcase()` with a segment-weighted scoring system (`_SEG` dictionary + `_segScore`). Every `/`-separated segment in a variable path contributes a positive or negative score to each semantic role. The variable with the highest total score wins. Functional scoring (contrast, luminance, saturation) runs only as a last resort when no variable scores above zero.
+
+**Why:**
+- Regex substring matching was semantically blind: `/surface/` matched `on-surface/default`, causing a foreground text token to be picked as a background.
+- Name matching treated the path as an opaque string. Segment scoring treats each component as a meaningful signal — `on-surface` and `surface` are semantically opposite, which is now encoded directly.
+- DSes with unconventional naming (e.g. `fg/primary` instead of `on-surface/default`) are understood via segment meaning rather than requiring a contrast fallback.
+- The DS author's naming convention is trusted first. Functional scoring (contrast, lum, sat) only runs if the DS has no recognisable semantic keywords at all.
+- All `_C.xxx` hardcoded fallback colors replaced with `_RC.xxx` — a resolved-color map that reads the DS variable's actual first-mode value, falling back to `_C` only if the variable is absent entirely.
+
+**Consequence:** Variable bindings adapt to any DS naming convention that uses recognisable semantic keywords. Adding new naming conventions is a one-line dictionary entry. Status token disambiguation (`surface/success` vs `outline/success` vs `on-surface/success`) is handled by combined segment scores, not separate regex lists. Unit-tested in `tests/core/semantic-var-picker.test.js`.
+
+---
+
+## [2026-04-24] Always show the indicator glyph for icon tokens regardless of contrast threshold
+
+**Decision:** `_buildSwatch` accepts a `forceIndicator` option. When set to `true`, the sample text glyph (☻) is rendered unconditionally. This option is passed for all icon token swatches. The WCAG badge continues to grade the actual contrast ratio independently.
+
+**Why:**
+- The default `≥ 4.5:1` threshold for rendering the glyph was suppressing it on icon swatches at 3–4:1 — tokens that are not text but are still meaningful to display.
+- Icons operate at a different WCAG threshold (3:1 for graphical elements) and the glyph is the only visual indicator in the swatch cell; omitting it makes the swatch appear empty.
+- Separating the "show the glyph" decision from the "pass WCAG AA" decision is cleaner: `forceIndicator` controls presence, the badge controls grading.
+
+**Consequence:** Icon swatches always show the indicator glyph. Non-icon swatches continue to gate on 4.5:1. The WCAG badge reflects true pass/fail for both.
+

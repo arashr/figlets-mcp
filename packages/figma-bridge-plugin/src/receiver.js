@@ -10,6 +10,7 @@ let pendingPollResponse = null;
 let pendingSyncRequest = null;
 let pendingSelectionRequest = null;
 let pendingShowcaseRequest = null;
+let pendingDsSetupRequest = null;
 
 const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
 
@@ -126,6 +127,55 @@ const server = http.createServer((req, res) => {
         pendingShowcaseRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingShowcaseRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingShowcaseRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 6. MCP Agent calls this to trigger DS setup (creates all variable collections)
+  if (req.method === 'POST' && req.url === '/request-ds-setup') {
+    if (pendingPollResponse) {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let dsPayload;
+        try { dsPayload = JSON.parse(body); } catch { dsPayload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'apply-ds-setup', data: dsPayload }));
+        pendingPollResponse = null;
+
+        pendingDsSetupRequest = res;
+
+        setTimeout(() => {
+          if (pendingDsSetupRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'DS setup timed out — building variables can take up to 3 minutes for large systems.' }));
+            pendingDsSetupRequest = null;
+          }
+        }, 180000); // 3 minutes for large systems
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Figma plugin is not connected or listening.' }));
+    }
+    return;
+  }
+
+  // 6b. Figma Plugin posts the DS setup result here
+  if (req.method === 'POST' && req.url === '/sync-ds-setup') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingDsSetupRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        pendingDsSetupRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingDsSetupRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingDsSetupRequest = null;
       }
     });
     return;

@@ -102,7 +102,22 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({ type: 'showcase-built', data: result });
       figma.notify('Token showcase built!');
     } catch (err) {
-      figma.ui.postMessage({ type: 'showcase-built', data: { error: err.message } });
+      const _errMsg = err instanceof Error ? err.message : String(err);
+      figma.ui.postMessage({ type: 'showcase-built', data: { error: _errMsg || 'Unknown error' } });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // apply-ds-setup — creates all 5 variable collections from a prepared config.
+  // Config payload is produced by prepare_ds_config MCP tool (figlets-core).
+  // ─────────────────────────────────────────────────────────────────────────
+  if (msg.type === 'apply-ds-setup') {
+    try {
+      const result = await _applyDsSetup(msg.data);
+      figma.ui.postMessage({ type: 'ds-setup-done', data: result });
+      figma.notify('Design system collections created!');
+    } catch (err) {
+      figma.ui.postMessage({ type: 'ds-setup-done', data: { error: err.message } });
     }
   }
 };
@@ -261,6 +276,8 @@ async function _buildShowcase() {
     (!c.isAlias || (c.colorVarCount === 0 && c.floatVarCount > 0))
   );
 
+
+
   const _semVars = _semColl
     ? _semColl.vars.filter(v => v.resolvedType === 'COLOR')
     : Object.values(varByName).filter(v => v.resolvedType === 'COLOR');
@@ -306,10 +323,19 @@ async function _buildShowcase() {
   _fontSet.set('Inter::Medium',  { family: 'Inter', style: 'Medium'  });
 
   const _dsFamily = textStyles.length > 0 ? textStyles[0].fontName.family : 'Inter';
-  _fontSet.set(`${_dsFamily}::Regular`,  { family: _dsFamily, style: 'Regular'  });
-  _fontSet.set(`${_dsFamily}::SemiBold`, { family: _dsFamily, style: 'SemiBold' });
+  _fontSet.set(`${_dsFamily}::Regular`, { family: _dsFamily, style: 'Regular' });
 
-  await Promise.all([..._fontSet.values()].map(f => figma.loadFontAsync(f)));
+  // Resolve semibold style name — varies by foundry ('SemiBold', 'Semi Bold', etc.).
+  // Try candidates in order; first one that loads wins.
+  const _SEMIBOLD_CANDIDATES = ['SemiBold', 'Semi Bold', 'Semibold', 'Demi Bold', 'DemiBold', 'Bold'];
+  let _semiboldStyle = 'Regular';
+  for (const _sc of _SEMIBOLD_CANDIDATES) {
+    try { await figma.loadFontAsync({ family: _dsFamily, style: _sc }); _semiboldStyle = _sc; break; } catch (_) {}
+  }
+  _fontSet.set(`${_dsFamily}::${_semiboldStyle}`, { family: _dsFamily, style: _semiboldStyle });
+
+  // Load all remaining fonts — individual failures are silently skipped.
+  await Promise.all([..._fontSet.values()].map(f => figma.loadFontAsync(f).catch(() => {})));
 
   const _C = {
     outlineSubtle:  { r: 0.894, g: 0.894, b: 0.906 },
@@ -339,38 +365,220 @@ async function _buildShowcase() {
       : base;
   }
 
-  const _V = {
-    bg:             _bgRaw  && _bgRaw.v   ? _bgRaw.v   : null,
-    text:           _textRaw && _textRaw.v ? _textRaw.v : null,
-    acc:            _accRaw  && _accRaw.v  ? _accRaw.v  : null,
-    surfaceBrand:   _findVar('color/surface/brand', 'surface/brand', 'color/brand/default', 'brand/default', 'color/primary', 'primary'),
-    textSub:        _findVar('color/on-surface/variant', 'on-surface/variant', 'color/text/subtle', 'text/subtle', 'color/text/muted', 'text/muted') || (_textRaw && _textRaw.v ? _textRaw.v : null),
-    outlineSubtle:  _findVar('color/outline/subtle',           'outline/subtle'),
-    surfaceDefault: _findVar('color/surface/default',          'surface/default'),
-    surfaceVariant: _findVar('color/surface/variant',          'surface/variant'),
-    brandVariant:   _findVar('color/surface/brand-variant',    'surface/brand-variant'),
-    onBrandVariant: _findVar('color/on-surface/brand-variant', 'on-surface/brand-variant'),
-    onSurface:      _findVar('color/on-surface/default',       'on-surface/default'),
-    onSurfaceVar:   _findVar('color/on-surface/variant',       'on-surface/variant'),
-    successBg:      _findVar('color/surface/success',          'surface/success'),
-    successBorder:  _findVar('color/outline/success',          'outline/success'),
-    successText:    _findVar('color/on-surface/success',       'on-surface/success'),
-    warningBg:      _findVar('color/surface/warning',          'surface/warning'),
-    warningBorder:  _findVar('color/outline/warning',          'outline/warning'),
-    warningText:    _findVar('color/on-surface/warning',       'on-surface/warning'),
+  // ── Semantic variable map ─────────────────────────────────────────────────
+  // Two-layer scoring system — every path segment contributes to semantic
+  // categories, and each role defines how much it cares about each category.
+  //
+  //   Layer 1 — _SEG: segment keyword → semantic categories (always >= 0).
+  //     Each slash-separated segment is looked up. Its category contributions
+  //     accumulate into a per-path map.
+  //     "on-surface"    → { FG: 3 }
+  //     "brand-variant" → { BRAND: 1, BVAR: 3 }
+  //
+  //   Layer 2 — _ROLE: role → category weights (positive = reward, negative = penalty).
+  //     Final score = dot product of path category map with role weights.
+  //     "onBrandVariant" = { FG: 3, BG: -4, BRAND: 3, BVAR: 2 }
+  //
+  // Why this beats per-role flat dictionaries:
+  //   - "on-surface/brand-variant" scores 18 for onBrandVariant regardless of
+  //     what the qualifier after "on-surface" is — no manual enumeration needed.
+  //   - "on-surface/default" scores 9 (no BRAND/BVAR) — correctly loses.
+  //   - "surface/brand-variant" scores -3 (BG*-4 dominates) — excluded.
+  //   - "fg/primary", "foreground/brand", "text/brand-variant" all bind correctly
+  //     to their roles via category accumulation, no explicit entry required.
+  //   - Functional fallback (contrast/lum/sat) only runs when NO variable
+  //     scores above zero — DS has entirely non-semantic naming.
+
+  // _SEG: segment keyword → semantic category contributions (always non-negative).
+  const _SEG = {
+    // BG family — indicates a background / surface token
+    'surface':       { BG: 3 },
+    'background':    { BG: 3 },
+    'bg':            { BG: 2 },
+    'canvas':        { BG: 2 },
+    'base':          { BG: 1 },
+    'page':          { BG: 1 },
+    'fill':          { BG: 1 },
+    'container':     { BG: 1, BRAND: 1 },
+    // FG family — indicates a foreground / text token
+    'on-surface':    { FG: 3 },
+    'on_surface':    { FG: 3 },
+    'foreground':    { FG: 3 },
+    'fg':            { FG: 2 },
+    'text':          { FG: 2 },
+    'label':         { FG: 1 },
+    'content':       { FG: 1 },
+    'on':            { FG: 1 },
+    // On-brand variants (FG that lives on a brand surface)
+    'on-brand':      { FG: 2, BRAND: 2 },
+    'on_brand':      { FG: 2, BRAND: 2 },
+    'on-primary':    { FG: 2, BRAND: 2 },
+    'on_primary':    { FG: 2, BRAND: 2 },
+    // Brand / primary family
+    'brand':         { BRAND: 2 },
+    'primary':       { BRAND: 2 },
+    'accent':        { BRAND: 2 },
+    'action':        { BRAND: 1 },
+    'interactive':   { BRAND: 1 },
+    // Brand-variant (a secondary brand surface, distinct from main brand)
+    'brand-variant': { BRAND: 1, BVAR: 3 },
+    'brand_variant': { BRAND: 1, BVAR: 3 },
+    // Modifiers
+    'default':       { DEFAULT: 1 },
+    'variant':       { VARIANT: 2 },
+    'subtle':        { VARIANT: 1 },
+    'muted':         { VARIANT: 2 },
+    'secondary':     { VARIANT: 1 },
+    'sub':           { VARIANT: 1 },
+    'weak':          { VARIANT: 1 },
+    'strong':        { STRONG: 1 },
+    // Outline / border family
+    'outline':       { OUTLINE: 3 },
+    'border':        { OUTLINE: 3 },
+    'stroke':        { OUTLINE: 2 },
+    'divider':       { OUTLINE: 3 },
+    'separator':     { OUTLINE: 3 },
+    'line':          { OUTLINE: 1 },
+    // Status families — combined with BG/FG/OUTLINE to resolve bg/text/border
+    'success':       { SUCCESS: 3 },
+    'positive':      { SUCCESS: 2 },
+    'confirm':       { SUCCESS: 1 },
+    'warning':       { WARNING: 3 },
+    'caution':       { WARNING: 2 },
+    'alert':         { WARNING: 1 },
+    'danger':        { WARNING: 2 },
+    'error':         { WARNING: 2 },
   };
 
-  // Find a COLOR variable whose first-mode resolved value provides sufficient contrast
-  // against bgRGB. Prefers on-surface/text/foreground tokens; falls back to any token.
-  // Used when a structural variable isn't found by name — guarantees accessibility and
-  // ensures mode-switching works (it's a real DS variable, not a hex coincidence).
+  // _ROLE: semantic role → category weights. Positive rewards, negative penalises.
+  // Final score = dot product of path category accumulator with role weights.
+  const _ROLE = {
+    onSurface:      { FG: 3, BG: -4, VARIANT: -1, DEFAULT: 1, STRONG: 1 },
+    onSurfaceVar:   { FG: 3, BG: -4, VARIANT: 2 },
+    surfaceDefault: { BG: 3, FG: -4, VARIANT: -1, DEFAULT: 2, BRAND: -2 },
+    surfaceVariant: { BG: 3, FG: -4, VARIANT: 2 },
+    surfaceBrand:   { BG: 2, FG: -4, BRAND: 3 },
+    brandVariant:   { BG: 2, FG: -4, BVAR: 3, BRAND: 1 },
+    onBrandVariant: { FG: 3, BG: -4, BRAND: 3, BVAR: 2 },
+    outlineSubtle:  { OUTLINE: 3, FG: -2, BG: -2 },
+    outlineBrand:   { OUTLINE: 3, FG: -2, BG: -2, BRAND: 3 },
+    successBg:      { SUCCESS: 3, BG: 2, FG: -3, OUTLINE: -2 },
+    successBorder:  { SUCCESS: 3, OUTLINE: 2, BG: -2, FG: -1 },
+    successText:    { SUCCESS: 3, FG: 2, BG: -3, OUTLINE: -2 },
+    warningBg:      { WARNING: 3, BG: 2, FG: -3, OUTLINE: -2 },
+    warningBorder:  { WARNING: 3, OUTLINE: 2, BG: -2, FG: -1 },
+    warningText:    { WARNING: 3, FG: 2, BG: -3, OUTLINE: -2 },
+  };
+
+  // Accumulate category scores from each path segment, then dot-product with role weights.
+  function _segScore(name, role) {
+    var segments = name.toLowerCase().split('/');
+    var pathCats = {};
+    for (var i = 0; i < segments.length; i++) {
+      var cats = _SEG[segments[i]];
+      if (!cats) continue;
+      for (var cat in cats) {
+        pathCats[cat] = (pathCats[cat] || 0) + cats[cat];
+      }
+    }
+    var roleWeights = _ROLE[role];
+    if (!roleWeights) return 0;
+    var total = 0;
+    for (var rcat in roleWeights) {
+      total += roleWeights[rcat] * (pathCats[rcat] || 0);
+    }
+    return total;
+  }
+
+  // Pick the best variable for a semantic role:
+  //   1. Score every COLOR var by summing its path segment scores for the role.
+  //   2. Take the variable with the highest positive score (scorer breaks ties).
+  //   3. If nothing scores > 0: status tokens return null (nameOnly=true);
+  //      structural tokens fall back to the functional scorer as a last resort.
+  function _semPick(role, scorer, nameOnly) {
+    var best = null, bestSeg = 0;
+    for (var i = 0; i < _scored.length; i++) {
+      var s = _scored[i];
+      var seg = _segScore(s.name, role);
+      if (seg <= 0) continue;
+      if (best === null || seg > bestSeg || (seg === bestSeg && scorer(s) > scorer(best))) {
+        best = s; bestSeg = seg;
+      }
+    }
+    if (best !== null) return best.v;
+
+    if (nameOnly) return null;
+
+    // Functional last resort — DS has no recognisable semantic naming at all
+    var funcBest = null, funcScore = 0;
+    for (var j = 0; j < _scored.length; j++) {
+      var sc = scorer(_scored[j]);
+      if (sc > funcScore) { funcScore = sc; funcBest = _scored[j]; }
+    }
+    return funcBest ? funcBest.v : null;
+  }
+
+  const _allColorVars = Object.values(varByName).filter(v => v.resolvedType === 'COLOR');
+  const _scored = _allColorVars.map(v => {
+    const rgb = _resolvedRGB(v);
+    if (!rgb) return null;
+    return {
+      v,
+      rgb,
+      lum: _lum(rgb),
+      sat: _sat(rgb),
+      contrast: _contrastRatio(rgb, _bgColor),
+      name: v.name.toLowerCase(),
+    };
+  }).filter(Boolean);
+
+  const _V = {
+    bg:   _bgRaw  && _bgRaw.v  ? _bgRaw.v  : null,
+    text: _textRaw && _textRaw.v ? _textRaw.v : null,
+    acc:  _accRaw  && _accRaw.v  ? _accRaw.v  : null,
+
+    onSurface:    _semPick('onSurface',    s => s.contrast >= 4.5 ? s.contrast : 0),
+    onSurfaceVar: _semPick('onSurfaceVar', s => s.contrast >= 2 && s.contrast < 9 ? s.contrast : 0),
+    surfaceDefault: _semPick('surfaceDefault', s => s.lum),
+    surfaceVariant: _semPick('surfaceVariant', s => s.lum * (1 - s.sat)),
+    surfaceBrand:   _semPick('surfaceBrand',   s => s.sat * 0.5 + s.lum * 0.5),
+    brandVariant:   _semPick('brandVariant',   s => s.sat * 0.4 + s.lum * 0.6),
+
+    // Resolved after brandVariant is settled below
+    onBrandVariant: null,
+
+    outlineSubtle: _semPick('outlineSubtle', s => {
+      if (s.lum > 0.9 || s.lum < 0.05) return 0;
+      var dist = Math.abs(s.lum - 0.6);
+      if (dist > 0.5) return 0;
+      return (1 - s.sat) * (1 - dist * 2);
+    }),
+    outlineBrand: _semPick('outlineBrand', s => {
+      if (s.lum < 0.05 || s.lum > 0.95) return 0;
+      var dist = Math.abs(s.lum - 0.4);
+      if (dist > 0.5) return 0;
+      return s.sat * (1 - dist * 1.5);
+    }),
+
+    // Status tokens — null if the DS has no recognisable status-named variables
+    successBg:     _semPick('successBg',     s => s.sat,                          true),
+    successBorder: _semPick('successBorder', s => s.sat,                          true),
+    successText:   _semPick('successText',   s => s.contrast >= 4.5 ? s.contrast : 0, true),
+    warningBg:     _semPick('warningBg',     s => s.sat,                          true),
+    warningBorder: _semPick('warningBorder', s => s.sat,                          true),
+    warningText:   _semPick('warningText',   s => s.contrast >= 4.5 ? s.contrast : 0, true),
+  };
+
+  // textSub alias — same variable, two reference names used across the file
+  _V.textSub = _V.onSurfaceVar;
+
+  // Kept for onBrandVariant fallback below — scans all vars by contrast
   function _findContrastVar(bgRGB, minRatio) {
     minRatio = minRatio || 4.5;
     var best = null, bestRatio = 0;
-    // Prefer semantically appropriate on-surface / text / foreground variables
     var preferred = Object.values(varByName).filter(function(v) {
       return v.resolvedType === 'COLOR' &&
-        /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_/]|$))/i.test(v.name);
+        /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_\/]|$))/i.test(v.name);
     });
     var candidates = preferred.length ? preferred : Object.values(varByName).filter(function(v) {
       return v.resolvedType === 'COLOR';
@@ -385,42 +593,58 @@ async function _buildShowcase() {
     return best;
   }
 
-  // Brand-variant background — prefer surface/brand-variant naming, fall back to surfaceVariant
+  // brandVariant: if not found above, try surfaceBrand role as a wider net
   if (!_V.brandVariant) {
-    _V.brandVariant = _findVar(
-      'color/surface/brand', 'surface/brand',
-      'color/brand/surface', 'brand/surface',
-      'color/primary/container', 'primary/container'
-    ) || _V.surfaceVariant || null;
+    _V.brandVariant = _semPick('surfaceBrand', s => s.sat * 0.4 + s.lum * 0.6)
+      || _V.surfaceVariant || null;
   }
 
-  // On-brand-variant text — try wider naming patterns, then contrast-based search
-  if (!_V.onBrandVariant) {
-    _V.onBrandVariant = _findVar(
-      'color/on-surface/brand', 'on-surface/brand',
-      'color/on-brand/default', 'on-brand/default',
-      'color/brand/on-brand',   'brand/on-brand',
-      'color/on-primary/container', 'on-primary/container'
-    );
-    if (!_V.onBrandVariant) {
-      // Resolve the actual background we'll be painting on
-      var _bvRaw = _V.brandVariant ? resolveVarValue(_V.brandVariant) : null;
-      var _bvRGB = _bvRaw && 'r' in _bvRaw
-        ? { r: _bvRaw.r, g: _bvRaw.g, b: _bvRaw.b }
-        : _C.brandVariant;
-      _V.onBrandVariant = _findContrastVar(_bvRGB) || _V.text || null;
-    }
+  // onBrandVariant: scored against the actual brand surface, not the default bg
+  {
+    var _bvRaw = _V.brandVariant ? resolveVarValue(_V.brandVariant) : null;
+    var _bvRGB = _bvRaw && 'r' in _bvRaw ? { r: _bvRaw.r, g: _bvRaw.g, b: _bvRaw.b } : _C.brandVariant;
+    _V.onBrandVariant = _semPick(
+      'onBrandVariant',
+      s => { var c = _contrastRatio(s.rgb, _bvRGB); return c >= 3 ? c : 0; }
+    ) || _findContrastVar(_bvRGB) || _V.text || null;
   }
 
-  // Surface-brand fallback — used for spacing visuals (bars, radius, border shapes)
+  // surfaceBrand final fallback: accent color is the closest proxy
   if (!_V.surfaceBrand) {
-    _V.surfaceBrand = _findVar('color/accent', 'accent', 'color/brand', 'brand') || _V.acc || null;
+    _V.surfaceBrand = _V.acc || null;
   }
 
-  // textSub fallback — if not found by name, use best contrast on the default surface
+  // textSub final fallback: best contrast at 3:1+ on the default surface
   if (!_V.textSub) {
     _V.textSub = _findContrastVar(_bgColor, 3) || _V.text || null;
   }
+
+  // ── Resolved-color map (_RC) ──────────────────────────────────────────────
+  // Every entry resolves its _V variable to an actual RGB, then falls back to
+  // the hardcoded _C constant only if the variable is null or unresolvable.
+  // Use _RC.xxx as the color argument in _paint()/_tDS() so that even the
+  // static fallback shown when a variable is absent reflects the live DS palette.
+
+  function _resolvedOrFallback(v, hardcode) {
+    if (!v) return hardcode;
+    const rgb = _resolvedRGB(v);
+    return rgb ? rgb : hardcode;
+  }
+
+  const _RC = {
+    outlineSubtle:  _resolvedOrFallback(_V.outlineSubtle,  _C.outlineSubtle),
+    surfaceDefault: _resolvedOrFallback(_V.surfaceDefault, _C.surfaceDefault),
+    surfaceVariant: _resolvedOrFallback(_V.surfaceVariant, _C.surfaceVariant),
+    brandVariant:   _resolvedOrFallback(_V.brandVariant,   _C.brandVariant),
+    onBrandVariant: _resolvedOrFallback(_V.onBrandVariant, _C.onBrandVariant),
+    onSurface:      _resolvedOrFallback(_V.onSurface,      _C.onSurface),
+    successBg:      _resolvedOrFallback(_V.successBg,      _C.successBg),
+    successBorder:  _resolvedOrFallback(_V.successBorder,  _C.successBorder),
+    successText:    _resolvedOrFallback(_V.successText,    _C.successText),
+    warningBg:      _resolvedOrFallback(_V.warningBg,      _C.warningBg),
+    warningBorder:  _resolvedOrFallback(_V.warningBorder,  _C.warningBorder),
+    warningText:    _resolvedOrFallback(_V.warningText,    _C.warningText),
+  };
 
   function _textFill(color, v) {
     // Use the explicit variable when provided. No hex auto-lookup — that binds
@@ -441,7 +665,7 @@ async function _buildShowcase() {
     const t = figma.createText();
     t.characters = String(str);
     t.fontSize = size;
-    t.fontName = { family: _dsFamily, style: semibold ? 'SemiBold' : 'Regular' };
+    t.fontName = { family: _dsFamily, style: semibold ? _semiboldStyle : 'Regular' };
     t.fills = _textFill(color, v);
     return t;
   }
@@ -496,7 +720,7 @@ async function _buildShowcase() {
     const d = figma.createRectangle();
     d.name = 'Divider';
     d.resize(1, 1);
-    d.fills = [_paint(_C.outlineSubtle, _V.outlineSubtle)];
+    d.fills = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
     parent.appendChild(d);
     d.layoutSizingHorizontal = 'FILL';
   }
@@ -511,19 +735,19 @@ async function _buildShowcase() {
   function _buildBadge(ratio) {
     let bg, border, fg, bgV, bdV, fgV, sign, score;
     if (ratio >= 7) {
-      bg = _C.successBg; border = _C.successBorder; fg = _C.successText;
+      bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
       bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
       sign = '✓'; score = 'AAA';
     } else if (ratio >= 4.5) {
-      bg = _C.successBg; border = _C.successBorder; fg = _C.successText;
+      bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
       bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
       sign = '✓'; score = 'AA';
     } else if (ratio >= 3) {
-      bg = _C.warningBg; border = _C.warningBorder; fg = _C.warningText;
+      bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
       bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
       sign = '~'; score = 'AA*';
     } else {
-      bg = _C.warningBg; border = _C.warningBorder; fg = _C.warningText;
+      bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
       bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
       sign = '✗'; score = 'Fail';
     }
@@ -547,7 +771,7 @@ async function _buildShowcase() {
     const row = _f('Group Header', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
     row.paddingTop  = 10; row.paddingBottom = 10;
-    row.fills = [_paint(_C.surfaceVariant, _V.surfaceVariant)];
+    row.fills = [_paint(_RC.surfaceVariant, _V.surfaceVariant)];
     const t = _tDS((label || 'Other').toUpperCase(), 11, _subColor, true, _V.textSub);
     row.appendChild(t);
     t.layoutSizingHorizontal = 'FILL';
@@ -576,8 +800,8 @@ async function _buildShowcase() {
     tag.cornerRadius = 8;
     tag.primaryAxisAlignItems = 'CENTER';
     tag.counterAxisAlignItems = 'CENTER';
-    tag.fills = [_paint(_C.brandVariant, _V.brandVariant)];
-    tag.appendChild(_tDS(label, 12, _C.onBrandVariant, true, _V.onBrandVariant));
+    tag.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
+    tag.appendChild(_tDS(label, 12, _RC.onBrandVariant, true, _V.onBrandVariant));
     return tag;
   }
 
@@ -588,8 +812,8 @@ async function _buildShowcase() {
     badge.cornerRadius = 4;
     badge.primaryAxisAlignItems = 'CENTER';
     badge.counterAxisAlignItems = 'CENTER';
-    badge.fills = [_paint(_C.brandVariant, _V.brandVariant)];
-    badge.appendChild(_tDS(label, 12, _C.onBrandVariant, true, _V.onBrandVariant));
+    badge.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
+    badge.appendChild(_tDS(label, 12, _RC.onBrandVariant, true, _V.onBrandVariant));
     return badge;
   }
 
@@ -598,8 +822,8 @@ async function _buildShowcase() {
   function _buildTable(title, description) {
     const table = _f('Table 1.0.0', 'VERTICAL');
     table.itemSpacing = 0;
-    table.fills   = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
-    table.strokes = [_paint(_C.outlineSubtle,  _V.outlineSubtle)];
+    table.fills   = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
+    table.strokes = [_paint(_RC.outlineSubtle,  _V.outlineSubtle)];
     table.strokeWeight = 0.5;
     table.strokeAlign  = 'INSIDE';
     table.cornerRadius = 16;
@@ -633,7 +857,7 @@ async function _buildShowcase() {
     heading.paddingLeft = 16; heading.paddingRight  = 16;
     heading.paddingTop  = 16; heading.paddingBottom = 16;
     heading.itemSpacing = gap;
-    heading.fills = [_paint(_C.brandVariant, _V.brandVariant)];
+    heading.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
     heading.counterAxisAlignItems = 'CENTER';
     for (const col of cols) {
       const cell = _f('Th', 'HORIZONTAL');
@@ -656,7 +880,7 @@ async function _buildShowcase() {
   function _swatchIndicator(swatchRGB) {
     const BLACK = { r: 0, g: 0, b: 0 };
     const WHITE = { r: 1, g: 1, b: 1 };
-    if (_contrastRatio(swatchRGB, BLACK) >= 4.5) return { fg: _C.onSurface,      show: true };
+    if (_contrastRatio(swatchRGB, BLACK) >= 4.5) return { fg: _RC.onSurface,     show: true };
     if (_contrastRatio(swatchRGB, WHITE) >= 4.5) return { fg: _C.onSurfaceLight, show: true };
     return { fg: null, show: false };
   }
@@ -675,7 +899,7 @@ async function _buildShowcase() {
     container.resize(80, 56);
     container.cornerRadius = 8;
     container.fills   = [_paint(swatchRGB, swatchVar)];
-    container.strokes = [_paint(_C.outlineSubtle, _V.outlineSubtle)];
+    container.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
     container.strokeWeight = 0.5;
     container.strokeAlign  = 'INSIDE';
 
@@ -737,7 +961,7 @@ async function _buildShowcase() {
     row.paddingLeft = 16.5; row.paddingRight  = 16.5;
     row.paddingTop  = 16.5; row.paddingBottom = 16.5;
     row.itemSpacing = 16;
-    row.fills = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+    row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
 
     const title = _tDS(rampName, 16, _textColor, true, _V.text);
     row.appendChild(title);
@@ -777,7 +1001,7 @@ async function _buildShowcase() {
     row.paddingTop  = 16; row.paddingBottom = 16;
     row.itemSpacing = 16;
     row.counterAxisAlignItems = 'CENTER';
-    row.fills = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+    row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
 
     const tokenCell = _f('TokenCell', 'VERTICAL');
     tokenCell.itemSpacing = 8;
@@ -828,7 +1052,7 @@ async function _buildShowcase() {
     row.paddingTop  = 16; row.paddingBottom = 16;
     row.itemSpacing = 16;
     row.counterAxisAlignItems = 'CENTER';
-    row.fills = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+    row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
 
     const tokenCell = _f('TokenCell', 'VERTICAL');
     tokenCell.itemSpacing = 8;
@@ -848,7 +1072,7 @@ async function _buildShowcase() {
     const swatchCell = _f('SwatchCell', 'VERTICAL');
     swatchCell.primaryAxisAlignItems = 'CENTER';
     swatchCell.counterAxisAlignItems = 'CENTER';
-    const swatch = _buildSwatch(bgRGB, fgRGB, opts.isIcon ? '☻' : token, {
+    const swatch = _buildSwatch(bgRGB, fgRGB, opts.isIcon ? '☻' : (opts.previewText || token), {
       swatchVar: bgVar,
       fgVar: fgVar,
       sampleFontSize: opts.isIcon ? 16 : 10,
@@ -889,7 +1113,7 @@ async function _buildShowcase() {
     row.paddingTop  = 16; row.paddingBottom = 16;
     row.itemSpacing = 16;
     row.counterAxisAlignItems = 'CENTER';
-    row.fills = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+    row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
 
     const tokenCell = _f('Table Cell', 'VERTICAL');
     tokenCell.itemSpacing = 8;
@@ -955,6 +1179,84 @@ async function _buildShowcase() {
     return row;
   }
 
+  function _buildTypoVarRow(group) {
+    const { key, sizeVar, lhVar, weightVar, familyVar, sizeVal, lhVal, weightVal } = group;
+    const row = _f('Table / Row / Typography Var 1.0.0', 'HORIZONTAL');
+    row.paddingLeft = 16; row.paddingRight  = 16;
+    row.paddingTop  = 16; row.paddingBottom = 16;
+    row.itemSpacing = 16;
+    row.counterAxisAlignItems = 'CENTER';
+    row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
+
+    const tokenCell = _f('Table Cell', 'VERTICAL');
+    tokenCell.itemSpacing = 8;
+    tokenCell.counterAxisAlignItems = 'MIN';
+    tokenCell.primaryAxisAlignItems = 'CENTER';
+    const _tag = _buildTag(key);
+    tokenCell.appendChild(_tag);
+    _tag.layoutSizingHorizontal = 'HUG';
+    const _desc = _tDS(_TABLE_DESC, 12, _subColor, false, _V.textSub);
+    _desc.name = 'DS Description';
+    tokenCell.appendChild(_desc);
+    _desc.layoutSizingHorizontal = 'FILL';
+    row.appendChild(tokenCell);
+    tokenCell.layoutSizingHorizontal = 'FILL';
+    tokenCell.layoutSizingVertical   = 'HUG';
+
+    const sampleCell = _f('Table Cell', 'VERTICAL');
+    sampleCell.primaryAxisAlignItems = 'CENTER';
+    sampleCell.counterAxisAlignItems = 'MIN';
+    sampleCell.clipsContent = true;
+    const sampleText = figma.createText();
+    // Resolve the effective family variable: per-token first, shared fallback second.
+    var _effFamVar = familyVar || _sharedFamilyVar;
+    var _effFamRaw = _effFamVar ? resolveVarValue(_effFamVar) : null;
+    var _effFamStr = (typeof _effFamRaw === 'string') ? _effFamRaw : _dsFamily;
+    sampleText.fontName  = { family: _effFamStr, style: 'Regular' };
+    sampleText.characters = 'The quick brown fox';
+    sampleText.fontSize   = sizeVal ? Math.min(Math.max(Math.round(sizeVal), 8), 60) : 16;
+    sampleText.fills      = _textFill(_textColor, _V.text);
+    sampleText.maxLines   = 1;
+    sampleText.textTruncation = 'ENDING';
+    if (sizeVar) { try { sampleText.setBoundVariable('fontSize', sizeVar); } catch (_) {} }
+    if (lhVar && lhVal !== null) {
+      try {
+        sampleText.lineHeight = { value: lhVal, unit: 'PIXELS' };
+        sampleText.setBoundVariable('lineHeight', lhVar);
+      } catch (_) {}
+    }
+    if (_effFamVar) { try { sampleText.setBoundVariable('fontFamily', _effFamVar); } catch (_) {} }
+    if (weightVar)  { try { sampleText.setBoundVariable('fontWeight',  weightVar);  } catch (_) {} }
+    sampleCell.appendChild(sampleText);
+    row.appendChild(sampleCell);
+    sampleCell.layoutSizingHorizontal = 'FILL';
+    sampleCell.layoutSizingVertical   = 'HUG';
+    sampleText.layoutSizingHorizontal = 'FILL';
+
+    const sizeLabel = sizeVal !== null ? `${Math.round(sizeVal)}px` : '—';
+    const sizeCl = _f('Table Cell', 'VERTICAL');
+    sizeCl.primaryAxisAlignItems = 'CENTER'; sizeCl.counterAxisAlignItems = 'MIN';
+    sizeCl.appendChild(_tDS(sizeLabel, 14, _textColor, false, _V.text));
+    row.appendChild(sizeCl);
+    sizeCl.layoutSizingHorizontal = 'FIXED'; sizeCl.resize(128, 1); sizeCl.layoutSizingVertical = 'FILL';
+
+    const lhLabel = lhVal !== null ? String(Math.round(lhVal * 10) / 10) : '—';
+    const lhCl = _f('Table Cell', 'VERTICAL');
+    lhCl.primaryAxisAlignItems = 'CENTER'; lhCl.counterAxisAlignItems = 'MIN';
+    lhCl.appendChild(_tDS(lhLabel, 14, _textColor, false, _V.text));
+    row.appendChild(lhCl);
+    lhCl.layoutSizingHorizontal = 'FIXED'; lhCl.resize(128, 1); lhCl.layoutSizingVertical = 'FILL';
+
+    const wtLabel = weightVal !== null ? String(Math.round(weightVal)) : '—';
+    const wtCl = _f('Table Cell', 'VERTICAL');
+    wtCl.primaryAxisAlignItems = 'CENTER'; wtCl.counterAxisAlignItems = 'MIN';
+    wtCl.appendChild(_tDS(wtLabel, 14, _textColor, false, _V.text));
+    row.appendChild(wtCl);
+    wtCl.layoutSizingHorizontal = 'FIXED'; wtCl.resize(128, 1); wtCl.layoutSizingVertical = 'FILL';
+
+    return row;
+  }
+
   function _buildSpacingVisual(type, value) {
     const px = value !== null && isFinite(value) ? Math.round(value) : 1;
 
@@ -962,7 +1264,7 @@ async function _buildShowcase() {
       const size = Math.min(Math.max(px, 2), 128);
       const sq = figma.createRectangle();
       sq.resize(size, size);
-      sq.fills = [_paint(_accColor, _V.surfaceBrand)];
+      sq.fills = [_paint(_RC.onSurface, _V.onSurface)];
       sq.cornerRadius = 2;
       return sq;
     }
@@ -971,8 +1273,8 @@ async function _buildShowcase() {
       const size = Math.max(px, 16);
       const el = figma.createEllipse();
       el.resize(size, size);
-      el.fills       = [_paint(_C.brandVariant, _V.brandVariant)];
-      el.strokes     = [_paint(_accColor,        _V.surfaceBrand)];
+      el.fills       = [_paint(_RC.brandVariant, _V.brandVariant)];
+      el.strokes     = [_paint(_accColor,        _V.outlineBrand)];
       el.strokeWeight = 2;
       el.strokeAlign  = 'INSIDE';
       el.dashPattern  = [4, 4];
@@ -982,8 +1284,8 @@ async function _buildShowcase() {
     if (type === 'radius') {
       const sq = figma.createRectangle();
       sq.resize(56, 56);
-      sq.fills        = [_paint(_C.brandVariant, _V.brandVariant)];
-      sq.strokes      = [_paint(_accColor,        _V.surfaceBrand)];
+      sq.fills        = [_paint(_RC.brandVariant, _V.brandVariant)];
+      sq.strokes      = [_paint(_accColor,        _V.outlineBrand)];
       sq.strokeWeight  = 1;
       sq.strokeAlign   = 'INSIDE';
       sq.cornerRadius  = Math.min(px, 28);
@@ -992,8 +1294,8 @@ async function _buildShowcase() {
 
     const sq = figma.createRectangle();
     sq.resize(56, 56);
-    sq.fills        = [_paint(_C.brandVariant, _V.brandVariant)];
-    sq.strokes      = [_paint(_accColor,        _V.surfaceBrand)];
+    sq.fills        = [_paint(_RC.brandVariant, _V.brandVariant)];
+    sq.strokes      = [_paint(_accColor,        _V.outlineBrand)];
     sq.strokeWeight  = Math.max(px, 0.5);
     sq.strokeAlign   = 'INSIDE';
     sq.cornerRadius  = 2;
@@ -1009,7 +1311,7 @@ async function _buildShowcase() {
     row.paddingTop  = 16; row.paddingBottom = 16;
     row.itemSpacing = 8;
     row.counterAxisAlignItems = 'CENTER';
-    row.fills = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+    row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
 
     const tokenCell = _f('Container', 'VERTICAL');
     tokenCell.itemSpacing = 4;
@@ -1040,7 +1342,7 @@ async function _buildShowcase() {
     valueCell.counterAxisAlignItems = 'CENTER';
     const valStr = px !== null ? `${pxNum}px` : '—';
     const rawStr = px !== null ? `(${pxNum})` : '';
-    const valText = _tDS(valStr, 12, _accColor, false, _V.surfaceBrand);
+    const valText = _tDS(valStr, 12, _textColor, false, _V.onSurface);
     valueCell.appendChild(valText);
     if (rawStr) {
       const rawText = _tDS(rawStr, 12, _subColor, false, _V.textSub);
@@ -1104,6 +1406,16 @@ async function _buildShowcase() {
     return null;
   }
 
+  // Return the last two slash-separated segments of a variable path, which gives
+  // designers just enough context to identify a token without showing the full path.
+  // e.g. "color/surface/brand" → "surface/brand"
+  //      "color/on-surface/brand-variant" → "on-surface/brand-variant"
+  //      "brand" → "brand"
+  function _tokenLabel(name) {
+    var parts = name.split('/');
+    return parts.length >= 2 ? parts.slice(-2).join('/') : name;
+  }
+
   // ── Page setup ───────────────────────────────────────────────────────────────
 
   let _page = figma.root.children.find(p => p.name === '00 · Tokens');
@@ -1136,18 +1448,34 @@ async function _buildShowcase() {
   }
 
   function _placeShowcaseSection(sectionName, frame, xOverride) {
-    const sec = figma.createSection();
-    sec.name = `Token Showcase — ${sectionName}`;
-    _page.appendChild(sec);
-    sec.appendChild(frame);
+    // Use a Section if available (Figma API ≥ 1.2), otherwise fall back to a plain frame.
+    var container;
+    try {
+      container = figma.createSection();
+    } catch (_) {
+      container = null;
+    }
+    if (!container || typeof container.appendChild !== 'function') {
+      // Fallback: rename the frame itself and place directly on the page.
+      frame.name = `Token Showcase — ${sectionName}`;
+      const posX = xOverride !== null && xOverride !== undefined ? xOverride : _sectionX;
+      frame.x = posX;
+      frame.y = 0;
+      _page.appendChild(frame);
+      _sectionX = posX + frame.width + _SECTION_GAP;
+      return frame;
+    }
+    container.name = `Token Showcase — ${sectionName}`;
+    _page.appendChild(container);
+    container.appendChild(frame);
     frame.x = 0;
     frame.y = 0;
     const posX = xOverride !== null && xOverride !== undefined ? xOverride : _sectionX;
-    sec.x = posX;
-    sec.y = 0;
-    sec.resizeWithoutConstraints(frame.width, frame.height);
+    container.x = posX;
+    container.y = 0;
+    container.resizeWithoutConstraints(frame.width, frame.height);
     _sectionX = posX + frame.width + _SECTION_GAP;
-    return sec;
+    return container;
   }
 
   // ── Colors section ───────────────────────────────────────────────────────────
@@ -1227,13 +1555,14 @@ async function _buildShowcase() {
 
           const isIcon    = /(?:^|\/)icon(?:\/|$)/i.test(v.name);
           const isOutline = /(?:^|\/)(?:outline|border|stroke)(?:\/|$)/i.test(v.name);
-          const tokenLeaf = v.name.split('/').pop();
-          const desc      = _tokenDesc(v.name);
+          const tokenLeaf  = v.name.split('/').pop();
+          const tokenLabel = _tokenLabel(v.name);
+          const desc       = _tokenDesc(v.name);
 
           if (isOutline) {
             // Outline tokens: surface bg + stroke — no contrast columns
             const outlineRGB = { r: raw.r, g: raw.g, b: raw.b };
-            const row = _buildOutlineRow(tokenLeaf, desc, outlineRGB, v);
+            const row = _buildOutlineRow(tokenLabel, desc, outlineRGB, v);
             bgUnpairedRows.push(row);
           } else if (isIcon) {
             // Icons are foreground colors — find the best surface to show them on.
@@ -1289,14 +1618,19 @@ async function _buildShowcase() {
               }
             }
 
+            var iconSurfaceLabel = iconSurfaceVar ? _tokenLabel(iconSurfaceVar.name) : null;
+            var iconDesc = desc ? desc : '';
+            if (iconSurfaceLabel) iconDesc = (iconDesc ? iconDesc + ' ' : '') + 'Shown on ' + iconSurfaceLabel + '.';
             fgRows.push(_buildSemColorRow(
-              tokenLeaf, desc,
+              tokenLabel, iconDesc || null,
               iconSurfaceRGB, iconRGB,
-              iconSurfaceVar, { isIcon: true, fgVar: v, hasPairing: true }
+              iconSurfaceVar, { isIcon: true, fgVar: v, hasPairing: true, previewText: tokenLeaf }
             ));
           } else {
             const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
-            // Try to find the fg pairing both as RGB and as a variable
+            // Try to find the fg pairing both as RGB and as a variable.
+            // Pass 1: try prefixing each segment with 'on-' (e.g. color/bg/danger → color/on-bg/danger,
+            //         color/surface/brand → color/on-surface/brand).
             var fgPairName = null;
             var fgPairParts = v.name.split('/');
             for (var pi = fgPairParts.length - 1; pi >= 0; pi--) {
@@ -1305,6 +1639,31 @@ async function _buildShowcase() {
               var candName = cand.join('/');
               if (_semVarRGB.has(candName)) { fgPairName = candName; break; }
             }
+            // Pass 2 — variant fallback (Material 3 convention).
+            // Tokens ending in '-variant' (e.g. color/surface/danger-variant) share a single
+            // foreground token (on-surface/default) rather than having a per-category counterpart.
+            // Also handle role-based subtle tokens (e.g. color/bg/brand-subtle → color/text/brand).
+            if (!fgPairName) {
+              var lastName = fgPairParts[fgPairParts.length - 1];
+              if (lastName && lastName.endsWith('-variant')) {
+                // Find the on-surface/default counterpart in the same namespace.
+                var nsParts = fgPairParts.slice(0, -1); // everything before the leaf
+                var onNsDefault = nsParts.map(function(p) { return p === 'surface' ? 'on-surface' : p; }).join('/') + '/default';
+                if (_semVarRGB.has(onNsDefault)) {
+                  fgPairName = onNsDefault;
+                } else {
+                  // Cross-namespace fallback: try color/on-surface/default directly.
+                  var crossDefault = 'color/on-surface/default';
+                  if (_semVarRGB.has(crossDefault)) fgPairName = crossDefault;
+                }
+              } else if (lastName && lastName.endsWith('-subtle')) {
+                // Role-based subtle: color/bg/brand-subtle → color/text/brand
+                var subtleBase = lastName.replace(/-subtle$/, '');
+                var subtleNsParts = fgPairParts.slice(0, -1);
+                var onSubtle = subtleNsParts.map(function(p) { return /^bg|surface/.test(p) ? 'text' : p; }).join('/') + '/' + subtleBase;
+                if (_semVarRGB.has(onSubtle)) fgPairName = onSubtle;
+              }
+            }
             const fgRGB    = fgPairName ? _semVarRGB.get(fgPairName) : null;
             const fgVar    = fgPairName ? (varByName[fgPairName] || null) : null;
             const hasPairing = !!fgRGB;
@@ -1312,7 +1671,9 @@ async function _buildShowcase() {
               var ind = _swatchIndicator(bgRGB);
               return ind.show ? ind.fg : _textColor;
             })();
-            const row = _buildSemColorRow(tokenLeaf, desc, bgRGB, effectiveFg, v, { fgVar: fgVar, hasPairing: hasPairing });
+            var pairingNote = fgPairName ? ('Paired with ' + _tokenLabel(fgPairName) + '.') : null;
+            var rowDesc = (desc && pairingNote) ? (desc + ' ' + pairingNote) : (pairingNote || desc);
+            const row = _buildSemColorRow(tokenLabel, rowDesc, bgRGB, effectiveFg, v, { fgVar: fgVar, hasPairing: hasPairing, previewText: tokenLeaf });
             if (hasPairing) bgPairedRows.push(row);
             else bgUnpairedRows.push(row);
           }
@@ -1378,15 +1739,82 @@ async function _buildShowcase() {
 
   // ── Typography section ───────────────────────────────────────────────────────
 
+  // Detect variable-based typography groups: type/{role}/{size} with /size, /line-height, /weight props.
+  const _typoVarGroups = [];
+  const _ROLE_ORDER = { display: 0, headline: 1, title: 2, body: 3, label: 4 };
+  const _SIZE_ORDER = { lg: 0, md: 1, sm: 2 };
+  for (const coll of _floatColls) {
+    const _tvars = coll.vars.filter(v => /^type\/(?:display|headline|title|body|label)\//i.test(v.name));
+    if (!_tvars.length) continue;
+    const _roleMap = {};
+    for (const v of _tvars) {
+      const key = v.name.split('/').slice(0, 3).join('/');
+      if (!_roleMap[key]) _roleMap[key] = [];
+      _roleMap[key].push(v);
+    }
+    Object.keys(_roleMap).sort((a, b) => {
+      const [, rA, sA] = a.split('/'); const [, rB, sB] = b.split('/');
+      const rd = (_ROLE_ORDER[rA] !== undefined ? _ROLE_ORDER[rA] : 99) - (_ROLE_ORDER[rB] !== undefined ? _ROLE_ORDER[rB] : 99);
+      return rd !== 0 ? rd : (_SIZE_ORDER[sA] !== undefined ? _SIZE_ORDER[sA] : 99) - (_SIZE_ORDER[sB] !== undefined ? _SIZE_ORDER[sB] : 99);
+    }).forEach(key => {
+      const gv = _roleMap[key];
+      const sizeVar   = gv.find(v => v.name.endsWith('/size'));
+      const lhVar     = gv.find(v => v.name.endsWith('/line-height'));
+      const weightVar = gv.find(v => v.name.endsWith('/weight'));
+      const familyVar = gv.find(v => v.name.endsWith('/family'));
+      const sRaw = sizeVar   ? resolveVarValue(sizeVar)   : null;
+      const lRaw = lhVar     ? resolveVarValue(lhVar)     : null;
+      const wRaw = weightVar ? resolveVarValue(weightVar) : null;
+      _typoVarGroups.push({
+        key, sizeVar, lhVar, weightVar, familyVar,
+        sizeVal:   typeof sRaw === 'number' ? sRaw : null,
+        lhVal:     typeof lRaw === 'number' ? lRaw : null,
+        weightVal: typeof wRaw === 'number' ? wRaw : null,
+      });
+    });
+  }
+
+  // Shared family variable fallback: used when a token group has no per-token /family var.
+  // Search all float collections for the first STRING variable whose name contains 'family'.
+  var _sharedFamilyVar = null;
+  for (var _sfci = 0; _sfci < _floatColls.length && !_sharedFamilyVar; _sfci++) {
+    var _sfVars = _floatColls[_sfci].vars;
+    for (var _sfvi = 0; _sfvi < _sfVars.length && !_sharedFamilyVar; _sfvi++) {
+      if (_sfVars[_sfvi].resolvedType === 'STRING' && /family/i.test(_sfVars[_sfvi].name)) {
+        _sharedFamilyVar = _sfVars[_sfvi];
+      }
+    }
+  }
+
+  // Pre-load any font families referenced by the var-based type groups so that
+  // fontName can be set to the variable's resolved value before binding.
+  var _familyFontsToLoad = [];
+  for (var _ffgi = 0; _ffgi < _typoVarGroups.length; _ffgi++) {
+    var _ffv = _typoVarGroups[_ffgi].familyVar || _sharedFamilyVar;
+    if (_ffv) {
+      var _ffStr = resolveVarValue(_ffv);
+      if (typeof _ffStr === 'string') {
+        var _ffKey = _ffStr + '::Regular';
+        if (!_fontSet.has(_ffKey)) {
+          _fontSet.set(_ffKey, { family: _ffStr, style: 'Regular' });
+          _familyFontsToLoad.push({ family: _ffStr, style: 'Regular' });
+        }
+      }
+    }
+  }
+  if (_familyFontsToLoad.length) {
+    await Promise.all(_familyFontsToLoad.map(function(f) { return figma.loadFontAsync(f).catch(function() {}); }));
+  }
+
   const _prevTypography = _page.children.find(n =>
     (n.type === 'FRAME' || n.type === 'SECTION') && n.name === 'Token Showcase — Typography'
   );
   const _myTypographyX = _prevTypography ? _prevTypography.x : _sectionX;
 
-  if (_sortedStyles.length) {
+  if (_sortedStyles.length || _typoVarGroups.length) {
     if (_prevTypography) _prevTypography.remove();
     const _typoFrame = _makeShowcaseFrame('Typography');
-    _addToFrame(_buildSectionHeader('Typography', 'Text styles, sizes, weights, and line heights.'), _typoFrame);
+    _addToFrame(_buildSectionHeader('Typography', 'Type scale — sizes, weights, and line heights.'), _typoFrame);
 
     const _typoTable = _buildTable(null);
     const _typoHeading = _buildTableHeading([
@@ -1407,6 +1835,16 @@ async function _buildShowcase() {
       _addTableDivider(_typoTable);
     }
 
+    // Var-based rows are a fallback path only — shown when the DS has no text styles.
+    if (!_sortedStyles.length) {
+      for (const group of _typoVarGroups) {
+        const row = _buildTypoVarRow(group);
+        _typoTable.appendChild(row);
+        row.layoutSizingHorizontal = 'FILL';
+        _addTableDivider(_typoTable);
+      }
+    }
+
     _appendFill(_typoTable, _typoFrame);
     _placeShowcaseSection('Typography', _typoFrame, _myTypographyX);
   }
@@ -1417,7 +1855,6 @@ async function _buildShowcase() {
     (n.type === 'FRAME' || n.type === 'SECTION') && n.name === 'Token Showcase — Spacing'
   );
   const _mySpacingX = _prevSpacing ? _prevSpacing.x : _sectionX;
-
   if (_floatColls.length) {
     if (_prevSpacing) _prevSpacing.remove();
 
@@ -1530,7 +1967,7 @@ async function _buildShowcase() {
     for (const style of _elevationStyles) {
       const shadow = style.effects.find(e => e.type === 'DROP_SHADOW');
       const row = _tableRow(style.name);
-      row.fills    = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+      row.fills    = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
       row.paddingLeft = 16; row.paddingRight  = 16;
       row.paddingTop  = 16; row.paddingBottom = 16;
       row.itemSpacing = 8;
@@ -1648,7 +2085,7 @@ async function _buildShowcase() {
         const desc       = (scrimVar.description && scrimVar.description.trim()) ? scrimVar.description.trim() : null;
 
         const row = _tableRow(scrimVar.name);
-        row.fills    = [_paint(_C.surfaceDefault, _V.surfaceDefault)];
+        row.fills    = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
         row.paddingLeft = 16; row.paddingRight  = 16;
         row.paddingTop  = 16; row.paddingBottom = 16;
         row.itemSpacing = 8;
@@ -1716,6 +2153,7 @@ async function _buildShowcase() {
 
   const _builtSections = _showcaseNodes.map(n => n.name.replace('Token Showcase — ', ''));
 
+
   if (_showcaseNodes.length) {
     figma.viewport.scrollAndZoomIntoView(_showcaseNodes);
   }
@@ -1723,5 +2161,548 @@ async function _buildShowcase() {
   return {
     sections: _builtSections,
     layout: 'horizontal, 100px gap between Figma sections',
+  };
+}
+
+// ── DS Setup implementation ──────────────────────────────────────────────────
+// Creates all 5 variable collections from a prepared DS config payload.
+// Input: the full DS object (from design-system.config.js after running prepare_ds_config).
+
+async function _applyDsSetup(DS) {
+  if (!DS) throw new Error('No DS config data received.');
+
+  var built = [];
+  var skipped = [];
+
+  // ── helpers ──────────────────────────────────────────────────────────────────
+
+  function hexToRgb(hex) {
+    var h = hex.replace('#', '');
+    return {
+      r: parseInt(h.slice(0, 2), 16) / 255,
+      g: parseInt(h.slice(2, 4), 16) / 255,
+      b: parseInt(h.slice(4, 6), 16) / 255,
+    };
+  }
+
+  function sanitize(s) { return String(s).replace('.', '-'); }
+
+  async function getOrCreateCollection(name, initialMode) {
+    var existing = await figma.variables.getLocalVariableCollectionsAsync();
+    for (var i = 0; i < existing.length; i++) {
+      if (existing[i].name === name) return { collection: existing[i], existed: true };
+    }
+    var coll = figma.variables.createVariableCollection(name);
+    if (initialMode && coll.modes[0]) {
+      coll.renameMode(coll.modes[0].modeId, initialMode);
+    }
+    return { collection: coll, existed: false };
+  }
+
+  // Build a map from variable name → variable id within a given collection
+  async function buildVarMap(collectionId) {
+    var allVars = await figma.variables.getLocalVariablesAsync();
+    var map = {};
+    for (var i = 0; i < allVars.length; i++) {
+      if (allVars[i].variableCollectionId === collectionId) {
+        map[allVars[i].name] = allVars[i].id;
+      }
+    }
+    return map;
+  }
+
+  // ── Collection 1 — Primitives ─────────────────────────────────────────────
+
+  var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
+  var _primRes = await getOrCreateCollection(primName, 'Default');
+  var primColl = _primRes.collection;
+  var primModeId = primColl.modes[0].modeId;
+
+  if (_primRes.existed) {
+    skipped.push(primName + ' (already exists — skipped)');
+  } else {
+    // 1A — color ramps
+    if (DS.color && DS.color.ramps) {
+      for (var ri = 0; ri < DS.color.ramps.length; ri++) {
+        var ramp = DS.color.ramps[ri];
+        for (var si = 0; si < ramp.steps.length; si++) {
+          var step = ramp.steps[si];
+          var vName = ramp.folder + '/' + step[0];
+          var v = figma.variables.createVariable(vName, primColl, 'COLOR');
+          v.setValueForMode(primModeId, { r: step[1], g: step[2], b: step[3] });
+        }
+      }
+    }
+
+    // 1A-ii — scrims (COLOR with alpha)
+    var SCRIMS = [
+      { name: 'color/scrim/black/4',  r: 0, g: 0, b: 0, a: 0.04 },
+      { name: 'color/scrim/black/8',  r: 0, g: 0, b: 0, a: 0.08 },
+      { name: 'color/scrim/black/12', r: 0, g: 0, b: 0, a: 0.12 },
+      { name: 'color/scrim/black/20', r: 0, g: 0, b: 0, a: 0.20 },
+      { name: 'color/scrim/black/40', r: 0, g: 0, b: 0, a: 0.40 },
+      { name: 'color/scrim/black/60', r: 0, g: 0, b: 0, a: 0.60 },
+      { name: 'color/scrim/white/8',  r: 1, g: 1, b: 1, a: 0.08 },
+      { name: 'color/scrim/white/12', r: 1, g: 1, b: 1, a: 0.12 },
+      { name: 'color/scrim/white/16', r: 1, g: 1, b: 1, a: 0.16 },
+      { name: 'color/scrim/white/20', r: 1, g: 1, b: 1, a: 0.20 },
+    ];
+    for (var sci = 0; sci < SCRIMS.length; sci++) {
+      var sc = SCRIMS[sci];
+      var sv = figma.variables.createVariable(sc.name, primColl, 'COLOR');
+      sv.setValueForMode(primModeId, { r: sc.r, g: sc.g, b: sc.b, a: sc.a });
+    }
+
+    // 1A-iii — shadow FLOAT primitives
+    var SHADOW_FLOATS = [
+      { name: 'shadow/1/offset-y', value: 1 }, { name: 'shadow/1/radius', value: 2 },
+      { name: 'shadow/2/offset-y', value: 4 }, { name: 'shadow/2/radius', value: 8 },
+      { name: 'shadow/3/offset-y', value: 8 }, { name: 'shadow/3/radius', value: 16 },
+      { name: 'shadow/4/offset-y', value: 12 }, { name: 'shadow/4/radius', value: 24 },
+      { name: 'shadow/5/offset-y', value: 16 }, { name: 'shadow/5/radius', value: 32 },
+      { name: 'shadow/ambient/2/radius', value: 8 }, { name: 'shadow/ambient/3/radius', value: 12 },
+      { name: 'shadow/ambient/4/radius', value: 16 }, { name: 'shadow/ambient/5/radius', value: 20 },
+    ];
+    for (var sfi = 0; sfi < SHADOW_FLOATS.length; sfi++) {
+      var sf = SHADOW_FLOATS[sfi];
+      var sfv = figma.variables.createVariable(sf.name, primColl, 'FLOAT');
+      sfv.setValueForMode(primModeId, sf.value);
+    }
+
+    // 1B — type primitives (FLOAT + STRING)
+    var _tp = (DS.naming && DS.naming.typePrefix) ? DS.naming.typePrefix : 'type';
+    var TYPE_WEIGHTS = [
+      { name: _tp + '/weight/regular', value: 400 }, { name: _tp + '/weight/medium', value: 500 },
+      { name: _tp + '/weight/semibold', value: 600 }, { name: _tp + '/weight/bold', value: 700 },
+    ];
+    var TYPE_LH = [
+      { name: _tp + '/line-height/tight', value: 1.2 }, { name: _tp + '/line-height/snug', value: 1.35 },
+      { name: _tp + '/line-height/normal', value: 1.5 }, { name: _tp + '/line-height/relaxed', value: 1.65 },
+      { name: _tp + '/line-height/loose', value: 1.8 },
+    ];
+    var TYPE_TRACKING = [
+      { name: _tp + '/tracking/tight', value: -0.02 }, { name: _tp + '/tracking/snug', value: -0.01 },
+      { name: _tp + '/tracking/normal', value: 0 }, { name: _tp + '/tracking/open', value: 0.01 },
+      { name: _tp + '/tracking/wide', value: 0.02 }, { name: _tp + '/tracking/wider', value: 0.05 },
+      { name: _tp + '/tracking/widest', value: 0.1 },
+    ];
+    var TYPE_SIZES = [
+      { name: _tp + '/size/2xs', value: 10 }, { name: _tp + '/size/xs', value: 12 },
+      { name: _tp + '/size/sm', value: 14 }, { name: _tp + '/size/md', value: 16 },
+      { name: _tp + '/size/lg', value: 18 }, { name: _tp + '/size/xl', value: 20 },
+      { name: _tp + '/size/2xl', value: 24 }, { name: _tp + '/size/3xl', value: 30 },
+      { name: _tp + '/size/4xl', value: 36 }, { name: _tp + '/size/5xl', value: 48 },
+      { name: _tp + '/size/6xl', value: 60 }, { name: _tp + '/size/7xl', value: 72 },
+    ];
+
+    var allTypeFloats = TYPE_WEIGHTS.concat(TYPE_LH).concat(TYPE_TRACKING).concat(TYPE_SIZES);
+    for (var tfi = 0; tfi < allTypeFloats.length; tfi++) {
+      var tf = allTypeFloats[tfi];
+      var tfv = figma.variables.createVariable(tf.name, primColl, 'FLOAT');
+      tfv.setValueForMode(primModeId, tf.value);
+    }
+
+    // Font family strings
+    var _ff = (DS.naming && DS.naming.fontFamily) ? DS.naming.fontFamily : 'font/{variant}';
+    var families = (DS.typography && DS.typography.families) ? DS.typography.families : {};
+    var famEntries = [
+      { key: 'sans',  value: families.sans  || 'Inter' },
+      { key: 'mono',  value: families.mono  || 'JetBrains Mono' },
+    ];
+    if (families.serif) famEntries.push({ key: 'serif', value: families.serif });
+    for (var fami = 0; fami < famEntries.length; fami++) {
+      var fam = famEntries[fami];
+      var famv = figma.variables.createVariable(_ff.replace('{variant}', fam.key), primColl, 'STRING');
+      famv.setValueForMode(primModeId, fam.value);
+    }
+
+    // 1C — spacing primitives
+    if (DS.primitives && DS.primitives.spacing) {
+      for (var spi = 0; spi < DS.primitives.spacing.length; spi++) {
+        var sp = DS.primitives.spacing[spi];
+        var spv = figma.variables.createVariable('space/' + sanitize(sp[0]), primColl, 'FLOAT');
+        spv.setValueForMode(primModeId, sp[1]);
+      }
+    }
+
+    // Hide primitives from publishing
+    try { primColl.hiddenFromPublishing = true; } catch (e) {}
+
+    built.push(primName);
+  }
+
+  // ── Collection 2 — Color Semantics ────────────────────────────────────────
+
+  var semName = (DS.collections && DS.collections.color) ? DS.collections.color : '2. Color';
+  var _semRes = await getOrCreateCollection(semName, 'Light');
+  var semColl = _semRes.collection;
+
+  if (_semRes.existed) {
+    skipped.push(semName + ' (already exists — skipped)');
+  } else {
+    // Add Dark mode
+    var darkModeId = semColl.addMode('Dark');
+    var lightModeId = semColl.modes[0].modeId;
+
+    var primVarMap = await buildVarMap(primColl.id);
+
+    function makeAlias(primitiveVarName) {
+      var id = primVarMap[primitiveVarName];
+      if (!id) return null;
+      return { type: 'VARIABLE_ALIAS', id: id };
+    }
+
+    if (DS.color && DS.color.semantics) {
+      var sem = DS.color.semantics;
+
+      // bg+text pairs — build a deduplicated token map first, then create each variable once.
+      // DS.color.semantics.pairs is a RELATIONSHIPS list: the same token (e.g. color/bg/default
+      // or color/on-surface/default) can appear as the bg or text counterpart in multiple pairs.
+      // Creating a Figma variable for every pair entry would crash on the 2nd duplicate name.
+      var tokenMap = {}; // name → { Light: primitiveRef | null, Dark: primitiveRef | null }
+
+      var pairs = sem.pairs || [];
+      for (var pi = 0; pi < pairs.length; pi++) {
+        var pair = pairs[pi];
+        if (!tokenMap[pair.bg]) {
+          tokenMap[pair.bg] = {
+            Light: pair.Light ? pair.Light.bg   : null,
+            Dark:  pair.Dark  ? pair.Dark.bg    : null,
+          };
+        }
+        if (!tokenMap[pair.text]) {
+          tokenMap[pair.text] = {
+            Light: pair.Light ? pair.Light.text : null,
+            Dark:  pair.Dark  ? pair.Dark.text  : null,
+          };
+        }
+      }
+
+      var tokenNames = Object.keys(tokenMap);
+      for (var ti = 0; ti < tokenNames.length; ti++) {
+        var tName  = tokenNames[ti];
+        var tEntry = tokenMap[tName];
+        var tVar   = figma.variables.createVariable(tName, semColl, 'COLOR');
+        if (tEntry.Light) {
+          var tLAlias = makeAlias(tEntry.Light);
+          if (tLAlias) tVar.setValueForMode(lightModeId, tLAlias);
+        }
+        if (tEntry.Dark) {
+          var tDAlias = makeAlias(tEntry.Dark);
+          if (tDAlias) tVar.setValueForMode(darkModeId, tDAlias);
+        }
+      }
+
+      // icon tokens
+      var icons = sem.icons || [];
+      for (var ii = 0; ii < icons.length; ii++) {
+        var icon = icons[ii];
+        var iconVar = figma.variables.createVariable(icon.token, semColl, 'COLOR');
+        if (icon.Light) { var ilAlias = makeAlias(icon.Light); if (ilAlias) iconVar.setValueForMode(lightModeId, ilAlias); }
+        if (icon.Dark)  { var idAlias = makeAlias(icon.Dark);  if (idAlias) iconVar.setValueForMode(darkModeId,  idAlias); }
+      }
+
+      // unpaired tokens (borders, surfaces, scrims, shadows)
+      var unpaired = sem.unpaired || [];
+      var createdSemTokens = new Set();
+      for (var upi = 0; upi < unpaired.length; upi++) {
+        var up = unpaired[upi];
+        if (createdSemTokens.has(up.token)) continue;
+        createdSemTokens.add(up.token);
+        var upVar = figma.variables.createVariable(up.token, semColl, 'COLOR');
+        if (up.Light) {
+          if (typeof up.Light === 'string' && up.Light.startsWith('color/scrim/')) {
+            var scrimAlias = makeAlias(up.Light);
+            if (scrimAlias) upVar.setValueForMode(lightModeId, scrimAlias);
+          } else if (typeof up.Light === 'string') {
+            var upLAlias = makeAlias(up.Light);
+            if (upLAlias) upVar.setValueForMode(lightModeId, upLAlias);
+          }
+        }
+        if (up.Dark) {
+          if (typeof up.Dark === 'string' && up.Dark.startsWith('color/scrim/')) {
+            var scrimDAlias = makeAlias(up.Dark);
+            if (scrimDAlias) upVar.setValueForMode(darkModeId, scrimDAlias);
+          } else if (typeof up.Dark === 'string') {
+            var upDAlias = makeAlias(up.Dark);
+            if (upDAlias) upVar.setValueForMode(darkModeId, upDAlias);
+          }
+        }
+      }
+    }
+
+    built.push(semName);
+  }
+
+  // ── Collection 3 — Typography ─────────────────────────────────────────────
+
+  var typoName = (DS.collections && DS.collections.typography) ? DS.collections.typography : '3. Typography';
+  var modes3 = (DS.breakpoints && DS.breakpoints.modes) ? DS.breakpoints.modes : ['Mobile', 'Tablet', 'Desktop'];
+  var _typoRes = await getOrCreateCollection(typoName, modes3[0]);
+  var typoColl = _typoRes.collection;
+
+  if (_typoRes.existed) {
+    skipped.push(typoName + ' (already exists — skipped)');
+  } else {
+    // Add remaining breakpoint modes
+    var typoModeMap = {};
+    typoModeMap[modes3[0]] = typoColl.modes[0].modeId;
+    for (var tmi = 1; tmi < modes3.length; tmi++) {
+      typoModeMap[modes3[tmi]] = typoColl.addMode(modes3[tmi]);
+    }
+
+    var primVarMapForTypo = await buildVarMap(primColl.id);
+
+    function typoAlias(name) {
+      var id = primVarMapForTypo[name];
+      return id ? { type: 'VARIABLE_ALIAS', id: id } : null;
+    }
+
+    function sizeTokenName(px) {
+      var sizeMap = { 10:'2xs', 12:'xs', 14:'sm', 16:'md', 18:'lg', 20:'xl', 24:'2xl', 30:'3xl', 36:'4xl', 48:'5xl', 60:'6xl', 72:'7xl' };
+      return sizeMap[px] ? (_tp + '/size/' + sizeMap[px]) : (_tp + '/size/' + px);
+    }
+
+    var _tp3 = (DS.naming && DS.naming.typePrefix) ? DS.naming.typePrefix : 'type';
+    var scale = (DS.typography && DS.typography.scale) ? DS.typography.scale : {};
+    var weightMap = { 400: 'regular', 500: 'medium', 600: 'semibold', 700: 'bold' };
+    var trackingMap = { '-0.02': 'tight', '-0.01': 'snug', '0': 'normal', '0.01': 'open', '0.02': 'wide', '0.05': 'wider', '0.1': 'widest' };
+
+    var typoPrefix = (DS.naming && DS.naming.textStyle) ? DS.naming.textStyle.split('/')[0] : 'type';
+
+    for (var role in scale) {
+      if (!scale.hasOwnProperty(role)) continue;
+      var roleDef = scale[role];
+      var sizes = roleDef.sizes || [];
+      var lineHeights = roleDef.lineHeights || [];
+      var weight = roleDef.weight || 400;
+      var tracking = roleDef.tracking != null ? roleDef.tracking : 0;
+
+      var tokenBase = typoPrefix + '/' + role;
+
+      // size variable
+      var sizeVar = figma.variables.createVariable(tokenBase + '/size', typoColl, 'FLOAT');
+      for (var mi = 0; mi < modes3.length; mi++) {
+        var modeName = modes3[mi];
+        var modeId3 = typoModeMap[modeName];
+        var sizePx = sizes[mi] != null ? sizes[mi] : sizes[sizes.length - 1];
+        var sizeAlias = typoAlias(sizeTokenName(sizePx));
+        if (sizeAlias) sizeVar.setValueForMode(modeId3, sizeAlias);
+        else sizeVar.setValueForMode(modeId3, sizePx);
+      }
+
+      // line-height variable (px, not ratio — raw computed value)
+      var lhVar = figma.variables.createVariable(tokenBase + '/line-height', typoColl, 'FLOAT');
+      for (var lhi = 0; lhi < modes3.length; lhi++) {
+        var lhModeId = typoModeMap[modes3[lhi]];
+        var lhPx = lineHeights[lhi] != null ? lineHeights[lhi] : lineHeights[lineHeights.length - 1];
+        lhVar.setValueForMode(lhModeId, lhPx);
+      }
+
+      // weight variable (alias to primitive)
+      var weightVar = figma.variables.createVariable(tokenBase + '/weight', typoColl, 'FLOAT');
+      var weightPrimName = _tp3 + '/weight/' + (weightMap[weight] || 'regular');
+      var weightAlias = typoAlias(weightPrimName);
+      for (var wi = 0; wi < modes3.length; wi++) {
+        var wModeId = typoModeMap[modes3[wi]];
+        if (weightAlias) weightVar.setValueForMode(wModeId, weightAlias);
+        else weightVar.setValueForMode(wModeId, weight);
+      }
+
+      // tracking variable (alias to primitive)
+      var trackingVar = figma.variables.createVariable(tokenBase + '/tracking', typoColl, 'FLOAT');
+      var trackingKey = String(tracking);
+      var trackingPrimName = _tp3 + '/tracking/' + (trackingMap[trackingKey] || trackingKey);
+      var trackingAlias = typoAlias(trackingPrimName);
+      for (var tri = 0; tri < modes3.length; tri++) {
+        var trModeId = typoModeMap[modes3[tri]];
+        if (trackingAlias) trackingVar.setValueForMode(trModeId, trackingAlias);
+        else trackingVar.setValueForMode(trModeId, tracking);
+      }
+
+      // family variable (alias to font/sans)
+      var famAlias3 = typoAlias('font/sans');
+      if (famAlias3) {
+        var famVar3 = figma.variables.createVariable(tokenBase + '/family', typoColl, 'STRING');
+        for (var fmi = 0; fmi < modes3.length; fmi++) {
+          famVar3.setValueForMode(typoModeMap[modes3[fmi]], famAlias3);
+        }
+      }
+    }
+
+    built.push(typoName);
+  }
+
+  // ── Collection 4 — Spacing ────────────────────────────────────────────────
+
+  var spacingName = (DS.collections && DS.collections.spacing) ? DS.collections.spacing : '4. Spacing';
+  var _spacingRes = await getOrCreateCollection(spacingName, modes3[0]);
+  var spacingColl = _spacingRes.collection;
+
+  if (_spacingRes.existed) {
+    skipped.push(spacingName + ' (already exists — skipped)');
+  } else {
+    var spaceModeMap = {};
+    spaceModeMap[modes3[0]] = spacingColl.modes[0].modeId;
+    for (var smi = 1; smi < modes3.length; smi++) {
+      spaceModeMap[modes3[smi]] = spacingColl.addMode(modes3[smi]);
+    }
+
+    var primVarMapForSpacing = await buildVarMap(primColl.id);
+
+    function spaceAlias(step) {
+      var name = 'space/' + sanitize(step);
+      var id = primVarMapForSpacing[name];
+      return id ? { type: 'VARIABLE_ALIAS', id: id } : null;
+    }
+
+    if (DS.spacing) {
+      // Semantic spacing tokens (responsive)
+      var semantic = DS.spacing.semantic || {};
+      for (var semKey in semantic) {
+        if (!semantic.hasOwnProperty(semKey)) continue;
+        var vals = semantic[semKey];
+        var semVar = figma.variables.createVariable('space/' + semKey, spacingColl, 'FLOAT');
+        for (var seMi = 0; seMi < modes3.length; seMi++) {
+          var seModeId = spaceModeMap[modes3[seMi]];
+          var seVal = vals[seMi] != null ? vals[seMi] : vals[vals.length - 1];
+          var seAlias = spaceAlias(seVal);
+          if (seAlias) semVar.setValueForMode(seModeId, seAlias);
+          else semVar.setValueForMode(seModeId, seVal);
+        }
+      }
+
+      // Radius tokens (mode-invariant)
+      var radius = DS.spacing.radius || {};
+      for (var radKey in radius) {
+        if (!radius.hasOwnProperty(radKey)) continue;
+        var radVar = figma.variables.createVariable('space/radius/' + radKey, spacingColl, 'FLOAT');
+        for (var rmi = 0; rmi < modes3.length; rmi++) {
+          radVar.setValueForMode(spaceModeMap[modes3[rmi]], radius[radKey]);
+        }
+      }
+
+      // Border width tokens (mode-invariant)
+      var border = DS.spacing.border || {};
+      for (var bKey in border) {
+        if (!border.hasOwnProperty(bKey)) continue;
+        var bVar = figma.variables.createVariable('space/border/' + bKey, spacingColl, 'FLOAT');
+        for (var bmi = 0; bmi < modes3.length; bmi++) {
+          bVar.setValueForMode(spaceModeMap[modes3[bmi]], border[bKey]);
+        }
+      }
+    }
+
+    built.push(spacingName);
+  }
+
+  // ── Collection 5 — Elevation (Effect Styles) ─────────────────────────────
+
+  var elevName = (DS.collections && DS.collections.elevation) ? DS.collections.elevation : '5. Elevation';
+  var _elevRes = await getOrCreateCollection(elevName, 'Default');
+  var elevColl = _elevRes.collection;
+
+  if (_elevRes.existed) {
+    skipped.push(elevName + ' (already exists — skipped)');
+  } else {
+    var elevModeId = elevColl.modes[0].modeId;
+
+    // Shadow FLOAT variables (re-alias from primitives)
+    var primVarMapForElev = await buildVarMap(primColl.id);
+
+    var ELEV_LEVELS = [
+      { level: 1, key: 'xs' },
+      { level: 2, key: 'sm' },
+      { level: 3, key: 'md' },
+      { level: 4, key: 'lg' },
+      { level: 5, key: 'xl' },
+    ];
+
+    for (var eli = 0; eli < ELEV_LEVELS.length; eli++) {
+      var el = ELEV_LEVELS[eli];
+      var l = el.level;
+
+      var offsetYId = primVarMapForElev['shadow/' + l + '/offset-y'];
+      var radiusId  = primVarMapForElev['shadow/' + l + '/radius'];
+
+      var elevOffsetVar = figma.variables.createVariable('elevation/' + el.key + '/offset-y', elevColl, 'FLOAT');
+      var elevRadiusVar = figma.variables.createVariable('elevation/' + el.key + '/radius', elevColl, 'FLOAT');
+      if (offsetYId) elevOffsetVar.setValueForMode(elevModeId, { type: 'VARIABLE_ALIAS', id: offsetYId });
+      if (radiusId)  elevRadiusVar.setValueForMode(elevModeId, { type: 'VARIABLE_ALIAS', id: radiusId });
+    }
+
+    built.push(elevName);
+
+    // Create Effect Styles for elevation/0 through elevation/5
+    var semVarMapForElev = await buildVarMap(semColl.id);
+    var keyColorId     = semVarMapForElev['color/shadow/key'];
+    var ambientColorId = semVarMapForElev['color/shadow/ambient'];
+
+    var EFFECT_LEVELS = [
+      { name: 'elevation/0',  shadows: [] },
+      { name: 'elevation/1',  shadows: [{ offsetY: 1,  radius: 2,  ambient: false }] },
+      { name: 'elevation/2',  shadows: [{ offsetY: 4,  radius: 8,  ambient: true,  ambRadius: 8  }] },
+      { name: 'elevation/3',  shadows: [{ offsetY: 8,  radius: 16, ambient: true,  ambRadius: 12 }] },
+      { name: 'elevation/4',  shadows: [{ offsetY: 12, radius: 24, ambient: true,  ambRadius: 16 }] },
+      { name: 'elevation/5',  shadows: [{ offsetY: 16, radius: 32, ambient: true,  ambRadius: 20 }] },
+    ];
+
+    for (var efli = 0; efli < EFFECT_LEVELS.length; efli++) {
+      var eff = EFFECT_LEVELS[efli];
+      var style = figma.createEffectStyle();
+      style.name = eff.name;
+
+      if (eff.shadows.length === 0) {
+        style.effects = [];
+      } else {
+        var effectArr = [];
+        for (var shi = 0; shi < eff.shadows.length; shi++) {
+          var sh = eff.shadows[shi];
+          // Key shadow
+          effectArr.push({
+            type: 'DROP_SHADOW',
+            color: { r: 0, g: 0, b: 0, a: 0.2 },
+            offset: { x: 0, y: sh.offsetY },
+            radius: sh.radius,
+            spread: 0,
+            visible: true,
+            blendMode: 'NORMAL',
+          });
+          // Ambient shadow (levels 2-5)
+          if (sh.ambient) {
+            effectArr.push({
+              type: 'DROP_SHADOW',
+              color: { r: 0, g: 0, b: 0, a: 0.08 },
+              offset: { x: 0, y: 0 },
+              radius: sh.ambRadius,
+              spread: 0,
+              visible: true,
+              blendMode: 'NORMAL',
+            });
+          }
+        }
+        style.effects = effectArr;
+
+        // Bind color variables to shadows
+        if (keyColorId && style.effects.length > 0) {
+          try {
+            style.setBoundVariableForEffect(0, 'color', figma.variables.getVariableById(keyColorId));
+          } catch (e) {}
+        }
+        if (ambientColorId && eff.shadows[0] && eff.shadows[0].ambient && style.effects.length > 1) {
+          try {
+            style.setBoundVariableForEffect(1, 'color', figma.variables.getVariableById(ambientColorId));
+          } catch (e) {}
+        }
+      }
+    }
+  }
+
+  return {
+    collections: built,
+    skipped: skipped,
+    message: built.length > 0
+      ? 'Created: ' + built.join(', ') + (skipped.length ? '. Skipped: ' + skipped.join(', ') : '')
+      : 'All collections already exist. ' + skipped.join(', '),
   };
 }

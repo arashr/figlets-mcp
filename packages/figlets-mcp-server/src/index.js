@@ -8,6 +8,8 @@ const { inspectComponentTool, handleInspectComponent } = require("./tools/inspec
 const { syncFigmaDataTool, handleSyncFigmaData } = require("./tools/sync-figma-data.js");
 const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js");
 const { buildShowcaseTool, handleBuildShowcase } = require("./tools/build-showcase.js");
+const { handlePrepareDsConfig } = require("./tools/prepare-ds-config.js");
+const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
@@ -97,6 +99,58 @@ server.tool(
   async () => {
     try {
       return await handleBuildShowcase();
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- prepare_ds_config ---
+server.tool(
+  "prepare_ds_config",
+  "Run the DS computation pipeline on an existing design-system.config.js: generates spacing scale, color ramps with WCAG/APCA analysis, validates semantic bg+text pair contrast, and prepares the Collection 1 primitives payload. Must be called after intake and before apply_ds_setup.",
+  {
+    config_path: z.string().describe("Absolute path to design-system.config.js (created during intake).")
+  },
+  async (args) => {
+    try {
+      const result = handlePrepareDsConfig(args);
+      if (result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- apply_ds_setup ---
+server.tool(
+  "apply_ds_setup",
+  "Build all 5 Figma variable collections from a prepared design-system.config.js. Creates: Primitives (color ramps, scrims, type + spacing floats), Color Semantics (Light/Dark aliases), Typography (responsive type vars per breakpoint), Spacing (responsive semantic spacing), and Elevation (shadow floats + Effect Styles). Requires the Figlets Bridge plugin open in Figma Desktop. Call prepare_ds_config first.",
+  {
+    config_path: z.string().describe("Absolute path to design-system.config.js (must have been prepared by prepare_ds_config).")
+  },
+  async (args) => {
+    try {
+      const result = await handleApplyDsSetup(args);
+      if (result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

@@ -26,13 +26,20 @@ function handleBuildShowcase() {
             let parsed;
             try { parsed = JSON.parse(body); } catch { parsed = {}; }
             const result = parsed.result || parsed;
+            if (result.error) {
+              resolve({
+                content: [{ type: "text", text: `Plugin error: ${result.error}` }],
+                isError: true
+              });
+              return;
+            }
             resolve({
               content: [{
                 type: "text",
                 text: JSON.stringify({
                   sections: result.sections || [],
                   layout: result.layout || "horizontal",
-                  message: `Showcase built — ${(result.sections || []).length} section(s) rendered on page '00 · Tokens'.`
+                  message: `Showcase built — ${(result.sections || []).length} section(s) rendered on page '00 · Tokens'.`,
                 }, null, 2)
               }]
             });
@@ -64,7 +71,7 @@ function handleBuildShowcase() {
       }
     });
 
-    req.setTimeout(130000, () => {
+    req.setTimeout(115000, () => {
       req.destroy();
       reject(new Error("Request to bridge receiver timed out"));
     });

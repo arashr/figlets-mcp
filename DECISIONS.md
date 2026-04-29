@@ -4,6 +4,33 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-04-28] Port `/fig-document` next; defer `/fig-create`; extend `audit_tokens` with auto-fix after
+
+**Decision:** With `/fig-setup` and `/fig-ds-showcase` already migrated, prioritize porting `/fig-document` as `generate_component_doc` before either `/fig-qa` auto-fix or `/fig-create`. Decompose `/fig-create` later, only after at least one adapter is scaffolded.
+
+**Why:**
+- `/fig-document` is the smallest remaining surface: 4 scripts (`find-component.js`, `doc-runner.js`, `write-spec.js`, `update-description.js`), all already organized as deterministic plugin-side rendering. Architecture is identical to the proven `build_ds_showcase` pattern (one MCP tool → plugin renders everything → result returned).
+- The tool's MCP fit is excellent: clean inputs (component name, optional variant-purpose map, optional do/don't rules), tool returns the markdown body so the agent writes the file via the Write tool. No conversational intake required, so it lives cleanly in core/MCP rather than an adapter.
+- `/fig-qa` auto-fix is small and useful but secondary — `audit_tokens` already covers detection. Closing the loop with `fix_token_violations` after fig-document keeps each port self-contained.
+- `/fig-create` is the largest skill (8 scripts) and is heavily conversational ("ask: build states? variants? sub-components?"). Trying to one-shot it as a single MCP tool fights the agent-agnostic boundary. It should be sliced into discrete deterministic tools (`audit_token_gaps`, `plan_component_from_frame`, `build_component`, `post_build_audit`) with the orchestration living in an adapter — which currently doesn't exist.
+
+**Consequence:** Migration sequence is now: `generate_component_doc` → `fix_token_violations` (extend `audit_tokens`) → adapter scaffold → decomposed `fig-create` tools. The "ported skills" set after step 1 will cover setup, showcase, and documentation — three of the five original skills, all deterministic.
+
+---
+
+## [2026-04-28] Add bridge + core integration tests covering the full poll/sync round-trip
+
+**Decision:** New `tests/integration/` directory with two end-to-end tests: `sync-detect-flow.test.js` (sync_figma_data → detect_design_system) and `inspect-component-flow.test.js` (inspect_component). Each test starts the real receiver on a random port, simulates the Figma plugin via raw HTTP (long-poll → command response → POST sync data), and runs the actual MCP tool handlers.
+
+**Why:**
+- Existing tests covered each layer in isolation (receiver, mocked MCP client, core analysis) but never the full `tool → receiver → plugin → receiver → tool` chain. A protocol change in any layer could pass all unit tests while breaking the bridge.
+- Simulating the plugin with a plain HTTP client is enough to validate the protocol — we don't need real Figma. The plugin contract is: poll, receive a command, post the result. Anything beyond that is rendering, which is tested by the unit tests on core analysis.
+- Required fixing one inconsistency: `inspect-component.js` was the only tool still hardcoding `localhost:1337` instead of reading `FIGLETS_RECEIVER_URL`. Standardised to env-driven URLs across all tools.
+
+**Consequence:** Future protocol or endpoint changes (e.g. for `generate_component_doc`) will fail loudly in CI, not silently in production. Each new bridge-backed tool should ship with a matching integration test.
+
+---
+
 ## [2026-04-21] Create a new repo instead of expanding the existing figlets repo
 
 **Decision:** Start a separate repository for the MCP-first, agent-agnostic architecture instead of continuing to expand the current Claude-oriented `figlets` repository.
@@ -296,6 +323,32 @@ Running log of non-obvious project decisions and the reasons behind them.
 - Adding a new naming convention is a single `_SEG` entry. The role logic never changes.
 
 **Consequence:** ANY foreground qualifier beside a brand marker correctly identifies the `onBrandVariant` token, regardless of exact wording. The same principle applies to all roles — qualifier specificity is naturally encoded by category accumulation, not by exhaustive per-role enumeration. Unit-tested in `tests/core/semantic-var-picker.test.js`.
+
+---
+
+## [2026-04-29] Plugin poll loop must be self-healing — watchdog + try/catch on every command handler
+
+**Decision:** Every command dispatched to the plugin from `ui.html` arms a watchdog timer that resets `isExtracting` and resumes polling if the plugin code doesn't respond in time. Every command handler in `code.js` wraps its body in try/catch and always calls `figma.ui.postMessage` — including on error, so the UI always gets a response and polling always resumes.
+
+**Why:**
+- Before this change, a silent crash in `serializeNode` (or any other plugin-side throw) left `isExtracting = true` permanently, killing the poll loop for the rest of the session. The only recovery was closing and reopening the plugin.
+- The plugin sandbox swallows uncaught errors without notifying the UI. There is no equivalent of `window.onerror` for the sandbox. The only reliable contract is: every message dispatched to `code.js` must produce a reply.
+- Watchdog timers on the UI side are the only defense against plugin code that hangs or crashes without posting back. Each command has a generous but bounded timeout (12s inspect, 30s sync, 60s doc/setup, 120s showcase).
+
+**Consequence:** The plugin self-heals after any crash or hang. A failed command produces an error result (not silence), the UI disarms the watchdog, resets state, and resumes polling. The MCP tool also retries 503/504 up to 3× with 1.5s delay so transient disconnects during the retry window are handled without surfacing to the user.
+
+---
+
+## [2026-04-29] Spec sheet containers must FILL width and HUG height — no custom row builders
+
+**Decision:** Every container in `_buildComponentDoc` that holds variable-height content must set `layoutSizingHorizontal = 'FILL'` (fills the doc frame width) and either `counterAxisSizingMode = 'AUTO'` or `primaryAxisSizingMode = 'AUTO'` to hug content height. Text nodes inside containers must use `layoutSizingHorizontal = 'FILL'` + `textAutoResize = 'HEIGHT'` — never `WIDTH_AND_HEIGHT`. Custom row/cell builders are prohibited: always use the proven `_mkTable/_mkRow/_mkCell` helpers for tabular data.
+
+**Why:**
+- `WIDTH_AND_HEIGHT` text auto-resize lets text nodes grow horizontally without bound, escaping their container and overflowing the doc frame. `FILL + HEIGHT` constrains width to the parent and grows height instead.
+- Frames without explicit `counterAxisSizingMode = 'AUTO'` default to a fixed height (typically 100px), silently clipping taller content (e.g., a 169px component preview, long rule text in Do/Don't panels).
+- Custom row builders reliably produce 0px-tall text rows because the auto-layout sizing semantics (when to set `textAutoResize` vs `layoutSizingHorizontal`, and in what order relative to `appendChild`) are non-obvious. The proven helpers encode the correct sequence.
+
+**Consequence:** All new sections added to the spec sheet must follow this sizing contract. A new tabular section must use `_mkTable/_mkRow/_mkCell`. A new non-tabular container must explicitly set FILL + HUG. Violations produce invisible or overflowing content that is hard to debug visually.
 
 ---
 

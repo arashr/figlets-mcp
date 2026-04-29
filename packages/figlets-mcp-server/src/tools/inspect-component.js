@@ -13,14 +13,11 @@ const inspectComponentTool = {
   }
 };
 
-function handleInspectComponent() {
+function _attemptInspect(receiverUrl) {
   return new Promise((resolve, reject) => {
     const req = http.request(
-      "http://localhost:1337/request-selection",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      },
+      receiverUrl + "/request-selection",
+      { method: "POST", headers: { "Content-Type": "application/json" } },
       (res) => {
         let body = "";
         res.on("data", (chunk) => { body += chunk; });
@@ -29,46 +26,42 @@ function handleInspectComponent() {
             try {
               const responseData = JSON.parse(body);
               const selectionPath = responseData.path;
-              
-              if (!fs.existsSync(selectionPath)) {
-                throw new Error("Selection data file was not created.");
-              }
-
-              const rawData = fs.readFileSync(selectionPath, "utf-8");
-              const parsedData = JSON.parse(rawData);
-
-              const normalizedData = {
-                target: "figma-selection",
-                selection: parsedData.selection || []
-              };
-
-              // We pass the selection data to the core logic. 
-              const result = inspectComponentData(normalizedData);
-
-              resolve({
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(result, null, 2)
-                  }
-                ]
-              });
+              if (!fs.existsSync(selectionPath)) throw new Error("Selection data file was not created.");
+              const parsedData = JSON.parse(fs.readFileSync(selectionPath, "utf-8"));
+              const result = inspectComponentData({ target: "figma-selection", selection: parsedData.selection || [] });
+              resolve({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
             } catch (err) {
               reject(new Error(`Failed to parse selection data: ${err.message}`));
             }
           } else {
-            reject(new Error(`Selection sync failed with status ${res.statusCode}: ${body}`));
+            const err = new Error(`Selection sync failed with status ${res.statusCode}: ${body}`);
+            err.statusCode = res.statusCode;
+            reject(err);
           }
         });
       }
     );
-
-    req.on("error", (err) => {
-      reject(new Error(`Failed to contact local receiver. Is it running? Error: ${err.message}`));
-    });
-
+    req.on("error", (err) => reject(new Error(`Failed to contact local receiver: ${err.message}`)));
     req.end();
   });
+}
+
+function handleInspectComponent() {
+  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 1500;
+
+  function attempt(n) {
+    return _attemptInspect(receiverUrl).catch((err) => {
+      const retryable = err.statusCode === 503 || err.statusCode === 504;
+      if (retryable && n < MAX_RETRIES) {
+        return new Promise((res) => setTimeout(res, RETRY_DELAY_MS)).then(() => attempt(n + 1));
+      }
+      throw err;
+    });
+  }
+
+  return attempt(1);
 }
 
 module.exports = {

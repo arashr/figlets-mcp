@@ -10,6 +10,7 @@ const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js"
 const { buildShowcaseTool, handleBuildShowcase } = require("./tools/build-showcase.js");
 const { handlePrepareDsConfig } = require("./tools/prepare-ds-config.js");
 const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
+const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
@@ -151,6 +152,29 @@ server.tool(
         };
       }
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- generate_component_doc ---
+server.tool(
+  generateComponentDocTool.name,
+  generateComponentDocTool.description,
+  {
+    component_name: z.string().describe("Name of the COMPONENT or COMPONENT_SET on the current Figma page."),
+    description: z.string().optional().describe("Human-readable description (1-2 sentences) shown under the title on the spec sheet. Agent should craft this after inspecting the component."),
+    usage_do: z.array(z.string()).optional().describe("Do rules for the usage panel. Agent should ground these in the component's actual purpose, not pass generic placeholders."),
+    usage_dont: z.array(z.string()).optional().describe("Don't rules for the usage panel. Agent should ground these in the component's actual purpose."),
+    variant_descriptions: z.record(z.string()).optional().describe("Map of exact variant name to short purpose (<=10 words).")
+  },
+  async (args) => {
+    try {
+      return await handleGenerateComponentDoc(args);
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

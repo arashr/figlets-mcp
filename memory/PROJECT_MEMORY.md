@@ -266,8 +266,95 @@ All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
 ---
 
+### [2026-04-28 — bridge + core integration tests]
+
+- Added `tests/integration/sync-detect-flow.test.js` — full E2E for `sync_figma_data` → `detect_design_system`. Starts the real receiver on a random port, simulates the plugin via raw HTTP (poll → respond to `extract-all` → POST `/sync` with fixture), runs both real MCP handlers, asserts file write and DS summary shape.
+- Added `tests/integration/inspect-component-flow.test.js` — same pattern for `inspect_component` (poll → `extract-selection` → POST `/sync-selection`).
+- Standardised receiver URLs across all tools: `inspect-component.js` was the last hold-out hardcoding `localhost:1337`. All tools now read `FIGLETS_RECEIVER_URL` (defaults to `http://localhost:1337`).
+- 20/20 tests passing. New bridge-backed tools should ship with a matching integration test.
+
+---
+
+### [2026-04-28 — porting plan: `/fig-document` next, then `/fig-qa` auto-fix, then decompose `/fig-create`]
+
+**State of the migration from the sibling `figlets` repo:**
+
+| figlets skill | figlets-mcp tool | Status |
+|---|---|---|
+| `/fig-setup` | `prepare_ds_config` + `apply_ds_setup` | Done |
+| `/fig-ds-showcase` | `build_ds_showcase` | Done |
+| `/fig-qa` | `audit_tokens` | Detection only (no auto-fix) |
+| `/fig-document` | — | Not ported |
+| `/fig-create` | — | Not ported |
+
+**Decided sequence:**
+
+1. **`generate_component_doc`** (port `/fig-document`) — chosen first. Architecture mirrors `build_ds_showcase`: plugin renders the spec sheet inside Figma + writes a `[SPEC]` block to the component description, agent calls one MCP tool, tool returns markdown for the agent to write via the Write tool. 4 scripts to port: `find-component.js`, `doc-runner.js`, `write-spec.js`, `update-description.js`. New endpoints: `/request-doc-build` + `/sync-doc-build`.
+2. **`fix_token_violations`** (extend `audit_tokens`) — port `fix-all.js` + `fix-violation.js`. Closes the audit loop. New endpoints: `/request-fix-violations` + `/sync-fix-violations`.
+3. **Adapter scaffold** before tackling `/fig-create`.
+4. **Decompose `/fig-create`** into `audit_token_gaps`, `plan_component_from_frame`, `build_component`, `post_build_audit` — orchestration lives in the adapter. Not one giant tool.
+
+See DECISIONS.md `[2026-04-28]` entry for full rationale.
+
+---
+
+### [2026-04-28 — `generate_component_doc` ported]
+
+Step 1 of the porting plan landed. `/fig-document` is now an MCP tool.
+
+- **Bridge protocol:** New endpoints `/request-doc-build` (POST, agent → receiver) and `/sync-doc-build` (POST, plugin → receiver). New plugin command `build-doc`. UI handles `build-doc` poll command and `doc-built` result.
+- **Plugin (`code.js`):** New `_buildComponentDoc(opts)` async function (~700 lines, appended at end of file). Self-contained — no shared helpers. Renders the spec sheet inside a "Documentation" section (Sections A–H mirroring the original `doc-runner.js`), updates the component description with a `[SPEC]` block, and returns the full markdown body for `component-specs/[Name].md`. ES6-compatible (no `??`, `?.`, `**` — sandbox restriction).
+- **MCP tool (`generate_component_doc`):** Inputs are `component_name` (required), `usage_do`, `usage_dont`, `variant_descriptions` (all optional with sensible defaults). Tool returns the markdown body so the agent writes the file via the Write tool — keeping file I/O on the agent side, rendering on the plugin side.
+- **DS-adaptive palette:** The spec sheet's chrome (paper, surface, ink, badge colors) resolves from the host DS variables when matching tokens exist (`paper`, `surface`, `ink/black`, `error`, etc.). Falls back to fixed RGB only if nothing matches — same approach as the showcase.
+- **Tests:** Unit (`generate-component-doc-tool.test.js`) covers tool metadata, error path for missing input, success payload, plugin error propagation, 503, and ECONNREFUSED. Integration (`generate-component-doc-flow.test.js`) runs the real receiver, simulates the plugin's poll → `build-doc` → `sync-doc-build` round-trip, and asserts the payload routed correctly in both directions.
+- **Adapter docs:** `CLAUDE.md` and `AGENTS.md` both updated with the new tool row, "Document a component" workflow, and two error-handling rows.
+
+**22/22 tests passing.** Migration is now: `prepare_ds_config` + `apply_ds_setup` + `build_ds_showcase` + `generate_component_doc` shipped — three of the five original skills fully ported. Next per the plan: `fix_token_violations` (extend `audit_tokens` to close the QA loop).
+
+---
+
+---
+
+### [2026-04-29 — generate_component_doc iteration + plugin robustness]
+
+**Live-tested against real DS file. Three bugs fixed, one missing feature added, spec sheet structure overhauled.**
+
+#### generate_component_doc fixes
+- **Library variable resolution:** added async pre-fetch loop using `figma.variables.getVariableByIdAsync` for any varId not in the local map. Resolves remote/library variables that `getLocalVariablesAsync` doesn't return. Eliminates raw `VariableID:xx:yy` in spec sheets.
+- **SIZING table:** rewrote using proven `_mkTable/_mkRow/_mkCell` helpers (same as Properties table). Custom `_sizeRow` helper removed — it produced 0px-tall text rows due to subtleties in auto-layout sizing. The proven helpers don't have this problem.
+- **Subtitle overflow:** added `layoutSizingHorizontal = 'FILL'` + `textAutoResize = 'HEIGHT'` on the subtitle text node so it word-wraps inside the doc frame instead of growing off-screen.
+- **Placement:** new component → lands to the right of the rightmost existing `· Spec` sheet with a 100px gap. Rebuild of same component → reuses old (x, y) so viewport and instances stay stable.
+
+#### New features
+- **`description` arg:** `generate_component_doc` now accepts a `description` string. Plugin uses it as the subtitle (agent-supplied content first, then existing component description stripped of `[SPEC]` blocks, then a placeholder). Markdown also uses it.
+- **Component description field:** agent-supplied description is now written to the top of the component's Figma description field, above the `[SPEC]` block. Designers see it in the Component Properties panel. Agents see the `[SPEC]` data. Rebuilds overwrite cleanly.
+- **Spec sheet section labels:** PREVIEW and VARIANTS sections now have `_mkLabel` calls matching all other sections.
+- **Container sizing:** Preview frame now has `counterAxisSizingMode = 'AUTO'` (hugs content height). Do/Don't row now has `layoutSizingHorizontal = 'FILL'`; panels fill width; rule text uses `FILL + HEIGHT` so it word-wraps instead of overflowing.
+
+#### Pre-flight check added to adapter docs
+Both `CLAUDE.md` and `AGENTS.md` now include a mandatory step 3 in "Document a component":
+- **Layer names check:** flag Figma-default names (`Frame NNN`, `Group NNN`, etc.) in shallow children. These appear verbatim in the Anatomy section.
+- **Component properties check:** flag a COMPONENT_SET with variants but no `componentPropertyDefinitions`. An empty properties table is useless for developers.
+Agent asks "fix first or proceed?" and waits. If user fixes, re-inspect before generating.
+
+#### Plugin robustness improvements (PINNED ISSUE)
+Background: `inspect_component` was reliably failing with 503/504 when a new component was selected. Root causes:
+1. `extract-selection` in `code.js` had no try/catch — a `serializeNode` error silently killed the poll loop
+2. `ui.html` set `isExtracting = true` when dispatching a command, but if the plugin code crashed, `isExtracting` was never reset and polling died permanently
+3. MCP tool had no retry on 503/504
+
+Fixes shipped:
+- `code.js`: `extract-selection` wrapped in try/catch; errors post back as `{ error, selection: [] }` instead of swallowed
+- `ui.html`: watchdog timer arms on every command dispatch (12s inspect, 30s sync, 60s doc/setup, 120s showcase); disarmed on every successful response; fires → resets `isExtracting` and resumes polling
+- `inspect-component.js`: retries up to 3× on 503/504 with 1.5s delay
+
+**Remaining open issue (PINNED):** `figma.currentPage.selection` is consistently returning `[]` even when something is selected in Figma. The plugin connects and polls correctly, executes the command without error, but reports empty selection. Suspected cause: Figma plugin sandbox clears `currentPage.selection` in some contexts when the plugin UI is focused during polling. Not resolved. Next session should investigate whether this is a `loadAllPagesAsync` requirement, a Figma Desktop bug, or a timing issue with the poll cycle. The robustness fixes above are correct regardless.
+
+---
+
 ## Open Questions
 
 - Should the long-term public package name stay `figlets-mcp`, or become a scoped name under the `figlets` brand?
 - Should `figma-selection.json` and `figma-data.json` be merged into one file with namespaced keys, or stay separate?
 - Which adapter to build first — Claude or Codex?
+- Why does `figma.currentPage.selection` return `[]` when something is selected? (Pinned — investigate next session)

@@ -80,11 +80,13 @@ figma.ui.onmessage = async (msg) => {
   }
 
   if (msg.type === 'extract-selection') {
-    const selection = figma.currentPage.selection;
-    const payload = {
-      selection: selection.map(node => serializeNode(node))
-    };
-    figma.ui.postMessage({ type: 'selection-extracted', data: payload });
+    try {
+      const selection = figma.currentPage.selection;
+      const payload = { selection: selection.map(function(node) { return serializeNode(node); }) };
+      figma.ui.postMessage({ type: 'selection-extracted', data: payload });
+    } catch (err) {
+      figma.ui.postMessage({ type: 'selection-extracted', data: { error: err.message || 'serializeNode failed', selection: [] } });
+    }
   }
 
   if (msg.type === 'sync-success') {
@@ -118,6 +120,22 @@ figma.ui.onmessage = async (msg) => {
       figma.notify('Design system collections created!');
     } catch (err) {
       figma.ui.postMessage({ type: 'ds-setup-done', data: { error: err.message } });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // build-doc — generates a component spec sheet inside Figma and returns
+  // markdown for the agent to write to component-specs/[Name].md.
+  // Equivalent of figlets fig-document skill.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (msg.type === 'build-doc') {
+    try {
+      const result = await _buildComponentDoc(msg.data || {});
+      figma.ui.postMessage({ type: 'doc-built', data: result });
+      if (!result.error) figma.notify('Component spec sheet built!');
+    } catch (err) {
+      const _errMsg = err instanceof Error ? err.message : String(err);
+      figma.ui.postMessage({ type: 'doc-built', data: { error: _errMsg || 'Unknown error' } });
     }
   }
 };
@@ -2731,5 +2749,802 @@ async function _applyDsSetup(DS) {
     message: built.length > 0
       ? 'Created: ' + built.join(', ') + (skipped.length ? '. Skipped: ' + skipped.join(', ') : '')
       : 'All collections already exist. ' + skipped.join(', '),
+  };
+}
+
+// ── Component documentation implementation ───────────────────────────────────
+// Ported from figlets skills/fig-document — runs entirely inside the plugin.
+// Renders a spec sheet inside Figma + writes [SPEC] block to the component
+// description + returns the markdown body for component-specs/[Name].md.
+//
+// ES6-era only: no `??`, `?.`, `**`. Figma plugin sandbox does not support them.
+
+async function _buildComponentDoc(opts) {
+  const compName = opts && opts.componentName ? String(opts.componentName) : '';
+  const agentDescription = (opts && typeof opts.description === 'string') ? opts.description.trim() : '';
+  const usageDo = (opts && opts.usageDo && opts.usageDo.length > 0)
+    ? opts.usageDo
+    : ['_[Add a Do rule grounded in this component\'s purpose]_'];
+  const usageDont = (opts && opts.usageDont && opts.usageDont.length > 0)
+    ? opts.usageDont
+    : ['_[Add a Don\'t rule grounded in this component\'s purpose]_'];
+  const variantDesc = (opts && opts.variantDescriptions) ? opts.variantDescriptions : {};
+
+  if (!compName) return { error: 'componentName is required' };
+
+  // ── Find component on current page ─────────────────────────────────────────
+  let _comp = figma.currentPage.findOne(function (n) {
+    return (n.type === 'COMPONENT' || n.type === 'COMPONENT_SET') && n.name === compName;
+  });
+  if (!_comp) {
+    _comp = figma.currentPage.findOne(function (n) {
+      return (n.type === 'COMPONENT' || n.type === 'COMPONENT_SET') && n.name.indexOf(compName) === 0;
+    });
+  }
+  if (!_comp) return { error: 'Component not found on current page: ' + compName };
+
+  const compSet = _comp;
+  const _isSet = compSet.type === 'COMPONENT_SET';
+  const _children = _isSet ? compSet.children : [compSet];
+  let _defaultV = compSet;
+  if (_isSet) {
+    _defaultV = null;
+    for (let i = 0; i < _children.length; i++) {
+      if (_children[i].name.indexOf('Default') >= 0 || _children[i].name.indexOf('Full') >= 0) { _defaultV = _children[i]; break; }
+    }
+    if (!_defaultV) _defaultV = _children[0];
+  }
+
+  const compMeta = {
+    type: compSet.type,
+    width: _defaultV.width,
+    height: _defaultV.height,
+    variantCount: _children.length,
+    variants: _children.map(function (c) { return c.name; }),
+    componentPropertyDefinitions: compSet.componentPropertyDefinitions || {},
+    description: compSet.description || ''
+  };
+
+  // ── Variables and text styles ──────────────────────────────────────────────
+  const _allVars = await figma.variables.getLocalVariablesAsync();
+  const _allTextStyles = await figma.getLocalTextStylesAsync();
+  const varById = {};
+  for (let i = 0; i < _allVars.length; i++) varById[_allVars[i].id] = _allVars[i];
+  const textStyleById = {};
+  for (let i = 0; i < _allTextStyles.length; i++) textStyleById[_allTextStyles[i].id] = _allTextStyles[i];
+
+  function _resolveAlias(varId) {
+    let depth = 0;
+    let cur = varById[varId];
+    while (cur && depth < 8) {
+      const modes = Object.keys(cur.valuesByMode);
+      if (modes.length === 0) return null;
+      const raw = cur.valuesByMode[modes[0]];
+      if (raw && raw.type === 'VARIABLE_ALIAS') {
+        cur = varById[raw.id];
+        depth++;
+        continue;
+      }
+      if (raw && typeof raw === 'object' && raw.r !== undefined) return { type: 'COLOR', val: raw };
+      if (typeof raw === 'number') return { type: 'FLOAT', val: raw };
+      return null;
+    }
+    return null;
+  }
+
+  function _toHex(r, g, b) {
+    function _h(c) {
+      const i = Math.round(Math.max(0, Math.min(1, c)) * 255);
+      const s = i.toString(16);
+      return s.length === 1 ? '0' + s : s;
+    }
+    return '#' + _h(r) + _h(g) + _h(b);
+  }
+
+  // ── Anatomy bounds ─────────────────────────────────────────────────────────
+  const _compBounds = _defaultV.absoluteBoundingBox;
+  const elements = [];
+  function _collectEl(node, depth) {
+    if (!node.absoluteBoundingBox) return;
+    if (depth > 0 && node.type !== 'INSTANCE') {
+      const nb = node.absoluteBoundingBox;
+      elements.push({
+        name: node.name, type: node.type, depth: depth,
+        x: Math.round(nb.x - _compBounds.x), y: Math.round(nb.y - _compBounds.y),
+        w: Math.round(nb.width), h: Math.round(nb.height)
+      });
+    }
+    if ('children' in node && node.type !== 'INSTANCE') {
+      for (let i = 0; i < node.children.length; i++) _collectEl(node.children[i], depth + 1);
+    }
+  }
+  _collectEl(_defaultV, 0);
+
+  // ── Token bindings on default variant ──────────────────────────────────────
+  function _collectBind(node, acc) {
+    if (node.type === 'INSTANCE') return acc;
+    const bv = node.boundVariables || {};
+    const _props = [
+      ['fills', 'Fill'], ['strokes', 'Stroke'],
+      ['paddingTop', 'paddingTop'], ['paddingBottom', 'paddingBottom'],
+      ['paddingLeft', 'paddingLeft'], ['paddingRight', 'paddingRight'],
+      ['itemSpacing', 'itemSpacing'], ['counterAxisSpacing', 'counterAxisSpacing'],
+      ['fontSize', 'fontSize'],
+      ['topLeftRadius', 'cornerRadius'],
+      ['strokeTopWeight', 'strokeWeight']
+    ];
+    for (let i = 0; i < _props.length; i++) {
+      const key = _props[i][0], label = _props[i][1];
+      if (bv[key]) {
+        const e = Array.isArray(bv[key]) ? bv[key][0] : bv[key];
+        if (e && e.id) acc.push({ node: node.name, property: label, varId: e.id });
+      }
+    }
+    if (node.type === 'TEXT' && node.textStyleId) {
+      acc.push({ node: node.name, property: 'textStyle', styleId: node.textStyleId });
+    }
+    if ('children' in node) {
+      for (let i = 0; i < node.children.length; i++) _collectBind(node.children[i], acc);
+    }
+    return acc;
+  }
+  const _rawBinds = _collectBind(_defaultV, []);
+
+  // Pre-fetch any varIds we don't have locally (library/remote variables).
+  // figma.variables.getVariableByIdAsync resolves both local and library vars.
+  const _missingIds = {};
+  for (let i = 0; i < _rawBinds.length; i++) {
+    const id = _rawBinds[i].varId;
+    if (id && !varById[id]) _missingIds[id] = true;
+  }
+  const _missingIdList = Object.keys(_missingIds);
+  for (let i = 0; i < _missingIdList.length; i++) {
+    try {
+      const remote = await figma.variables.getVariableByIdAsync(_missingIdList[i]);
+      if (remote) varById[_missingIdList[i]] = remote;
+    } catch (e) {}
+  }
+
+  const resolved = [];
+  for (let i = 0; i < _rawBinds.length; i++) {
+    const b = _rawBinds[i];
+    if (b.varId) {
+      const v = varById[b.varId];
+      const tokenName = v ? v.name : b.varId;
+      let resolvedVal = '—';
+      const res = _resolveAlias(b.varId);
+      if (res && res.type === 'COLOR') resolvedVal = _toHex(res.val.r, res.val.g, res.val.b);
+      else if (res && res.type === 'FLOAT') resolvedVal = res.val + 'px';
+      resolved.push({ node: b.node, property: b.property, token: tokenName, resolvedVal: resolvedVal });
+    } else if (b.styleId) {
+      const style = textStyleById[b.styleId];
+      let lh = '';
+      if (style) {
+        if (typeof style.lineHeight === 'object') {
+          lh = (style.lineHeight && style.lineHeight.value !== undefined) ? style.lineHeight.value : '?';
+        } else {
+          lh = style.lineHeight;
+        }
+      }
+      resolved.push({
+        node: b.node, property: 'Text style',
+        token: style ? style.name : b.styleId,
+        resolvedVal: style ? (style.fontSize + 'px / ' + lh) : '—'
+      });
+    }
+  }
+
+  // ── Fonts ──────────────────────────────────────────────────────────────────
+  let _fam = 'Inter', _fReg = 'Regular', _fSemi = 'Semi Bold', _fBold = 'Bold';
+  if (_allTextStyles.length > 0) {
+    _fam = _allTextStyles[0].fontName.family;
+    const _sf = [];
+    for (let i = 0; i < _allTextStyles.length; i++) {
+      if (_allTextStyles[i].fontName.family === _fam) _sf.push(_allTextStyles[i].fontName.style);
+    }
+    function _findStyle(re) {
+      for (let i = 0; i < _sf.length; i++) if (re.test(_sf[i])) return _sf[i];
+      return null;
+    }
+    _fSemi = _findStyle(/semi.?bold/i) || 'Semi Bold';
+    _fBold = _findStyle(/^bold$/i) || 'Bold';
+    _fReg  = _findStyle(/^regular$/i) || 'Regular';
+  }
+  async function _loadFontSafe(family, candidates) {
+    for (let i = 0; i < candidates.length; i++) {
+      try { await figma.loadFontAsync({ family: family, style: candidates[i] }); return candidates[i]; } catch (e) {}
+    }
+    return null;
+  }
+  const _regOk  = await _loadFontSafe(_fam, [_fReg, 'Regular']);
+  const _semOk  = await _loadFontSafe(_fam, [_fSemi, 'Semi Bold', 'SemiBold', 'Demi Bold', 'DemiBold', 'Bold']);
+  const _boldOk = await _loadFontSafe(_fam, [_fBold, 'Bold']);
+  if (_regOk)  _fReg = _regOk;
+  if (_semOk)  _fSemi = _semOk;
+  if (_boldOk) _fBold = _boldOk;
+  if (!_regOk && !_semOk && !_boldOk) {
+    return { error: 'Could not load any font for "' + _fam + '". Spec sheet aborted.' };
+  }
+
+  // ── DS-adaptive palette ────────────────────────────────────────────────────
+  function _dsCol(pats, fb) {
+    function resolveColor(v, depth) {
+      if (depth > 4) return null;
+      const modes = Object.keys(v.valuesByMode);
+      if (modes.length === 0) return null;
+      const raw = v.valuesByMode[modes[0]];
+      if (raw && raw.r !== undefined) return { r: raw.r, g: raw.g, b: raw.b };
+      if (raw && raw.type === 'VARIABLE_ALIAS') {
+        const target = varById[raw.id];
+        if (target) return resolveColor(target, depth + 1);
+      }
+      return null;
+    }
+    for (let i = 0; i < pats.length; i++) {
+      for (let j = 0; j < _allVars.length; j++) {
+        const v = _allVars[j];
+        if (v.resolvedType === 'COLOR' && v.name.toLowerCase().indexOf(pats[i]) >= 0) {
+          const r = resolveColor(v, 0);
+          if (r) return r;
+        }
+      }
+    }
+    return fb;
+  }
+  const _cPaper   = _dsCol(['paper', 'bg/primary', 'background/primary', 'surface/default'], { r: 0.961, g: 0.941, b: 0.922 });
+  const _cSurface = _dsCol(['surface', 'bg/secondary', 'background/secondary', 'card'], { r: 0.937, g: 0.918, b: 0.898 });
+  const _cInk     = _dsCol(['ink/black', 'ink-black', 'text/primary', 'foreground/primary'], { r: 0.071, g: 0.071, b: 0.078 });
+  const _cSubtle  = _dsCol(['ink/subtle', 'ink-subtle', 'text/secondary', 'foreground/secondary'], { r: 0.439, g: 0.439, b: 0.569 });
+  const _cInvBg   = _dsCol(['ink/black-soft', 'background/inverse', 'surface/inverse'], { r: 0.071, g: 0.071, b: 0.078 });
+  const _cInvTxt  = _dsCol(['ink/white', 'text/inverse', 'foreground/inverse'], { r: 0.737, g: 0.737, b: 0.808 });
+  const _cBadge   = _dsCol(['overprint/red', 'overprint-red', 'error', 'danger'], { r: 0.863, g: 0.133, b: 0.000 });
+  const _cBorder  = _dsCol(['border', 'stroke/default', 'divider'], { r: 0.851, g: 0.831, b: 0.804 });
+  const _cDo      = _dsCol(['success', 'positive', 'confirm'], { r: 0.133, g: 0.545, b: 0.133 });
+  const _cDont    = _dsCol(['error', 'danger', 'destructive'], { r: 0.863, g: 0.133, b: 0.000 });
+
+  // ── Doc frame inside Documentation section ────────────────────────────────
+  let _docSec = figma.currentPage.findOne(function (n) {
+    return n.type === 'SECTION' && n.name === 'Documentation';
+  });
+  if (!_docSec) {
+    _docSec = figma.createSection();
+    _docSec.name = 'Documentation';
+    figma.currentPage.appendChild(_docSec);
+  }
+
+  // If we're rebuilding the same component, remember its position so the new
+  // sheet lands in place — instances and viewport stay stable for the user.
+  const _old = figma.currentPage.findOne(function (n) { return n.name === compName + ' · Spec'; });
+  let _rebuildX, _rebuildY;
+  if (_old) {
+    _rebuildX = _old.x;
+    _rebuildY = _old.y;
+    _old.remove();
+  }
+
+  const doc = figma.createFrame();
+  doc.name = compName + ' · Spec';
+  doc.layoutMode = 'VERTICAL';
+  doc.resize(1400, 100);
+  doc.primaryAxisSizingMode = 'AUTO'; doc.counterAxisSizingMode = 'FIXED';
+  doc.paddingTop = 64; doc.paddingBottom = 64; doc.paddingLeft = 60; doc.paddingRight = 60;
+  doc.itemSpacing = 56;
+  doc.fills = [{ type: 'SOLID', color: _cPaper }];
+  _docSec.appendChild(doc);
+
+  // Position: rebuild → reuse old coords; new component → land to the right of
+  // the rightmost existing · Spec sheet (if any) with a 100px gap.
+  if (_rebuildX !== undefined) {
+    doc.x = _rebuildX;
+    doc.y = _rebuildY;
+  } else {
+    const _SHEET_GAP = 100;
+    const _siblings = _docSec.children;
+    let _rightmost = 0;
+    let _topY = 0;
+    let _hasAny = false;
+    for (let i = 0; i < _siblings.length; i++) {
+      const s = _siblings[i];
+      if (s === doc) continue;
+      if (s.type !== 'FRAME') continue;
+      if (! / · Spec$/.test(s.name)) continue;
+      const right = s.x + s.width;
+      if (!_hasAny || right > _rightmost) {
+        _rightmost = right;
+        _topY = s.y;
+        _hasAny = true;
+      }
+    }
+    if (_hasAny) {
+      doc.x = _rightmost + _SHEET_GAP;
+      doc.y = _topY;
+    }
+  }
+
+  function _mkLabel(parent, text) {
+    const t = figma.createText();
+    t.fontName = { family: _fam, style: _fSemi };
+    t.characters = text; t.fontSize = 11;
+    t.letterSpacing = { value: 2, unit: 'PIXELS' };
+    t.fills = [{ type: 'SOLID', color: _cSubtle }];
+    parent.appendChild(t); t.textAutoResize = 'WIDTH_AND_HEIGHT';
+    return t;
+  }
+  function _mkRow(parent, w, isHdr) {
+    const row = figma.createFrame();
+    row.name = isHdr ? 'Header Row' : 'Row'; row.layoutMode = 'HORIZONTAL';
+    row.counterAxisAlignItems = 'MIN'; row.itemSpacing = 0;
+    row.paddingTop = 12; row.paddingBottom = 12; row.paddingLeft = 0; row.paddingRight = 0;
+    row.primaryAxisSizingMode = 'FIXED'; row.resize(w, 1); row.counterAxisSizingMode = 'AUTO';
+    row.fills = isHdr ? [{ type: 'SOLID', color: _cInvBg }] : [];
+    parent.appendChild(row); return row;
+  }
+  function _mkCell(row, text, width, style) {
+    const isH = style === 'header-text', isMono = style === 'mono';
+    const cell = figma.createFrame();
+    cell.name = 'Cell'; cell.layoutMode = 'VERTICAL';
+    cell.paddingTop = 0; cell.paddingBottom = 0; cell.paddingLeft = 16; cell.paddingRight = 16;
+    cell.fills = []; row.appendChild(cell); cell.resize(width, 1);
+    cell.primaryAxisSizingMode = 'AUTO'; cell.counterAxisSizingMode = 'FIXED';
+    const t = figma.createText();
+    t.fontName = { family: _fam, style: isH ? _fSemi : _fReg };
+    t.characters = String(text); t.fontSize = 12;
+    t.fills = [{ type: 'SOLID', color: isH ? _cInvTxt : isMono ? _cSubtle : _cInk }];
+    cell.appendChild(t); t.textAutoResize = 'HEIGHT';
+    return cell;
+  }
+  function _mkTable(parent, name) {
+    const t = figma.createFrame();
+    t.name = name; t.layoutMode = 'VERTICAL';
+    t.itemSpacing = 0; t.fills = []; t.cornerRadius = 6; t.clipsContent = true;
+    parent.appendChild(t); t.layoutSizingHorizontal = 'FILL'; t.resize(1280, 1);
+    t.primaryAxisSizingMode = 'AUTO'; t.counterAxisSizingMode = 'FIXED';
+    return t;
+  }
+
+  // Section A — Header
+  const _secA = figma.createFrame();
+  _secA.name = 'Section A · Header'; _secA.layoutMode = 'VERTICAL';
+  _secA.primaryAxisSizingMode = 'AUTO'; _secA.counterAxisSizingMode = 'FIXED';
+  _secA.itemSpacing = 8; _secA.fills = [];
+  doc.appendChild(_secA); _secA.layoutSizingHorizontal = 'FILL';
+
+  const _tTitle = figma.createText();
+  _tTitle.fontName = { family: _fam, style: _fBold };
+  _tTitle.characters = compName; _tTitle.fontSize = 40;
+  _tTitle.fills = [{ type: 'SOLID', color: _cInk }];
+  _secA.appendChild(_tTitle); _tTitle.textAutoResize = 'WIDTH_AND_HEIGHT';
+
+  // Prefer agent-supplied description, then existing component description (with [SPEC]
+  // block stripped), then a placeholder prompting the agent to provide one.
+  let _subtitleText = '';
+  if (agentDescription) {
+    _subtitleText = agentDescription;
+  } else if (compMeta.description) {
+    _subtitleText = compMeta.description.replace(/\[SPEC\][\s\S]*?\[\/SPEC\]\n*/g, '').trim();
+  }
+  if (!_subtitleText) {
+    _subtitleText = '_[Add a 1-2 sentence description: what this component is and when to use it]_';
+  }
+  const _tSub = figma.createText();
+  _tSub.fontName = { family: _fam, style: _fReg };
+  _tSub.characters = _subtitleText;
+  _tSub.fontSize = 16;
+  _tSub.fills = [{ type: 'SOLID', color: _cSubtle }];
+  _secA.appendChild(_tSub);
+  // Wrap inside the section's width: FILL horizontal + HEIGHT auto-resize.
+  _tSub.layoutSizingHorizontal = 'FILL';
+  _tSub.textAutoResize = 'HEIGHT';
+
+  // Section B — Preview
+  _mkLabel(doc, 'PREVIEW');
+  const _secB = figma.createFrame();
+  _secB.name = 'Section B · Preview'; _secB.layoutMode = 'HORIZONTAL';
+  _secB.primaryAxisAlignItems = 'CENTER'; _secB.counterAxisAlignItems = 'CENTER';
+  _secB.paddingTop = 40; _secB.paddingBottom = 40; _secB.paddingLeft = 40; _secB.paddingRight = 40;
+  _secB.fills = [{ type: 'SOLID', color: _cSurface }]; _secB.cornerRadius = 8;
+  _secB.strokes = [{ type: 'SOLID', color: _cBorder }]; _secB.strokeWeight = 1;
+  doc.appendChild(_secB); _secB.layoutSizingHorizontal = 'FILL'; _secB.counterAxisSizingMode = 'AUTO';
+  _secB.appendChild(_defaultV.createInstance());
+
+  // Section C — Variant showcase
+  _mkLabel(doc, 'VARIANTS');
+  const _secC = figma.createFrame();
+  _secC.name = 'Section C · Variants'; _secC.layoutMode = 'HORIZONTAL';
+  _secC.layoutWrap = 'WRAP';
+  _secC.counterAxisAlignItems = 'MIN'; _secC.itemSpacing = 24; _secC.counterAxisSpacing = 24;
+  _secC.paddingTop = 24; _secC.paddingBottom = 24; _secC.paddingLeft = 24; _secC.paddingRight = 24;
+  _secC.fills = [{ type: 'SOLID', color: _cSurface }]; _secC.cornerRadius = 8;
+  doc.appendChild(_secC); _secC.layoutSizingHorizontal = 'FILL'; _secC.counterAxisSizingMode = 'AUTO';
+  for (let i = 0; i < _children.length; i++) {
+    const _v = _children[i];
+    const _vf = figma.createFrame();
+    _vf.layoutMode = 'VERTICAL'; _vf.primaryAxisSizingMode = 'AUTO'; _vf.counterAxisSizingMode = 'AUTO';
+    _vf.primaryAxisAlignItems = 'CENTER'; _vf.itemSpacing = 8; _vf.fills = [];
+    _secC.appendChild(_vf); _vf.appendChild(_v.createInstance());
+    const _vl = figma.createText();
+    _vl.fontName = { family: _fam, style: _fSemi };
+    _vl.characters = _v.name.replace(/,\s*/g, '\n');
+    _vl.fontSize = 11; _vl.textAlignHorizontal = 'CENTER';
+    _vl.fills = [{ type: 'SOLID', color: _cInk }];
+    _vf.appendChild(_vl); _vl.textAutoResize = 'WIDTH_AND_HEIGHT';
+    if (variantDesc[_v.name]) {
+      const _vdt = figma.createText();
+      _vdt.fontName = { family: _fam, style: _fReg };
+      _vdt.characters = variantDesc[_v.name];
+      _vdt.fontSize = 10; _vdt.textAlignHorizontal = 'CENTER';
+      _vdt.fills = [{ type: 'SOLID', color: _cSubtle }];
+      _vf.appendChild(_vdt); _vdt.textAutoResize = 'WIDTH_AND_HEIGHT';
+    }
+  }
+
+  // Section D — Properties table
+  _mkLabel(doc, 'COMPONENT PROPERTIES');
+  const _tblD = _mkTable(doc, 'Properties Table');
+  const _dHdr = _mkRow(_tblD, 1280, true);
+  _mkCell(_dHdr, 'PROPERTY', 427, 'header-text');
+  _mkCell(_dHdr, 'TYPE', 427, 'header-text');
+  _mkCell(_dHdr, 'DEFAULT', 426, 'header-text');
+  const _propKeys = Object.keys(compMeta.componentPropertyDefinitions);
+  if (_propKeys.length === 0) {
+    _mkCell(_mkRow(_tblD, 1280, false), '(no component properties defined)', 1280, 'mono');
+  } else {
+    for (let i = 0; i < _propKeys.length; i++) {
+      const key = _propKeys[i];
+      const def = compMeta.componentPropertyDefinitions[key];
+      const r = _mkRow(_tblD, 1280, false);
+      r.fills = i % 2 === 1 ? [{ type: 'SOLID', color: _cSurface }] : [];
+      _mkCell(r, key.replace(/#[^#]+$/, ''), 427, 'body');
+      _mkCell(r, def.type, 427, 'mono');
+      _mkCell(r, String(def.defaultValue !== undefined ? def.defaultValue : '—'), 426, 'body');
+    }
+  }
+
+  // Section F — Sizing
+  // Property -> token-name table for the default variant. Smart-group padding
+  // when 4 sides share a token; collapse to (Y) + (X) if Y-pair and X-pair
+  // each share. Dimensions are shown plainly. Never show raw VariableID.
+  // Uses the proven _mkTable/_mkRow/_mkCell helpers — same as Properties Table.
+  _mkLabel(doc, 'SIZING');
+  const _tblF = _mkTable(doc, 'Sizing Table');
+  const _fHdr = _mkRow(_tblF, 1280, true);
+  _mkCell(_fHdr, 'PROPERTY', 360, 'header-text');
+  _mkCell(_fHdr, 'TOKEN / VALUE', 920, 'header-text');
+
+  // Map property -> token name (only resolved variables; never raw VariableID:).
+  const _propTokens = {};
+  for (let i = 0; i < resolved.length; i++) {
+    const b = resolved[i];
+    if (b.node !== _defaultV.name && b.node !== compName) continue;
+    if (typeof b.token === 'string' && b.token.indexOf('VariableID:') === 0) continue;
+    _propTokens[b.property] = b.token;
+  }
+
+  const _sizingRows = [];
+  _sizingRows.push(['Dimensions (default)', _defaultV.width + ' x ' + _defaultV.height + ' px'
+    + (compMeta.variantCount > 1 ? '   (' + compMeta.variantCount + ' variants)' : '')]);
+
+  const _pT = _propTokens['paddingTop'];
+  const _pB = _propTokens['paddingBottom'];
+  const _pL = _propTokens['paddingLeft'];
+  const _pR = _propTokens['paddingRight'];
+  if (_pT || _pB || _pL || _pR) {
+    if (_pT && _pT === _pB && _pT === _pL && _pT === _pR) {
+      _sizingRows.push(['Padding (all sides)', _pT]);
+    } else if (_pT && _pT === _pB && _pL && _pL === _pR) {
+      _sizingRows.push(['Padding (vertical)', _pT]);
+      _sizingRows.push(['Padding (horizontal)', _pL]);
+    } else {
+      if (_pT) _sizingRows.push(['Padding (top)', _pT]);
+      if (_pR) _sizingRows.push(['Padding (right)', _pR]);
+      if (_pB) _sizingRows.push(['Padding (bottom)', _pB]);
+      if (_pL) _sizingRows.push(['Padding (left)', _pL]);
+    }
+  }
+  if (_propTokens['itemSpacing']) _sizingRows.push(['Gap (primary axis)', _propTokens['itemSpacing']]);
+  if (_propTokens['counterAxisSpacing']) _sizingRows.push(['Gap (counter axis)', _propTokens['counterAxisSpacing']]);
+  if (_propTokens['cornerRadius']) _sizingRows.push(['Corner radius', _propTokens['cornerRadius']]);
+  if (_propTokens['strokeWeight']) _sizingRows.push(['Stroke weight', _propTokens['strokeWeight']]);
+
+  for (let i = 0; i < _sizingRows.length; i++) {
+    const r = _mkRow(_tblF, 1280, false);
+    r.fills = i % 2 === 1 ? [{ type: 'SOLID', color: _cSurface }] : [];
+    _mkCell(r, _sizingRows[i][0], 360, 'body');
+    _mkCell(r, _sizingRows[i][1], 920, 'body');
+  }
+
+  // Section G — Anatomy
+  _mkLabel(doc, 'ANATOMY');
+  const _wrapper = figma.createFrame();
+  _wrapper.name = 'Anatomy Wrapper'; _wrapper.layoutMode = 'HORIZONTAL';
+  _wrapper.primaryAxisSizingMode = 'FIXED'; _wrapper.counterAxisSizingMode = 'FIXED';
+  _wrapper.clipsContent = false; _wrapper.fills = [];
+  _wrapper.resize(_defaultV.width, _defaultV.height);
+  doc.appendChild(_wrapper);
+  const _anatInst = _defaultV.createInstance();
+  _wrapper.appendChild(_anatInst);
+  _anatInst.layoutPositioning = 'ABSOLUTE'; _anatInst.x = 0; _anatInst.y = 0;
+  const _BS = 22;
+  for (let idx = 0; idx < elements.length; idx++) {
+    const el = elements[idx];
+    const n = idx + 1;
+    const bx = Math.round(el.x + el.w / 2 - _BS / 2);
+    const by = Math.round(el.y + el.h / 2 - _BS / 2);
+    const _b = figma.createEllipse();
+    _b.name = 'Badge ' + n; _b.resize(_BS, _BS);
+    _b.fills = [{ type: 'SOLID', color: _cBadge }];
+    _wrapper.appendChild(_b);
+    _b.layoutPositioning = 'ABSOLUTE'; _b.x = bx; _b.y = by;
+    const _nt = figma.createText();
+    _nt.fontName = { family: _fam, style: _fBold };
+    _nt.characters = String(n);
+    _nt.fontSize = n >= 10 ? 9 : 10;
+    _nt.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+    _nt.textAlignHorizontal = 'CENTER'; _nt.textAlignVertical = 'CENTER';
+    _nt.resize(_BS, _BS);
+    _wrapper.appendChild(_nt);
+    _nt.layoutPositioning = 'ABSOLUTE'; _nt.x = bx; _nt.y = by;
+  }
+  // Anatomy legend table
+  const _tblG = _mkTable(doc, 'Anatomy Legend');
+  const _gHdr = _mkRow(_tblG, 1280, true);
+  _mkCell(_gHdr, '#', 80, 'header-text');
+  _mkCell(_gHdr, 'ELEMENT', 500, 'header-text');
+  _mkCell(_gHdr, 'TYPE', 700, 'header-text');
+  for (let idx = 0; idx < elements.length; idx++) {
+    const el = elements[idx];
+    const r = _mkRow(_tblG, 1280, false);
+    r.fills = idx % 2 === 1 ? [{ type: 'SOLID', color: _cSurface }] : [];
+    _mkCell(r, String(idx + 1), 80, 'body');
+    _mkCell(r, el.name, 500, 'body');
+    _mkCell(r, el.type, 700, 'mono');
+  }
+
+  // Section H — Usage
+  _mkLabel(doc, 'USAGE');
+  const _secH = figma.createFrame();
+  _secH.name = 'Section H · Usage'; _secH.layoutMode = 'HORIZONTAL';
+  _secH.primaryAxisSizingMode = 'FIXED'; _secH.counterAxisSizingMode = 'AUTO';
+  _secH.itemSpacing = 24; _secH.fills = [];
+  doc.appendChild(_secH); _secH.layoutSizingHorizontal = 'FILL';
+  function _mkUsagePanel(parent, label, rules, borderColor) {
+    const panel = figma.createFrame();
+    panel.name = label; panel.layoutMode = 'VERTICAL';
+    panel.primaryAxisSizingMode = 'AUTO'; panel.counterAxisSizingMode = 'FIXED';
+    panel.itemSpacing = 8;
+    panel.paddingTop = 20; panel.paddingBottom = 20; panel.paddingLeft = 20; panel.paddingRight = 20;
+    panel.fills = []; panel.cornerRadius = 8;
+    panel.strokes = [{ type: 'SOLID', color: borderColor }]; panel.strokeWeight = 2;
+    parent.appendChild(panel); panel.layoutSizingHorizontal = 'FILL';
+    const lbl = figma.createText();
+    lbl.fontName = { family: _fam, style: _fSemi };
+    lbl.characters = label; lbl.fontSize = 13;
+    lbl.fills = [{ type: 'SOLID', color: borderColor }];
+    panel.appendChild(lbl); lbl.textAutoResize = 'WIDTH_AND_HEIGHT';
+    for (let i = 0; i < rules.length; i++) {
+      const rt = figma.createText();
+      rt.fontName = { family: _fam, style: _fReg };
+      rt.characters = '• ' + rules[i]; rt.fontSize = 12;
+      rt.fills = [{ type: 'SOLID', color: _cInk }];
+      panel.appendChild(rt); rt.layoutSizingHorizontal = 'FILL'; rt.textAutoResize = 'HEIGHT';
+    }
+  }
+  _mkUsagePanel(_secH, 'Do', usageDo, _cDo);
+  _mkUsagePanel(_secH, "Don't", usageDont, _cDont);
+
+  // ── Update component description with [SPEC] block ─────────────────────────
+  let _propsForSpec = '';
+  for (let i = 0; i < _propKeys.length; i++) {
+    if (i > 0) _propsForSpec += ', ';
+    _propsForSpec += _propKeys[i].replace(/#[^#]+$/, '') + ' (' + compMeta.componentPropertyDefinitions[_propKeys[i]].type + ')';
+  }
+  if (!_propsForSpec) _propsForSpec = 'none';
+  let _tokensForSpec = '';
+  for (let i = 0; i < Math.min(5, resolved.length); i++) {
+    if (i > 0) _tokensForSpec += ', ';
+    _tokensForSpec += resolved[i].property + '=' + resolved[i].token;
+  }
+  const _specBlock =
+    '[SPEC]\n' +
+    'component: ' + compName + '\n' +
+    'variants: ' + compMeta.variants.join(' | ') + '\n' +
+    'properties: ' + _propsForSpec + '\n' +
+    'tokens: ' + _tokensForSpec + '\n' +
+    'spec-file: component-specs/' + compName + '.md\n' +
+    '[/SPEC]\n\n';
+  const _humanDesc = agentDescription ? agentDescription + '\n\n' : '';
+  compSet.description = _humanDesc + _specBlock;
+
+  // ── Build markdown (port of write-spec.js) ────────────────────────────────
+  function _parseVariantProps(name) {
+    const out = {};
+    const parts = name.split(',');
+    for (let i = 0; i < parts.length; i++) {
+      const kv = parts[i].trim().split('=');
+      if (kv.length === 2 && kv[0] && kv[1] !== undefined) out[kv[0].trim()] = kv[1].trim();
+    }
+    return out;
+  }
+  const _dimensions = {};
+  for (let i = 0; i < compMeta.variants.length; i++) {
+    const parsed = _parseVariantProps(compMeta.variants[i]);
+    const keys = Object.keys(parsed);
+    for (let j = 0; j < keys.length; j++) {
+      if (!_dimensions[keys[j]]) _dimensions[keys[j]] = {};
+      _dimensions[keys[j]][parsed[keys[j]]] = true;
+    }
+  }
+  function _dimImpl(values) {
+    const stateNames = { Default: 1, Hover: 1, Focus: 1, Active: 1, Disabled: 1, Pressed: 1 };
+    let allStates = true;
+    for (let i = 0; i < values.length; i++) if (!stateNames[values[i]]) { allStates = false; break; }
+    return allStates ? 'ComponentSet (prototype-wired)' : 'ComponentSet variant';
+  }
+
+  const _compProps = [];
+  for (let i = 0; i < _propKeys.length; i++) {
+    const k = _propKeys[i];
+    const d = compMeta.componentPropertyDefinitions[k];
+    _compProps.push({ name: k, type: d.type, defaultValue: d.defaultValue !== undefined ? String(d.defaultValue) : '—' });
+  }
+
+  const _sizing = [];
+  for (let i = 0; i < Math.min(_children.length, 10); i++) {
+    _sizing.push({ name: _children[i].name, width: Math.round(_children[i].width), height: Math.round(_children[i].height) });
+  }
+
+  const _anatomyMd = [];
+  let _anatIdx = 1;
+  function _walkAnatomy(node, depth) {
+    if (node.type === 'INSTANCE') return;
+    if (depth > 0 && node.name && node.name.charAt(0) !== '_') {
+      const bv = node.boundVariables || {};
+      let token = '—';
+      if (bv.fills && bv.fills[0] && bv.fills[0].id) {
+        const v = varById[bv.fills[0].id];
+        if (v) token = v.name;
+      } else if (node.type === 'TEXT' && node.textStyleId) {
+        const s = textStyleById[node.textStyleId];
+        if (s) token = s.name;
+      }
+      _anatomyMd.push({ idx: _anatIdx++, name: node.name, type: node.type, token: token, depth: depth });
+    }
+    if ('children' in node) {
+      for (let i = 0; i < node.children.length; i++) _walkAnatomy(node.children[i], depth + 1);
+    }
+  }
+  _walkAnatomy(_defaultV, 0);
+
+  function _mdRow(cells) { return '| ' + cells.join(' | ') + ' |'; }
+  function _mdTable(header, rows) {
+    const lines = [_mdRow(header), _mdRow(header.map(function () { return '---'; }))];
+    for (let i = 0; i < rows.length; i++) lines.push(_mdRow(rows[i]));
+    return lines.join('\n');
+  }
+
+  const _dimKeys = Object.keys(_dimensions);
+  const _variantsTable = _dimKeys.length > 0
+    ? _mdTable(['Dimension', 'Values', 'Implementation'],
+        _dimKeys.map(function (k) {
+          const vals = Object.keys(_dimensions[k]);
+          return [k, vals.join(' · '), _dimImpl(vals)];
+        }))
+    : '_(Single component — no variant dimensions)_';
+
+  const _vdKeys = Object.keys(variantDesc);
+  const _variantDescTable = _vdKeys.length > 0
+    ? _mdTable(['Variant', 'Purpose'], _vdKeys.map(function (k) { return [k, variantDesc[k]]; }))
+    : '';
+
+  const _propsTable = _compProps.length > 0
+    ? _mdTable(['Property', 'Type', 'Default', 'Description'],
+        _compProps.map(function (p) { return [p.name, p.type, p.defaultValue, '']; }))
+    : '_(No component properties defined)_';
+
+  const _bindingsTable = resolved.length > 0
+    ? _mdTable(['Node', 'Property', 'Token', 'Resolved Value'],
+        resolved.map(function (b) { return [b.node, b.property, b.token, b.resolvedVal]; }))
+    : '_(No variable or style bindings found)_';
+
+  const _sizingTable = _sizing.length > 0
+    ? _mdTable(['Variant', 'Width', 'Height'],
+        _sizing.map(function (s) { return [s.name, s.width + 'px', s.height + 'px']; }))
+    : '_(No variants)_';
+
+  const _anatomyTable = _anatomyMd.length > 0
+    ? _mdTable(['#', 'Element', 'Type', 'Primary Token', 'Notes'],
+        _anatomyMd.map(function (a) {
+          const indent = a.depth > 1 ? new Array(a.depth).join('  ') : '';
+          return [a.idx, indent + a.name, a.type, a.token, ''];
+        }))
+    : '_(No named elements found in default variant)_';
+
+  const _md = [];
+  _md.push('# ' + compName);
+  _md.push('');
+  _md.push('> ' + (agentDescription ? agentDescription : '_[Add a 1-2 sentence description: what this component is and when to use it]_'));
+  _md.push('');
+  _md.push('---');
+  _md.push('');
+  _md.push('## Variants');
+  _md.push('');
+  _md.push(_variantsTable);
+  _md.push('');
+  if (_variantDescTable) {
+    _md.push('### Variant purposes');
+    _md.push('');
+    _md.push(_variantDescTable);
+    _md.push('');
+  }
+  _md.push('---');
+  _md.push('');
+  _md.push('## Component Properties');
+  _md.push('');
+  _md.push(_propsTable);
+  _md.push('');
+  _md.push('---');
+  _md.push('');
+  _md.push('## Token Bindings');
+  _md.push('');
+  _md.push(_bindingsTable);
+  _md.push('');
+  _md.push('---');
+  _md.push('');
+  _md.push('## Accessibility');
+  _md.push('');
+  _md.push('| Check | Result |');
+  _md.push('|---|---|');
+  _md.push('| Primary text contrast | _[ratio]:1 — WCAG AA pass/fail_ |');
+  _md.push('| Touch target | _[W]×[H]px — pass/fail >=44px_ |');
+  _md.push('| Focus indicator | _[describe]_ |');
+  _md.push('');
+  _md.push('---');
+  _md.push('');
+  _md.push('## Sizing');
+  _md.push('');
+  _md.push(_sizingTable);
+  _md.push('');
+  _md.push('---');
+  _md.push('');
+  _md.push('## Anatomy');
+  _md.push('');
+  _md.push(_anatomyTable);
+  _md.push('');
+  _md.push('---');
+  _md.push('');
+  _md.push('## Usage Rules');
+  _md.push('');
+  _md.push('**Do:**');
+  for (let i = 0; i < usageDo.length; i++) _md.push('- ' + usageDo[i]);
+  _md.push('');
+  _md.push("**Don't:**");
+  for (let i = 0; i < usageDont.length; i++) _md.push('- ' + usageDont[i]);
+  _md.push('');
+  _md.push('---');
+  _md.push('');
+  _md.push('## Figma');
+  _md.push('');
+  _md.push('- **File:** ' + figma.root.name);
+  _md.push('- **Page:** ' + figma.currentPage.name);
+  _md.push('- **Section:** Documentation');
+  _md.push('- **ComponentSet ID:** ' + compSet.id);
+  _md.push('- **Spec Frame:** Documentation · ' + compName + ' · Spec');
+
+  try { figma.viewport.scrollAndZoomIntoView([doc]); } catch (e) {}
+
+  return {
+    componentName: compName,
+    markdown: _md.join('\n'),
+    path: 'component-specs/' + compName + '.md',
+    componentMeta: {
+      type: compMeta.type,
+      variantCount: compMeta.variantCount,
+      width: compMeta.width,
+      height: compMeta.height,
+      propertyCount: _compProps.length
+    },
+    bindingsCount: resolved.length,
+    anatomyCount: _anatomyMd.length,
+    specSheet: { page: figma.currentPage.name, frame: compName + ' · Spec' }
   };
 }

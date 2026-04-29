@@ -23,6 +23,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
 | `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, WCAG validation, spacing scale | After intake and before building collections — validates everything before touching Figma |
 | `apply_ds_setup` | Creates all 5 variable collections in Figma from the prepared config (Primitives, Color, Typography, Spacing, Elevation) | After `prepare_ds_config` confirms `readyToBuild === true` |
+| `generate_component_doc` | Renders a complete spec sheet for a component inside Figma (preview, variants, properties, sizing, anatomy, usage) AND returns the markdown body for `component-specs/[Name].md`. Also writes a `[SPEC]` block to the component description for MCP handover. | When the user wants to document a component for design + LLM code handover. The component must be on the current Figma page. |
 
 ---
 
@@ -65,6 +66,28 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 9. Call `apply_ds_setup` with the config path
 10. Report: collections created, any skipped (already existed), config path for reference
 
+### Document a component
+The Figma spec sheet is for **humans**; the markdown handover is for **agents**. The plugin renders structure and tangible data (variants, sizing, anatomy, token names). The agent must supply the human-readable content — never rely on generic defaults.
+
+1. Ask the user to navigate to the Figma page containing the target component (it must be on the current page) and keep the Figlets Bridge plugin open.
+2. **Inspect first.** Call `inspect_component` (after asking the user to select the component) or read the existing `figma-data.json` snapshot to understand: what the component is, its variants, properties, anatomy, and likely use cases.
+3. **Pre-flight readiness check.** Before generating, evaluate the inspection result for two issues that degrade spec quality. Report any findings to the user clearly and ask whether they'd like to fix them in Figma first or proceed as-is:
+
+   **a. Generic layer names** — scan all direct and shallow children for Figma default names: `Frame NNN`, `Group NNN`, `Rectangle NNN`, `Ellipse NNN`, `Vector NNN`, `Component NNN`. These names appear as-is in the Anatomy section of the spec sheet. Renamed layers produce a readable anatomy; default names produce noise. Example message: _"I noticed 3 layers still have default Figma names (Frame 12, Rectangle 7, Group 3). Renaming them in Figma before generating will make the Anatomy section readable for developers. Want to fix that first, or proceed now?"_
+
+   **b. Missing component properties** — if the node is a COMPONENT_SET with variants but `componentPropertyDefinitions` is empty or has no entries, the Properties table in the spec sheet will be empty. Component properties (boolean toggles, text overrides, variant selectors) are what developers interact with at the API level; without them the spec is incomplete. Example message: _"This component has N variants but no component properties defined. Adding properties in Figma (text overrides, boolean toggles, variant switches) will make the Properties table meaningful. Proceed without them, or fix in Figma first?"_
+
+   If both issues are present, report them together. If the user chooses to fix in Figma: wait for confirmation that they're done, then re-inspect before proceeding. If the user proceeds as-is: continue without further prompting.
+
+4. **Craft the content** based on what you learned. If the user supplied any of these, use their wording verbatim; otherwise generate them yourself as a UX expert would:
+   - `description` — 1–2 sentences: what the component is and when to use it
+   - `usage_do` — 2–3 rules grounded in this specific component's purpose (not generic "ensure 44px touch target" boilerplate unless that's actually the key concern here)
+   - `usage_dont` — 2–3 rules grounded in misuse risks specific to this component
+   - `variant_descriptions` — map of exact variant name → ≤10-word purpose
+5. Call `generate_component_doc` with `component_name` plus all four content inputs.
+6. Use the Write tool to save the returned `markdown` to the returned `path` (e.g. `component-specs/Button.md`). Confirm the path with the user first if it's a new directory.
+7. Tell the user: spec sheet rendered in the Documentation section, markdown saved locally, `[SPEC]` block written to the component description for MCP handover.
+
 ### Full design system health check
 1. Call `sync_figma_data`
 2. Call `detect_design_system`
@@ -85,6 +108,8 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `prepare_ds_config` returns error about missing ramps | Config missing `DS.color.brand` | "Add brand color(s) to the config (name + hex) and try again." |
 | `prepare_ds_config` returns `failCount > 0` | Semantic pairs fail contrast | Show the pairs table, suggest the nearest passing step, update the config, re-run |
 | `apply_ds_setup` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
+| `generate_component_doc` returns "Component not found on current page" | The component is on a different page or named differently | Ask the user to navigate to the page with the component, or confirm the exact component name |
+| `generate_component_doc` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `apply_ds_setup` collection skipped | Collection already exists | Report which were skipped; offer to delete and rebuild if user wants a clean slate |
 
 ---

@@ -11,6 +11,7 @@ let pendingSyncRequest = null;
 let pendingSelectionRequest = null;
 let pendingShowcaseRequest = null;
 let pendingDsSetupRequest = null;
+let pendingDocBuildRequest = null;
 
 const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
 
@@ -127,6 +128,55 @@ const server = http.createServer((req, res) => {
         pendingShowcaseRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingShowcaseRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingShowcaseRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 5b. MCP Agent calls this to trigger a component doc build
+  if (req.method === 'POST' && req.url === '/request-doc-build') {
+    if (pendingPollResponse) {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let docPayload;
+        try { docPayload = JSON.parse(body); } catch { docPayload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'build-doc', data: docPayload }));
+        pendingPollResponse = null;
+
+        pendingDocBuildRequest = res;
+
+        setTimeout(() => {
+          if (pendingDocBuildRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Doc build timed out' }));
+            pendingDocBuildRequest = null;
+          }
+        }, 120000);
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Figma plugin is not connected or listening.' }));
+    }
+    return;
+  }
+
+  // 5c. Figma Plugin posts the doc build result here
+  if (req.method === 'POST' && req.url === '/sync-doc-build') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingDocBuildRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        pendingDocBuildRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingDocBuildRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingDocBuildRequest = null;
       }
     });
     return;

@@ -41,9 +41,25 @@
 
 <script>
   let isExtracting = false;
+  let _watchdog = null;
+
+  function _armWatchdog(label, ms) {
+    if (_watchdog) clearTimeout(_watchdog);
+    _watchdog = setTimeout(function() {
+      _watchdog = null;
+      document.getElementById('status').innerText = 'Listening for Agent';
+      document.getElementById('substatus').innerText = label + ' timed out — resuming.';
+      isExtracting = false;
+      poll();
+    }, ms);
+  }
+
+  function _disarmWatchdog() {
+    if (_watchdog) { clearTimeout(_watchdog); _watchdog = null; }
+  }
 
   async function poll() {
-    if (isExtracting) return; // Wait until extraction is done before polling again
+    if (isExtracting) return;
 
     try {
       const res = await fetch('http://localhost:1337/poll');
@@ -51,33 +67,42 @@
         const data = await res.json();
         if (data.command === 'extract' || data.command === 'extract-all') {
           isExtracting = true;
+          _armWatchdog('Sync', 30000);
           document.getElementById('status').innerText = 'Extracting data...';
           document.getElementById('substatus').innerText = 'Sync triggered by agent.';
           parent.postMessage({ pluginMessage: { type: 'extract-all' } }, '*');
         } else if (data.command === 'extract-selection') {
           isExtracting = true;
+          _armWatchdog('Inspect', 12000);
           document.getElementById('status').innerText = 'Extracting selection...';
           document.getElementById('substatus').innerText = 'Inspect triggered by agent.';
           parent.postMessage({ pluginMessage: { type: 'extract-selection' } }, '*');
         } else if (data.command === 'build-showcase') {
           isExtracting = true;
+          _armWatchdog('Showcase', 120000);
           document.getElementById('status').innerText = 'Building showcase...';
           document.getElementById('substatus').innerText = 'Rendering token tables in Figma.';
           parent.postMessage({ pluginMessage: { type: 'build-showcase' } }, '*');
         } else if (data.command === 'apply-ds-setup') {
           isExtracting = true;
+          _armWatchdog('DS setup', 60000);
           document.getElementById('status').innerText = 'Creating collections...';
           document.getElementById('substatus').innerText = 'Building DS variables in Figma.';
           parent.postMessage({ pluginMessage: { type: 'apply-ds-setup', data: data.data } }, '*');
+        } else if (data.command === 'build-doc') {
+          isExtracting = true;
+          _armWatchdog('Doc build', 60000);
+          document.getElementById('status').innerText = 'Building component doc...';
+          document.getElementById('substatus').innerText = 'Rendering spec sheet in Figma.';
+          parent.postMessage({ pluginMessage: { type: 'build-doc', data: data.data } }, '*');
         }
       }
     } catch (err) {
       document.getElementById('status').innerText = 'Offline';
       document.getElementById('substatus').innerText = 'Receiver not running. Retrying...';
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(function(resolve) { setTimeout(resolve, 2000); });
     }
-    
-    // Poll again
+
     if (!isExtracting) {
       poll();
     }
@@ -87,6 +112,7 @@
     const msg = event.data.pluginMessage;
     
     if (msg.type === 'showcase-built') {
+      _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
         await fetch('http://localhost:1337/sync-showcase', {
@@ -105,7 +131,28 @@
       return;
     }
 
+    if (msg.type === 'doc-built') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch('http://localhost:1337/sync-doc-build', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Doc build failed.' : 'Spec sheet rendered.';
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
     if (msg.type === 'ds-setup-done') {
+      _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
         await fetch('http://localhost:1337/sync-ds-setup', {
@@ -125,6 +172,7 @@
     }
 
     if (msg.type === 'data-extracted' || msg.type === 'selection-extracted') {
+      _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending payload...';
       const endpoint = msg.type === 'selection-extracted' ? '/sync-selection' : '/sync';
       

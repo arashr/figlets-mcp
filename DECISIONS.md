@@ -4,6 +4,46 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-04-29] Cache the last non-empty Figma selection in the plugin main thread
+
+**Decision:** `packages/figma-bridge-plugin/code.js` now records selection snapshots on `selectionchange` and `currentpagechange`, and `extract-selection` may fall back to the last non-empty snapshot from the same page when the live `figma.currentPage.selection` is unexpectedly empty.
+
+**Why:**
+- The current regression is not a timeout anymore; the plugin responds quickly but sometimes sees `figma.currentPage.selection` as `[]` at command time.
+- The failure is most likely transient runtime state around plugin/UI focus rather than a real lack of user selection. If we only sample once at message time, the agent loses the selection entirely.
+- Caching in the main plugin thread is cheap, deterministic, and gives us better diagnostics in the Figma console without changing the MCP contract.
+- Restricting fallback to the same page and a recent snapshot keeps the recovery path narrow and reduces the risk of inspecting a stale selection from unrelated work.
+
+**Consequence:** `inspect_component` is more resilient to transient empty reads, and the Figma plugin console now exposes enough state (`live`, `lastNonEmpty`, `usedFallback`) to confirm whether the bug is focus-related or a deeper Figma regression.
+
+---
+
+## [2026-04-29] Guard component property reads by node type during selection serialization
+
+**Decision:** `serializeNode()` in `packages/figma-bridge-plugin/code.js` must only read `componentPropertyDefinitions` from `COMPONENT_SET` nodes and standalone `COMPONENT` nodes. Variant children inside a component set must not be queried for property definitions.
+
+**Why:**
+- Figma throws `Can only get component property definitions of a component set or non-variant component` when that field is accessed on a variant child.
+- This exception made `inspect_component` look like an empty-selection bug even when the selected component set was present and cached correctly.
+- The plugin needs to serialize nested variant children safely, so the serializer must follow Figma's node-type contract instead of relying on `'componentPropertyDefinitions' in node`.
+
+**Consequence:** Selection extraction no longer aborts while walking variant children. The debug logs now reflect the true selection state, and `inspect_component` can proceed to structural analysis.
+
+---
+
+## [2026-04-29] Surface current selection and session activity directly in the plugin UI
+
+**Decision:** The bridge plugin UI should display two live, session-scoped panels under the status area: (1) current selection summary, and (2) chronological session log. The log remains in memory only and is not persisted to disk or posted anywhere.
+
+**Why:**
+- The plugin is long-lived and agent-driven, so users need immediate visibility into what the bridge thinks is selected and what command just ran.
+- Console-only debugging is too hidden for normal use; basic operational state should be visible in the plugin itself.
+- Keeping the log session-local avoids creating noisy artifacts or new storage rules while still making the plugin much easier to debug.
+
+**Consequence:** `code.js` now pushes `selection-state`, session log history, and incremental log entries into the UI, and `ui.html` renders a larger dashboard-style panel with live selection and execution history.
+
+---
+
 ## [2026-04-28] Port `/fig-document` next; defer `/fig-create`; extend `audit_tokens` with auto-fix after
 
 **Decision:** With `/fig-setup` and `/fig-ds-showcase` already migrated, prioritize porting `/fig-document` as `generate_component_doc` before either `/fig-qa` auto-fix or `/fig-create`. Decompose `/fig-create` later, only after at least one adapter is scaffolded.
@@ -397,4 +437,3 @@ Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats`
 - Separating the "show the glyph" decision from the "pass WCAG AA" decision is cleaner: `forceIndicator` controls presence, the badge controls grading.
 
 **Consequence:** Icon swatches always show the indicator glyph. Non-icon swatches continue to gate on 4.5:1. The WCAG badge reflects true pass/fail for both.
-

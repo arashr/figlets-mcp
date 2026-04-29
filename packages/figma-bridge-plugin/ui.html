@@ -1,21 +1,30 @@
 <style>
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
   body {
     font-family: Inter, sans-serif;
-    padding: 20px;
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
     background-color: #222;
     color: white;
+  }
+  .app {
+    box-sizing: border-box;
+    height: 100%;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    overflow: hidden;
   }
   .pulse {
     width: 12px;
     height: 12px;
     background-color: #18A0FB;
     border-radius: 50%;
-    margin-bottom: 12px;
+    margin: 0 auto 12px auto;
     animation: pulse 2s infinite;
   }
   @keyframes pulse {
@@ -27,21 +36,133 @@
     font-size: 13px;
     font-weight: 500;
     color: #eee;
+    text-align: center;
   }
   #substatus {
-    margin-top: 6px;
     font-size: 11px;
     color: #aaa;
+    text-align: center;
+  }
+  .panel {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 10px;
+    box-sizing: border-box;
+  }
+  .log-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8fc7ff;
+    margin-bottom: 8px;
+  }
+  #selection-state {
+    font-size: 12px;
+    color: #f0f4f8;
+    line-height: 1.5;
+  }
+  #session-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #d5dde5;
+  }
+  .log-entry + .log-entry {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .log-time {
+    color: #8d9aa7;
+    margin-right: 6px;
+  }
+  .empty {
+    color: #8d9aa7;
   }
 </style>
 
-<div class="pulse"></div>
-<div id="status">Listening for Agent</div>
-<div id="substatus">Keep this plugin open...</div>
+<div class="app">
+  <div class="pulse"></div>
+  <div id="status">Listening for Agent</div>
+  <div id="substatus">Keep this plugin open...</div>
+  <div class="panel">
+    <div class="panel-title">Current Selection</div>
+    <div id="selection-state" class="empty">No selection yet.</div>
+  </div>
+  <div class="panel log-panel">
+    <div class="panel-title">Session Log</div>
+    <div id="session-log" class="empty">No actions yet.</div>
+  </div>
+</div>
 
 <script>
   let isExtracting = false;
   let _watchdog = null;
+  let _sessionLog = [];
+
+  function _fmtTime(ts) {
+    const d = new Date(ts);
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    return h + ':' + m + ':' + s;
+  }
+
+  function _renderSessionLog() {
+    const el = document.getElementById('session-log');
+    if (!_sessionLog.length) {
+      el.className = 'empty';
+      el.innerText = 'No actions yet.';
+      return;
+    }
+
+    el.className = '';
+    el.innerHTML = _sessionLog.map(function(entry) {
+      return '<div class="log-entry"><span class="log-time">' +
+        _fmtTime(entry.ts) +
+        '</span><span>' +
+        entry.message
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;') +
+        '</span></div>';
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function _appendLog(message) {
+    _sessionLog.push({
+      ts: Date.now(),
+      message: message
+    });
+    _renderSessionLog();
+  }
+
+  function _setSelectionState(data) {
+    const el = document.getElementById('selection-state');
+    if (!data || !data.count) {
+      el.className = 'empty';
+      el.innerHTML = 'No current selection.';
+      return;
+    }
+
+    el.className = '';
+    el.innerHTML =
+      '<div><strong>' + data.count + '</strong> node' + (data.count === 1 ? '' : 's') + ' selected</div>' +
+      '<div>Page: ' + (data.pageName || 'Unknown') + '</div>' +
+      '<div>Source: ' + (data.source || 'Unknown') + '</div>' +
+      '<div>Items: ' + data.names.join(', ') + '</div>';
+  }
 
   function _armWatchdog(label, ms) {
     if (_watchdog) clearTimeout(_watchdog);
@@ -49,6 +170,7 @@
       _watchdog = null;
       document.getElementById('status').innerText = 'Listening for Agent';
       document.getElementById('substatus').innerText = label + ' timed out — resuming.';
+      _appendLog(label + ' timed out; resuming poll loop.');
       isExtracting = false;
       poll();
     }, ms);
@@ -70,30 +192,35 @@
           _armWatchdog('Sync', 30000);
           document.getElementById('status').innerText = 'Extracting data...';
           document.getElementById('substatus').innerText = 'Sync triggered by agent.';
+          _appendLog('Received command: sync_figma_data.');
           parent.postMessage({ pluginMessage: { type: 'extract-all' } }, '*');
         } else if (data.command === 'extract-selection') {
           isExtracting = true;
           _armWatchdog('Inspect', 12000);
           document.getElementById('status').innerText = 'Extracting selection...';
           document.getElementById('substatus').innerText = 'Inspect triggered by agent.';
+          _appendLog('Received command: inspect_component.');
           parent.postMessage({ pluginMessage: { type: 'extract-selection' } }, '*');
         } else if (data.command === 'build-showcase') {
           isExtracting = true;
           _armWatchdog('Showcase', 120000);
           document.getElementById('status').innerText = 'Building showcase...';
           document.getElementById('substatus').innerText = 'Rendering token tables in Figma.';
+          _appendLog('Received command: build_ds_showcase.');
           parent.postMessage({ pluginMessage: { type: 'build-showcase' } }, '*');
         } else if (data.command === 'apply-ds-setup') {
           isExtracting = true;
           _armWatchdog('DS setup', 60000);
           document.getElementById('status').innerText = 'Creating collections...';
           document.getElementById('substatus').innerText = 'Building DS variables in Figma.';
+          _appendLog('Received command: apply_ds_setup.');
           parent.postMessage({ pluginMessage: { type: 'apply-ds-setup', data: data.data } }, '*');
         } else if (data.command === 'build-doc') {
           isExtracting = true;
           _armWatchdog('Doc build', 60000);
           document.getElementById('status').innerText = 'Building component doc...';
           document.getElementById('substatus').innerText = 'Rendering spec sheet in Figma.';
+          _appendLog('Received command: generate_component_doc.');
           parent.postMessage({ pluginMessage: { type: 'build-doc', data: data.data } }, '*');
         }
       }
@@ -110,6 +237,23 @@
 
   onmessage = async (event) => {
     const msg = event.data.pluginMessage;
+
+    if (msg.type === 'selection-state') {
+      _setSelectionState(msg.data);
+      return;
+    }
+
+    if (msg.type === 'session-log-history') {
+      _sessionLog = Array.isArray(msg.data) ? msg.data.slice() : [];
+      _renderSessionLog();
+      return;
+    }
+
+    if (msg.type === 'session-log-entry') {
+      _sessionLog.push(msg.data);
+      _renderSessionLog();
+      return;
+    }
     
     if (msg.type === 'showcase-built') {
       _disarmWatchdog();
@@ -122,9 +266,11 @@
         });
         document.getElementById('status').innerText = 'Listening for Agent';
         document.getElementById('substatus').innerText = 'Showcase built successfully.';
+        _appendLog(msg.data.error ? 'Showcase build returned an error.' : 'Showcase result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send showcase result to receiver.');
       }
       isExtracting = false;
       poll();
@@ -142,9 +288,11 @@
         });
         document.getElementById('status').innerText = 'Listening for Agent';
         document.getElementById('substatus').innerText = msg.data.error ? 'Doc build failed.' : 'Spec sheet rendered.';
+        _appendLog(msg.data.error ? 'Doc build failed in plugin.' : 'Doc build result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send doc build result to receiver.');
       }
       isExtracting = false;
       poll();
@@ -162,9 +310,11 @@
         });
         document.getElementById('status').innerText = 'Listening for Agent';
         document.getElementById('substatus').innerText = msg.data.error ? 'Setup failed.' : 'DS collections created.';
+        _appendLog(msg.data.error ? 'DS setup failed in plugin.' : 'DS setup result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send DS setup result to receiver.');
       }
       isExtracting = false;
       poll();
@@ -186,14 +336,17 @@
         if (response.ok) {
           document.getElementById('status').innerText = 'Listening for Agent';
           document.getElementById('substatus').innerText = 'Last sync successful.';
+          _appendLog(msg.type === 'selection-extracted' ? 'Selection payload sent to receiver.' : 'Snapshot payload sent to receiver.');
           parent.postMessage({ pluginMessage: { type: 'sync-success' } }, '*');
         } else {
           document.getElementById('status').innerText = 'Server Error';
           document.getElementById('substatus').innerText = 'Status: ' + response.status;
+          _appendLog('Receiver returned status ' + response.status + '.');
         }
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send payload to receiver.');
       }
       
       isExtracting = false;
@@ -202,5 +355,7 @@
   }
 
   // Start polling immediately
+  parent.postMessage({ pluginMessage: { type: 'ui-ready' } }, '*');
+  _appendLog('Plugin UI ready.');
   poll();
 </script>

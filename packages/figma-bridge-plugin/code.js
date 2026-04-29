@@ -1,4 +1,90 @@
-figma.showUI(__html__, { width: 240, height: 120, themeColors: true });
+figma.showUI(__html__, { width: 320, height: 420, themeColors: true });
+
+var _sessionLog = [];
+
+function _appendSessionLog(message) {
+  var entry = {
+    ts: Date.now(),
+    message: message
+  };
+  _sessionLog.push(entry);
+  console.log("[figlets] log", JSON.stringify(entry));
+  figma.ui.postMessage({ type: "session-log-entry", data: entry });
+}
+
+var _selectionCache = {
+  current: {
+    nodes: [],
+    pageId: null,
+    pageName: "",
+    ts: 0,
+    source: "startup"
+  },
+  lastNonEmpty: {
+    nodes: [],
+    pageId: null,
+    pageName: "",
+    ts: 0,
+    source: "startup"
+  }
+};
+
+function _selectionDebug(snapshot) {
+  return {
+    count: snapshot.nodes.length,
+    names: snapshot.nodes.map(function(node) { return node.name; }),
+    ids: snapshot.nodes.map(function(node) { return node.id; }),
+    types: snapshot.nodes.map(function(node) { return node.type; }),
+    pageId: snapshot.pageId,
+    pageName: snapshot.pageName,
+    source: snapshot.source,
+    ts: snapshot.ts
+  };
+}
+
+function _captureSelectionSnapshot(source) {
+  var selection = [];
+  if (figma.currentPage && figma.currentPage.selection) {
+    selection = figma.currentPage.selection.slice();
+  }
+
+  var snapshot = {
+    nodes: selection,
+    pageId: figma.currentPage ? figma.currentPage.id : null,
+    pageName: figma.currentPage ? figma.currentPage.name : "",
+    ts: Date.now(),
+    source: source || "unknown"
+  };
+
+  _selectionCache.current = snapshot;
+  if (selection.length > 0) {
+    _selectionCache.lastNonEmpty = snapshot;
+  }
+
+  console.log("[figlets] selection snapshot", JSON.stringify(_selectionDebug(snapshot)));
+  figma.ui.postMessage({
+    type: "selection-state",
+    data: {
+      count: snapshot.nodes.length,
+      pageName: snapshot.pageName,
+      source: snapshot.source,
+      names: snapshot.nodes.map(function(node) { return node.name; }),
+      types: snapshot.nodes.map(function(node) { return node.type; })
+    }
+  });
+  return snapshot;
+}
+
+_captureSelectionSnapshot("startup");
+_appendSessionLog("Plugin session started.");
+figma.on("selectionchange", function() {
+  _captureSelectionSnapshot("selectionchange");
+  _appendSessionLog("Selection changed.");
+});
+figma.on("currentpagechange", function() {
+  _captureSelectionSnapshot("currentpagechange");
+  _appendSessionLog("Current page changed to " + (figma.currentPage ? figma.currentPage.name : "unknown") + ".");
+});
 
 function serializeNode(node) {
   const result = {
@@ -9,8 +95,21 @@ function serializeNode(node) {
 
   if ('description' in node) result.description = node.description || "";
   if ('documentationLinks' in node) result.documentationLinks = node.documentationLinks || [];
-  if ('componentPropertyDefinitions' in node) result.componentPropertyDefinitions = node.componentPropertyDefinitions;
-  if ('componentProperties' in node) result.componentProperties = node.componentProperties;
+  if (node.type === 'COMPONENT_SET') {
+    result.componentPropertyDefinitions = node.componentPropertyDefinitions;
+  } else if (node.type === 'COMPONENT') {
+    if (!node.parent || node.parent.type !== 'COMPONENT_SET') {
+      result.componentPropertyDefinitions = node.componentPropertyDefinitions;
+    }
+  }
+
+  if (
+    node.type === 'INSTANCE' ||
+    node.type === 'COMPONENT' ||
+    node.type === 'COMPONENT_SET'
+  ) {
+    result.componentProperties = node.componentProperties;
+  }
 
   if ('layoutMode' in node) result.layoutMode = node.layoutMode;
   if ('paddingTop' in node) {
@@ -31,7 +130,17 @@ function serializeNode(node) {
 }
 
 figma.ui.onmessage = async (msg) => {
+  if (msg.type === 'ui-ready') {
+    figma.ui.postMessage({
+      type: 'session-log-history',
+      data: _sessionLog.slice()
+    });
+    _captureSelectionSnapshot("ui-ready");
+    return;
+  }
+
   if (msg.type === 'extract-all') {
+    _appendSessionLog('Executing sync_figma_data.');
     const collections = await figma.variables.getLocalVariableCollectionsAsync();
     const variables = await figma.variables.getLocalVariablesAsync();
     const textStyles = await figma.getLocalTextStylesAsync();
@@ -77,14 +186,54 @@ figma.ui.onmessage = async (msg) => {
     };
 
     figma.ui.postMessage({ type: 'data-extracted', data: payload });
+    _appendSessionLog('Completed sync_figma_data.');
   }
 
   if (msg.type === 'extract-selection') {
     try {
-      const selection = figma.currentPage.selection;
-      const payload = { selection: selection.map(function(node) { return serializeNode(node); }) };
+      _appendSessionLog('Executing inspect_component.');
+      var liveSnapshot = _captureSelectionSnapshot("extract-selection");
+      var chosenSnapshot = liveSnapshot;
+      var usedFallback = false;
+      var fallbackReason = "";
+      var lastNonEmpty = _selectionCache.lastNonEmpty;
+
+      if (
+        liveSnapshot.nodes.length === 0 &&
+        lastNonEmpty.nodes.length > 0 &&
+        lastNonEmpty.pageId === liveSnapshot.pageId &&
+        (liveSnapshot.ts - lastNonEmpty.ts) < 300000
+      ) {
+        chosenSnapshot = lastNonEmpty;
+        usedFallback = true;
+        fallbackReason = "Live selection was empty; using last non-empty snapshot from the same page.";
+      }
+
+      console.log("[figlets] extract-selection", JSON.stringify({
+        live: _selectionDebug(liveSnapshot),
+        lastNonEmpty: _selectionDebug(lastNonEmpty),
+        chosenSource: chosenSnapshot.source,
+        usedFallback: usedFallback,
+        fallbackReason: fallbackReason
+      }));
+
+      var payload = {
+        selection: chosenSnapshot.nodes.map(function(node) { return serializeNode(node); }),
+        meta: {
+          usedFallback: usedFallback,
+          fallbackReason: fallbackReason,
+          liveSelectionCount: liveSnapshot.nodes.length,
+          cachedSelectionCount: lastNonEmpty.nodes.length,
+          pageId: liveSnapshot.pageId,
+          pageName: liveSnapshot.pageName,
+          chosenSource: chosenSnapshot.source,
+          cachedAgeMs: usedFallback ? (liveSnapshot.ts - lastNonEmpty.ts) : 0
+        }
+      };
       figma.ui.postMessage({ type: 'selection-extracted', data: payload });
+      _appendSessionLog('Completed inspect_component.');
     } catch (err) {
+      _appendSessionLog('inspect_component failed: ' + (err && err.message ? err.message : 'serializeNode failed'));
       figma.ui.postMessage({ type: 'selection-extracted', data: { error: err.message || 'serializeNode failed', selection: [] } });
     }
   }
@@ -100,11 +249,14 @@ figma.ui.onmessage = async (msg) => {
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'build-showcase') {
     try {
+      _appendSessionLog('Executing build_ds_showcase.');
       const result = await _buildShowcase();
       figma.ui.postMessage({ type: 'showcase-built', data: result });
+      _appendSessionLog('Completed build_ds_showcase.');
       figma.notify('Token showcase built!');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
+      _appendSessionLog('build_ds_showcase failed: ' + _errMsg);
       figma.ui.postMessage({ type: 'showcase-built', data: { error: _errMsg || 'Unknown error' } });
     }
   }
@@ -115,10 +267,13 @@ figma.ui.onmessage = async (msg) => {
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'apply-ds-setup') {
     try {
+      _appendSessionLog('Executing apply_ds_setup.');
       const result = await _applyDsSetup(msg.data);
       figma.ui.postMessage({ type: 'ds-setup-done', data: result });
+      _appendSessionLog('Completed apply_ds_setup.');
       figma.notify('Design system collections created!');
     } catch (err) {
+      _appendSessionLog('apply_ds_setup failed: ' + err.message);
       figma.ui.postMessage({ type: 'ds-setup-done', data: { error: err.message } });
     }
   }
@@ -130,11 +285,14 @@ figma.ui.onmessage = async (msg) => {
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'build-doc') {
     try {
+      _appendSessionLog('Executing generate_component_doc.');
       const result = await _buildComponentDoc(msg.data || {});
       figma.ui.postMessage({ type: 'doc-built', data: result });
+      _appendSessionLog(result && result.error ? ('generate_component_doc failed: ' + result.error) : 'Completed generate_component_doc.');
       if (!result.error) figma.notify('Component spec sheet built!');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
+      _appendSessionLog('generate_component_doc failed: ' + _errMsg);
       figma.ui.postMessage({ type: 'doc-built', data: { error: _errMsg || 'Unknown error' } });
     }
   }

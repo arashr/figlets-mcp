@@ -219,6 +219,25 @@ All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
 ---
 
+### [2026-04-29 — inspect_component selection debugging hardening]
+
+- Investigated the open `inspect_component` regression where the bridge now responds quickly but returns `selection: []` from `figma.currentPage.selection`.
+- Added plugin-side selection instrumentation in `packages/figma-bridge-plugin/code.js`:
+  - caches both the current selection snapshot and the last non-empty snapshot in the main plugin thread
+  - logs every `selectionchange`, `currentpagechange`, and `extract-selection` snapshot to the Figma plugin console with names, ids, types, page, and source
+  - includes `meta.usedFallback`, counts, and cache age in the `/sync-selection` payload
+- Added a guarded fallback for `extract-selection`: if the live selection is empty but the plugin has a recent non-empty snapshot from the same page, the bridge serializes that cached snapshot instead. This is meant to cover transient focus-related clears while keeping intentional cross-page stale selections out.
+- Figma console debugging showed the selected node was present (`Button 1.0.0`, `COMPONENT_SET`) and the real failure was elsewhere: `serializeNode()` was reading `componentPropertyDefinitions` on variant child components, which throws in Figma with `Can only get component property definitions of a component set or non-variant component`.
+- Fixed `serializeNode()` to read `componentPropertyDefinitions` only for `COMPONENT_SET` and standalone `COMPONENT` nodes, while still including `componentProperties` for `INSTANCE` / `COMPONENT` / `COMPONENT_SET`.
+- Expanded the bridge plugin UI for live session visibility:
+  - current selection panel under the main status, showing count, page, source, and selected node names
+  - in-session chronological log panel under selection, showing command execution and bridge events only for the active plugin session
+  - plugin main thread now replays session log history and current selection to the UI on `ui-ready`
+- `node --check packages/figma-bridge-plugin/code.js` passes.
+- Full `node tests/run-tests.js` could not complete in the Codex sandbox because the bridge receiver tests hit `listen EPERM: operation not permitted 0.0.0.0`; this needs either an adjusted test bind address or an unrestricted run.
+
+---
+
 ### [2026-04-27 — showcase token label and pairing observability]
 
 **Problem:** Semantic color swatches showed only the leaf segment of the variable path (e.g. `brand`) with no context about what role it plays or what it pairs with. Typography section showed both text-style rows and variable-based rows simultaneously, causing duplicates.

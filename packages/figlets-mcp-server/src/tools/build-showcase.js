@@ -39,6 +39,7 @@ function handleBuildShowcase() {
                 text: JSON.stringify({
                   sections: result.sections || [],
                   layout: result.layout || "horizontal",
+                  bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
                   message: `Showcase built — ${(result.sections || []).length} section(s) rendered on page '00 · Tokens'.`,
                 }, null, 2)
               }]

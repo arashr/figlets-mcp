@@ -675,6 +675,74 @@ async function _createDsBindingContext() {
     return null;
   }
 
+  function normalizeName(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function buildTypographyVariableGroups() {
+    const groups = {};
+    let sharedFamilyVar = null;
+    for (let i = 0; i < allVars.length; i++) {
+      const variable = allVars[i];
+      if (!variable || !variable.name) continue;
+      const name = String(variable.name);
+      if (variable.resolvedType === 'STRING' && /(?:^|\/)(family|font-family|fontFamily)(?:\/|$|-)/i.test(name)) {
+        if (!sharedFamilyVar) sharedFamilyVar = variable;
+      }
+      if (variable.resolvedType !== 'FLOAT' && variable.resolvedType !== 'STRING') continue;
+      const parts = name.split('/');
+      if (parts.length < 4) continue;
+      if (!/^(type|typo|typography)$/i.test(parts[0])) continue;
+      const prop = parts[parts.length - 1].toLowerCase();
+      const key = parts.slice(0, -1).join('/');
+      if (!groups[key]) groups[key] = { key: key };
+      if (prop === 'size' || prop === 'font-size' || prop === 'fontsize') groups[key].sizeVar = variable;
+      if (prop === 'line-height' || prop === 'lineheight' || prop === 'leading') groups[key].lineHeightVar = variable;
+      if (prop === 'weight' || prop === 'font-weight' || prop === 'fontweight') groups[key].weightVar = variable;
+      if (prop === 'tracking' || prop === 'letter-spacing' || prop === 'letterspacing') groups[key].trackingVar = variable;
+      if (prop === 'family' || prop === 'font-family' || prop === 'fontfamily') groups[key].familyVar = variable;
+    }
+    return Object.keys(groups).sort().map(function (key) {
+      const group = groups[key];
+      group.familyVar = group.familyVar || sharedFamilyVar || null;
+      group.sizeValue = group.sizeVar ? resolveVarValue(group.sizeVar) : null;
+      group.lineHeightValue = group.lineHeightVar ? resolveVarValue(group.lineHeightVar) : null;
+      group.weightValue = group.weightVar ? resolveVarValue(group.weightVar) : null;
+      group.trackingValue = group.trackingVar ? resolveVarValue(group.trackingVar) : null;
+      group.familyValue = group.familyVar ? resolveVarValue(group.familyVar) : null;
+      return group;
+    });
+  }
+
+  const typographyVariableGroups = buildTypographyVariableGroups();
+
+  function pickTypographyVariableGroup(patterns) {
+    const normalizedPatterns = (patterns || []).map(normalizeName);
+    for (let i = 0; i < typographyVariableGroups.length; i++) {
+      const group = typographyVariableGroups[i];
+      const groupName = normalizeName(group.key);
+      for (let j = 0; j < normalizedPatterns.length; j++) {
+        const pattern = normalizedPatterns[j];
+        if (pattern && (groupName.indexOf(pattern) >= 0 || pattern.indexOf(groupName) >= 0)) return group;
+      }
+    }
+    return null;
+  }
+
+  function pickTypographyBinding(role, patterns) {
+    const style = pickTextStyleLike(patterns);
+    if (style) return { kind: 'style', role: role, style: style, warning: null };
+    const variableGroup = pickTypographyVariableGroup(patterns);
+    if (variableGroup && (variableGroup.sizeVar || variableGroup.lineHeightVar || variableGroup.weightVar || variableGroup.familyVar)) {
+      return { kind: 'variables', role: role, variables: variableGroup, warning: null };
+    }
+    return {
+      kind: 'raw',
+      role: role,
+      warning: 'No typography style or typography variables found for ' + role + '; using raw text values.'
+    };
+  }
+
   function paint(fallbackRGB, variable) {
     const base = { type: 'SOLID', color: fallbackRGB };
     return variable ? figma.variables.setBoundVariableForPaint(base, 'color', variable) : base;
@@ -701,6 +769,9 @@ async function _createDsBindingContext() {
     pickColorRole,
     pickFloatByValue,
     pickTextStyleLike,
+    pickTypographyBinding,
+    pickTypographyVariableGroup,
+    typographyVariableGroups,
     resolvedOrFallback,
     paint,
     bindVar
@@ -718,6 +789,14 @@ async function _buildShowcase() {
   const _dsStruct_allColls = await figma.variables.getLocalVariableCollectionsAsync();
   const textStyles          = await figma.getLocalTextStylesAsync();
   const effectStyles        = await figma.getLocalEffectStylesAsync();
+  const _binding = await _createDsBindingContext();
+  const _showcaseBindingWarnings = [];
+  const _showcaseBindingWarningSet = {};
+  function _warnShowcaseBinding(message) {
+    if (!message || _showcaseBindingWarningSet[message]) return;
+    _showcaseBindingWarningSet[message] = true;
+    _showcaseBindingWarnings.push(message);
+  }
 
   const varByName = Object.fromEntries(
     [..._dsStruct_allVars]
@@ -1278,40 +1357,21 @@ async function _buildShowcase() {
     return t;
   }
 
-  const _floatVarsForBinding = _dsStruct_allVars.filter(v => v.resolvedType === 'FLOAT');
-
   function _pickFloatVarByValue(value, purpose) {
-    const want = Number(value);
-    if (!isFinite(want)) return null;
-    const pattern = purpose === 'typography'
-      ? /font|size|line|tracking|letter|weight|type|typo|text/i
-      : purpose === 'border'
-        ? /border|stroke|outline/i
-        : purpose === 'radius'
-          ? /radius|corner|round/i
-          : /space|spacing|gap|padding|margin|inset|size/i;
-    let fallback = null;
-    let best = null;
-    let bestDepth = -1;
-    for (let i = 0; i < _floatVarsForBinding.length; i++) {
-      const v = _floatVarsForBinding[i];
-      const val = resolveVarValue(v);
-      if (typeof val !== 'number' || Number(val) !== want) continue;
-      const depth = String(v.name).split('/').length;
-      if (!fallback || depth > String(fallback.name).split('/').length) fallback = v;
-      if (pattern.test(v.name) && depth > bestDepth) {
-        best = v;
-        bestDepth = depth;
-      }
-    }
-    return best || fallback;
+    return _binding.pickFloatByValue(value, purpose);
   }
 
   function _bindNumericProp(node, prop, value, purpose) {
     if (!node || !(prop in node) || typeof value !== 'number' || !isFinite(value)) return false;
     const variable = _pickFloatVarByValue(value, purpose);
-    if (!variable) return false;
-    try { node.setBoundVariable(prop, variable); return true; } catch (_) { return false; }
+    if (!variable) {
+      _warnShowcaseBinding('No ' + purpose + ' variable found for value ' + value + '; using raw ' + prop + '.');
+      return false;
+    }
+    try { node.setBoundVariable(prop, variable); return true; } catch (_) {
+      _warnShowcaseBinding('Could not bind ' + prop + ' to ' + variable.name + '; using raw value.');
+      return false;
+    }
   }
 
   function _fontStyleWeight(styleName) {
@@ -2946,6 +3006,7 @@ async function _buildShowcase() {
   return {
     sections: _builtSections,
     layout: 'horizontal, 100px gap between Figma sections',
+    bindingWarnings: _showcaseBindingWarnings
   };
 }
 
@@ -3759,14 +3820,38 @@ async function _buildComponentDoc(opts) {
     borderStrong: _ds.pickFloatByValue(2, 'border')
   };
 
-  const _docTextStyles = {
-    title: _ds.pickTextStyleLike(['type/display/lg', 'display/lg', 'display large', 'type/headline/lg', 'headline/lg', 'title/lg', 'title large']),
-    subtitle: _ds.pickTextStyleLike(['type/body/lg', 'body/lg', 'body large', 'type/body/md', 'body/md', 'body medium', 'paragraph']),
-    sectionLabel: _ds.pickTextStyleLike(['type/label/sm', 'label/sm', 'label small', 'caption', 'overline']),
-    bodyStrong: _ds.pickTextStyleLike(['type/label/md', 'label/md', 'label medium', 'type/body/md', 'body/md', 'body medium']),
-    body: _ds.pickTextStyleLike(['type/body/md', 'body/md', 'body medium', 'paragraph', 'type/body/sm', 'body/sm', 'body small']),
-    mono: _ds.pickTextStyleLike(['code', 'mono', 'type/body/sm', 'body/sm', 'body small'])
+  const _docTextRoles = {
+    title: ['type/display/lg', 'display/lg', 'display large', 'type/headline/lg', 'headline/lg', 'title/lg', 'title large'],
+    subtitle: ['type/body/lg', 'body/lg', 'body large', 'type/body/md', 'body/md', 'body medium', 'paragraph'],
+    sectionLabel: ['type/label/sm', 'label/sm', 'label small', 'caption', 'overline'],
+    bodyStrong: ['type/label/md', 'label/md', 'label medium', 'type/body/md', 'body/md', 'body medium'],
+    body: ['type/body/md', 'body/md', 'body medium', 'paragraph', 'type/body/sm', 'body/sm', 'body small'],
+    mono: ['code', 'mono', 'type/body/sm', 'body/sm', 'body small']
   };
+  const _docTypeBindings = {};
+  Object.keys(_docTextRoles).forEach(function (role) {
+    _docTypeBindings[role] = _ds.pickTypographyBinding(role, _docTextRoles[role]);
+  });
+  const _docBindingWarnings = [];
+  const _docBindingWarningSet = {};
+
+  function _warnBinding(message) {
+    if (!message || _docBindingWarningSet[message]) return;
+    _docBindingWarningSet[message] = true;
+    _docBindingWarnings.push(message);
+  }
+  Object.keys(_docSpace).forEach(function (key) {
+    if (!_docSpace[key]) _warnBinding('No numeric variable found for doc ' + key + '; using raw layout value.');
+  });
+  [
+    ['paper surface', _vPaper],
+    ['surface', _vSurface],
+    ['primary text', _vInk],
+    ['secondary text', _vSubtle],
+    ['border', _vBorder]
+  ].forEach(function (item) {
+    if (!item[1]) _warnBinding('No color variable found for doc ' + item[0] + '; using raw color value.');
+  });
 
   function _hasMeaningfulAnatomy(root) {
     if (!('children' in root) || !root.children || root.children.length === 0) return false;
@@ -3778,12 +3863,28 @@ async function _buildComponentDoc(opts) {
   }
 
   function _applyTextRole(t, role, fallbackSize, fallbackStyle, fallbackColor, colorVar) {
-    const style = _docTextStyles[role];
-    if (style) {
-      try { t.textStyleId = style.id; } catch (e) {}
+    const binding = _docTypeBindings[role] || { kind: 'raw', warning: 'No typography style or typography variables found for ' + role + '; using raw text values.' };
+    if (binding.kind === 'style' && binding.style) {
+      try { t.textStyleId = binding.style.id; } catch (e) {}
     } else {
+      const vars = binding.kind === 'variables' && binding.variables ? binding.variables : null;
       t.fontName = { family: _fam, style: fallbackStyle };
       t.fontSize = fallbackSize;
+      if (vars) {
+        if (vars.familyValue && typeof vars.familyValue === 'string') {
+          try { t.fontName = { family: vars.familyValue, style: fallbackStyle }; } catch (e) {}
+        }
+        if (typeof vars.sizeValue === 'number') t.fontSize = vars.sizeValue;
+        if (typeof vars.lineHeightValue === 'number') t.lineHeight = { value: vars.lineHeightValue, unit: 'PIXELS' };
+        if (typeof vars.trackingValue === 'number') t.letterSpacing = { value: vars.trackingValue, unit: 'PIXELS' };
+        if (vars.sizeVar) _bindVar(t, 'fontSize', vars.sizeVar);
+        if (vars.lineHeightVar) _bindVar(t, 'lineHeight', vars.lineHeightVar);
+        if (vars.trackingVar) _bindVar(t, 'letterSpacing', vars.trackingVar);
+        if (vars.weightVar) _bindVar(t, 'fontWeight', vars.weightVar);
+        if (vars.familyVar) _bindVar(t, 'fontFamily', vars.familyVar);
+      } else {
+        _warnBinding(binding.warning);
+      }
     }
     t.fills = [_paint(fallbackColor, colorVar)];
   }
@@ -4351,6 +4452,7 @@ async function _buildComponentDoc(opts) {
       propertyCount: _compProps.length
     },
     bindingsCount: resolved.length,
+    bindingWarnings: _docBindingWarnings,
     anatomyCount: _anatomyMd.length,
     selectionContext: {
       fileName: figma.root ? figma.root.name : '',

@@ -2,6 +2,7 @@ const { analyzeDesignSystemData } = require("./analyze-design-system.js");
 const { inspectComponentData } = require("./inspect-component.js");
 const { auditTokens } = require("./audit-tokens.js");
 const dsConfig = require("./ds-config/index.js");
+const variableBinding = require("./variable-binding.js");
 
 const CORE_VERSION = "0.1.0";
 
@@ -76,5 +77,6 @@ module.exports = {
   inspectComponentData,
   normalizeDesignSystemSnapshot,
   summarizeDesignSystem,
+  variableBinding,
   dsConfig,
 };

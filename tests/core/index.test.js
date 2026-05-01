@@ -3,9 +3,14 @@ const {
   detectDesignSystem,
   detectDesignSystemFromFigmaData,
   normalizeDesignSystemSnapshot,
-  summarizeDesignSystem
+  summarizeDesignSystem,
+  variableBinding
 } = require("../../packages/figlets-core/src/index.js");
 const { exampleFigmaData } = require("../fixtures/design-system-data.js");
+
+{
+  assert.strictEqual(typeof variableBinding.pickFloatVariableByValue, "function");
+}
 
 {
   const snapshot = normalizeDesignSystemSnapshot({});

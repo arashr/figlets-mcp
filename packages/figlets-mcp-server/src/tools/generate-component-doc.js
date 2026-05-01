@@ -150,6 +150,7 @@ function handleGenerateComponentDoc(args) {
                   markdown: result.markdown,
                   componentMeta: result.componentMeta || {},
                   bindingsCount: result.bindingsCount || 0,
+                  bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
                   anatomyCount: result.anatomyCount || 0,
                   selectionContext: result.selectionContext || selectionContext,
                   specSheet: result.specSheet || {},

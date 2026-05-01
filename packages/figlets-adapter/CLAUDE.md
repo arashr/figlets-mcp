@@ -69,7 +69,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 ### Document a component
 The Figma spec sheet is for **humans**; the markdown handover is for **agents**. The plugin renders structure and tangible data (variants, sizing, anatomy, token names). The agent must supply the human-readable content — never rely on generic defaults.
 
-1. Ask the user to navigate to the Figma page containing the target component (it must be on the current page) and keep the Figlets Bridge plugin open.
+1. Ask the user to navigate to the Figma page containing the target component (it must be on the current page), select the component or component set, and keep the Figlets Bridge plugin open.
 2. **Inspect first.** Call `inspect_component` (after asking the user to select the component) or read the existing `figma-data.json` snapshot to understand: what the component is, its variants, properties, anatomy, and likely use cases.
 3. **Pre-flight readiness check.** Before generating, evaluate the inspection result for two issues that degrade spec quality. Report any findings to the user clearly and ask whether they'd like to fix them in Figma first or proceed as-is:
 

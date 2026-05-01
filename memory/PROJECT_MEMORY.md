@@ -233,6 +233,25 @@ All items from the initial `feature/figma-bridge-plugin` branch are shipped:
   - current selection panel under the main status, showing count, page, source, and selected node names
   - in-session chronological log panel under selection, showing command execution and bridge events only for the active plugin session
   - plugin main thread now replays session log history and current selection to the UI on `ui-ready`
+- Updated `generate_component_doc` selection behavior:
+  - server tool now resolves the current Figma selection first and uses the selected `COMPONENT` / `COMPONENT_SET` by default
+  - plugin doc builder accepts `componentId` and prefers exact ID matching over page-level name search
+  - this prevents stale/manual `component_name` input from documenting the wrong component when a different one is selected
+- Tightened the agent-authored content contract for `generate_component_doc`:
+  - removed plugin-side placeholder fallbacks for description / Do / Don't
+  - server tool now requires `description`, `usage_do`, and `usage_dont`
+  - doc generation now fails loudly when the human-authored sections are missing, instead of silently producing weak generic guidance
+- Refined spec-sheet rendering behavior:
+  - removed the redundant Preview section; variants are now the primary visual reference
+  - spec-sheet chrome now attempts to bind its own colors, text styles, and spacing/radius values to the host DS when matching tokens/styles exist
+  - sections with no meaningful data are omitted from both the Figma sheet and markdown output
+  - anatomy is now skipped when the default variant has no meaningful internal non-instance parts (e.g. primitive/reference components like `Spacing Visual`)
+- Added plugin session identification and bridge propagation:
+  - plugin UI now shows a visible session ID (`figlets-...`) under the main status
+  - `ui.html` sends the session ID on `/poll` and all `/sync*` posts
+  - `receiver.js` tracks the active polling session, logs it, and includes `activeSessionId` in 503 not-connected responses
+  - this made it possible to verify a real reconnect end-to-end: receiver saw `figlets-mok7r7lf-gzrll`, after which `generate_component_doc` succeeded again
+- Receiver restart behavior confirmed: after restarting `src/receiver.js`, the Figma plugin must reopen or otherwise reconnect its long-poll loop before bridge-backed tools succeed again. A visible plugin window alone is not sufficient if the receiver has been replaced underneath it.
 - `node --check packages/figma-bridge-plugin/code.js` passes.
 - Full `node tests/run-tests.js` could not complete in the Codex sandbox because the bridge receiver tests hit `listen EPERM: operation not permitted 0.0.0.0`; this needs either an adjusted test bind address or an unrestricted run.
 
@@ -329,6 +348,55 @@ Step 1 of the porting plan landed. `/fig-document` is now an MCP tool.
 - **Adapter docs:** `CLAUDE.md` and `AGENTS.md` both updated with the new tool row, "Document a component" workflow, and two error-handling rows.
 
 **22/22 tests passing.** Migration is now: `prepare_ds_config` + `apply_ds_setup` + `build_ds_showcase` + `generate_component_doc` shipped — three of the five original skills fully ported. Next per the plan: `fix_token_violations` (extend `audit_tokens` to close the QA loop).
+
+---
+
+### [2026-04-30 — semantic brand/accent split and inset visuals]
+
+Follow-up from showcase QA:
+
+- Found why spacing visuals bound to `color/surface/accent` instead of `color/surface/brand`: the semantic scorer treated `accent` as `BRAND`, so `surface/accent` and `surface/brand` tied and saturation/luminance broke the tie.
+- Changed both bridge-side semantic maps so `accent` contributes `ACCENT`, while `brand`/`primary` contribute `BRAND`.
+- With the new scoring, `color/surface/brand` scores higher than `color/surface/accent` for `surfaceBrand`.
+- Found that the old showcase had an `inset` visual builder but no routing into it. Added `inset` group classification and a dedicated inset visual to the port.
+- `node --check packages/figma-bridge-plugin/code.js` passes.
+
+Next live test after reloading the Figma bridge plugin: rebuild showcase and verify spacing visual fills bind to `color/surface/brand`, and `space/inset/*` rows render as inset boxes instead of generic spacing squares.
+
+---
+
+### [2026-04-30 — showcase QA binding pass]
+
+`build_ds_showcase` now applies a final DS binding pass to all generated `Token Showcase` sections:
+
+- Binds generated padding/gaps to exact matching spacing variables.
+- Binds generated radii to exact matching radius variables.
+- Binds generated stroke widths to exact matching border/stroke variables.
+- Applies the closest local text style to generated text nodes, with fallback typography-variable binding where no style exists.
+- Normalized arbitrary showcase chrome values (`5`, `6`, `10`, `16.5`) to nearby existing DS token values so QA does not correctly flag them as private raw values.
+- Figma clears `textStyleId` when font overrides are restored after applying a style, so generated showcase text must actually use DS text-style metrics to count as style-bound.
+- Live proof pass on the current Spacing showcase reached `1285/1285` checked properties bound, `0` raw gaps, using a smart audit that treats side-specific radius/stroke bindings as covering shorthand properties.
+
+Verification:
+- `node --check packages/figma-bridge-plugin/code.js` passes.
+- `npm test` reported all 22 test files passing and exited successfully.
+
+Live validation note: Figma must reload the bridge plugin before a real `build_ds_showcase` call will execute this new code.
+
+---
+
+### [2026-04-30 — shared semantic DS binding resolver started]
+
+Preparing for `/fig-qa` auto-fix, added a shared bridge-side resolver in `packages/figma-bridge-plugin/code.js`:
+
+- `_createDsBindingContext()` detects variables, collections, text styles, effect styles, collection roles, aliases, semantic color roles, float values, and text-style matches in one live Figma pass.
+- Color binding is semantic-first, based on the existing segment/category scoring model from the showcase. Hex matching is intentionally not used for automatic color role binding.
+- Purpose locks remain the rule for role-specific slots: border/outline tokens must have outline semantics, status fills must have surface/bg semantics, and text/icon slots must have foreground semantics.
+- `generate_component_doc` now consumes this resolver for spec-sheet chrome colors, spacing/radius/border variables, and text-style roles. Its output contract is unchanged; only the binding path changed.
+- `node --check packages/figma-bridge-plugin/code.js` passes.
+- `npm test` reports 22/22 test files passing. The runner can take a while to release after the summary because of bridge-server handles, but exited successfully.
+
+Next step: port QA audit/fix commands on top of `_createDsBindingContext()` instead of bringing over old hex-based `bind-colors.js` as-is.
 
 ---
 

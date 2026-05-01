@@ -1,7 +1,7 @@
 /**
  * E2E: generate_component_doc
  *
- * Runs the real receiver, simulates the plugin's poll → build-doc → sync-doc-build
+ * Runs the real receiver, simulates the plugin's poll → selection → poll → build-doc → sync-doc-build
  * round-trip, calls the real handleGenerateComponentDoc, and verifies the full chain
  * including the payload routed to the plugin.
  */
@@ -45,9 +45,11 @@ const FAKE_DOC_RESULT = {
 };
 
 /**
- * Simulate the plugin for build-doc:
- *   1. GET /poll → expects { command: 'build-doc', data: { componentName, ... } }
- *   2. POST /sync-doc-build with the simulated plugin output
+ * Simulate the plugin for selection + build-doc:
+ *   1. GET /poll → expects { command: 'extract-selection' }
+ *   2. POST /sync-selection with the selected component
+ *   3. GET /poll → expects { command: 'build-doc', data: { componentId, componentName, ... } }
+ *   4. POST /sync-doc-build with the simulated plugin output
  */
 function simulatePluginDocBuild(baseUrl, capturedRef) {
   return new Promise((resolve, reject) => {
@@ -57,21 +59,45 @@ function simulatePluginDocBuild(baseUrl, capturedRef) {
       pollRes.on("end", () => {
         let cmd;
         try { cmd = JSON.parse(body); } catch (e) { return reject(new Error("Unparseable poll response: " + body)); }
-        if (cmd.command !== "build-doc") return reject(new Error("Plugin expected build-doc, got: " + cmd.command));
-        capturedRef.command = cmd;
+        if (cmd.command !== "extract-selection") return reject(new Error("Plugin expected extract-selection, got: " + cmd.command));
 
-        const payload = JSON.stringify(FAKE_DOC_RESULT);
-        const postReq = http.request(baseUrl + "/sync-doc-build", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
-        }, (syncRes) => {
-          let syncBody = "";
-          syncRes.on("data", c => { syncBody += c; });
-          syncRes.on("end", () => resolve(JSON.parse(syncBody)));
+        const selectionPayload = JSON.stringify({
+          selection: [{ id: "1:2", type: "COMPONENT_SET", name: "Button" }]
         });
-        postReq.on("error", reject);
-        postReq.write(payload);
-        postReq.end();
+        const selectionReq = http.request(baseUrl + "/sync-selection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(selectionPayload) }
+        }, (selectionRes) => {
+          selectionRes.resume();
+          selectionRes.on("end", () => {
+            http.get(baseUrl + "/poll", (buildPollRes) => {
+              let buildBody = "";
+              buildPollRes.on("data", chunk => { buildBody += chunk; });
+              buildPollRes.on("end", () => {
+                let buildCmd;
+                try { buildCmd = JSON.parse(buildBody); } catch (e) { return reject(new Error("Unparseable build poll response: " + buildBody)); }
+                if (buildCmd.command !== "build-doc") return reject(new Error("Plugin expected build-doc, got: " + buildCmd.command));
+                capturedRef.command = buildCmd;
+
+                const payload = JSON.stringify(FAKE_DOC_RESULT);
+                const postReq = http.request(baseUrl + "/sync-doc-build", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
+                }, (syncRes) => {
+                  let syncBody = "";
+                  syncRes.on("data", c => { syncBody += c; });
+                  syncRes.on("end", () => resolve(JSON.parse(syncBody)));
+                });
+                postReq.on("error", reject);
+                postReq.write(payload);
+                postReq.end();
+              });
+            }).on("error", reject);
+          });
+        });
+        selectionReq.on("error", reject);
+        selectionReq.write(selectionPayload);
+        selectionReq.end();
       });
     }).on("error", reject);
   });
@@ -93,8 +119,8 @@ module.exports = new Promise((resolve, reject) => {
       new Promise((r) => setTimeout(r, 50)).then(() => handleGenerateComponentDoc({
         component_name: "Button",
         description: "A primary CTA button. Use when there is one most-important action on the screen.",
-        usage_do: ["Use for the primary CTA"],
-        usage_dont: ["Don't truncate the label"],
+        usage_do: ["Use for the primary CTA", "Keep the label action-oriented"],
+        usage_dont: ["Don't truncate the label", "Don't use for secondary actions"],
         variant_descriptions: { "Type=Primary": "High-emphasis" }
       }))
     ])
@@ -104,10 +130,11 @@ module.exports = new Promise((resolve, reject) => {
         assert.ok(captured.command, "plugin should have received a build-doc command");
         assert.strictEqual(captured.command.command, "build-doc");
         const data = captured.command.data;
+        assert.strictEqual(data.componentId, "1:2", "componentId should come from selected component");
         assert.strictEqual(data.componentName, "Button", "componentName should propagate to plugin");
         assert.ok(data.description && data.description.indexOf("primary CTA") >= 0, "description should propagate to plugin");
-        assert.deepStrictEqual(data.usageDo, ["Use for the primary CTA"]);
-        assert.deepStrictEqual(data.usageDont, ["Don't truncate the label"]);
+        assert.deepStrictEqual(data.usageDo, ["Use for the primary CTA", "Keep the label action-oriented"]);
+        assert.deepStrictEqual(data.usageDont, ["Don't truncate the label", "Don't use for secondary actions"]);
         assert.deepStrictEqual(data.variantDescriptions, { "Type=Primary": "High-emphasis" });
 
         // --- tool returned the markdown + path for the agent to write ---

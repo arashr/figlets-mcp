@@ -4,6 +4,47 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-04-30] Brand and accent are separate semantic color families
+
+**Decision:** The color semantic scorer must not treat `accent` as a synonym for `brand`. `accent` now contributes an `ACCENT` category, while `brand` and `primary` contribute `BRAND`.
+
+**Why:**
+- `color/surface/accent` and `color/surface/brand` are different design-system intents even if both are colorful surfaces.
+- Treating `accent` as `BRAND` made those paths tie for `surfaceBrand`; the tiebreaker then picked whichever color had a stronger saturation/luminance score.
+- In the spacing showcase, that caused visual spacing blocks to bind to `color/surface/accent` even when `color/surface/brand` existed.
+
+**Consequence:** Brand slots prefer brand/primary tokens. Accent can still be used as a fallback when a DS has no brand token, but it no longer beats an explicit brand token.
+
+---
+
+## [2026-04-30] Inset spacing needs its own visual representation
+
+**Decision:** Spacing showcase groups named `inset`, `padding`, `pad`, or `internal-space` render with a dedicated inset visual: an outer box with an inner block offset by the token value.
+
+**Why:**
+- The old showcase code had an `inset` visual builder, but group classification never routed inset groups to it.
+- Inset tokens communicate internal padding, not object size. Rendering them as a plain square made them indistinguishable from spacing scale tokens.
+
+**Consequence:** Inset tokens now show their intended concept visually while still using the true token value in labels. The drawn padding is capped for readability so large inset values do not overwhelm the fixed preview cell.
+
+---
+
+## [2026-04-30] Showcase output must self-bind DS chrome before QA
+
+**Decision:** `build_ds_showcase` runs a final binding pass over every generated showcase section. The pass binds auto-layout spacing, padding, radii, stroke weights, and text styles to matching design-system variables/styles after the visual structure has been built.
+
+**Why:**
+- QA should not report raw values for generated showcase chrome when the file already has matching DS tokens.
+- Binding at the end keeps the existing output structure intact and avoids hand-maintaining one-off bindings in every row helper.
+- Numeric binding is exact-value and purpose-aware (`spacing`, `radius`, `border`, `typography`); it does not bind arbitrary nearest values.
+- Text nodes choose the closest DS text style by size, weight, and usage role so designers see text styles instead of raw typography.
+
+**Consequence:** A showcase generated in a DS-rich file should have far fewer QA gaps, and ideally none for properties covered by available tokens/styles. A few arbitrary chrome values were normalized to existing token values so the generated output can be semantically bound instead of carrying private raw numbers.
+
+**Update:** Figma clears `textStyleId` when font size/name overrides are restored after applying a text style. Showcase typography therefore uses real DS text styles instead of style-plus-raw-overrides; content and hierarchy remain stable, while exact text metrics may follow the DS style.
+
+---
+
 ## [2026-04-29] Cache the last non-empty Figma selection in the plugin main thread
 
 **Decision:** `packages/figma-bridge-plugin/code.js` now records selection snapshots on `selectionchange` and `currentpagechange`, and `extract-selection` may fall back to the last non-empty snapshot from the same page when the live `figma.currentPage.selection` is unexpectedly empty.
@@ -41,6 +82,58 @@ Running log of non-obvious project decisions and the reasons behind them.
 - Keeping the log session-local avoids creating noisy artifacts or new storage rules while still making the plugin much easier to debug.
 
 **Consequence:** `code.js` now pushes `selection-state`, session log history, and incremental log entries into the UI, and `ui.html` renders a larger dashboard-style panel with live selection and execution history.
+
+---
+
+## [2026-04-29] Generate component docs from the current selection by default
+
+**Decision:** `generate_component_doc` should resolve the live Figma selection first and use the selected `COMPONENT` or `COMPONENT_SET` as the document target. When the selection is valid, the bridge should pass `componentId` and the plugin should match by exact node ID before considering name-based lookup.
+
+**Why:**
+- Users reasonably expect the currently selected component to be the source of truth.
+- Name-based lookup can document the wrong component when stale args are reused or when similar names exist on the page.
+- Exact ID matching is deterministic and aligns with how `inspect_component` already works.
+
+**Consequence:** The doc flow is now selection-driven by default, while `component_name` remains as a fallback for cases where nothing is selected.
+
+---
+
+## [2026-04-29] Fail doc generation when agent-authored human content is missing
+
+**Decision:** `generate_component_doc` must not fall back to placeholder copy for `description`, `usage_do`, or `usage_dont`. Both the server tool and the plugin doc builder now reject requests that do not include a real description plus at least two Do and two Don't rules.
+
+**Why:**
+- The architecture split is intentional: the plugin renders structure and token data, while the agent supplies human-readable guidance.
+- Silent fallbacks hide orchestration failures and produce bad docs that look superficially complete.
+- A loud error is easier to notice, easier to debug, and preserves the quality bar for spec sheets.
+
+**Consequence:** Agents must inspect first and provide tailored guidance before calling `generate_component_doc`. Missing human-authored sections now block generation instead of producing generic filler.
+
+---
+
+## [2026-04-29] Track the active plugin session end-to-end through the bridge
+
+**Decision:** The Figlets Bridge UI exposes a visible per-session ID, and the bridge protocol now carries that ID through `/poll` and `/sync*` requests. The receiver tracks the current polling session and includes `activeSessionId` in not-connected responses.
+
+**Why:**
+- During debugging, the plugin UI could appear active while the receiver still reported `plugin is not connected`, making it hard to know whether we were looking at the real bridge instance or a stale/parallel UI.
+- A visible session token lets the user and agent refer to the same concrete runtime instead of inferring from appearance or timestamps.
+- Receiver-level awareness closes the loop: we can now compare “what the plugin UI says” with “what the server thinks is connected.”
+
+**Consequence:** Bridge debugging is now session-aware instead of guess-based. A reconnect can be verified concretely, as happened when the receiver reported the same active session ID the plugin UI showed: `figlets-mok7r7lf-gzrll`.
+
+---
+
+## [2026-04-29] Omit empty spec-sheet sections; treat anatomy as meaningful internal structure, not merely root existence
+
+**Decision:** `generate_component_doc` skips any section that has no meaningful data, in both the rendered Figma sheet and the returned markdown. For anatomy specifically, the section renders only when the default variant has meaningful internal non-instance parts; a bare primitive/reference component does not get a placeholder anatomy block.
+
+**Why:**
+- Empty sections create noise and suggest missing content rather than useful structure.
+- The earlier anatomy logic defined anatomy as descendant structure, not “the root component exists,” but still rendered an empty wrapper and legend when no descendants qualified. That produced a visually broken result for primitive examples like `Spacing Visual`.
+- A one-row anatomy that simply repeats the root component name is technically true but usually low-value for token visuals and primitive references.
+
+**Consequence:** Primitive/reference components can legitimately omit anatomy, while composed UI components still render full anatomy when they have meaningful named parts. The same omission rule now applies across other data-driven sections as well.
 
 ---
 
@@ -376,6 +469,20 @@ Running log of non-obvious project decisions and the reasons behind them.
 - Watchdog timers on the UI side are the only defense against plugin code that hangs or crashes without posting back. Each command has a generous but bounded timeout (12s inspect, 30s sync, 60s doc/setup, 120s showcase).
 
 **Consequence:** The plugin self-heals after any crash or hang. A failed command produces an error result (not silence), the UI disarms the watchdog, resets state, and resumes polling. The MCP tool also retries 503/504 up to 3× with 1.5s delay so transient disconnects during the retry window are handled without surfacing to the user.
+
+---
+
+## [2026-04-30] Shared DS binding resolver before QA auto-fix
+
+**Decision:** Live Figma binding should go through one shared bridge-side resolver, `_createDsBindingContext()`, instead of each tool maintaining local name/hex matchers. The resolver detects collections, variables, text styles, and effect styles; resolves aliases; classifies primitive/alias collections; exposes semantic color roles; and provides float/text-style pickers for spacing, radius, border, typography, and doc chrome.
+
+**Why:**
+- QA auto-fix must bind as many properties as possible when a DS exists, but it must not bind wrong-purpose variables just because their raw value matches.
+- Hex matching is useful for reporting raw values, but it is not safe as an automatic binding strategy. Equal colors can represent different semantic purposes, such as icon, text, surface, or border roles.
+- The current showcase semantic picker is the most accurate binding logic in the project. It trusts variable path semantics first, uses purpose locks (`requiredCats`) for role-specific slots, and only falls back to functional scoring for broad structural roles.
+- The original figlets QA scripts have a good audit/fix structure, but their matching step still depends on agent-side nearest-token prose and hex/value indexes. They should be ported on top of the shared resolver.
+
+**Consequence:** `generate_component_doc` now uses `_createDsBindingContext()` for spec-sheet chrome binding without changing its sections, markdown contract, or returned payload. Next QA port should expose this same resolver through audit/fix commands, with automatic fixes only when the resolver has high-confidence semantic/property matches.
 
 ---
 

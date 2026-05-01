@@ -43,6 +43,11 @@
     color: #aaa;
     text-align: center;
   }
+  #session-meta {
+    font-size: 11px;
+    color: #8d9aa7;
+    text-align: center;
+  }
   .panel {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -68,6 +73,25 @@
     font-size: 12px;
     color: #f0f4f8;
     line-height: 1.5;
+  }
+  #selection-state.warning {
+    color: #ffd38a;
+  }
+  .selection-warning {
+    border: 1px solid rgba(255, 179, 71, 0.35);
+    background: rgba(255, 179, 71, 0.12);
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .selection-warning strong {
+    color: #ffe0a3;
+  }
+  .selection-meta {
+    margin-top: 6px;
+    color: #cbd5df;
+  }
+  .selection-ok {
+    color: #c7f7d4;
   }
   #session-log {
     flex: 1;
@@ -95,6 +119,7 @@
   <div class="pulse"></div>
   <div id="status">Listening for Agent</div>
   <div id="substatus">Keep this plugin open...</div>
+  <div id="session-meta">Session: pending</div>
   <div class="panel">
     <div class="panel-title">Current Selection</div>
     <div id="selection-state" class="empty">No selection yet.</div>
@@ -109,6 +134,7 @@
   let isExtracting = false;
   let _watchdog = null;
   let _sessionLog = [];
+  let _sessionId = '';
 
   function _fmtTime(ts) {
     const d = new Date(ts);
@@ -148,20 +174,54 @@
     _renderSessionLog();
   }
 
+  function _escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function _setSelectionState(data) {
     const el = document.getElementById('selection-state');
     if (!data || !data.count) {
-      el.className = 'empty';
-      el.innerHTML = 'No current selection.';
+      el.className = 'warning';
+      el.innerHTML =
+        '<div class="selection-warning">' +
+          '<strong>No component selected.</strong><br>' +
+          'Select a component or component set in Figma, then confirm in chat to continue.' +
+        '</div>' +
+        '<div class="selection-meta">File: ' + _escapeHtml(data && data.fileName ? data.fileName : 'Unknown') + '</div>' +
+        '<div class="selection-meta">Page: ' + _escapeHtml(data && data.pageName ? data.pageName : 'Unknown') + '</div>';
       return;
     }
 
-    el.className = '';
+    const types = Array.isArray(data.types) ? data.types : [];
+    const names = Array.isArray(data.names) ? data.names : [];
+    const hasDocumentableSelection = data.count === 1 && (types[0] === 'COMPONENT' || types[0] === 'COMPONENT_SET');
+    if (!hasDocumentableSelection) {
+      el.className = 'warning';
+      el.innerHTML =
+        '<div class="selection-warning">' +
+          '<strong>Selection is not documentable.</strong><br>' +
+          'Select one component or component set, then confirm in chat to continue.' +
+        '</div>' +
+        '<div class="selection-meta">File: ' + _escapeHtml(data.fileName || 'Unknown') + '</div>' +
+        '<div class="selection-meta">Page: ' + _escapeHtml(data.pageName || 'Unknown') + '</div>' +
+        '<div class="selection-meta">Selected: ' + _escapeHtml(names.join(', ') || 'Unknown') + '</div>' +
+        '<div class="selection-meta">Type: ' + _escapeHtml(types.join(', ') || 'Unknown') + '</div>';
+      return;
+    }
+
+    el.className = 'selection-ok';
     el.innerHTML =
-      '<div><strong>' + data.count + '</strong> node' + (data.count === 1 ? '' : 's') + ' selected</div>' +
-      '<div>Page: ' + (data.pageName || 'Unknown') + '</div>' +
-      '<div>Source: ' + (data.source || 'Unknown') + '</div>' +
-      '<div>Items: ' + data.names.join(', ') + '</div>';
+      '<div><strong>' + data.count + '</strong> documentable node selected</div>' +
+      '<div>File: ' + _escapeHtml(data.fileName || 'Unknown') + '</div>' +
+      '<div>Page: ' + _escapeHtml(data.pageName || 'Unknown') + '</div>' +
+      '<div>Source: ' + _escapeHtml(data.source || 'Unknown') + '</div>' +
+      '<div>Item: ' + _escapeHtml(names[0] || 'Unknown') + '</div>' +
+      '<div>Type: ' + _escapeHtml(types[0] || 'Unknown') + '</div>';
   }
 
   function _armWatchdog(label, ms) {
@@ -182,9 +242,14 @@
 
   async function poll() {
     if (isExtracting) return;
+    if (!_sessionId) {
+      await new Promise(function(resolve) { setTimeout(resolve, 250); });
+      if (!isExtracting) poll();
+      return;
+    }
 
     try {
-      const res = await fetch('http://localhost:1337/poll');
+      const res = await fetch('http://localhost:1337/poll?sessionId=' + encodeURIComponent(_sessionId));
       if (res.ok) {
         const data = await res.json();
         if (data.command === 'extract' || data.command === 'extract-all') {
@@ -243,6 +308,12 @@
       return;
     }
 
+    if (msg.type === 'session-meta') {
+      _sessionId = (msg.data && msg.data.sessionId) ? msg.data.sessionId : '';
+      document.getElementById('session-meta').innerText = 'Session: ' + (msg.data && msg.data.sessionId ? msg.data.sessionId : 'unknown');
+      return;
+    }
+
     if (msg.type === 'session-log-history') {
       _sessionLog = Array.isArray(msg.data) ? msg.data.slice() : [];
       _renderSessionLog();
@@ -254,14 +325,14 @@
       _renderSessionLog();
       return;
     }
-    
+
     if (msg.type === 'showcase-built') {
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
         await fetch('http://localhost:1337/sync-showcase', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
         });
         document.getElementById('status').innerText = 'Listening for Agent';
@@ -283,7 +354,7 @@
       try {
         await fetch('http://localhost:1337/sync-doc-build', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
         });
         document.getElementById('status').innerText = 'Listening for Agent';
@@ -305,7 +376,7 @@
       try {
         await fetch('http://localhost:1337/sync-ds-setup', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
         });
         document.getElementById('status').innerText = 'Listening for Agent';
@@ -329,7 +400,7 @@
       try {
         const response = await fetch(`http://localhost:1337${endpoint}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
         });
         

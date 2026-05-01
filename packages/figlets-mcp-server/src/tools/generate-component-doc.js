@@ -12,6 +12,7 @@
  */
 
 const http = require('http');
+const fs = require('fs');
 
 const generateComponentDocTool = {
   name: 'generate_component_doc',
@@ -31,12 +32,12 @@ const generateComponentDocTool = {
       usage_do: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Optional list of Do rules (2-3 short sentences). Falls back to generic defaults when omitted.'
+        description: 'List of Do rules (2-3 short sentences) grounded in this specific component.'
       },
       usage_dont: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Optional list of Don\'t rules (2-3 short sentences). Falls back to generic defaults when omitted.'
+        description: 'List of Don\'t rules (2-3 short sentences) grounded in misuse risks specific to this component.'
       },
       variant_descriptions: {
         type: 'object',
@@ -44,112 +45,234 @@ const generateComponentDocTool = {
         description: 'Optional map of exact variant name (e.g. "Type=Primary, Size=Default") to <=10-word purpose. Used in the variant showcase and the markdown handover file.'
       }
     },
-    required: ['component_name'],
+    required: ['description', 'usage_do', 'usage_dont'],
     additionalProperties: false
   }
 };
 
 function handleGenerateComponentDoc(args) {
-  const componentName = args && args.component_name ? String(args.component_name) : '';
-  if (!componentName) {
-    return Promise.resolve({
-      content: [{ type: 'text', text: 'Error: component_name is required.' }],
-      isError: true
-    });
-  }
-
-  const payload = {
-    componentName: componentName,
-    description: typeof args.description === 'string' ? args.description : '',
-    usageDo: Array.isArray(args.usage_do) ? args.usage_do : [],
-    usageDont: Array.isArray(args.usage_dont) ? args.usage_dont : [],
-    variantDescriptions: (args.variant_descriptions && typeof args.variant_descriptions === 'object')
-      ? args.variant_descriptions
-      : {}
-  };
-
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || 'http://localhost:1337';
-  const body = JSON.stringify(payload);
+  const fallbackComponentName = args && args.component_name ? String(args.component_name) : '';
 
-  return new Promise((resolve) => {
-    const req = http.request(`${receiverUrl}/request-doc-build`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk.toString(); });
-      res.on('end', () => {
-        if (res.statusCode === 200) {
-          let parsed;
-          try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
-          const result = parsed.result || parsed;
-          if (result.error) {
+  return _resolveSelectedComponent(receiverUrl).then((selectionInfo) => {
+    const selected = selectionInfo && selectionInfo.component ? selectionInfo.component : null;
+    const selectionContext = selectionInfo && selectionInfo.context ? selectionInfo.context : {};
+    const componentId = selected && selected.id ? selected.id : '';
+    const componentName = selected && selected.name ? selected.name : fallbackComponentName;
+
+    if (selected && fallbackComponentName && selected.name !== fallbackComponentName) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Error: Figma selection does not match component_name. Selected ${selected.type} "${selected.name}" on ${selectionContext.fileName || 'current file'} / ${selectionContext.pageName || 'current page'}, but component_name was "${fallbackComponentName}". Select the intended component or omit component_name to document the live selection.`
+        }],
+        isError: true
+      };
+    }
+
+    if (!componentName) {
+      const where = `${selectionContext.fileName || 'current file'} / ${selectionContext.pageName || 'current page'}`;
+      return {
+        content: [{ type: 'text', text: `Error: Select a COMPONENT or COMPONENT_SET in Figma on ${where}. Ask the user to select the intended component or component set, then confirm before continuing.` }],
+        isError: true
+      };
+    }
+
+    const description = typeof args.description === 'string' ? args.description.trim() : '';
+    const usageDo = Array.isArray(args.usage_do) ? args.usage_do.map((s) => String(s).trim()).filter(Boolean) : [];
+    const usageDont = Array.isArray(args.usage_dont) ? args.usage_dont.map((s) => String(s).trim()).filter(Boolean) : [];
+
+    if (!description) {
+      return {
+        content: [{ type: 'text', text: 'Error: description is required. The agent must provide a component-specific summary before generating the doc.' }],
+        isError: true
+      };
+    }
+    if (usageDo.length < 2) {
+      return {
+        content: [{ type: 'text', text: 'Error: usage_do must contain at least 2 component-specific rules.' }],
+        isError: true
+      };
+    }
+    if (usageDont.length < 2) {
+      return {
+        content: [{ type: 'text', text: 'Error: usage_dont must contain at least 2 component-specific misuse rules.' }],
+        isError: true
+      };
+    }
+
+    const payload = {
+      componentId: componentId,
+      componentName: componentName,
+      description: description,
+      usageDo: usageDo,
+      usageDont: usageDont,
+      variantDescriptions: (args.variant_descriptions && typeof args.variant_descriptions === 'object')
+        ? args.variant_descriptions
+        : {}
+    };
+    const body = JSON.stringify(payload);
+
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const maxAttempts = 8;
+      const retryDelayMs = 750;
+
+      function sendDocBuildRequest() {
+        attempts += 1;
+      const req = http.request(`${receiverUrl}/request-doc-build`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body)
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk.toString(); });
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            let parsed;
+            try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
+            const result = parsed.result || parsed;
+            if (result.error) {
+              resolve({
+                content: [{ type: 'text', text: `Plugin error: ${result.error}` }],
+                isError: true
+              });
+              return;
+            }
             resolve({
-              content: [{ type: 'text', text: `Plugin error: ${result.error}` }],
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  componentName: result.componentName || componentName,
+                  path: result.path,
+                  markdown: result.markdown,
+                  componentMeta: result.componentMeta || {},
+                  bindingsCount: result.bindingsCount || 0,
+                  anatomyCount: result.anatomyCount || 0,
+                  selectionContext: result.selectionContext || selectionContext,
+                  specSheet: result.specSheet || {},
+                  message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Write the 'markdown' field to '${result.path}' via the Write tool.`
+                }, null, 2)
+              }]
+            });
+          } else if (res.statusCode === 503) {
+            let parsed;
+            try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
+            if (attempts < maxAttempts) {
+              setTimeout(sendDocBuildRequest, retryDelayMs);
+              return;
+            }
+            const activeSessionText = parsed && parsed.activeSessionId
+              ? ` Active plugin session: ${parsed.activeSessionId}.`
+              : '';
+            resolve({
+              content: [{ type: 'text', text: `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${activeSessionText}` }],
               isError: true
             });
-            return;
+          } else if (res.statusCode === 504) {
+            resolve({
+              content: [{ type: 'text', text: 'Error: Doc build timed out. The component may be very large or the plugin may have crashed.' }],
+              isError: true
+            });
+          } else {
+            resolve({
+              content: [{ type: 'text', text: `Error: Unexpected status ${res.statusCode}: ${data}` }],
+              isError: true
+            });
           }
+        });
+      });
+
+      req.setTimeout(125000, () => {
+        req.destroy();
+        resolve({
+          content: [{ type: 'text', text: 'Error: Request to bridge receiver timed out.' }],
+          isError: true
+        });
+      });
+
+      req.on('error', (err) => {
+        if (err.code === 'ECONNREFUSED') {
           resolve({
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                componentName: result.componentName || componentName,
-                path: result.path,
-                markdown: result.markdown,
-                componentMeta: result.componentMeta || {},
-                bindingsCount: result.bindingsCount || 0,
-                anatomyCount: result.anatomyCount || 0,
-                specSheet: result.specSheet || {},
-                message: `Spec sheet rendered. Write the 'markdown' field to '${result.path}' via the Write tool.`
-              }, null, 2)
-            }]
-          });
-        } else if (res.statusCode === 503) {
-          resolve({
-            content: [{ type: 'text', text: 'Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.' }],
-            isError: true
-          });
-        } else if (res.statusCode === 504) {
-          resolve({
-            content: [{ type: 'text', text: 'Error: Doc build timed out. The component may be very large or the plugin may have crashed.' }],
+            content: [{ type: 'text', text: 'Error: Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP server.' }],
             isError: true
           });
         } else {
           resolve({
-            content: [{ type: 'text', text: `Error: Unexpected status ${res.statusCode}: ${data}` }],
+            content: [{ type: 'text', text: `Error: ${err.message}` }],
             isError: true
           });
         }
       });
-    });
 
-    req.setTimeout(125000, () => {
-      req.destroy();
-      resolve({
-        content: [{ type: 'text', text: 'Error: Request to bridge receiver timed out.' }],
-        isError: true
+      req.write(body);
+      req.end();
+      }
+
+      sendDocBuildRequest();
+    });
+  });
+}
+
+function _resolveSelectedComponent(receiverUrl) {
+  return new Promise((resolve) => {
+    const req = http.request(`${receiverUrl}/request-selection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk.toString(); });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          resolve(null);
+          return;
+        }
+
+        let parsed;
+        try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
+        let selection = [];
+        if (parsed && parsed.path && fs.existsSync(parsed.path)) {
+          try {
+            const selectionData = JSON.parse(fs.readFileSync(parsed.path, 'utf-8'));
+            selection = Array.isArray(selectionData.selection) ? selectionData.selection : [];
+            parsed.meta = selectionData.meta || parsed.meta || {};
+          } catch (e) {
+            selection = [];
+          }
+        }
+
+        const context = {
+          fileName: parsed && parsed.meta && parsed.meta.fileName ? String(parsed.meta.fileName) : '',
+          pageName: parsed && parsed.meta && parsed.meta.pageName ? String(parsed.meta.pageName) : '',
+          pageId: parsed && parsed.meta && parsed.meta.pageId ? String(parsed.meta.pageId) : '',
+          usedFallback: !!(parsed && parsed.meta && parsed.meta.usedFallback),
+          chosenSource: parsed && parsed.meta && parsed.meta.chosenSource ? String(parsed.meta.chosenSource) : '',
+          liveSelectionCount: parsed && parsed.meta && typeof parsed.meta.liveSelectionCount === 'number' ? parsed.meta.liveSelectionCount : 0
+        };
+
+        if (!selection.length) {
+          resolve({ component: null, context: context });
+          return;
+        }
+
+        const node = selection[0];
+        if (node && (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET')) {
+          resolve({ component: { id: node.id, name: node.name, type: node.type }, context: context });
+          return;
+        }
+
+        resolve({ component: null, context: context });
       });
     });
 
-    req.on('error', (err) => {
-      if (err.code === 'ECONNREFUSED') {
-        resolve({
-          content: [{ type: 'text', text: 'Error: Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP server.' }],
-          isError: true
-        });
-      } else {
-        resolve({
-          content: [{ type: 'text', text: `Error: ${err.message}` }],
-          isError: true
-        });
-      }
+    req.setTimeout(16000, () => {
+      req.destroy();
+      resolve(null);
     });
 
-    req.write(body);
+    req.on('error', () => resolve(null));
     req.end();
   });
 }

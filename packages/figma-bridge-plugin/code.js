@@ -1,6 +1,7 @@
 figma.showUI(__html__, { width: 320, height: 420, themeColors: true });
 
 var _sessionLog = [];
+var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
 function _appendSessionLog(message) {
   var entry = {
@@ -15,6 +16,7 @@ function _appendSessionLog(message) {
 var _selectionCache = {
   current: {
     nodes: [],
+    fileName: "",
     pageId: null,
     pageName: "",
     ts: 0,
@@ -22,6 +24,7 @@ var _selectionCache = {
   },
   lastNonEmpty: {
     nodes: [],
+    fileName: "",
     pageId: null,
     pageName: "",
     ts: 0,
@@ -35,6 +38,7 @@ function _selectionDebug(snapshot) {
     names: snapshot.nodes.map(function(node) { return node.name; }),
     ids: snapshot.nodes.map(function(node) { return node.id; }),
     types: snapshot.nodes.map(function(node) { return node.type; }),
+    fileName: snapshot.fileName,
     pageId: snapshot.pageId,
     pageName: snapshot.pageName,
     source: snapshot.source,
@@ -50,6 +54,7 @@ function _captureSelectionSnapshot(source) {
 
   var snapshot = {
     nodes: selection,
+    fileName: figma.root ? figma.root.name : "",
     pageId: figma.currentPage ? figma.currentPage.id : null,
     pageName: figma.currentPage ? figma.currentPage.name : "",
     ts: Date.now(),
@@ -64,11 +69,12 @@ function _captureSelectionSnapshot(source) {
   console.log("[figlets] selection snapshot", JSON.stringify(_selectionDebug(snapshot)));
   figma.ui.postMessage({
     type: "selection-state",
-    data: {
-      count: snapshot.nodes.length,
-      pageName: snapshot.pageName,
-      source: snapshot.source,
-      names: snapshot.nodes.map(function(node) { return node.name; }),
+      data: {
+        count: snapshot.nodes.length,
+        fileName: snapshot.fileName,
+        pageName: snapshot.pageName,
+        source: snapshot.source,
+        names: snapshot.nodes.map(function(node) { return node.name; }),
       types: snapshot.nodes.map(function(node) { return node.type; })
     }
   });
@@ -134,6 +140,12 @@ figma.ui.onmessage = async (msg) => {
     figma.ui.postMessage({
       type: 'session-log-history',
       data: _sessionLog.slice()
+    });
+    figma.ui.postMessage({
+      type: 'session-meta',
+      data: {
+        sessionId: _sessionId
+      }
     });
     _captureSelectionSnapshot("ui-ready");
     return;
@@ -224,6 +236,7 @@ figma.ui.onmessage = async (msg) => {
           fallbackReason: fallbackReason,
           liveSelectionCount: liveSnapshot.nodes.length,
           cachedSelectionCount: lastNonEmpty.nodes.length,
+          fileName: liveSnapshot.fileName,
           pageId: liveSnapshot.pageId,
           pageName: liveSnapshot.pageName,
           chosenSource: chosenSnapshot.source,
@@ -297,6 +310,402 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 };
+
+// ── Shared DS binding context ────────────────────────────────────────────────
+// Central resolver for live Figma variable binding. It is intentionally role-
+// based for color tokens: semantic names win; exact/nearest color matching is
+// reserved for reporting workflows and should not drive automatic role binding.
+
+async function _createDsBindingContext() {
+  const allVars = await figma.variables.getLocalVariablesAsync();
+  const allColls = await figma.variables.getLocalVariableCollectionsAsync();
+  const textStyles = await figma.getLocalTextStylesAsync();
+  const effectStyles = await figma.getLocalEffectStylesAsync();
+
+  const varByName = {};
+  const varById = {};
+  const sortedVars = allVars.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+  for (let i = 0; i < sortedVars.length; i++) {
+    varByName[sortedVars[i].name] = sortedVars[i];
+    varById[sortedVars[i].id] = sortedVars[i];
+  }
+
+  function resolveVarValue(v, depth) {
+    if (!v) return null;
+    if (depth === undefined) depth = 0;
+    if (depth > 8) return null;
+    const modeIds = Object.keys(v.valuesByMode || {});
+    if (modeIds.length === 0) return null;
+    const val = v.valuesByMode[modeIds[0]];
+    if (!val && val !== 0) return null;
+    if (typeof val === 'object' && val.type === 'VARIABLE_ALIAS') {
+      const aliased = varById[val.id] || figma.variables.getVariableById(val.id);
+      return aliased ? resolveVarValue(aliased, depth + 1) : null;
+    }
+    return val;
+  }
+
+  function groupByPath(vars, depth) {
+    const groups = {};
+    for (let i = 0; i < vars.length; i++) {
+      const parts = String(vars[i].name).split('/');
+      let key;
+      if (depth !== undefined) key = parts.slice(0, depth).join('/');
+      else key = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(vars[i]);
+    }
+    return groups;
+  }
+
+  const collIdSets = new Map(allColls.map(function (c) { return [c.id, new Set(c.variableIds || [])]; }));
+  const dsCollections = allColls.slice()
+    .sort(function (a, b) { return a.name.localeCompare(b.name); })
+    .map(function (coll) {
+      const vars = allVars.filter(function (v) { return (coll.variableIds || []).indexOf(v.id) >= 0; })
+        .sort(function (a, b) { return a.name.localeCompare(b.name); });
+      const colorVars = vars.filter(function (v) { return v.resolvedType === 'COLOR'; });
+      const floatVars = vars.filter(function (v) { return v.resolvedType === 'FLOAT'; });
+      const ids = collIdSets.get(coll.id) || new Set();
+      let selfAliasCount = 0;
+      let crossAliasCount = 0;
+      for (let i = 0; i < vars.length; i++) {
+        const modeIds = Object.keys(vars[i].valuesByMode || {});
+        const val = modeIds.length ? vars[i].valuesByMode[modeIds[0]] : null;
+        if (!val || typeof val !== 'object' || val.type !== 'VARIABLE_ALIAS') continue;
+        if (ids.has(val.id)) selfAliasCount++;
+        else crossAliasCount++;
+      }
+      const aliasCount = selfAliasCount + crossAliasCount;
+      const modeNames = (coll.modes || []).map(function (m) { return m.name; });
+      const hasLight = modeNames.some(function (n) { return /light|day|bright/i.test(n); });
+      const hasDark = modeNames.some(function (n) { return /dark|night|dim/i.test(n); });
+      const hasLightDark = hasLight && hasDark;
+      const numericLeafCount = colorVars.filter(function (v) { return /^\d+$/.test(String(v.name).split('/').pop()); }).length;
+      const hasNumericSteps = colorVars.length > 0 && numericLeafCount >= colorVars.length * 0.3;
+      const crossAliasRatio = vars.length > 0 ? crossAliasCount / vars.length : 0;
+      const totalAliasRatio = vars.length > 0 ? aliasCount / vars.length : 0;
+      const isPrimitive = vars.length > 0 && !hasLightDark && (
+        hasNumericSteps
+          ? crossAliasRatio < 0.3
+          : totalAliasRatio < 0.2 && crossAliasRatio < 0.1
+      );
+      const isAlias = vars.length > 0 && (
+        hasLightDark || crossAliasRatio > 0.4 || (!hasNumericSteps && totalAliasRatio > 0.7)
+      );
+      return {
+        id: coll.id,
+        name: coll.name,
+        modeNames,
+        varCount: vars.length,
+        colorVarCount: colorVars.length,
+        floatVarCount: floatVars.length,
+        aliasCount,
+        selfAliasCount,
+        crossAliasCount,
+        isPrimitive,
+        isAlias,
+        hasLightDark,
+        hasNumericSteps,
+        hasMultipleModes: (coll.modes || []).length > 1,
+        vars,
+        groups: groupByPath(vars),
+        topLevelGroups: groupByPath(vars, 1)
+      };
+    });
+
+  function lum(c) {
+    return [c.r, c.g, c.b]
+      .map(function (v) { return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); })
+      .reduce(function (sum, v, i) { return sum + v * [0.2126, 0.7152, 0.0722][i]; }, 0);
+  }
+  function sat(c) {
+    const max = Math.max(c.r, c.g, c.b), min = Math.min(c.r, c.g, c.b);
+    return max === 0 ? 0 : (max - min) / max;
+  }
+  function contrastRatio(a, b) {
+    const l1 = lum(a), l2 = lum(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  }
+  function rgb(v) {
+    const val = resolveVarValue(v);
+    return val && typeof val === 'object' && 'r' in val ? { r: val.r, g: val.g, b: val.b } : null;
+  }
+
+  const semanticColl = dsCollections.find(function (c) { return c.isAlias && c.colorVarCount > 0; });
+  const semanticVars = semanticColl
+    ? semanticColl.vars.filter(function (v) { return v.resolvedType === 'COLOR'; })
+    : Object.keys(varByName).map(function (k) { return varByName[k]; }).filter(function (v) { return v.resolvedType === 'COLOR'; });
+
+  function bestBgVar() {
+    for (let i = 0; i < semanticVars.length; i++) {
+      const name = semanticVars[i].name;
+      if (/(?:^|\/)on[-_]/i.test(name)) continue;
+      if (/(?:surface|background|base|page)(?:[/_-]default)?$/i.test(name)) return semanticVars[i];
+    }
+    let best = null, bestLum = -1;
+    for (let i = 0; i < semanticVars.length; i++) {
+      const c = rgb(semanticVars[i]);
+      if (c && lum(c) > bestLum) { best = semanticVars[i]; bestLum = lum(c); }
+    }
+    return best;
+  }
+  function bestTextVar() {
+    for (let i = 0; i < semanticVars.length; i++) {
+      if (/(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(semanticVars[i].name)) return semanticVars[i];
+    }
+    let best = null, bestLum = 2;
+    for (let i = 0; i < semanticVars.length; i++) {
+      const c = rgb(semanticVars[i]);
+      if (c && lum(c) < bestLum) { best = semanticVars[i]; bestLum = lum(c); }
+    }
+    return best;
+  }
+  function bestAccentVar() {
+    let best = null, bestSat = -1;
+    for (let i = 0; i < semanticVars.length; i++) {
+      const c = rgb(semanticVars[i]);
+      if (c && sat(c) > bestSat) { best = semanticVars[i]; bestSat = sat(c); }
+    }
+    return best;
+  }
+
+  const bgVar = bestBgVar();
+  const textVar = bestTextVar();
+  const accVar = bestAccentVar();
+  const bgRGB = rgb(bgVar) || { r: 1, g: 1, b: 1 };
+  const textRGB = rgb(textVar) || { r: 0.1, g: 0.1, b: 0.1 };
+
+  const SEG = {
+    'surface': { BG: 3 }, 'background': { BG: 3 }, 'bg': { BG: 2 }, 'canvas': { BG: 2 },
+    'base': { BG: 1 }, 'page': { BG: 1 }, 'fill': { BG: 1 }, 'container': { BG: 1, BRAND: 1 },
+    'on-surface': { FG: 3 }, 'on_surface': { FG: 3 }, 'foreground': { FG: 3 }, 'fg': { FG: 2 },
+    'text': { FG: 2 }, 'icon': { FG: 1 }, 'label': { FG: 1 }, 'content': { FG: 1 }, 'on': { FG: 1 },
+    'on-brand': { FG: 2, BRAND: 2 }, 'on_brand': { FG: 2, BRAND: 2 },
+    'on-primary': { FG: 2, BRAND: 2 }, 'on_primary': { FG: 2, BRAND: 2 },
+    'brand': { BRAND: 2 }, 'primary': { BRAND: 2 }, 'accent': { ACCENT: 2 }, 'action': { BRAND: 1 }, 'interactive': { BRAND: 1 },
+    'brand-variant': { BRAND: 1, BVAR: 3 }, 'brand_variant': { BRAND: 1, BVAR: 3 },
+    'default': { DEFAULT: 1 }, 'variant': { VARIANT: 2 }, 'subtle': { VARIANT: 1 }, 'muted': { VARIANT: 2 },
+    'secondary': { VARIANT: 1 }, 'sub': { VARIANT: 1 }, 'weak': { VARIANT: 1 }, 'strong': { STRONG: 1 },
+    'outline': { OUTLINE: 3 }, 'border': { OUTLINE: 3 }, 'stroke': { OUTLINE: 2 }, 'divider': { OUTLINE: 3 },
+    'separator': { OUTLINE: 3 }, 'line': { OUTLINE: 1 },
+    'success': { SUCCESS: 3 }, 'positive': { SUCCESS: 2 }, 'confirm': { SUCCESS: 1 },
+    'warning': { WARNING: 3 }, 'caution': { WARNING: 2 }, 'alert': { WARNING: 1 },
+    'danger': { DANGER: 2 }, 'error': { DANGER: 2 }, 'destructive': { DANGER: 2 }
+  };
+
+  const ROLE = {
+    onSurface: { FG: 3, BG: -4, VARIANT: -1, DEFAULT: 1, STRONG: 1 },
+    onSurfaceVar: { FG: 3, BG: -4, VARIANT: 2 },
+    surfaceDefault: { BG: 3, FG: -4, VARIANT: -1, DEFAULT: 2, BRAND: -2 },
+    surfaceVariant: { BG: 3, FG: -4, VARIANT: 2 },
+    surfaceBrand: { BG: 2, FG: -4, BRAND: 3 },
+    brandVariant: { BG: 2, FG: -4, BVAR: 3, BRAND: 1 },
+    onBrandVariant: { FG: 3, BG: -4, BRAND: 3, BVAR: 2 },
+    outlineSubtle: { OUTLINE: 3, FG: -2, BG: -2 },
+    outlineBrand: { OUTLINE: 3, FG: -2, BG: -2, BRAND: 3 },
+    successBg: { SUCCESS: 3, BG: 2, FG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+    successBorder: { SUCCESS: 3, OUTLINE: 2, BG: -2, FG: -1, WARNING: -6, DANGER: -6 },
+    successText: { SUCCESS: 3, FG: 2, BG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+    warningBg: { WARNING: 3, BG: 2, FG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
+    warningBorder: { WARNING: 3, OUTLINE: 2, BG: -2, FG: -1, SUCCESS: -6, DANGER: -6 },
+    warningText: { WARNING: 3, FG: 2, BG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
+    dangerBg: { DANGER: 3, BG: 2, FG: -3, OUTLINE: -2, SUCCESS: -6, WARNING: -6 },
+    dangerBorder: { DANGER: 3, OUTLINE: 2, BG: -2, FG: -1, SUCCESS: -6, WARNING: -6 },
+    dangerText: { DANGER: 3, FG: 2, BG: -3, OUTLINE: -2, SUCCESS: -6, WARNING: -6 }
+  };
+
+  function pathCats(name) {
+    const segments = String(name).toLowerCase().split('/');
+    const cats = {};
+    for (let i = 0; i < segments.length; i++) {
+      const segCats = SEG[segments[i]];
+      if (!segCats) continue;
+      for (const cat in segCats) cats[cat] = (cats[cat] || 0) + segCats[cat];
+    }
+    return cats;
+  }
+  function segScore(name, role) {
+    const cats = pathCats(name);
+    const weights = ROLE[role];
+    if (!weights) return 0;
+    let total = 0;
+    for (const cat in weights) total += weights[cat] * (cats[cat] || 0);
+    return total;
+  }
+
+  const scored = Object.keys(varByName).map(function (k) {
+    const v = varByName[k];
+    if (v.resolvedType !== 'COLOR') return null;
+    const c = rgb(v);
+    if (!c) return null;
+    return { v: v, rgb: c, lum: lum(c), sat: sat(c), contrast: contrastRatio(c, bgRGB), name: v.name.toLowerCase() };
+  }).filter(Boolean);
+
+  function pickColorRole(role, scorer, nameOnly, requiredCats, compareBg) {
+    let best = null, bestSeg = 0;
+    for (let i = 0; i < scored.length; i++) {
+      const s = scored[i];
+      const seg = segScore(s.name, role);
+      if (seg <= 0) continue;
+      if (requiredCats) {
+        const cats = pathCats(s.name);
+        let ok = true;
+        for (let j = 0; j < requiredCats.length; j++) {
+          if ((cats[requiredCats[j]] || 0) <= 0) { ok = false; break; }
+        }
+        if (!ok) continue;
+      }
+      if (best === null || seg > bestSeg || (seg === bestSeg && scorer(s) > scorer(best))) {
+        best = s; bestSeg = seg;
+      }
+    }
+    if (best) return best.v;
+    if (nameOnly || requiredCats) return null;
+    let funcBest = null, funcScore = 0;
+    for (let i = 0; i < scored.length; i++) {
+      const score = scorer(scored[i]);
+      if (score > funcScore) { funcScore = score; funcBest = scored[i]; }
+    }
+    return funcBest ? funcBest.v : null;
+  }
+
+  function findContrastVar(against, minRatio) {
+    minRatio = minRatio || 4.5;
+    let best = null, bestRatio = 0;
+    const preferred = Object.keys(varByName).map(function (k) { return varByName[k]; }).filter(function (v) {
+      return v.resolvedType === 'COLOR' && /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_\/]|$))/i.test(v.name);
+    });
+    const candidates = preferred.length ? preferred : scored.map(function (s) { return s.v; });
+    for (let i = 0; i < candidates.length; i++) {
+      const c = rgb(candidates[i]);
+      if (!c) continue;
+      const ratio = contrastRatio(c, against);
+      if (ratio >= minRatio && ratio > bestRatio) { bestRatio = ratio; best = candidates[i]; }
+    }
+    return best;
+  }
+
+  const colorRoles = {
+    bg: bgVar || null,
+    text: textVar || null,
+    acc: accVar || null,
+    onSurface: pickColorRole('onSurface', function (s) { return s.contrast >= 4.5 ? s.contrast : 0; }),
+    onSurfaceVar: pickColorRole('onSurfaceVar', function (s) { return s.contrast >= 2 && s.contrast < 9 ? s.contrast : 0; }),
+    surfaceDefault: pickColorRole('surfaceDefault', function (s) { return s.lum; }),
+    surfaceVariant: pickColorRole('surfaceVariant', function (s) { return s.lum * (1 - s.sat); }),
+    surfaceBrand: pickColorRole('surfaceBrand', function (s) { return s.sat * 0.5 + s.lum * 0.5; }),
+    brandVariant: pickColorRole('brandVariant', function (s) { return s.sat * 0.4 + s.lum * 0.6; }),
+    outlineSubtle: pickColorRole('outlineSubtle', function (s) {
+      if (s.lum > 0.9 || s.lum < 0.05) return 0;
+      const dist = Math.abs(s.lum - 0.6);
+      if (dist > 0.5) return 0;
+      return (1 - s.sat) * (1 - dist * 2);
+    }, false, ['OUTLINE']),
+    successBg: pickColorRole('successBg', function (s) { return s.sat; }, true, ['BG', 'SUCCESS']),
+    successBorder: pickColorRole('successBorder', function (s) { return s.sat; }, true, ['OUTLINE', 'SUCCESS']),
+    successText: pickColorRole('successText', function (s) { return s.contrast >= 4.5 ? s.contrast : 0; }, true, ['FG', 'SUCCESS']),
+    dangerBg: pickColorRole('dangerBg', function (s) { return s.sat; }, true, ['BG', 'DANGER']),
+    dangerBorder: pickColorRole('dangerBorder', function (s) { return s.sat; }, true, ['OUTLINE', 'DANGER']),
+    dangerText: pickColorRole('dangerText', function (s) { return s.contrast >= 4.5 ? s.contrast : 0; }, true, ['FG', 'DANGER'])
+  };
+  if (!colorRoles.brandVariant) colorRoles.brandVariant = colorRoles.surfaceBrand || colorRoles.surfaceVariant || null;
+  const brandRGB = rgb(colorRoles.brandVariant) || { r: 0.957, g: 0.953, b: 0.988 };
+  colorRoles.onBrandVariant = pickColorRole('onBrandVariant', function (s) {
+    const ratio = contrastRatio(s.rgb, brandRGB);
+    return ratio >= 3 ? ratio : 0;
+  }) || findContrastVar(brandRGB, 3) || colorRoles.text || null;
+  if (!colorRoles.surfaceBrand) colorRoles.surfaceBrand = colorRoles.acc || null;
+  if (!colorRoles.onSurfaceVar) colorRoles.onSurfaceVar = findContrastVar(bgRGB, 3) || colorRoles.text || null;
+
+  function resolvedOrFallback(v, fallback) {
+    const c = rgb(v);
+    return c || fallback;
+  }
+
+  const floatVars = allVars.filter(function (v) { return v.resolvedType === 'FLOAT'; });
+  function pickFloatByValue(value, purpose) {
+    const want = Number(value);
+    let best = null;
+    let bestScore = -1;
+    function scoreName(name) {
+      const n = String(name).toLowerCase();
+      if (purpose === 'typography') {
+        if (!/(?:^|\/)(type|font|line-height|tracking|letter|weight|size)(?:\/|$|-)/i.test(n)) return -1;
+        return (/^type\//.test(n) ? 50 : 20) + String(name).split('/').length;
+      }
+      if (purpose === 'border') {
+        if (!/(?:^|\/)(border|stroke|outline)(?:\/|$|-)/i.test(n)) return -1;
+        return (/^space\/border\//.test(n) ? 80 : 30) + String(name).split('/').length;
+      }
+      if (purpose === 'radius') {
+        if (/shadow|elevation|blur|offset|type|font|line-height|tracking|weight/i.test(n)) return -1;
+        if (!/(?:^|\/)(radius|corner|round)(?:\/|$|-)/i.test(n)) return -1;
+        return (/^space\/radius\//.test(n) ? 80 : 30) + String(name).split('/').length;
+      }
+      if (/shadow|elevation|type|font|line-height|tracking|weight|radius|border|stroke/i.test(n)) return -1;
+      if (!/(?:^|\/)(space|spacing|gap|padding|margin|inset|stack|layout|component|touch)(?:\/|$|-)/i.test(n)) return -1;
+      return (/^space\//.test(n) ? 80 : 30) + String(name).split('/').length;
+    }
+    for (let i = 0; i < floatVars.length; i++) {
+      const val = resolveVarValue(floatVars[i]);
+      if (typeof val !== 'number' || Number(val) !== want) continue;
+      const score = scoreName(floatVars[i].name);
+      if (score > bestScore) {
+        best = floatVars[i];
+        bestScore = score;
+      }
+    }
+    return bestScore >= 0 ? best : null;
+  }
+
+  function pickTextStyleLike(patterns) {
+    function norm(value) {
+      return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+    const lower = patterns.map(function (p) { return p.toLowerCase(); });
+    const normalized = patterns.map(norm);
+    for (let i = 0; i < textStyles.length; i++) {
+      const name = textStyles[i].name.toLowerCase();
+      const normalizedName = norm(name);
+      for (let j = 0; j < lower.length; j++) {
+        if (name.indexOf(lower[j]) >= 0 || normalizedName.indexOf(normalized[j]) >= 0) return textStyles[i];
+      }
+    }
+    return null;
+  }
+
+  function paint(fallbackRGB, variable) {
+    const base = { type: 'SOLID', color: fallbackRGB };
+    return variable ? figma.variables.setBoundVariableForPaint(base, 'color', variable) : base;
+  }
+  function bindVar(node, prop, variable) {
+    if (!variable) return false;
+    try { node.setBoundVariable(prop, variable); return true; } catch (e) { return false; }
+  }
+
+  return {
+    allVars,
+    allColls,
+    textStyles,
+    effectStyles,
+    varByName,
+    varById,
+    dsCollections,
+    resolveVarValue,
+    rgb,
+    lum,
+    sat,
+    contrastRatio,
+    colorRoles,
+    pickColorRole,
+    pickFloatByValue,
+    pickTextStyleLike,
+    resolvedOrFallback,
+    paint,
+    bindVar
+  };
+}
 
 // ── Showcase implementation ──────────────────────────────────────────────────
 // Ported from figlets skills/fig-ds-showcase — all rendering via Figma Plugin API.
@@ -594,7 +1003,7 @@ async function _buildShowcase() {
     // Brand / primary family
     'brand':         { BRAND: 2 },
     'primary':       { BRAND: 2 },
-    'accent':        { BRAND: 2 },
+    'accent':        { ACCENT: 2 },
     'action':        { BRAND: 1 },
     'interactive':   { BRAND: 1 },
     // Brand-variant (a secondary brand surface, distinct from main brand)
@@ -869,6 +1278,147 @@ async function _buildShowcase() {
     return t;
   }
 
+  const _floatVarsForBinding = _dsStruct_allVars.filter(v => v.resolvedType === 'FLOAT');
+
+  function _pickFloatVarByValue(value, purpose) {
+    const want = Number(value);
+    if (!isFinite(want)) return null;
+    const pattern = purpose === 'typography'
+      ? /font|size|line|tracking|letter|weight|type|typo|text/i
+      : purpose === 'border'
+        ? /border|stroke|outline/i
+        : purpose === 'radius'
+          ? /radius|corner|round/i
+          : /space|spacing|gap|padding|margin|inset|size/i;
+    let fallback = null;
+    let best = null;
+    let bestDepth = -1;
+    for (let i = 0; i < _floatVarsForBinding.length; i++) {
+      const v = _floatVarsForBinding[i];
+      const val = resolveVarValue(v);
+      if (typeof val !== 'number' || Number(val) !== want) continue;
+      const depth = String(v.name).split('/').length;
+      if (!fallback || depth > String(fallback.name).split('/').length) fallback = v;
+      if (pattern.test(v.name) && depth > bestDepth) {
+        best = v;
+        bestDepth = depth;
+      }
+    }
+    return best || fallback;
+  }
+
+  function _bindNumericProp(node, prop, value, purpose) {
+    if (!node || !(prop in node) || typeof value !== 'number' || !isFinite(value)) return false;
+    const variable = _pickFloatVarByValue(value, purpose);
+    if (!variable) return false;
+    try { node.setBoundVariable(prop, variable); return true; } catch (_) { return false; }
+  }
+
+  function _fontStyleWeight(styleName) {
+    const s = String(styleName || '').toLowerCase();
+    if (/thin|hairline/.test(s)) return 100;
+    if (/extra\s*light|ultra\s*light/.test(s)) return 200;
+    if (/light/.test(s)) return 300;
+    if (/regular|book|normal/.test(s)) return 400;
+    if (/medium/.test(s)) return 500;
+    if (/semi\s*bold|semibold|demi\s*bold|demibold/.test(s)) return 600;
+    if (/bold/.test(s)) return 700;
+    if (/black|heavy/.test(s)) return 900;
+    return 400;
+  }
+
+  function _pickTextStyleForText(node) {
+    if (!node || node.type !== 'TEXT' || !textStyles.length) return null;
+    const size = typeof node.fontSize === 'number' ? node.fontSize : null;
+    if (!size) return null;
+    const fontName = node.fontName && typeof node.fontName === 'object' ? node.fontName : null;
+    const nodeWeight = fontName ? _fontStyleWeight(fontName.style) : 400;
+    const nodeName = String(node.name || '').toLowerCase();
+    const chars = String(node.characters || '').trim();
+    const wantsLabel = /token|badge|tag|label|th|meta|aa|\([0-9]+\)/i.test(nodeName) || chars.length <= 18;
+    const wantsTitle = /title|heading|header|section|component/i.test(nodeName) || size >= 18;
+    const wantsBody = /description|body|caption/i.test(nodeName) || (!wantsLabel && !wantsTitle);
+
+    let best = null;
+    let bestScore = -Infinity;
+    for (let i = 0; i < textStyles.length; i++) {
+      const s = textStyles[i];
+      const styleName = String(s.name || '').toLowerCase();
+      const sWeight = _fontStyleWeight(s.fontName && s.fontName.style);
+      const sizeDelta = Math.abs(Number(s.fontSize || 0) - size);
+      let score = 100 - (sizeDelta * 18) - (Math.abs(sWeight - nodeWeight) / 100) * 4;
+      if (fontName && s.fontName && s.fontName.family === fontName.family) score += 8;
+      if (wantsLabel && /label/.test(styleName)) score += 14;
+      if (wantsTitle && /title|headline|display/.test(styleName)) score += 14;
+      if (wantsBody && /body/.test(styleName)) score += 14;
+      if (!wantsTitle && /display|headline/.test(styleName)) score -= 20;
+      if (sizeDelta === 0) score += 18;
+      if (score > bestScore) { bestScore = score; best = s; }
+    }
+    return bestScore > 0 ? best : null;
+  }
+
+  function _applyTextStyleBinding(node) {
+    if (!node || node.type !== 'TEXT' || node.textStyleId) return false;
+    const style = _pickTextStyleForText(node);
+    if (!style) {
+      _bindNumericProp(node, 'fontSize', node.fontSize, 'typography');
+      if (node.lineHeight && typeof node.lineHeight === 'object' && node.lineHeight.unit === 'PIXELS') {
+        _bindNumericProp(node, 'lineHeight', node.lineHeight.value, 'typography');
+      }
+      return false;
+    }
+    const fills = Array.isArray(node.fills) ? node.fills.slice() : node.fills;
+    const name = node.name;
+    const maxLines = node.maxLines;
+    const textTruncation = node.textTruncation;
+    try {
+      node.textStyleId = style.id;
+      node.name = name;
+      if (Array.isArray(fills)) node.fills = fills;
+      if (maxLines !== undefined) node.maxLines = maxLines;
+      if (textTruncation !== undefined) node.textTruncation = textTruncation;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _bindShowcaseNodeProperties(root) {
+    function bindNode(node) {
+      if (!node) return;
+      const spacingProps = ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'itemSpacing', 'counterAxisSpacing'];
+      for (let i = 0; i < spacingProps.length; i++) {
+        const prop = spacingProps[i];
+        if (prop in node && typeof node[prop] === 'number' && node[prop] !== 0) {
+          _bindNumericProp(node, prop, node[prop], 'spacing');
+        }
+      }
+      const radiusProps = ['cornerRadius', 'topLeftRadius', 'topRightRadius', 'bottomRightRadius', 'bottomLeftRadius'];
+      for (let i = 0; i < radiusProps.length; i++) {
+        const prop = radiusProps[i];
+        if (prop in node && typeof node[prop] === 'number' && node[prop] !== 0) {
+          _bindNumericProp(node, prop, node[prop], 'radius');
+        }
+      }
+      const hasVisibleStroke = Array.isArray(node.strokes) && node.strokes.some(p => p && p.visible !== false);
+      if (hasVisibleStroke) {
+        const borderProps = ['strokeWeight', 'strokeTopWeight', 'strokeRightWeight', 'strokeBottomWeight', 'strokeLeftWeight'];
+        for (let i = 0; i < borderProps.length; i++) {
+          const prop = borderProps[i];
+          if (prop in node && typeof node[prop] === 'number' && node[prop] !== 0) {
+            _bindNumericProp(node, prop, node[prop], 'border');
+          }
+        }
+      }
+      _applyTextStyleBinding(node);
+      if ('children' in node && node.type !== 'INSTANCE') {
+        for (let i = 0; i < node.children.length; i++) bindNode(node.children[i]);
+      }
+    }
+    bindNode(root);
+  }
+
   function _f(name, dir) {
     dir = dir || 'VERTICAL';
     const f = figma.createFrame();
@@ -951,8 +1501,8 @@ async function _buildShowcase() {
       sign = '✗'; score = 'Fail';
     }
     const badge = _f('Contrast Badge', 'HORIZONTAL');
-    badge.paddingLeft = 9; badge.paddingRight = 9;
-    badge.paddingTop  = 5; badge.paddingBottom = 5;
+    badge.paddingLeft = 8; badge.paddingRight = 8;
+    badge.paddingTop  = 4; badge.paddingBottom = 4;
     badge.itemSpacing = 4;
     badge.cornerRadius = 8;
     badge.primaryAxisAlignItems = 'CENTER';
@@ -973,7 +1523,7 @@ async function _buildShowcase() {
   function _buildGroupHeader(label) {
     const row = _f('Group Header', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
-    row.paddingTop  = 10; row.paddingBottom = 10;
+    row.paddingTop  = 12; row.paddingBottom = 12;
     row.fills = [_paint(_RC.surfaceVariant, _V.surfaceVariant)];
     const t = _tDS((label || 'Other').toUpperCase(), 11, _subColor, true, _V.textSub);
     row.appendChild(t);
@@ -1161,8 +1711,8 @@ async function _buildShowcase() {
 
   function _buildPrimSwatchRow(rampName, vars) {
     const row = _f('Table / Row / Primary Color Swatches 1.0.0', 'VERTICAL');
-    row.paddingLeft = 16.5; row.paddingRight  = 16.5;
-    row.paddingTop  = 16.5; row.paddingBottom = 16.5;
+    row.paddingLeft = 16; row.paddingRight  = 16;
+    row.paddingTop  = 16; row.paddingBottom = 16;
     row.itemSpacing = 16;
     row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
 
@@ -1472,6 +2022,28 @@ async function _buildShowcase() {
       return sq;
     }
 
+    if (type === 'inset') {
+      const displayPx = Math.min(Math.max(px, 2), 32);
+      const outer = figma.createFrame();
+      outer.name = 'Inset Visual';
+      outer.layoutMode = 'NONE';
+      outer.resize(40 + displayPx * 2, 40 + displayPx * 2);
+      outer.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
+      outer.strokes = [_paint(_RC.onBrandVariant, _V.onBrandVariant)];
+      outer.strokeWeight = 1;
+      outer.strokeAlign = 'INSIDE';
+      outer.cornerRadius = 4;
+      outer.clipsContent = true;
+      const inner = figma.createRectangle();
+      inner.resize(40, 40);
+      inner.x = displayPx;
+      inner.y = displayPx;
+      inner.fills = [_paint(_RC.onBrandVariant, _V.onBrandVariant)];
+      inner.cornerRadius = 2;
+      outer.appendChild(inner);
+      return outer;
+    }
+
     if (type === 'touch') {
       const size = Math.max(px, 16);
       const el = figma.createEllipse();
@@ -1567,6 +2139,7 @@ async function _buildShowcase() {
     const effectiveMax  = Math.max(...effectiveVals);
     const posVals       = effectiveVals.filter(v => v > 0);
     const effectiveMin  = posVals.length ? Math.min(...posVals) : 0;
+    if (/inset|padding|pad(?:ding)?|internal[-_]?space/i.test(groupPath)) return 'inset';
     if (effectiveMax <= 8 && vals.length <= 8) return 'border';
     if (/radius|corner|round|pill|curve/i.test(groupPath) && effectiveMax <= 128) return 'radius';
     if (effectiveMax <= 24 && vals.length <= 16 && effectiveMin > 0 && effectiveMax / effectiveMin >= 8) return 'radius';
@@ -2062,6 +2635,7 @@ async function _buildShowcase() {
     if (_prevSpacing) _prevSpacing.remove();
 
     const _barGroups    = [];
+    const _insetGroups  = [];
     const _touchGroups  = [];
     const _radiusGroups = [];
     const _borderGroups = [];
@@ -2079,7 +2653,8 @@ async function _buildShowcase() {
         const sortedValues = _sorted.map(p => p.val);
         const type = _groupVisualType(groupPath, sortedValues);
         const entry = { groupPath: groupPath || coll.name, sortedVars, sortedValues };
-        if (type === 'touch')  _touchGroups.push(entry);
+        if (type === 'inset') _insetGroups.push(entry);
+        else if (type === 'touch')  _touchGroups.push(entry);
         else if (type === 'radius') _radiusGroups.push(entry);
         else if (type === 'border') _borderGroups.push(entry);
         else _barGroups.push(entry);
@@ -2105,13 +2680,16 @@ async function _buildShowcase() {
     _spTwoCols.itemSpacing = 24;
     _spTwoCols.counterAxisAlignItems = 'MIN';
 
-    if (_barGroups.length) {
+    if (_barGroups.length || _insetGroups.length) {
       const _leftCol = _f('Spacing', 'VERTICAL');
       _leftCol.itemSpacing = 32;
       _spTwoCols.appendChild(_leftCol);
       _leftCol.layoutSizingHorizontal = 'FILL';
       for (const { groupPath, sortedVars, sortedValues } of _barGroups) {
         _buildGroupTable(groupPath, sortedVars, sortedValues, _leftCol, 'bar');
+      }
+      for (const { groupPath, sortedVars, sortedValues } of _insetGroups) {
+        _buildGroupTable(groupPath, sortedVars, sortedValues, _leftCol, 'inset');
       }
     }
 
@@ -2178,7 +2756,7 @@ async function _buildShowcase() {
       const tokenCell = _f('TokenCell', 'VERTICAL');
       tokenCell.paddingLeft = 12; tokenCell.paddingRight  = 12;
       tokenCell.paddingTop  = 12; tokenCell.paddingBottom = 12;
-      tokenCell.itemSpacing = 6;
+      tokenCell.itemSpacing = 8;
       tokenCell.counterAxisAlignItems = 'MIN';
       tokenCell.primaryAxisAlignItems = 'CENTER';
       const _elevTag = _buildTag(style.name.split('/').pop());
@@ -2296,7 +2874,7 @@ async function _buildShowcase() {
         const tokenCell = _f('TokenCell', 'VERTICAL');
         tokenCell.paddingLeft = 12; tokenCell.paddingRight  = 12;
         tokenCell.paddingTop  = 12; tokenCell.paddingBottom = 12;
-        tokenCell.itemSpacing = 6;
+        tokenCell.itemSpacing = 8;
         tokenCell.counterAxisAlignItems = 'MIN';
         tokenCell.primaryAxisAlignItems = 'CENTER';
         const _scrimTag = _buildTag(scrimVar.name.split('/').pop());
@@ -2355,6 +2933,10 @@ async function _buildShowcase() {
     .filter(n => n.name.startsWith('Token Showcase'));
 
   const _builtSections = _showcaseNodes.map(n => n.name.replace('Token Showcase — ', ''));
+
+  for (const _showcaseNode of _showcaseNodes) {
+    _bindShowcaseNodeProperties(_showcaseNode);
+  }
 
 
   if (_showcaseNodes.length) {
@@ -2918,28 +3500,40 @@ async function _applyDsSetup(DS) {
 // ES6-era only: no `??`, `?.`, `**`. Figma plugin sandbox does not support them.
 
 async function _buildComponentDoc(opts) {
+  const compId = opts && opts.componentId ? String(opts.componentId) : '';
   const compName = opts && opts.componentName ? String(opts.componentName) : '';
   const agentDescription = (opts && typeof opts.description === 'string') ? opts.description.trim() : '';
   const usageDo = (opts && opts.usageDo && opts.usageDo.length > 0)
     ? opts.usageDo
-    : ['_[Add a Do rule grounded in this component\'s purpose]_'];
+    : [];
   const usageDont = (opts && opts.usageDont && opts.usageDont.length > 0)
     ? opts.usageDont
-    : ['_[Add a Don\'t rule grounded in this component\'s purpose]_'];
+    : [];
   const variantDesc = (opts && opts.variantDescriptions) ? opts.variantDescriptions : {};
 
-  if (!compName) return { error: 'componentName is required' };
+  if (!compId && !compName) return { error: 'componentName or componentId is required' };
+  if (!agentDescription) return { error: 'description is required. Agent must provide a component-specific summary.' };
+  if (usageDo.length < 2) return { error: 'usageDo must contain at least 2 component-specific rules.' };
+  if (usageDont.length < 2) return { error: 'usageDont must contain at least 2 component-specific misuse rules.' };
 
   // ── Find component on current page ─────────────────────────────────────────
-  let _comp = figma.currentPage.findOne(function (n) {
-    return (n.type === 'COMPONENT' || n.type === 'COMPONENT_SET') && n.name === compName;
-  });
-  if (!_comp) {
+  let _comp = null;
+  if (compId) {
+    _comp = figma.currentPage.findOne(function (n) {
+      return (n.type === 'COMPONENT' || n.type === 'COMPONENT_SET') && n.id === compId;
+    });
+  }
+  if (!_comp && compName) {
+    _comp = figma.currentPage.findOne(function (n) {
+      return (n.type === 'COMPONENT' || n.type === 'COMPONENT_SET') && n.name === compName;
+    });
+  }
+  if (!_comp && compName) {
     _comp = figma.currentPage.findOne(function (n) {
       return (n.type === 'COMPONENT' || n.type === 'COMPONENT_SET') && n.name.indexOf(compName) === 0;
     });
   }
-  if (!_comp) return { error: 'Component not found on current page: ' + compName };
+  if (!_comp) return { error: 'Component not found on current page: ' + (compName || compId) };
 
   const compSet = _comp;
   const _isSet = compSet.type === 'COMPONENT_SET';
@@ -2964,8 +3558,9 @@ async function _buildComponentDoc(opts) {
   };
 
   // ── Variables and text styles ──────────────────────────────────────────────
-  const _allVars = await figma.variables.getLocalVariablesAsync();
-  const _allTextStyles = await figma.getLocalTextStylesAsync();
+  const _ds = await _createDsBindingContext();
+  const _allVars = _ds.allVars;
+  const _allTextStyles = _ds.textStyles;
   const varById = {};
   for (let i = 0; i < _allVars.length; i++) varById[_allVars[i].id] = _allVars[i];
   const textStyleById = {};
@@ -2997,6 +3592,15 @@ async function _buildComponentDoc(opts) {
       return s.length === 1 ? '0' + s : s;
     }
     return '#' + _h(r) + _h(g) + _h(b);
+  }
+
+  function _paint(fallbackRGB, varOrNull) {
+    return _ds.paint(fallbackRGB, varOrNull);
+  }
+
+  function _bindVar(node, prop, variable) {
+    if (!variable) return;
+    _ds.bindVar(node, prop, variable);
   }
 
   // ── Anatomy bounds ─────────────────────────────────────────────────────────
@@ -3114,6 +3718,7 @@ async function _buildComponentDoc(opts) {
     }
     return null;
   }
+  try { await figma.loadFontAsync({ family: 'Inter', style: 'Regular' }); } catch (e) {}
   const _regOk  = await _loadFontSafe(_fam, [_fReg, 'Regular']);
   const _semOk  = await _loadFontSafe(_fam, [_fSemi, 'Semi Bold', 'SemiBold', 'Demi Bold', 'DemiBold', 'Bold']);
   const _boldOk = await _loadFontSafe(_fam, [_fBold, 'Bold']);
@@ -3125,40 +3730,63 @@ async function _buildComponentDoc(opts) {
   }
 
   // ── DS-adaptive palette ────────────────────────────────────────────────────
-  function _dsCol(pats, fb) {
-    function resolveColor(v, depth) {
-      if (depth > 4) return null;
-      const modes = Object.keys(v.valuesByMode);
-      if (modes.length === 0) return null;
-      const raw = v.valuesByMode[modes[0]];
-      if (raw && raw.r !== undefined) return { r: raw.r, g: raw.g, b: raw.b };
-      if (raw && raw.type === 'VARIABLE_ALIAS') {
-        const target = varById[raw.id];
-        if (target) return resolveColor(target, depth + 1);
-      }
-      return null;
+  const _vPaper   = _ds.colorRoles.surfaceDefault || _ds.colorRoles.bg;
+  const _vSurface = _ds.colorRoles.surfaceVariant || _ds.colorRoles.surfaceDefault || _ds.colorRoles.bg;
+  const _vInk     = _ds.colorRoles.onSurface || _ds.colorRoles.text;
+  const _vSubtle  = _ds.colorRoles.onSurfaceVar || _ds.colorRoles.onSurface || _ds.colorRoles.text;
+  const _vBadge   = _ds.colorRoles.dangerBg || _ds.colorRoles.dangerBorder;
+  const _vBorder  = _ds.colorRoles.outlineSubtle;
+  const _vDo      = _ds.colorRoles.successBorder || _ds.colorRoles.successBg || _ds.colorRoles.onSurface;
+  const _vDont    = _ds.colorRoles.dangerBorder || _ds.colorRoles.dangerBg || _ds.colorRoles.onSurface;
+  const _cPaper   = _ds.resolvedOrFallback(_vPaper, { r: 0.961, g: 0.941, b: 0.922 });
+  const _cSurface = _ds.resolvedOrFallback(_vSurface, { r: 0.937, g: 0.918, b: 0.898 });
+  const _cInk     = _ds.resolvedOrFallback(_vInk, { r: 0.071, g: 0.071, b: 0.078 });
+  const _cSubtle  = _ds.resolvedOrFallback(_vSubtle, { r: 0.439, g: 0.439, b: 0.569 });
+  const _cBadge   = _ds.resolvedOrFallback(_vBadge, { r: 0.863, g: 0.133, b: 0.000 });
+  const _cBorder  = _ds.resolvedOrFallback(_vBorder, { r: 0.851, g: 0.831, b: 0.804 });
+  const _cDo      = _ds.resolvedOrFallback(_vDo, { r: 0.133, g: 0.545, b: 0.133 });
+  const _cDont    = _ds.resolvedOrFallback(_vDont, { r: 0.863, g: 0.133, b: 0.000 });
+
+  const _docSpace = {
+    padS: _ds.pickFloatByValue(8, 'spacing'),
+    padM: _ds.pickFloatByValue(12, 'spacing'),
+    padL: _ds.pickFloatByValue(16, 'spacing'),
+    padXL: _ds.pickFloatByValue(24, 'spacing'),
+    pad2XL: _ds.pickFloatByValue(40, 'spacing'),
+    gapDoc: _ds.pickFloatByValue(56, 'spacing'),
+    radius: _ds.pickFloatByValue(8, 'radius'),
+    border: _ds.pickFloatByValue(1, 'border'),
+    borderStrong: _ds.pickFloatByValue(2, 'border')
+  };
+
+  const _docTextStyles = {
+    title: _ds.pickTextStyleLike(['type/display/lg', 'display/lg', 'display large', 'type/headline/lg', 'headline/lg', 'title/lg', 'title large']),
+    subtitle: _ds.pickTextStyleLike(['type/body/lg', 'body/lg', 'body large', 'type/body/md', 'body/md', 'body medium', 'paragraph']),
+    sectionLabel: _ds.pickTextStyleLike(['type/label/sm', 'label/sm', 'label small', 'caption', 'overline']),
+    bodyStrong: _ds.pickTextStyleLike(['type/label/md', 'label/md', 'label medium', 'type/body/md', 'body/md', 'body medium']),
+    body: _ds.pickTextStyleLike(['type/body/md', 'body/md', 'body medium', 'paragraph', 'type/body/sm', 'body/sm', 'body small']),
+    mono: _ds.pickTextStyleLike(['code', 'mono', 'type/body/sm', 'body/sm', 'body small'])
+  };
+
+  function _hasMeaningfulAnatomy(root) {
+    if (!('children' in root) || !root.children || root.children.length === 0) return false;
+    for (let i = 0; i < root.children.length; i++) {
+      const c = root.children[i];
+      if (c.type !== 'INSTANCE') return true;
     }
-    for (let i = 0; i < pats.length; i++) {
-      for (let j = 0; j < _allVars.length; j++) {
-        const v = _allVars[j];
-        if (v.resolvedType === 'COLOR' && v.name.toLowerCase().indexOf(pats[i]) >= 0) {
-          const r = resolveColor(v, 0);
-          if (r) return r;
-        }
-      }
-    }
-    return fb;
+    return false;
   }
-  const _cPaper   = _dsCol(['paper', 'bg/primary', 'background/primary', 'surface/default'], { r: 0.961, g: 0.941, b: 0.922 });
-  const _cSurface = _dsCol(['surface', 'bg/secondary', 'background/secondary', 'card'], { r: 0.937, g: 0.918, b: 0.898 });
-  const _cInk     = _dsCol(['ink/black', 'ink-black', 'text/primary', 'foreground/primary'], { r: 0.071, g: 0.071, b: 0.078 });
-  const _cSubtle  = _dsCol(['ink/subtle', 'ink-subtle', 'text/secondary', 'foreground/secondary'], { r: 0.439, g: 0.439, b: 0.569 });
-  const _cInvBg   = _dsCol(['ink/black-soft', 'background/inverse', 'surface/inverse'], { r: 0.071, g: 0.071, b: 0.078 });
-  const _cInvTxt  = _dsCol(['ink/white', 'text/inverse', 'foreground/inverse'], { r: 0.737, g: 0.737, b: 0.808 });
-  const _cBadge   = _dsCol(['overprint/red', 'overprint-red', 'error', 'danger'], { r: 0.863, g: 0.133, b: 0.000 });
-  const _cBorder  = _dsCol(['border', 'stroke/default', 'divider'], { r: 0.851, g: 0.831, b: 0.804 });
-  const _cDo      = _dsCol(['success', 'positive', 'confirm'], { r: 0.133, g: 0.545, b: 0.133 });
-  const _cDont    = _dsCol(['error', 'danger', 'destructive'], { r: 0.863, g: 0.133, b: 0.000 });
+
+  function _applyTextRole(t, role, fallbackSize, fallbackStyle, fallbackColor, colorVar) {
+    const style = _docTextStyles[role];
+    if (style) {
+      try { t.textStyleId = style.id; } catch (e) {}
+    } else {
+      t.fontName = { family: _fam, style: fallbackStyle };
+      t.fontSize = fallbackSize;
+    }
+    t.fills = [_paint(fallbackColor, colorVar)];
+  }
 
   // ── Doc frame inside Documentation section ────────────────────────────────
   let _docSec = figma.currentPage.findOne(function (n) {
@@ -3187,7 +3815,10 @@ async function _buildComponentDoc(opts) {
   doc.primaryAxisSizingMode = 'AUTO'; doc.counterAxisSizingMode = 'FIXED';
   doc.paddingTop = 64; doc.paddingBottom = 64; doc.paddingLeft = 60; doc.paddingRight = 60;
   doc.itemSpacing = 56;
-  doc.fills = [{ type: 'SOLID', color: _cPaper }];
+  doc.fills = [_paint(_cPaper, _vPaper)];
+  _bindVar(doc, 'itemSpacing', _docSpace.gapDoc);
+  _bindVar(doc, 'paddingTop', _docSpace.pad2XL);
+  _bindVar(doc, 'paddingBottom', _docSpace.pad2XL);
   _docSec.appendChild(doc);
 
   // Position: rebuild → reuse old coords; new component → land to the right of
@@ -3221,10 +3852,9 @@ async function _buildComponentDoc(opts) {
 
   function _mkLabel(parent, text) {
     const t = figma.createText();
-    t.fontName = { family: _fam, style: _fSemi };
-    t.characters = text; t.fontSize = 11;
+    t.characters = text;
     t.letterSpacing = { value: 2, unit: 'PIXELS' };
-    t.fills = [{ type: 'SOLID', color: _cSubtle }];
+    _applyTextRole(t, 'sectionLabel', 11, _fSemi, _cSubtle, _vSubtle);
     parent.appendChild(t); t.textAutoResize = 'WIDTH_AND_HEIGHT';
     return t;
   }
@@ -3234,7 +3864,9 @@ async function _buildComponentDoc(opts) {
     row.counterAxisAlignItems = 'MIN'; row.itemSpacing = 0;
     row.paddingTop = 12; row.paddingBottom = 12; row.paddingLeft = 0; row.paddingRight = 0;
     row.primaryAxisSizingMode = 'FIXED'; row.resize(w, 1); row.counterAxisSizingMode = 'AUTO';
-    row.fills = isHdr ? [{ type: 'SOLID', color: _cInvBg }] : [];
+    row.fills = isHdr ? [_paint(_cSurface, _vSurface)] : [];
+    _bindVar(row, 'paddingTop', _docSpace.padM);
+    _bindVar(row, 'paddingBottom', _docSpace.padM);
     parent.appendChild(row); return row;
   }
   function _mkCell(row, text, width, style) {
@@ -3242,12 +3874,13 @@ async function _buildComponentDoc(opts) {
     const cell = figma.createFrame();
     cell.name = 'Cell'; cell.layoutMode = 'VERTICAL';
     cell.paddingTop = 0; cell.paddingBottom = 0; cell.paddingLeft = 16; cell.paddingRight = 16;
+    _bindVar(cell, 'paddingLeft', _docSpace.padL);
+    _bindVar(cell, 'paddingRight', _docSpace.padL);
     cell.fills = []; row.appendChild(cell); cell.resize(width, 1);
     cell.primaryAxisSizingMode = 'AUTO'; cell.counterAxisSizingMode = 'FIXED';
     const t = figma.createText();
-    t.fontName = { family: _fam, style: isH ? _fSemi : _fReg };
-    t.characters = String(text); t.fontSize = 12;
-    t.fills = [{ type: 'SOLID', color: isH ? _cInvTxt : isMono ? _cSubtle : _cInk }];
+    t.characters = String(text);
+    _applyTextRole(t, isH ? 'sectionLabel' : isMono ? 'mono' : 'body', 12, isH ? _fSemi : _fReg, isH ? _cInk : isMono ? _cSubtle : _cInk, isH ? _vInk : isMono ? _vSubtle : _vInk);
     cell.appendChild(t); t.textAutoResize = 'HEIGHT';
     return cell;
   }
@@ -3255,6 +3888,7 @@ async function _buildComponentDoc(opts) {
     const t = figma.createFrame();
     t.name = name; t.layoutMode = 'VERTICAL';
     t.itemSpacing = 0; t.fills = []; t.cornerRadius = 6; t.clipsContent = true;
+    _bindVar(t, 'cornerRadius', _docSpace.radius);
     parent.appendChild(t); t.layoutSizingHorizontal = 'FILL'; t.resize(1280, 1);
     t.primaryAxisSizingMode = 'AUTO'; t.counterAxisSizingMode = 'FIXED';
     return t;
@@ -3265,12 +3899,12 @@ async function _buildComponentDoc(opts) {
   _secA.name = 'Section A · Header'; _secA.layoutMode = 'VERTICAL';
   _secA.primaryAxisSizingMode = 'AUTO'; _secA.counterAxisSizingMode = 'FIXED';
   _secA.itemSpacing = 8; _secA.fills = [];
+  _bindVar(_secA, 'itemSpacing', _docSpace.padS);
   doc.appendChild(_secA); _secA.layoutSizingHorizontal = 'FILL';
 
   const _tTitle = figma.createText();
-  _tTitle.fontName = { family: _fam, style: _fBold };
-  _tTitle.characters = compName; _tTitle.fontSize = 40;
-  _tTitle.fills = [{ type: 'SOLID', color: _cInk }];
+  _tTitle.characters = compName;
+  _applyTextRole(_tTitle, 'title', 40, _fBold, _cInk, _vInk);
   _secA.appendChild(_tTitle); _tTitle.textAutoResize = 'WIDTH_AND_HEIGHT';
 
   // Prefer agent-supplied description, then existing component description (with [SPEC]
@@ -3285,73 +3919,65 @@ async function _buildComponentDoc(opts) {
     _subtitleText = '_[Add a 1-2 sentence description: what this component is and when to use it]_';
   }
   const _tSub = figma.createText();
-  _tSub.fontName = { family: _fam, style: _fReg };
   _tSub.characters = _subtitleText;
-  _tSub.fontSize = 16;
-  _tSub.fills = [{ type: 'SOLID', color: _cSubtle }];
+  _applyTextRole(_tSub, 'subtitle', 16, _fReg, _cSubtle, _vSubtle);
   _secA.appendChild(_tSub);
   // Wrap inside the section's width: FILL horizontal + HEIGHT auto-resize.
   _tSub.layoutSizingHorizontal = 'FILL';
   _tSub.textAutoResize = 'HEIGHT';
 
-  // Section B — Preview
-  _mkLabel(doc, 'PREVIEW');
-  const _secB = figma.createFrame();
-  _secB.name = 'Section B · Preview'; _secB.layoutMode = 'HORIZONTAL';
-  _secB.primaryAxisAlignItems = 'CENTER'; _secB.counterAxisAlignItems = 'CENTER';
-  _secB.paddingTop = 40; _secB.paddingBottom = 40; _secB.paddingLeft = 40; _secB.paddingRight = 40;
-  _secB.fills = [{ type: 'SOLID', color: _cSurface }]; _secB.cornerRadius = 8;
-  _secB.strokes = [{ type: 'SOLID', color: _cBorder }]; _secB.strokeWeight = 1;
-  doc.appendChild(_secB); _secB.layoutSizingHorizontal = 'FILL'; _secB.counterAxisSizingMode = 'AUTO';
-  _secB.appendChild(_defaultV.createInstance());
-
-  // Section C — Variant showcase
   _mkLabel(doc, 'VARIANTS');
   const _secC = figma.createFrame();
-  _secC.name = 'Section C · Variants'; _secC.layoutMode = 'HORIZONTAL';
+  _secC.name = 'Section B · Variants'; _secC.layoutMode = 'HORIZONTAL';
   _secC.layoutWrap = 'WRAP';
   _secC.counterAxisAlignItems = 'MIN'; _secC.itemSpacing = 24; _secC.counterAxisSpacing = 24;
   _secC.paddingTop = 24; _secC.paddingBottom = 24; _secC.paddingLeft = 24; _secC.paddingRight = 24;
-  _secC.fills = [{ type: 'SOLID', color: _cSurface }]; _secC.cornerRadius = 8;
+  _secC.fills = [_paint(_cSurface, _vSurface)]; _secC.cornerRadius = 8;
+  _secC.strokes = [_paint(_cBorder, _vBorder)]; _secC.strokeWeight = 1;
+  _bindVar(_secC, 'paddingTop', _docSpace.padXL);
+  _bindVar(_secC, 'paddingBottom', _docSpace.padXL);
+  _bindVar(_secC, 'paddingLeft', _docSpace.padXL);
+  _bindVar(_secC, 'paddingRight', _docSpace.padXL);
+  _bindVar(_secC, 'itemSpacing', _docSpace.padXL);
+  _bindVar(_secC, 'counterAxisSpacing', _docSpace.padXL);
+  _bindVar(_secC, 'cornerRadius', _docSpace.radius);
+  _bindVar(_secC, 'strokeWeight', _docSpace.border);
   doc.appendChild(_secC); _secC.layoutSizingHorizontal = 'FILL'; _secC.counterAxisSizingMode = 'AUTO';
   for (let i = 0; i < _children.length; i++) {
     const _v = _children[i];
     const _vf = figma.createFrame();
     _vf.layoutMode = 'VERTICAL'; _vf.primaryAxisSizingMode = 'AUTO'; _vf.counterAxisSizingMode = 'AUTO';
     _vf.primaryAxisAlignItems = 'CENTER'; _vf.itemSpacing = 8; _vf.fills = [];
+    _bindVar(_vf, 'itemSpacing', _docSpace.padS);
     _secC.appendChild(_vf); _vf.appendChild(_v.createInstance());
     const _vl = figma.createText();
-    _vl.fontName = { family: _fam, style: _fSemi };
     _vl.characters = _v.name.replace(/,\s*/g, '\n');
-    _vl.fontSize = 11; _vl.textAlignHorizontal = 'CENTER';
-    _vl.fills = [{ type: 'SOLID', color: _cInk }];
+    _applyTextRole(_vl, 'sectionLabel', 11, _fSemi, _cInk, _vInk);
+    _vl.textAlignHorizontal = 'CENTER';
     _vf.appendChild(_vl); _vl.textAutoResize = 'WIDTH_AND_HEIGHT';
     if (variantDesc[_v.name]) {
       const _vdt = figma.createText();
-      _vdt.fontName = { family: _fam, style: _fReg };
       _vdt.characters = variantDesc[_v.name];
-      _vdt.fontSize = 10; _vdt.textAlignHorizontal = 'CENTER';
-      _vdt.fills = [{ type: 'SOLID', color: _cSubtle }];
+      _applyTextRole(_vdt, 'body', 10, _fReg, _cSubtle, _vSubtle);
+      _vdt.textAlignHorizontal = 'CENTER';
       _vf.appendChild(_vdt); _vdt.textAutoResize = 'WIDTH_AND_HEIGHT';
     }
   }
 
   // Section D — Properties table
-  _mkLabel(doc, 'COMPONENT PROPERTIES');
-  const _tblD = _mkTable(doc, 'Properties Table');
-  const _dHdr = _mkRow(_tblD, 1280, true);
-  _mkCell(_dHdr, 'PROPERTY', 427, 'header-text');
-  _mkCell(_dHdr, 'TYPE', 427, 'header-text');
-  _mkCell(_dHdr, 'DEFAULT', 426, 'header-text');
   const _propKeys = Object.keys(compMeta.componentPropertyDefinitions);
-  if (_propKeys.length === 0) {
-    _mkCell(_mkRow(_tblD, 1280, false), '(no component properties defined)', 1280, 'mono');
-  } else {
+  if (_propKeys.length > 0) {
+    _mkLabel(doc, 'COMPONENT PROPERTIES');
+    const _tblD = _mkTable(doc, 'Properties Table');
+    const _dHdr = _mkRow(_tblD, 1280, true);
+    _mkCell(_dHdr, 'PROPERTY', 427, 'header-text');
+    _mkCell(_dHdr, 'TYPE', 427, 'header-text');
+    _mkCell(_dHdr, 'DEFAULT', 426, 'header-text');
     for (let i = 0; i < _propKeys.length; i++) {
       const key = _propKeys[i];
       const def = compMeta.componentPropertyDefinitions[key];
       const r = _mkRow(_tblD, 1280, false);
-      r.fills = i % 2 === 1 ? [{ type: 'SOLID', color: _cSurface }] : [];
+      r.fills = i % 2 === 1 ? [_paint(_cSurface, _vSurface)] : [];
       _mkCell(r, key.replace(/#[^#]+$/, ''), 427, 'body');
       _mkCell(r, def.type, 427, 'mono');
       _mkCell(r, String(def.defaultValue !== undefined ? def.defaultValue : '—'), 426, 'body');
@@ -3363,12 +3989,6 @@ async function _buildComponentDoc(opts) {
   // when 4 sides share a token; collapse to (Y) + (X) if Y-pair and X-pair
   // each share. Dimensions are shown plainly. Never show raw VariableID.
   // Uses the proven _mkTable/_mkRow/_mkCell helpers — same as Properties Table.
-  _mkLabel(doc, 'SIZING');
-  const _tblF = _mkTable(doc, 'Sizing Table');
-  const _fHdr = _mkRow(_tblF, 1280, true);
-  _mkCell(_fHdr, 'PROPERTY', 360, 'header-text');
-  _mkCell(_fHdr, 'TOKEN / VALUE', 920, 'header-text');
-
   // Map property -> token name (only resolved variables; never raw VariableID:).
   const _propTokens = {};
   for (let i = 0; i < resolved.length; i++) {
@@ -3404,58 +4024,83 @@ async function _buildComponentDoc(opts) {
   if (_propTokens['cornerRadius']) _sizingRows.push(['Corner radius', _propTokens['cornerRadius']]);
   if (_propTokens['strokeWeight']) _sizingRows.push(['Stroke weight', _propTokens['strokeWeight']]);
 
-  for (let i = 0; i < _sizingRows.length; i++) {
-    const r = _mkRow(_tblF, 1280, false);
-    r.fills = i % 2 === 1 ? [{ type: 'SOLID', color: _cSurface }] : [];
-    _mkCell(r, _sizingRows[i][0], 360, 'body');
-    _mkCell(r, _sizingRows[i][1], 920, 'body');
+  if (_sizingRows.length > 0) {
+    _mkLabel(doc, 'SIZING');
+    const _tblF = _mkTable(doc, 'Sizing Table');
+    const _fHdr = _mkRow(_tblF, 1280, true);
+    _mkCell(_fHdr, 'LAYOUT FACT', 360, 'header-text');
+    _mkCell(_fHdr, 'TOKEN / VALUE', 920, 'header-text');
+    for (let i = 0; i < _sizingRows.length; i++) {
+      const r = _mkRow(_tblF, 1280, false);
+      r.fills = i % 2 === 1 ? [_paint(_cSurface, _vSurface)] : [];
+      _mkCell(r, _sizingRows[i][0], 360, 'body');
+      _mkCell(r, _sizingRows[i][1], 920, 'body');
+    }
   }
 
   // Section G — Anatomy
-  _mkLabel(doc, 'ANATOMY');
-  const _wrapper = figma.createFrame();
-  _wrapper.name = 'Anatomy Wrapper'; _wrapper.layoutMode = 'HORIZONTAL';
-  _wrapper.primaryAxisSizingMode = 'FIXED'; _wrapper.counterAxisSizingMode = 'FIXED';
-  _wrapper.clipsContent = false; _wrapper.fills = [];
-  _wrapper.resize(_defaultV.width, _defaultV.height);
-  doc.appendChild(_wrapper);
-  const _anatInst = _defaultV.createInstance();
-  _wrapper.appendChild(_anatInst);
-  _anatInst.layoutPositioning = 'ABSOLUTE'; _anatInst.x = 0; _anatInst.y = 0;
-  const _BS = 22;
-  for (let idx = 0; idx < elements.length; idx++) {
-    const el = elements[idx];
-    const n = idx + 1;
-    const bx = Math.round(el.x + el.w / 2 - _BS / 2);
-    const by = Math.round(el.y + el.h / 2 - _BS / 2);
-    const _b = figma.createEllipse();
-    _b.name = 'Badge ' + n; _b.resize(_BS, _BS);
-    _b.fills = [{ type: 'SOLID', color: _cBadge }];
-    _wrapper.appendChild(_b);
-    _b.layoutPositioning = 'ABSOLUTE'; _b.x = bx; _b.y = by;
-    const _nt = figma.createText();
-    _nt.fontName = { family: _fam, style: _fBold };
-    _nt.characters = String(n);
-    _nt.fontSize = n >= 10 ? 9 : 10;
-    _nt.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
-    _nt.textAlignHorizontal = 'CENTER'; _nt.textAlignVertical = 'CENTER';
-    _nt.resize(_BS, _BS);
-    _wrapper.appendChild(_nt);
-    _nt.layoutPositioning = 'ABSOLUTE'; _nt.x = bx; _nt.y = by;
-  }
-  // Anatomy legend table
-  const _tblG = _mkTable(doc, 'Anatomy Legend');
-  const _gHdr = _mkRow(_tblG, 1280, true);
-  _mkCell(_gHdr, '#', 80, 'header-text');
-  _mkCell(_gHdr, 'ELEMENT', 500, 'header-text');
-  _mkCell(_gHdr, 'TYPE', 700, 'header-text');
-  for (let idx = 0; idx < elements.length; idx++) {
-    const el = elements[idx];
-    const r = _mkRow(_tblG, 1280, false);
-    r.fills = idx % 2 === 1 ? [{ type: 'SOLID', color: _cSurface }] : [];
-    _mkCell(r, String(idx + 1), 80, 'body');
-    _mkCell(r, el.name, 500, 'body');
-    _mkCell(r, el.type, 700, 'mono');
+  const _hasAnatomySection = elements.length > 0 && _hasMeaningfulAnatomy(_defaultV);
+  if (_hasAnatomySection) {
+    _mkLabel(doc, 'ANATOMY');
+    const _wrapper = figma.createFrame();
+    _wrapper.name = 'Anatomy Wrapper'; _wrapper.layoutMode = 'HORIZONTAL';
+    _wrapper.primaryAxisSizingMode = 'FIXED'; _wrapper.counterAxisSizingMode = 'FIXED';
+    _wrapper.clipsContent = false; _wrapper.fills = [];
+    _wrapper.resize(_defaultV.width, _defaultV.height);
+    doc.appendChild(_wrapper);
+    const _anatInst = _defaultV.createInstance();
+    _wrapper.appendChild(_anatInst);
+    _anatInst.layoutPositioning = 'ABSOLUTE'; _anatInst.x = 0; _anatInst.y = 0;
+    const _BS = 18;
+    const _usedBadgeSlots = {};
+    for (let idx = 0; idx < elements.length; idx++) {
+      const el = elements[idx];
+      const n = idx + 1;
+      let bx = Math.round(el.x);
+      let by;
+      if (el.y - _BS - 4 >= 0) {
+        by = Math.round(el.y - _BS - 4);
+      } else if (el.y + el.h + 4 + _BS <= _defaultV.height) {
+        by = Math.round(el.y + el.h + 4);
+      } else {
+        by = Math.round(el.y);
+      }
+      const slotKey = Math.round(bx / 8) + ':' + Math.round(by / 8);
+      const slotCount = _usedBadgeSlots[slotKey] || 0;
+      _usedBadgeSlots[slotKey] = slotCount + 1;
+      if (slotCount > 0) {
+        bx += (slotCount % 3) * (_BS + 4);
+        by += Math.floor(slotCount / 3) * (_BS + 4);
+      }
+      if (bx + _BS > _defaultV.width) bx = Math.max(0, Math.round(_defaultV.width - _BS));
+      if (by + _BS > _defaultV.height) by = Math.max(0, Math.round(_defaultV.height - _BS));
+      const _b = figma.createEllipse();
+      _b.name = 'Badge ' + n; _b.resize(_BS, _BS);
+      _b.fills = [_paint(_cBadge, _vBadge)];
+      _wrapper.appendChild(_b);
+      _b.layoutPositioning = 'ABSOLUTE'; _b.x = bx; _b.y = by;
+      const _nt = figma.createText();
+      _nt.characters = String(n);
+      _applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, { r: 1, g: 1, b: 1 }, null);
+      _nt.textAlignHorizontal = 'CENTER'; _nt.textAlignVertical = 'CENTER';
+      _nt.resize(_BS, _BS);
+      _wrapper.appendChild(_nt);
+      _nt.layoutPositioning = 'ABSOLUTE'; _nt.x = bx; _nt.y = by;
+    }
+    // Anatomy legend table
+    const _tblG = _mkTable(doc, 'Anatomy Legend');
+    const _gHdr = _mkRow(_tblG, 1280, true);
+    _mkCell(_gHdr, '#', 80, 'header-text');
+    _mkCell(_gHdr, 'ELEMENT', 500, 'header-text');
+    _mkCell(_gHdr, 'TYPE', 700, 'header-text');
+    for (let idx = 0; idx < elements.length; idx++) {
+      const el = elements[idx];
+      const r = _mkRow(_tblG, 1280, false);
+      r.fills = idx % 2 === 1 ? [_paint(_cSurface, _vSurface)] : [];
+      _mkCell(r, String(idx + 1), 80, 'body');
+      _mkCell(r, el.name, 500, 'body');
+      _mkCell(r, el.type, 700, 'mono');
+    }
   }
 
   // Section H — Usage
@@ -3464,6 +4109,7 @@ async function _buildComponentDoc(opts) {
   _secH.name = 'Section H · Usage'; _secH.layoutMode = 'HORIZONTAL';
   _secH.primaryAxisSizingMode = 'FIXED'; _secH.counterAxisSizingMode = 'AUTO';
   _secH.itemSpacing = 24; _secH.fills = [];
+  _bindVar(_secH, 'itemSpacing', _docSpace.padXL);
   doc.appendChild(_secH); _secH.layoutSizingHorizontal = 'FILL';
   function _mkUsagePanel(parent, label, rules, borderColor) {
     const panel = figma.createFrame();
@@ -3472,18 +4118,23 @@ async function _buildComponentDoc(opts) {
     panel.itemSpacing = 8;
     panel.paddingTop = 20; panel.paddingBottom = 20; panel.paddingLeft = 20; panel.paddingRight = 20;
     panel.fills = []; panel.cornerRadius = 8;
-    panel.strokes = [{ type: 'SOLID', color: borderColor }]; panel.strokeWeight = 2;
+    panel.strokes = [_paint(borderColor, label === 'Do' ? _vDo : _vDont)]; panel.strokeWeight = 2;
+    _bindVar(panel, 'paddingTop', _docSpace.padL);
+    _bindVar(panel, 'paddingBottom', _docSpace.padL);
+    _bindVar(panel, 'paddingLeft', _docSpace.padL);
+    _bindVar(panel, 'paddingRight', _docSpace.padL);
+    _bindVar(panel, 'itemSpacing', _docSpace.padS);
+    _bindVar(panel, 'cornerRadius', _docSpace.radius);
+    _bindVar(panel, 'strokeWeight', _docSpace.borderStrong);
     parent.appendChild(panel); panel.layoutSizingHorizontal = 'FILL';
     const lbl = figma.createText();
-    lbl.fontName = { family: _fam, style: _fSemi };
-    lbl.characters = label; lbl.fontSize = 13;
-    lbl.fills = [{ type: 'SOLID', color: borderColor }];
+    lbl.characters = label;
+    _applyTextRole(lbl, 'bodyStrong', 13, _fSemi, borderColor, label === 'Do' ? _vDo : _vDont);
     panel.appendChild(lbl); lbl.textAutoResize = 'WIDTH_AND_HEIGHT';
     for (let i = 0; i < rules.length; i++) {
       const rt = figma.createText();
-      rt.fontName = { family: _fam, style: _fReg };
-      rt.characters = '• ' + rules[i]; rt.fontSize = 12;
-      rt.fills = [{ type: 'SOLID', color: _cInk }];
+      rt.characters = '• ' + rules[i];
+      _applyTextRole(rt, 'body', 12, _fReg, _cInk, _vInk);
       panel.appendChild(rt); rt.layoutSizingHorizontal = 'FILL'; rt.textAutoResize = 'HEIGHT';
     }
   }
@@ -3597,25 +4248,25 @@ async function _buildComponentDoc(opts) {
   const _propsTable = _compProps.length > 0
     ? _mdTable(['Property', 'Type', 'Default', 'Description'],
         _compProps.map(function (p) { return [p.name, p.type, p.defaultValue, '']; }))
-    : '_(No component properties defined)_';
+    : '';
 
   const _bindingsTable = resolved.length > 0
     ? _mdTable(['Node', 'Property', 'Token', 'Resolved Value'],
         resolved.map(function (b) { return [b.node, b.property, b.token, b.resolvedVal]; }))
-    : '_(No variable or style bindings found)_';
+    : '';
 
   const _sizingTable = _sizing.length > 0
     ? _mdTable(['Variant', 'Width', 'Height'],
         _sizing.map(function (s) { return [s.name, s.width + 'px', s.height + 'px']; }))
-    : '_(No variants)_';
+    : '';
 
-  const _anatomyTable = _anatomyMd.length > 0
+  const _anatomyTable = (_hasMeaningfulAnatomy(_defaultV) && _anatomyMd.length > 0)
     ? _mdTable(['#', 'Element', 'Type', 'Primary Token', 'Notes'],
         _anatomyMd.map(function (a) {
           const indent = a.depth > 1 ? new Array(a.depth).join('  ') : '';
           return [a.idx, indent + a.name, a.type, a.token, ''];
         }))
-    : '_(No named elements found in default variant)_';
+    : '';
 
   const _md = [];
   _md.push('# ' + compName);
@@ -3636,40 +4287,38 @@ async function _buildComponentDoc(opts) {
   }
   _md.push('---');
   _md.push('');
-  _md.push('## Component Properties');
-  _md.push('');
-  _md.push(_propsTable);
-  _md.push('');
-  _md.push('---');
-  _md.push('');
-  _md.push('## Token Bindings');
-  _md.push('');
-  _md.push(_bindingsTable);
-  _md.push('');
-  _md.push('---');
-  _md.push('');
-  _md.push('## Accessibility');
-  _md.push('');
-  _md.push('| Check | Result |');
-  _md.push('|---|---|');
-  _md.push('| Primary text contrast | _[ratio]:1 — WCAG AA pass/fail_ |');
-  _md.push('| Touch target | _[W]×[H]px — pass/fail >=44px_ |');
-  _md.push('| Focus indicator | _[describe]_ |');
-  _md.push('');
-  _md.push('---');
-  _md.push('');
-  _md.push('## Sizing');
-  _md.push('');
-  _md.push(_sizingTable);
-  _md.push('');
-  _md.push('---');
-  _md.push('');
-  _md.push('## Anatomy');
-  _md.push('');
-  _md.push(_anatomyTable);
-  _md.push('');
-  _md.push('---');
-  _md.push('');
+  if (_propsTable) {
+    _md.push('## Component Properties');
+    _md.push('');
+    _md.push(_propsTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
+  if (_bindingsTable) {
+    _md.push('## Token Bindings');
+    _md.push('');
+    _md.push(_bindingsTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
+  if (_sizingTable) {
+    _md.push('## Sizing');
+    _md.push('');
+    _md.push(_sizingTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
+  if (_anatomyTable) {
+    _md.push('## Anatomy');
+    _md.push('');
+    _md.push(_anatomyTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
   _md.push('## Usage Rules');
   _md.push('');
   _md.push('**Do:**');
@@ -3703,6 +4352,14 @@ async function _buildComponentDoc(opts) {
     },
     bindingsCount: resolved.length,
     anatomyCount: _anatomyMd.length,
+    selectionContext: {
+      fileName: figma.root ? figma.root.name : '',
+      pageName: figma.currentPage ? figma.currentPage.name : '',
+      pageId: figma.currentPage ? figma.currentPage.id : '',
+      componentName: compName,
+      componentId: _comp.id,
+      componentType: _comp.type
+    },
     specSheet: { page: figma.currentPage.name, frame: compName + ' · Spec' }
   };
 }

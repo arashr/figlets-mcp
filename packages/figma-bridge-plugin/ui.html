@@ -272,7 +272,7 @@
           document.getElementById('status').innerText = 'Building showcase...';
           document.getElementById('substatus').innerText = 'Rendering token tables in Figma.';
           _appendLog('Received command: build_ds_showcase.');
-          parent.postMessage({ pluginMessage: { type: 'build-showcase' } }, '*');
+          parent.postMessage({ pluginMessage: { type: 'build-showcase', data: data.data || {} } }, '*');
         } else if (data.command === 'apply-ds-setup') {
           isExtracting = true;
           _armWatchdog('DS setup', 60000);
@@ -287,6 +287,13 @@
           document.getElementById('substatus').innerText = 'Rendering spec sheet in Figma.';
           _appendLog('Received command: generate_component_doc.');
           parent.postMessage({ pluginMessage: { type: 'build-doc', data: data.data } }, '*');
+        } else if (data.command === 'qa-audit') {
+          isExtracting = true;
+          _armWatchdog('QA audit', 60000);
+          document.getElementById('status').innerText = 'Running QA audit...';
+          document.getElementById('substatus').innerText = 'Checking bindings in Figma.';
+          _appendLog('Received command: qa_binding_audit.');
+          parent.postMessage({ pluginMessage: { type: 'qa-audit', data: data.data } }, '*');
         }
       }
     } catch (err) {
@@ -386,6 +393,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
         _appendLog('Failed to send DS setup result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'qa-audit-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch('http://localhost:1337/sync-qa-audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'QA audit failed.' : 'QA audit complete.';
+        _appendLog(msg.data.error ? 'QA audit failed in plugin.' : 'QA audit result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send QA audit result to receiver.');
       }
       isExtracting = false;
       poll();

@@ -9,11 +9,16 @@ async function runTests() {
   await (async () => {
     const mockServer = http.createServer((req, res) => {
       if (req.method === "POST" && req.url === "/request-showcase") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: { sections: ["Colors", "Typography", "Spacing"], layout: "horizontal, 100px gap between Figma sections" }
-        }));
+        let body = "";
+        req.on("data", chunk => { body += chunk.toString(); });
+        req.on("end", () => {
+          assert.deepStrictEqual(JSON.parse(body), { numericFallback: null });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            success: true,
+            result: { sections: ["Colors", "Typography", "Spacing"], layout: "horizontal, 100px gap between Figma sections" }
+          }));
+        });
       } else {
         res.writeHead(404);
         res.end();
@@ -32,6 +37,40 @@ async function runTests() {
       const data = JSON.parse(result.content[0].text);
       assert.deepStrictEqual(data.sections, ["Colors", "Typography", "Spacing"]);
       assert.ok(data.message.includes("3 section(s)"), `expected 3 sections in message, got: ${data.message}`);
+    } finally {
+      await new Promise(resolve => mockServer.close(resolve));
+    }
+  })();
+
+  // Test 1b: optional numeric fallback policy is forwarded
+  await (async () => {
+    const expectedFallback = { radius: "ceil", border: "floor", maxDistance: 8 };
+    const mockServer = http.createServer((req, res) => {
+      if (req.method === "POST" && req.url === "/request-showcase") {
+        let body = "";
+        req.on("data", chunk => { body += chunk.toString(); });
+        req.on("end", () => {
+          assert.deepStrictEqual(JSON.parse(body), { numericFallback: expectedFallback });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, result: { sections: ["Spacing"] } }));
+        });
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    await new Promise(resolve => mockServer.listen(0, resolve));
+    const { port } = mockServer.address();
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+
+    try {
+      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/tools/build-showcase.js")];
+      const { handleBuildShowcase } = require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+      const result = await handleBuildShowcase({ numericFallback: expectedFallback });
+      assert.ok(!result.isError, "should succeed");
+      const data = JSON.parse(result.content[0].text);
+      assert.deepStrictEqual(data.sections, ["Spacing"]);
     } finally {
       await new Promise(resolve => mockServer.close(resolve));
     }

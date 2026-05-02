@@ -20,6 +20,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `detect_design_system` | Analyzes the snapshot: collections, variables, styles, inferred capabilities | After syncing, or when a snapshot already exists on disk |
 | `inspect_component` | Extracts layout, variants, and properties of the currently selected Figma node | When the user wants to inspect a specific component or frame |
 | `audit_tokens` | Reports unaliased values, duplicate tokens, and naming violations in the snapshot | When the user wants a token health check |
+| `qa_binding_audit` | Audits the current Figma selection/page for raw unbound layer properties and optional safe binding fixes | When the user wants QA on designed frames/components, especially before documentation |
 | `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
 | `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, WCAG validation, spacing scale | After intake and before building collections — validates everything before touching Figma |
 | `apply_ds_setup` | Creates all 5 variable collections in Figma from the prepared config (Primitives, Color, Typography, Spacing, Elevation) | After `prepare_ds_config` confirms `readyToBuild === true` |
@@ -46,6 +47,13 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 3. Call `audit_tokens`
 4. Report violations by type: unaliased values → duplicate tokens → naming inconsistencies
 5. Surface the highest-impact fixes first
+
+### QA binding audit
+1. Ask the user to select the frame/component to QA, or confirm that auditing the current page is intended.
+2. Call `qa_binding_audit` with `fix: false`.
+3. Summarize unbound raw values by type: color, spacing, border, typography.
+4. Treat suggestions as semantic binding suggestions, not hex/value guesses. Color, spacing, radius, and border suggestions are variable-first; typography may prefer text styles because they bundle variable-backed type decisions. If a violation has no suggestion, report that the DS lacks a matching variable/style and raw values would remain.
+5. If the user asks to fix everything, call `qa_binding_audit` with `fix: true`; report fixed and failed counts.
 
 ### Build token showcase
 1. Call `sync_figma_data` if fresh data is needed (or skip if already synced)
@@ -104,6 +112,8 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 | `inspect_component` returns empty selection | Nothing selected in Figma | "Select a component or frame in Figma, then try again." |
 | `detect_design_system` returns no collections | No snapshot on disk | "Run a sync first to pull data from Figma." |
 | `audit_tokens` returns no violations | Clean token set or no snapshot | Confirm snapshot exists; if it does, report the all-clear to the user |
+| `qa_binding_audit` returns violations with no suggestion | The selected layer uses a value/role not covered by existing variables or typography styles | Tell the user the binding policy could not find a matching DS variable/style; the DS may need a new token or the layer role may need adjustment |
+| `qa_binding_audit` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `build_ds_showcase` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `prepare_ds_config` returns error about missing ramps | Config missing `DS.color.brand` | "Add brand color(s) to the config (name + hex) and try again." |
 | `prepare_ds_config` returns `failCount > 0` | Semantic pairs fail contrast | Show the pairs table, suggest nearest passing step, update config, re-run |

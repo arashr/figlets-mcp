@@ -13,6 +13,7 @@ let pendingSelectionRequest = null;
 let pendingShowcaseRequest = null;
 let pendingDsSetupRequest = null;
 let pendingDocBuildRequest = null;
+let pendingQaAuditRequest = null;
 
 const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
 
@@ -114,25 +115,32 @@ const server = http.createServer((req, res) => {
 
   // 4. MCP Agent calls this to trigger a showcase build
   if (req.method === 'POST' && pathname === '/request-showcase') {
-    if (pendingPollResponse) {
-      pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-      pendingPollResponse.end(JSON.stringify({ command: 'build-showcase' }));
-      pendingPollResponse = null;
-      pendingPollSessionId = null;
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      let parsed;
+      try { parsed = body ? JSON.parse(body) : {}; } catch { parsed = {}; }
 
-      pendingShowcaseRequest = res;
+      if (pendingPollResponse) {
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'build-showcase', data: parsed }));
+        pendingPollResponse = null;
+        pendingPollSessionId = null;
 
-      setTimeout(() => {
-        if (pendingShowcaseRequest === res) {
-          res.writeHead(504, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Showcase build timed out' }));
-          pendingShowcaseRequest = null;
-        }
-      }, 120000); // Showcase can take a while
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
+        pendingShowcaseRequest = res;
+
+        setTimeout(() => {
+          if (pendingShowcaseRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Showcase build timed out' }));
+            pendingShowcaseRequest = null;
+          }
+        }, 120000); // Showcase can take a while
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(_notConnectedPayload()));
+      }
+    });
     return;
   }
 
@@ -202,6 +210,57 @@ const server = http.createServer((req, res) => {
         pendingDocBuildRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingDocBuildRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingDocBuildRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 5d. MCP Agent calls this to trigger a QA binding audit
+  if (req.method === 'POST' && pathname === '/request-qa-audit') {
+    if (pendingPollResponse) {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let qaPayload;
+        try { qaPayload = JSON.parse(body); } catch { qaPayload = {}; }
+
+        pendingQaAuditRequest = res;
+
+        setTimeout(() => {
+          if (pendingQaAuditRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'QA audit timed out' }));
+            pendingQaAuditRequest = null;
+          }
+        }, 120000);
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'qa-audit', data: qaPayload }));
+        pendingPollResponse = null;
+        pendingPollSessionId = null;
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  // 5e. Figma Plugin posts the QA audit result here
+  if (req.method === 'POST' && pathname === '/sync-qa-audit') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingQaAuditRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingQaAuditRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingQaAuditRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingQaAuditRequest = null;
       }
     });
     return;

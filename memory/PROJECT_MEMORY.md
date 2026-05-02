@@ -4,6 +4,14 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+## Current Pillar Decision — Binding Policy
+
+As of 2026-05-02, design-system binding is **variable-first** for colors, spacing, radii, borders, and scalar layer properties. Figma color/effect styles are fallback metadata, not the primary color binding target. **Typography is the exception:** text styles may be preferred because they can bundle size, line-height, weight, tracking, and family decisions that may themselves be variable-backed.
+
+Practical rule for future work: setup, showcase, documentation, QA, and component creation should rely on the shared live resolver `_createDsBindingContext()` for binding decisions. Server-side hex/value indexes are for reporting and detection context only; they must not become automatic binding authorities. Hex/nearest-color matching remains forbidden for automatic color binding.
+
+---
+
 ## Project Identity
 
 - Name: `figlets-mcp`
@@ -18,6 +26,10 @@ Active context for the project so future sessions can recover quickly without re
 - Expose stable MCP tools over that core
 - Add Codex and Claude adapters as thin orchestration layers
 - Migrate logic gradually rather than rewriting everything at once
+
+## Post-MVP Todo
+
+- Add optional agent-enriched showcase descriptions. Default showcase descriptions should stay deterministic and cheap, but a later workflow can ask an agent to polish token/table usage copy and write the result back to Figma token/style descriptions so future showcase builds can reuse it without spending tokens again.
 
 ---
 

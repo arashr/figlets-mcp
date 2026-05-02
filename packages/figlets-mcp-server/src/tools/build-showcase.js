@@ -6,18 +6,39 @@ const buildShowcaseTool = {
     "Renders a full design-system token showcase directly in Figma — color ramps, semantic color pairs with WCAG contrast, typography table, spacing scale, elevation, and scrims. All rendering happens inside the Figma plugin. Requires sync_figma_data to have been run first (plugin must be open).",
   inputSchema: {
     type: "object",
-    properties: {},
+    properties: {
+      numericFallback: {
+        type: "object",
+        description: "Optional numeric fallback policy for generated showcase chrome when no exact variable exists. Colors never use nearest-neighbor matching.",
+        properties: {
+          radius: { type: "string", enum: ["exact", "nearest", "floor", "ceil"] },
+          border: { type: "string", enum: ["exact", "nearest", "floor", "ceil"] },
+          spacing: { type: "string", enum: ["exact", "nearest", "floor", "ceil"] },
+          maxDistance: { type: "number", minimum: 0 }
+        },
+        additionalProperties: false
+      }
+    },
     additionalProperties: false
   }
 };
 
-function handleBuildShowcase() {
+function handleBuildShowcase(args = {}) {
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const payload = JSON.stringify({
+    numericFallback: args.numericFallback || null
+  });
 
   return new Promise((resolve, reject) => {
     const req = http.request(
       `${receiverUrl}/request-showcase`,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload)
+        }
+      },
       (res) => {
         let body = "";
         res.on("data", (chunk) => { body += chunk.toString(); });
@@ -77,6 +98,7 @@ function handleBuildShowcase() {
       reject(new Error("Request to bridge receiver timed out"));
     });
 
+    req.write(payload);
     req.end();
   });
 }

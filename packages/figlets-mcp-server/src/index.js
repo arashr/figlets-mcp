@@ -11,6 +11,7 @@ const { buildShowcaseTool, handleBuildShowcase } = require("./tools/build-showca
 const { handlePrepareDsConfig } = require("./tools/prepare-ds-config.js");
 const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
+const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
@@ -96,10 +97,17 @@ server.tool(
 server.tool(
   buildShowcaseTool.name,
   buildShowcaseTool.description,
-  {},
-  async () => {
+  {
+    numericFallback: z.object({
+      radius: z.enum(["exact", "nearest", "floor", "ceil"]).optional(),
+      border: z.enum(["exact", "nearest", "floor", "ceil"]).optional(),
+      spacing: z.enum(["exact", "nearest", "floor", "ceil"]).optional(),
+      maxDistance: z.number().min(0).optional()
+    }).optional().describe("Optional numeric fallback policy for generated showcase chrome when no exact variable exists. Colors never use nearest-neighbor matching.")
+  },
+  async (args) => {
     try {
-      return await handleBuildShowcase();
+      return await handleBuildShowcase(args || {});
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],
@@ -175,6 +183,25 @@ server.tool(
   async (args) => {
     try {
       return await handleGenerateComponentDoc(args);
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- qa_binding_audit ---
+server.tool(
+  qaBindingAuditTool.name,
+  qaBindingAuditTool.description,
+  {
+    fix: z.boolean().optional().describe("When true, apply all high-confidence variable/style suggestions in Figma. Defaults to false.")
+  },
+  async (args) => {
+    try {
+      return await handleQaBindingAudit(args);
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

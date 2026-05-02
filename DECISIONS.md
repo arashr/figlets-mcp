@@ -4,6 +4,20 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-02] Binding policy: variables first, typography styles as the exception
+
+**Decision:** Design-system binding is variable-first for colors, spacing, radii, borders, and other scalar layer properties. Figma color/effect styles are fallback metadata, not the primary color binding target. Typography is the explicit exception: text styles may be preferred because a text style can package a coherent type decision while its underlying size, line-height, weight, tracking, and family values may themselves be variable-backed.
+
+**Why:**
+- Color semantics live in variables. A paint style and a color variable can represent the same visual color, but only the variable encodes the cross-mode, semantic token contract that downstream component generation should depend on.
+- Hex matching remains forbidden for automatic color binding. Same-value colors can have different semantic roles; binding must follow variable path semantics and purpose locks.
+- Text styles are different from color styles: typography styles can serve as a deliberate bundle of multiple variable-backed decisions, making them appropriate as the first typography binding target.
+- This policy must be shared across setup, showcase, documentation, QA, and future component creation. Live Figma flows should use `_createDsBindingContext()` as the bridge-side resolver; server-side indexes such as `colorVarByHex` are reporting aids, not automatic binding authorities.
+
+**Consequence:** QA must not treat `fillStyleId` or `strokeStyleId` as automatically satisfying color binding when a semantic color variable should exist. `fix: true` may only apply high-confidence variable/style suggestions; medium-confidence color role guesses stay report-only unless a human confirms them. Future component builders should call the shared resolver for variable selection instead of introducing new local hex, nearest-color, or broad value matchers.
+
+---
+
 ## [2026-04-30] Brand and accent are separate semantic color families
 
 **Decision:** The color semantic scorer must not treat `accent` as a synonym for `brand`. `accent` now contributes an `ACCENT` category, while `brand` and `primary` contribute `BRAND`.

@@ -263,7 +263,7 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === 'build-showcase') {
     try {
       _appendSessionLog('Executing build_ds_showcase.');
-      const result = await _buildShowcase();
+      const result = await _buildShowcase(msg.data || {});
       figma.ui.postMessage({ type: 'showcase-built', data: result });
       _appendSessionLog('Completed build_ds_showcase.');
       figma.notify('Token showcase built!');
@@ -307,6 +307,24 @@ figma.ui.onmessage = async (msg) => {
       const _errMsg = err instanceof Error ? err.message : String(err);
       _appendSessionLog('generate_component_doc failed: ' + _errMsg);
       figma.ui.postMessage({ type: 'doc-built', data: { error: _errMsg || 'Unknown error' } });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // qa-audit — audits selection/page for raw values that should be bound to
+  // design-system styles or variables.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (msg.type === 'qa-audit') {
+    try {
+      _appendSessionLog('Executing qa_binding_audit.');
+      const result = await _runQaBindingAudit(msg.data || {});
+      figma.ui.postMessage({ type: 'qa-audit-done', data: result });
+      _appendSessionLog(result && result.error ? ('qa_binding_audit failed: ' + result.error) : 'Completed qa_binding_audit.');
+      if (!result.error) figma.notify('QA audit complete.');
+    } catch (err) {
+      const _errMsg = err instanceof Error ? err.message : String(err);
+      _appendSessionLog('qa_binding_audit failed: ' + _errMsg);
+      figma.ui.postMessage({ type: 'qa-audit-done', data: { error: _errMsg || 'Unknown error' } });
     }
   }
 };
@@ -602,6 +620,7 @@ async function _createDsBindingContext() {
       if (dist > 0.5) return 0;
       return (1 - s.sat) * (1 - dist * 2);
     }, false, ['OUTLINE']),
+    outlineBrand: pickColorRole('outlineBrand', function (s) { return s.sat * 0.5 + s.lum * 0.5; }, false, ['OUTLINE']),
     successBg: pickColorRole('successBg', function (s) { return s.sat; }, true, ['BG', 'SUCCESS']),
     successBorder: pickColorRole('successBorder', function (s) { return s.sat; }, true, ['OUTLINE', 'SUCCESS']),
     successText: pickColorRole('successText', function (s) { return s.contrast >= 4.5 ? s.contrast : 0; }, true, ['FG', 'SUCCESS']),
@@ -624,11 +643,7 @@ async function _createDsBindingContext() {
   }
 
   const floatVars = allVars.filter(function (v) { return v.resolvedType === 'FLOAT'; });
-  function pickFloatByValue(value, purpose) {
-    const want = Number(value);
-    let best = null;
-    let bestScore = -1;
-    function scoreName(name) {
+  function scoreFloatName(name, purpose) {
       const n = String(name).toLowerCase();
       if (purpose === 'typography') {
         if (!/(?:^|\/)(type|font|line-height|tracking|letter|weight|size)(?:\/|$|-)/i.test(n)) return -1;
@@ -646,17 +661,50 @@ async function _createDsBindingContext() {
       if (/shadow|elevation|type|font|line-height|tracking|weight|radius|border|stroke/i.test(n)) return -1;
       if (!/(?:^|\/)(space|spacing|gap|padding|margin|inset|stack|layout|component|touch)(?:\/|$|-)/i.test(n)) return -1;
       return (/^space\//.test(n) ? 80 : 30) + String(name).split('/').length;
-    }
+  }
+  function pickFloatByValue(value, purpose) {
+    const want = Number(value);
+    let best = null;
+    let bestScore = -1;
     for (let i = 0; i < floatVars.length; i++) {
       const val = resolveVarValue(floatVars[i]);
       if (typeof val !== 'number' || Number(val) !== want) continue;
-      const score = scoreName(floatVars[i].name);
+      const score = scoreFloatName(floatVars[i].name, purpose);
       if (score > bestScore) {
         best = floatVars[i];
         bestScore = score;
       }
     }
     return bestScore >= 0 ? best : null;
+  }
+
+  function pickFloatByNearest(value, purpose, preference, maxDistance) {
+    const want = Number(value);
+    if (!isFinite(want)) return null;
+    preference = preference || 'nearest';
+    if (maxDistance === undefined || maxDistance === null) maxDistance = 8;
+    let best = null;
+    let bestDistance = Infinity;
+    let bestScore = -1;
+    for (let i = 0; i < floatVars.length; i++) {
+      const variable = floatVars[i];
+      const score = scoreFloatName(variable.name, purpose);
+      if (score < 0) continue;
+      const val = resolveVarValue(variable);
+      if (typeof val !== 'number' || !isFinite(val)) continue;
+      const delta = val - want;
+      if (preference === 'ceil' && delta < 0) continue;
+      if (preference === 'floor' && delta > 0) continue;
+      const distance = Math.abs(delta);
+      if (distance === 0) return variable;
+      if (distance > maxDistance) continue;
+      if (distance < bestDistance || (distance === bestDistance && score > bestScore)) {
+        best = variable;
+        bestDistance = distance;
+        bestScore = score;
+      }
+    }
+    return best;
   }
 
   function pickTextStyleLike(patterns) {
@@ -768,6 +816,7 @@ async function _createDsBindingContext() {
     colorRoles,
     pickColorRole,
     pickFloatByValue,
+    pickFloatByNearest,
     pickTextStyleLike,
     pickTypographyBinding,
     pickTypographyVariableGroup,
@@ -778,10 +827,289 @@ async function _createDsBindingContext() {
   };
 }
 
+async function _runQaBindingAudit(opts) {
+  opts = opts || {};
+  const shouldFix = !!opts.fix;
+  const _ds = await _createDsBindingContext();
+  const scopeNodes = figma.currentPage.selection.length > 0
+    ? figma.currentPage.selection.slice()
+    : figma.currentPage.children.slice();
+  const scopeLabel = figma.currentPage.selection.length > 0 ? 'selection' : 'page';
+  const violations = [];
+  const fixed = [];
+  const failed = [];
+
+  function _rgbText(c) {
+    return 'rgb(' + Math.round(c.r * 255) + ',' + Math.round(c.g * 255) + ',' + Math.round(c.b * 255) + ')';
+  }
+
+  function _suggestion(kind, variable, confidence, reason) {
+    if (!variable) return { kind: 'none', confidence: 'none', reason: reason || 'No semantic style or variable available.' };
+    return {
+      kind: kind || 'variable',
+      name: variable.name,
+      id: variable.id,
+      confidence: confidence || 'high',
+      reason: reason || 'Matched by binding policy.'
+    };
+  }
+
+  function _nameText(node) {
+    return String((node && node.name) || '').toLowerCase();
+  }
+
+  function _colorRoleFor(node, property) {
+    const name = _nameText(node);
+    if (property === 'Stroke color') {
+      if (/brand|primary|accent|action|interactive/.test(name)) return 'outlineBrand';
+      if (/success|positive|confirm/.test(name)) return 'successBorder';
+      if (/danger|error|destructive/.test(name)) return 'dangerBorder';
+      return 'outlineSubtle';
+    }
+    if (node.type === 'TEXT' || /text|label|icon|glyph|content/.test(name)) {
+      if (/success|positive|confirm/.test(name)) return 'successText';
+      if (/danger|error|destructive/.test(name)) return 'dangerText';
+      if (/brand|primary|accent/.test(name)) return 'onBrandVariant';
+      return 'onSurface';
+    }
+    if (/success|positive|confirm/.test(name)) return 'successBg';
+    if (/danger|error|destructive/.test(name)) return 'dangerBg';
+    if (/brand|primary|accent|action|interactive|cta|button/.test(name)) return 'surfaceBrand';
+    if (/subtle|muted|secondary|variant|badge|chip|tag/.test(name)) return 'surfaceVariant';
+    return 'surfaceDefault';
+  }
+
+  function _colorSuggestion(node, property) {
+    const role = _colorRoleFor(node, property);
+    const variable = _ds.colorRoles[role] || null;
+    return _suggestion('variable', variable, variable ? 'medium' : 'none',
+      variable ? 'Suggested from semantic role "' + role + '".' : 'No semantic color variable found for role "' + role + '".');
+  }
+
+  function _textRolePatterns(node) {
+    const name = _nameText(node);
+    if (/display|hero/.test(name)) return { role: 'display', patterns: ['type/display/lg', 'display/lg', 'display large'] };
+    if (/headline|heading|title|h1|h2|h3/.test(name)) return { role: 'title', patterns: ['type/title/md', 'title/md', 'title medium', 'type/headline/md', 'headline/md'] };
+    if (/label|caption|eyebrow|meta/.test(name)) return { role: 'label', patterns: ['type/label/md', 'label/md', 'type/label/sm', 'label/sm', 'caption'] };
+    return { role: 'body', patterns: ['type/body/md', 'body/md', 'body medium', 'paragraph', 'type/body/sm', 'body/sm'] };
+  }
+
+  function _typographySuggestion(node) {
+    const match = _textRolePatterns(node);
+    const binding = _ds.pickTypographyBinding(match.role, match.patterns);
+    if (binding.kind === 'style' && binding.style) {
+      return {
+        kind: 'textStyle',
+        name: binding.style.name,
+        id: binding.style.id,
+        confidence: 'medium',
+        reason: 'Text styles have priority; matched role "' + match.role + '".'
+      };
+    }
+    if (binding.kind === 'variables' && binding.variables) {
+      const variable = binding.variables.sizeVar || binding.variables.lineHeightVar || binding.variables.weightVar || binding.variables.familyVar;
+      return _suggestion('typographyVariables', variable, variable ? 'medium' : 'none',
+        variable ? 'Typography variables found for role "' + match.role + '".' : binding.warning);
+    }
+    return { kind: 'none', confidence: 'none', reason: binding.warning };
+  }
+
+  function _pushViolation(node, property, rawValue, type, details) {
+    details = details || {};
+    const violation = {
+      nodeId: node.id,
+      nodeName: node.name,
+      nodeType: node.type,
+      property: property,
+      rawValue: rawValue,
+      type: type,
+      suggestion: details.suggestion || { kind: 'none', confidence: 'none', reason: 'No suggestion.' }
+    };
+    if (details.fillIndex !== undefined) violation.fillIndex = details.fillIndex;
+    if (details.strokeIndex !== undefined) violation.strokeIndex = details.strokeIndex;
+    violations.push(violation);
+    return violation;
+  }
+
+  function _applyQaFix(violation) {
+    const node = figma.getNodeById(violation.nodeId);
+    if (!node) return 'NODE_NOT_FOUND';
+    const suggestion = violation.suggestion || {};
+    if (!suggestion.id) return 'NO_SUGGESTION';
+    if (suggestion.confidence !== 'high') return 'LOW_CONFIDENCE';
+    const variable = _ds.varById[suggestion.id] || null;
+
+    if (violation.property === 'Text style') {
+      const style = _ds.textStyles.find(function (s) { return s.id === suggestion.id; });
+      if (!style) return 'STYLE_NOT_FOUND';
+      try { node.textStyleId = style.id; return 'OK'; } catch (e) { return e.message || 'STYLE_BIND_FAILED'; }
+    }
+
+    if (violation.property === 'Font size') {
+      const binding = _typographySuggestion(node);
+      if (binding.kind !== 'typographyVariables') return 'NO_TYPOGRAPHY_VARIABLES';
+      const role = _textRolePatterns(node);
+      const group = _ds.pickTypographyBinding(role.role, role.patterns).variables;
+      if (!group) return 'NO_TYPOGRAPHY_VARIABLES';
+      if (group.sizeVar) _ds.bindVar(node, 'fontSize', group.sizeVar);
+      if (group.lineHeightVar) {
+        if (typeof group.lineHeightValue === 'number') node.lineHeight = { value: group.lineHeightValue, unit: 'PIXELS' };
+        _ds.bindVar(node, 'lineHeight', group.lineHeightVar);
+      }
+      if (group.trackingVar) {
+        if (typeof group.trackingValue === 'number') node.letterSpacing = { value: group.trackingValue, unit: 'PIXELS' };
+        _ds.bindVar(node, 'letterSpacing', group.trackingVar);
+      }
+      if (group.weightVar) _ds.bindVar(node, 'fontWeight', group.weightVar);
+      if (group.familyVar) _ds.bindVar(node, 'fontFamily', group.familyVar);
+      return 'OK';
+    }
+
+    if (!variable) return 'VAR_NOT_FOUND';
+    if (violation.property === 'Fill color') {
+      const fills = JSON.parse(JSON.stringify(node.fills));
+      fills[violation.fillIndex || 0] = figma.variables.setBoundVariableForPaint(fills[violation.fillIndex || 0], 'color', variable);
+      node.fills = fills;
+      return 'OK';
+    }
+    if (violation.property === 'Stroke color') {
+      const strokes = JSON.parse(JSON.stringify(node.strokes));
+      strokes[violation.strokeIndex || 0] = figma.variables.setBoundVariableForPaint(strokes[violation.strokeIndex || 0], 'color', variable);
+      node.strokes = strokes;
+      return 'OK';
+    }
+    if (violation.property === 'Stroke weight') {
+      const isFrameLike = node.type === 'FRAME' || node.type === 'COMPONENT' || node.type === 'COMPONENT_SET';
+      if (node.type === 'TEXT' || !isFrameLike) _ds.bindVar(node, 'strokeWeight', variable);
+      else ['strokeTopWeight','strokeBottomWeight','strokeLeftWeight','strokeRightWeight'].forEach(function (p) { _ds.bindVar(node, p, variable); });
+      return 'OK';
+    }
+    if (violation.property === 'Corner radius') {
+      ['topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius'].forEach(function (p) { _ds.bindVar(node, p, variable); });
+      return 'OK';
+    }
+    if (['paddingTop','paddingBottom','paddingLeft','paddingRight','itemSpacing','counterAxisSpacing'].indexOf(violation.property) >= 0) {
+      _ds.bindVar(node, violation.property, variable);
+      return 'OK';
+    }
+    return 'UNKNOWN_PROPERTY';
+  }
+
+  function _auditNode(node) {
+    if (!node || node.type === 'INSTANCE') return;
+
+    if (node.fills && Array.isArray(node.fills)) {
+      for (let i = 0; i < node.fills.length; i++) {
+        const fill = node.fills[i];
+        if (fill && fill.type === 'SOLID' && !(node.boundVariables && node.boundVariables.fills && node.boundVariables.fills[i])) {
+          _pushViolation(node, 'Fill color', _rgbText(fill.color), 'color', { fillIndex: i, suggestion: _colorSuggestion(node, 'Fill color') });
+        }
+      }
+    }
+
+    if (node.strokes && Array.isArray(node.strokes)) {
+      for (let i = 0; i < node.strokes.length; i++) {
+        const stroke = node.strokes[i];
+        if (stroke && stroke.type === 'SOLID' && !(node.boundVariables && node.boundVariables.strokes && node.boundVariables.strokes[i])) {
+          _pushViolation(node, 'Stroke color', _rgbText(stroke.color), 'color', { strokeIndex: i, suggestion: _colorSuggestion(node, 'Stroke color') });
+        }
+      }
+    }
+
+    if (node.strokes && node.strokes.length > 0 && typeof node.strokeWeight === 'number' && node.strokeWeight !== 0) {
+      const swBound = node.boundVariables && (
+        node.boundVariables.strokeWeight ||
+        (
+          node.boundVariables.strokeTopWeight &&
+          node.boundVariables.strokeRightWeight &&
+          node.boundVariables.strokeBottomWeight &&
+          node.boundVariables.strokeLeftWeight
+        )
+      );
+      if (!swBound) {
+        const variable = _ds.pickFloatByValue(node.strokeWeight, 'border');
+        _pushViolation(node, 'Stroke weight', node.strokeWeight + 'px', 'border', {
+          suggestion: _suggestion('variable', variable, variable ? 'high' : 'none', variable ? 'Exact value and border semantics.' : 'No exact border variable found.')
+        });
+      }
+    }
+
+    if (node.type !== 'TEXT' && typeof node.cornerRadius === 'number' && node.cornerRadius !== 0) {
+      if (!(node.boundVariables && node.boundVariables.topLeftRadius)) {
+        const variable = _ds.pickFloatByValue(node.cornerRadius, 'radius');
+        _pushViolation(node, 'Corner radius', node.cornerRadius + 'px', 'border', {
+          suggestion: _suggestion('variable', variable, variable ? 'high' : 'none', variable ? 'Exact value and radius semantics.' : 'No exact radius variable found.')
+        });
+      }
+    }
+
+    if (node.layoutMode && node.layoutMode !== 'NONE') {
+      ['paddingTop','paddingBottom','paddingLeft','paddingRight','itemSpacing','counterAxisSpacing'].forEach(function (prop) {
+        if (typeof node[prop] === 'number' && node[prop] !== 0 && !(node.boundVariables && node.boundVariables[prop])) {
+          const variable = _ds.pickFloatByValue(node[prop], 'spacing');
+          _pushViolation(node, prop, node[prop] + 'px', 'spacing', {
+            suggestion: _suggestion('variable', variable, variable ? 'high' : 'none', variable ? 'Exact value and spacing semantics.' : 'No exact spacing variable found.')
+          });
+        }
+      });
+    }
+
+    if (node.type === 'TEXT') {
+      if (_ds.textStyles.length > 0) {
+        if (!node.textStyleId || node.textStyleId === figma.mixed) {
+          _pushViolation(node, 'Text style', node.fontSize !== figma.mixed ? node.fontSize + 'px' : 'mixed', 'typography', {
+            suggestion: _typographySuggestion(node)
+          });
+        }
+      } else if (node.fontSize !== figma.mixed && !(node.boundVariables && node.boundVariables.fontSize)) {
+        _pushViolation(node, 'Font size', node.fontSize + 'px', 'typography', {
+          suggestion: _typographySuggestion(node)
+        });
+      }
+    }
+
+    if ('children' in node && node.children) {
+      for (let i = 0; i < node.children.length; i++) _auditNode(node.children[i]);
+    }
+  }
+
+  for (let i = 0; i < scopeNodes.length; i++) _auditNode(scopeNodes[i]);
+
+  if (shouldFix) {
+    for (let i = 0; i < violations.length; i++) {
+      const v = violations[i];
+      const result = _applyQaFix(v);
+      if (result === 'OK') fixed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, boundTo: v.suggestion.name });
+      else failed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, reason: result });
+    }
+  }
+
+  const byType = {};
+  for (let i = 0; i < violations.length; i++) byType[violations[i].type] = (byType[violations[i].type] || 0) + 1;
+
+  return {
+    scope: scopeLabel,
+    fileName: figma.root ? figma.root.name : '',
+    pageName: figma.currentPage ? figma.currentPage.name : '',
+    selectedCount: figma.currentPage.selection.length,
+    checkedRootCount: scopeNodes.length,
+    violationCount: violations.length,
+    byType: byType,
+    fixApplied: shouldFix,
+    fixedCount: fixed.length,
+    failedCount: failed.length,
+    fixed: fixed,
+    failed: failed,
+    violations: violations
+  };
+}
+
 // ── Showcase implementation ──────────────────────────────────────────────────
 // Ported from figlets skills/fig-ds-showcase — all rendering via Figma Plugin API.
 
-async function _buildShowcase() {
+async function _buildShowcase(opts) {
+  opts = opts || {};
+  const _numericFallback = opts.numericFallback || {};
 
   // ── detect-ds-structure ────────────────────────────────────────────────────
 
@@ -1363,11 +1691,18 @@ async function _buildShowcase() {
 
   function _bindNumericProp(node, prop, value, purpose) {
     if (!node || !(prop in node) || typeof value !== 'number' || !isFinite(value)) return false;
-    const variable = _pickFloatVarByValue(value, purpose);
+    var variable = _pickFloatVarByValue(value, purpose);
+    var fallbackMode = _numericFallback[purpose];
+    if (!variable && fallbackMode && fallbackMode !== 'exact' && _binding.pickFloatByNearest) {
+      variable = _binding.pickFloatByNearest(value, purpose, fallbackMode, _numericFallback.maxDistance);
+    }
     if (!variable) {
       _warnShowcaseBinding('No ' + purpose + ' variable found for value ' + value + '; using raw ' + prop + '.');
       return false;
     }
+    try {
+      if (_binding.bindVar(node, prop, variable)) return true;
+    } catch (_) {}
     try { node.setBoundVariable(prop, variable); return true; } catch (_) {
       _warnShowcaseBinding('Could not bind ' + prop + ' to ' + variable.name + '; using raw value.');
       return false;
@@ -1463,7 +1798,10 @@ async function _buildShowcase() {
       }
       const hasVisibleStroke = Array.isArray(node.strokes) && node.strokes.some(p => p && p.visible !== false);
       if (hasVisibleStroke) {
-        const borderProps = ['strokeWeight', 'strokeTopWeight', 'strokeRightWeight', 'strokeBottomWeight', 'strokeLeftWeight'];
+        const isFrameLike = node.type === 'FRAME' || node.type === 'COMPONENT' || node.type === 'COMPONENT_SET';
+        const borderProps = isFrameLike
+          ? ['strokeTopWeight', 'strokeRightWeight', 'strokeBottomWeight', 'strokeLeftWeight']
+          : ['strokeWeight'];
         for (let i = 0; i < borderProps.length; i++) {
           const prop = borderProps[i];
           if (prop in node && typeof node[prop] === 'number' && node[prop] !== 0) {
@@ -1630,7 +1968,9 @@ async function _buildShowcase() {
     return badge;
   }
 
-  const _TABLE_DESC = '[Describe what these tokens are used for]';
+  const _PRIMITIVE_COLOR_DESC = 'Primitive ramp values used to construct semantic color roles and visual states.';
+  const _SEMANTIC_COLOR_DESC = 'Semantic color tokens mapped to UI roles, foreground pairings, and accessibility checks.';
+  const _SCRIM_TABLE_DESC = 'Overlay opacity tokens for dimming background content behind modal surfaces.';
 
   function _buildTable(title, description) {
     const table = _f('Table 1.0.0', 'VERTICAL');
@@ -1664,6 +2004,35 @@ async function _buildShowcase() {
     return table;
   }
 
+  function _typeVarDesc(key) {
+    var parts = String(key || '').split('/');
+    var role = parts.length > 1 ? parts[1] : 'type';
+    var size = parts.length > 2 ? parts[2] : 'default';
+    return 'Typography token for ' + role + ' text at the ' + size + ' size.';
+  }
+
+  function _textStyleDesc(style) {
+    var name = style && style.name ? style.name : 'this style';
+    return 'Text style for ' + name + '; use it to keep font, size, line height, and weight consistent.';
+  }
+
+  function _colorTableDesc(label) {
+    var s = String(label || '').toLowerCase();
+    if (/icon/.test(s)) return 'Foreground icon tokens shown against their intended or highest-contrast surfaces.';
+    if (/outline|border|stroke/.test(s)) return 'Outline and border color tokens for dividers, controls, and focusable surfaces.';
+    if (/surface|bg|background/.test(s)) return 'Surface color tokens paired with readable foreground examples.';
+    return 'Semantic color tokens shown with accessible foreground or preview pairings.';
+  }
+
+  function _spacingGroupDesc(groupPath, visualType) {
+    var label = String(groupPath || '').split('/').pop() || groupPath || 'spacing';
+    if (visualType === 'inset') return 'Inset scale for internal padding in component containers.';
+    if (visualType === 'touch') return 'Touch target scale for interactive hit areas.';
+    if (visualType === 'radius') return 'Corner radius scale for rounded components and surfaces.';
+    if (visualType === 'border') return 'Border width scale for strokes, outlines, and separators.';
+    return 'Spacing scale for layout gaps, stacks, and ' + label + ' rhythm.';
+  }
+
   function _buildTableHeading(cols, gap) {
     gap = gap !== undefined ? gap : 16;
     const heading = _f('Table Heading', 'HORIZONTAL');
@@ -1690,12 +2059,39 @@ async function _buildShowcase() {
     return heading;
   }
 
-  function _swatchIndicator(swatchRGB) {
-    const BLACK = { r: 0, g: 0, b: 0 };
-    const WHITE = { r: 1, g: 1, b: 1 };
-    if (_contrastRatio(swatchRGB, BLACK) >= 4.5) return { fg: _RC.onSurface,     show: true };
-    if (_contrastRatio(swatchRGB, WHITE) >= 4.5) return { fg: _C.onSurfaceLight, show: true };
-    return { fg: null, show: false };
+  function _pickReadableNeutralExtreme(swatchRGB) {
+    var best = null;
+    var bestContrast = 0;
+    for (var i = 0; i < _scored.length; i++) {
+      var s = _scored[i];
+      if (!/^color\/neutral\//i.test(s.name)) continue;
+      if (/(?:scrim|overlay|surface|foreground|text|on[-_]surface|shadow|elevation)/i.test(s.name)) continue;
+      if (s.rgb.a !== undefined && s.rgb.a < 0.95) continue;
+      var ratio = _contrastRatio(swatchRGB, s.rgb);
+      if (ratio < 4.5) continue;
+      if (ratio > bestContrast) {
+        best = s;
+        bestContrast = ratio;
+      }
+    }
+    return best ? { fg: best.rgb, varRef: best.v, show: true, neutralExtreme: true } : null;
+  }
+
+  function _swatchIndicator(swatchRGB, allowNeutralFallback) {
+    var candidates = [
+      { fg: _RC.onSurface, varRef: _V.onSurface },
+      { fg: _RC.onBrandVariant, varRef: _V.onBrandVariant },
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].varRef && _contrastRatio(swatchRGB, candidates[i].fg) >= 4.5) {
+        return { fg: candidates[i].fg, varRef: candidates[i].varRef, show: true };
+      }
+    }
+    if (allowNeutralFallback) {
+      var neutral = _pickReadableNeutralExtreme(swatchRGB);
+      if (neutral) return neutral;
+    }
+    return { fg: null, varRef: null, show: false };
   }
 
   function _buildSwatch(swatchRGB, fgRGB, sampleText, opts) {
@@ -1790,12 +2186,13 @@ async function _buildShowcase() {
       const swatchRGB = rawVal && 'r' in rawVal
         ? { r: rawVal.r, g: rawVal.g, b: rawVal.b }
         : { r: 0.8, g: 0.8, b: 0.8 };
-      const ind = _swatchIndicator(swatchRGB);
+      const ind = _swatchIndicator(swatchRGB, true);
       const fgRGB = ind.show ? ind.fg : _textColor;
-      const swatch = _buildSwatch(swatchRGB, fgRGB, 'Aa', {
+      const swatch = _buildSwatch(swatchRGB, fgRGB, ind.show ? 'Aa' : null, {
         stepLabel: stepName,
         hexLabel:  rawVal && 'r' in rawVal ? _hex(rawVal) : '—',
         swatchVar: v,
+        fgVar: ind.varRef,
       });
       strip.appendChild(swatch);
       swatch.layoutSizingHorizontal = 'FILL';
@@ -1823,7 +2220,7 @@ async function _buildShowcase() {
     const _outTag = _buildTag(token);
     tokenCell.appendChild(_outTag);
     _outTag.layoutSizingHorizontal = 'HUG';
-    const _outDesc = _tDS(description || _TABLE_DESC, 12, _subColor, false, _V.textSub);
+    const _outDesc = _tDS(description || 'Border color token for outlines, dividers, and low-emphasis structure.', 12, _subColor, false, _V.textSub);
     _outDesc.name = 'DS Description';
     tokenCell.appendChild(_outDesc);
     _outDesc.layoutSizingHorizontal = 'FILL';
@@ -1874,7 +2271,7 @@ async function _buildShowcase() {
     const _semTag = _buildTag(token);
     tokenCell.appendChild(_semTag);
     _semTag.layoutSizingHorizontal = 'HUG';
-    const _semRowDesc = _tDS(description || _TABLE_DESC, 12, _subColor, false, _V.textSub);
+    const _semRowDesc = _tDS(description || 'Semantic color token for role-based UI surfaces and states.', 12, _subColor, false, _V.textSub);
     _semRowDesc.name = 'DS Description';
     tokenCell.appendChild(_semRowDesc);
     _semRowDesc.layoutSizingHorizontal = 'FILL';
@@ -1935,7 +2332,7 @@ async function _buildShowcase() {
     const _typoTag = _buildTag(style.name);
     tokenCell.appendChild(_typoTag);
     _typoTag.layoutSizingHorizontal = 'HUG';
-    const _typoDesc = _tDS((style.description && style.description.trim()) || _TABLE_DESC, 12, _subColor, false, _V.textSub);
+    const _typoDesc = _tDS((style.description && style.description.trim()) || _textStyleDesc(style), 12, _subColor, false, _V.textSub);
     _typoDesc.name = 'DS Description';
     tokenCell.appendChild(_typoDesc);
     _typoDesc.layoutSizingHorizontal = 'FILL';
@@ -2008,7 +2405,7 @@ async function _buildShowcase() {
     const _tag = _buildTag(key);
     tokenCell.appendChild(_tag);
     _tag.layoutSizingHorizontal = 'HUG';
-    const _desc = _tDS(_TABLE_DESC, 12, _subColor, false, _V.textSub);
+    const _desc = _tDS(_typeVarDesc(key), 12, _subColor, false, _V.textSub);
     _desc.name = 'DS Description';
     tokenCell.appendChild(_desc);
     _desc.layoutSizingHorizontal = 'FILL';
@@ -2089,7 +2486,7 @@ async function _buildShowcase() {
       outer.layoutMode = 'NONE';
       outer.resize(40 + displayPx * 2, 40 + displayPx * 2);
       outer.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
-      outer.strokes = [_paint(_RC.onBrandVariant, _V.onBrandVariant)];
+      outer.strokes = [_paint(_accColor, _V.outlineBrand)];
       outer.strokeWeight = 1;
       outer.strokeAlign = 'INSIDE';
       outer.cornerRadius = 4;
@@ -2098,7 +2495,7 @@ async function _buildShowcase() {
       inner.resize(40, 40);
       inner.x = displayPx;
       inner.y = displayPx;
-      inner.fills = [_paint(_RC.onBrandVariant, _V.onBrandVariant)];
+      inner.fills = [_paint(_RC.surfaceBrand, _V.surfaceBrand)];
       inner.cornerRadius = 2;
       outer.appendChild(inner);
       return outer;
@@ -2139,7 +2536,7 @@ async function _buildShowcase() {
 
   function _buildSpacingRow(v, px, visualType) {
     const pxNum    = px !== null && isFinite(px) ? Math.round(px) : 0;
-    const desc     = (v.description && v.description.trim()) ? v.description.trim() : null;
+    const desc     = (v.description && v.description.trim()) ? v.description.trim() : _floatTokenDesc(v.name, visualType, px);
 
     const row = _f('Table / Row / Spacing & Effects 1.0.0', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
@@ -2154,7 +2551,7 @@ async function _buildShowcase() {
     tokenCell.primaryAxisAlignItems = 'CENTER';
     const badge = _buildTokenBadge(v.name);
     tokenCell.appendChild(badge);
-    const _spDesc = _tDS(desc || _TABLE_DESC, 12, _subColor, false, _V.textSub);
+    const _spDesc = _tDS(desc, 12, _subColor, false, _V.textSub);
     _spDesc.name = 'DS Description';
     tokenCell.appendChild(_spDesc);
     _spDesc.layoutSizingHorizontal = 'FILL';
@@ -2213,6 +2610,14 @@ async function _buildShowcase() {
     const has  = k => segs.some(s => s === k || s.startsWith(k + '-'));
     const qualifier = segs.find(s => !['surface','on-surface','outline','border','icon','state','on','color'].includes(s) && !s.startsWith('on-')) || last;
 
+    if (has('elevation') || has('shadow')) {
+      if (last === '0' || last === 'none') return 'No-shadow elevation for flat surfaces.';
+      return 'Shadow style for layered surfaces and raised UI.';
+    }
+    if (has('scrim') || has('overlay')) {
+      return 'Overlay color for dimming background content behind modal UI.';
+    }
+
     if (has('icon')) {
       if (qualifier === 'brand')   return 'Brand-colored icon.';
       if (qualifier === 'default' || qualifier === 'icon') return 'Default icon color.';
@@ -2240,6 +2645,16 @@ async function _buildShowcase() {
       return `${qualifier} border color.`;
     }
     return null;
+  }
+
+  function _floatTokenDesc(name, visualType, px) {
+    var n = String(name || '').toLowerCase();
+    var valueText = px !== null && isFinite(px) ? ' Resolves to ' + Math.round(px) + 'px.' : '';
+    if (visualType === 'inset' || /inset|padding|pad/.test(n)) return 'Inset token for internal spacing inside components.' + valueText;
+    if (visualType === 'touch' || /touch|tap|hit/.test(n)) return 'Touch target token for interactive hit areas.' + valueText;
+    if (visualType === 'radius' || /radius|corner|round/.test(n)) return 'Radius token for rounded corners.' + valueText;
+    if (visualType === 'border' || /border|stroke|outline/.test(n)) return 'Border width token for strokes and outlines.' + valueText;
+    return 'Spacing token for layout gaps, stacks, and rhythm.' + valueText;
   }
 
   // Return the last two slash-separated segments of a variable path, which gives
@@ -2302,6 +2717,7 @@ async function _buildShowcase() {
       return frame;
     }
     container.name = `Token Showcase — ${sectionName}`;
+    try { container.fills = [_paint(_bgColor, _V.bg)]; } catch (_) {}
     _page.appendChild(container);
     container.appendChild(frame);
     frame.x = 0;
@@ -2327,7 +2743,7 @@ async function _buildShowcase() {
     _addToFrame(_buildSectionHeader('Colors', 'Primitive ramps and their semantic surface / foreground pairs.'), _colorsFrame);
 
     if (_primColls.length) {
-      const _primTable = _buildTable('Primitives', _TABLE_DESC);
+      const _primTable = _buildTable('Primitives', _PRIMITIVE_COLOR_DESC);
 
       for (const coll of _primColls) {
         const _colorVars = coll.vars.filter(v => {
@@ -2527,7 +2943,7 @@ async function _buildShowcase() {
       }
 
       if (_mainGroups.length) {
-        const _semTable = _buildTable('Semantic Colors', _TABLE_DESC);
+        const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
         const _semHeading = _buildTableHeading([
           { text: 'Token',    flex: true },
           { text: 'Example',  flex: true },
@@ -2553,7 +2969,7 @@ async function _buildShowcase() {
       }
 
       for (const { label, rows } of _bottomGroups) {
-        const _btTable = _buildTable(label, _TABLE_DESC);
+        const _btTable = _buildTable(label, _colorTableDesc(label));
         const _btHeading = _buildTableHeading([
           { text: 'Token',   flex: true },
           { text: 'Example', flex: true },
@@ -2726,7 +3142,7 @@ async function _buildShowcase() {
 
     function _buildGroupTable(groupPath, sortedVars, sortedValues, parentCol, visualType) {
       const svType = visualType === 'bar' ? 'spacing' : visualType;
-      const table = _buildTable(groupPath.split('/').pop() || groupPath, _TABLE_DESC);
+      const table = _buildTable(groupPath.split('/').pop() || groupPath, _spacingGroupDesc(groupPath, svType));
       for (let i = 0; i < sortedVars.length; i++) {
         const row = _buildSpacingRow(sortedVars[i], sortedValues[i], svType);
         table.appendChild(row);
@@ -2793,7 +3209,8 @@ async function _buildShowcase() {
     const _elevFrame = _makeShowcaseFrame('Elevation');
     _addToFrame(_buildSectionHeader('Elevation', 'Drop shadows for layering depth.'), _elevFrame);
 
-    const _elevTable = _buildTable('Elevation', _TABLE_DESC);
+    const _elevTable = _buildTable('Elevation', 'Shadow styles for layered surfaces, popovers, and raised UI.');
+    _elevTable.clipsContent = false;
     const _elevHeading = _buildTableHeading([
       { text: 'Token',    flex: true },
       { text: 'Preview',  width: 96  },
@@ -2822,7 +3239,7 @@ async function _buildShowcase() {
       const _elevTag = _buildTag(style.name.split('/').pop());
       tokenCell.appendChild(_elevTag);
       _elevTag.layoutSizingHorizontal = 'HUG';
-      const _elevDesc = _tDS(_tokenDesc(style.name) || _TABLE_DESC, 12, _subColor, false, _V.textSub);
+      const _elevDesc = _tDS(_tokenDesc(style.name) || 'Shadow style for layered surfaces and raised UI.', 12, _subColor, false, _V.textSub);
       _elevDesc.name = 'DS Description';
       tokenCell.appendChild(_elevDesc);
       _elevDesc.layoutSizingHorizontal = 'FILL';
@@ -2837,6 +3254,7 @@ async function _buildShowcase() {
       card.fills = [_paint(_bgColor, _V.bg)];
       card.effectStyleId = style.id;
       const previewCell = _f('Visual', 'HORIZONTAL');
+      previewCell.clipsContent = false;
       previewCell.paddingTop = 8; previewCell.paddingBottom = 8;
       previewCell.paddingLeft = 12; previewCell.paddingRight = 12;
       previewCell.primaryAxisAlignItems = 'CENTER';
@@ -2891,7 +3309,7 @@ async function _buildShowcase() {
     const _scrimFrame = _makeShowcaseFrame('Scrims');
     _addToFrame(_buildSectionHeader('Overlays & Scrims', 'Scrim and overlay opacity tokens.'), _scrimFrame);
 
-    const _scrimTable = _buildTable('Overlays & Scrims', _TABLE_DESC);
+    const _scrimTable = _buildTable('Overlays & Scrims', _SCRIM_TABLE_DESC);
     const _scrimHeading = _buildTableHeading([
       { text: 'Token',   flex: true },
       { text: 'Preview', width: 96  },
@@ -2941,7 +3359,7 @@ async function _buildShowcase() {
         tokenCell.appendChild(_scrimTag);
         _scrimTag.layoutSizingHorizontal = 'HUG';
         const scrimDescText = _tokenDesc(scrimVar.name);
-        const _scrimDesc = _tDS(scrimDescText || desc || _TABLE_DESC, 12, _subColor, false, _V.textSub);
+        const _scrimDesc = _tDS(scrimDescText || desc || 'Scrim token for layered overlays and dimmed backgrounds.', 12, _subColor, false, _V.textSub);
         _scrimDesc.name = 'DS Description';
         tokenCell.appendChild(_scrimDesc);
         _scrimDesc.layoutSizingHorizontal = 'FILL';
@@ -2997,6 +3415,23 @@ async function _buildShowcase() {
   for (const _showcaseNode of _showcaseNodes) {
     _bindShowcaseNodeProperties(_showcaseNode);
   }
+  await new Promise(function(resolve) { setTimeout(resolve, 0); });
+  for (const _showcaseNode of _showcaseNodes) {
+    _bindShowcaseNodeProperties(_showcaseNode);
+  }
+  try {
+    const _prevSelection = figma.currentPage.selection.slice();
+    figma.currentPage.selection = _showcaseNodes;
+    var _qaPass = null;
+    try {
+      _qaPass = await _runQaBindingAudit({ fix: true });
+    } finally {
+      figma.currentPage.selection = _prevSelection;
+    }
+    if (_qaPass && _qaPass.failedCount) {
+      _warnShowcaseBinding('QA binding pass left ' + _qaPass.failedCount + ' unresolved gap(s).');
+    }
+  } catch (_) {}
 
 
   if (_showcaseNodes.length) {

@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-02] Designer-facing agents guide workflows but do not own product logic
+
+**Decision:** Public designer-facing agents should translate plain designer intent into the right MCP workflow, but they must not implement or modify design-system logic in prompts. The bridge plugin, MCP tools, and shared core own detection, binding, rendering, QA, setup, and documentation output. Agents handle guidance, readiness checks, human-readable summaries, and supported tool options only.
+
+**Why:**
+- Figlets is meant to feel like a helper in a designer's hand: the designer should be able to say "build a showcase of my design system" without knowing about receiver ports, snapshots, or tool sequencing.
+- Keeping logic out of the agent preserves deterministic output across Claude, Codex, and future MCP hosts.
+- The product needs one tested binding/rendering authority. Agent-side script edits or ad hoc output changes would reintroduce drift, token-heavy behavior, and inconsistent design-system decisions.
+- Developer/debug workflows still matter, but they should be explicitly separate from the public designer workflow.
+
+**Consequence:** Adapter docs should route intents such as showcase, QA, setup, inspect, and document into existing tools using designer-friendly language. Agents may choose supported parameters, summarize or omit irrelevant returned sections, and ask for designer confirmation when needed. If a designer asks for behavior the tool does not support, the agent should report it as an unsupported product request rather than patching this package or changing plugin scripts during the workflow.
+
 ## [2026-05-02] Binding policy: variables first, typography styles as the exception
 
 **Decision:** Design-system binding is variable-first for colors, spacing, radii, borders, and other scalar layer properties. Figma color/effect styles are fallback metadata, not the primary color binding target. Typography is the explicit exception: text styles may be preferred because a text style can package a coherent type decision while its underlying size, line-height, weight, tracking, and family values may themselves be variable-backed.

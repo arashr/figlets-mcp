@@ -10,6 +10,12 @@ As of 2026-05-02, design-system binding is **variable-first** for colors, spacin
 
 Practical rule for future work: setup, showcase, documentation, QA, and component creation should rely on the shared live resolver `_createDsBindingContext()` for binding decisions. Server-side hex/value indexes are for reporting and detection context only; they must not become automatic binding authorities. Hex/nearest-color matching remains forbidden for automatic color binding.
 
+## Current Pillar Decision — Agent Boundary
+
+As of 2026-05-02, designer-facing agents guide workflows but do **not** own product logic. The agent translates plain designer intent into existing MCP tools, helps with readiness and confirmation, and summarizes results in human language. The bridge plugin, MCP tools, and shared core own detection, binding, rendering, QA, setup, and documentation output.
+
+Practical rule for future work: agents may choose supported tool options and may ignore or summarize parts of tool output based on the designer's request, but they must not edit showcase scripts, binding logic, QA rules, or generated output as part of a public workflow. Unsupported designer requests become product/dev backlog items unless the developer is explicitly working in this repo.
+
 ---
 
 ## Project Identity

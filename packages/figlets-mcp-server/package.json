@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "doctor": "node src/cli/doctor.js",
     "detect-ds": "node src/cli/detect-design-system.js",
     "export-figma-file": "node src/cli/export-figma-file.js",
     "inspect-component": "node src/cli/inspect-component.js"

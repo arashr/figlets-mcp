@@ -43,6 +43,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && pathname === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      receiver: 'running',
+      pluginConnected: Boolean(pendingPollResponse),
+      activeSessionId: pendingPollSessionId || null,
+      dataPath: DEST_FILE,
+      selectionPath: DEST_FILE_SELECTION
+    }));
+    return;
+  }
+
   // 1. Figma Plugin long-polls this endpoint
   if (req.method === 'GET' && pathname === '/poll') {
     const sessionId = url.searchParams.get('sessionId') || '';

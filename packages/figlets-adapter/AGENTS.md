@@ -28,6 +28,23 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 
 ---
 
+## Intent Routing
+
+Designers should be able to ask in natural language. Route their intent to MCP tools, but do not move product logic into the prompt.
+
+| Designer says... | Agent should... |
+|---|---|
+| "Build a showcase of my design system" | Explain that you'll check what the file contains, ask them to keep the Figlets Bridge plugin open, then run the showcase workflow. |
+| "Check my design system" | Run a health check workflow: sync if needed, detect the system, audit tokens, and summarize the highest-impact issues. |
+| "QA this frame/component" | Ask them to select the target in Figma, run `qa_binding_audit` without fixes, then summarize raw/unbound values. |
+| "Fix the binding gaps" | Confirm they want automatic safe fixes, then run `qa_binding_audit` with `fix: true`. |
+| "Set up a design system" | Walk through setup intake in plain language, show previews, then use `prepare_ds_config` and `apply_ds_setup`. |
+| "Document this component" | Ask them to select the component, inspect it, craft human usage copy, then call `generate_component_doc`. |
+
+Keep the designer-facing language non-technical. Say "I'll check what's available in the file" rather than "I'll call `sync_figma_data` and `detect_design_system`." Tool names are for internal clarity and debugging, not the default user experience.
+
+---
+
 ## Workflows
 
 ### Detect design system
@@ -56,11 +73,12 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 5. If the user asks to fix everything, call `qa_binding_audit` with `fix: true`; report fixed and failed counts.
 
 ### Build token showcase
-1. Call `sync_figma_data` if fresh data is needed (or skip if already synced)
-2. Ask the user to keep the Figma plugin open — rendering happens inside Figma
-3. Call `build_ds_showcase`
-4. Report which sections were built (Colors, Typography, Spacing, Elevation, Scrims)
-5. Tell the user to look at the "00 · Tokens" page in their Figma file
+1. Tell the designer: "I'll check what this file exposes, then build the showcase sections that apply. Please keep the Figlets Bridge plugin open in Figma."
+2. Call `sync_figma_data` if fresh data is needed (or skip if already synced)
+3. By default, call `build_ds_showcase` with no options. It renders what the design system exposes and keeps descriptions deterministic and cheap.
+4. If the user explicitly accepts numeric nearest/floor fallback for generated showcase chrome, call `build_ds_showcase` with `numericFallback`, for example `{ "radius": "nearest", "border": "floor", "maxDistance": 8 }`. Exact token matches still win; colors never use nearest fallback.
+5. Report which sections were built (Colors, Typography, Spacing, Elevation, Scrims)
+6. Tell the user to look at the "00 · Tokens" page in their Figma file
 
 ### Set up a new design system (bootstrap collections)
 1. Run intake: project name, platform, grid base (4px/8px), breakpoints (3-tier/4-tier), naming convention (role-based/surface-based), color scale, brand colors (name + hex), typeface, typography preset
@@ -127,11 +145,13 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 ## Rules
 
 - Never embed design system analysis logic in the prompt — call the MCP tools instead
+- Never modify plugin scripts, binding rules, QA rules, or generated output as part of a public designer workflow. If the designer asks for unsupported behavior, explain the gap and treat it as a product request.
 - Never ask the user for variable names, token values, or collection names — the tools extract these from Figma
 - Never call `inspect_component` without first confirming the user has selected a node in Figma
 - Never call `detect_design_system` or `audit_tokens` without checking whether a sync is needed first
 - Never present raw JSON tool output directly — always summarize into plain language
-- Never add reasoning steps to `build_ds_showcase` — it renders exactly what it detects, no decisions needed
+- Treat the shared binding resolver as the binding authority. Color and scalar bindings are variable-first; typography may prefer text styles because they can bundle variable-backed type decisions. Never invent hex or nearest-color auto-binding.
+- Never add agent reasoning steps to `build_ds_showcase` unless the user explicitly opts into a supported parameter such as `numericFallback`. Showcase descriptions are deterministic by default; agent-enriched description polish is post-MVP and should only run when the user asks for it.
 - Never call `apply_ds_setup` until `prepare_ds_config` returns `readyToBuild === true` — building with failing pairs will produce inaccessible tokens
 - Never hardcode token values in intake — all values come from the user and are written to the config file
 - Never skip showing the semantic pairs table before building — the user must confirm WCAG ratios before any collections are created

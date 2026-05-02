@@ -134,19 +134,27 @@ Once connected, the agent will have access to:
 | `inspect_component` | Grabs the currently selected Figma node(s) and returns structure, layout, and variant properties. |
 | `detect_design_system` | Analyzes a saved snapshot and returns a structured design system summary. |
 | `audit_tokens` | Audits the snapshot for unaliased values, duplicate values, and naming inconsistencies. |
+| `qa_binding_audit` | Audits selected Figma layers for raw/unbound design-system properties and can apply safe high-confidence fixes. |
+| `build_ds_showcase` | Builds the visual token showcase in Figma. |
+| `prepare_ds_config` | Previews and validates a design-system config before building variables. |
+| `apply_ds_setup` | Builds Figma variable collections from a prepared config. |
+| `generate_component_doc` | Builds a component spec sheet in Figma and returns local markdown for developer handoff. |
 
 ---
 
 ## Prerequisites
 
-All tools that interact with Figma require the local bridge receiver to be running:
+The MCP server starts the local bridge receiver automatically. Designers normally only need to open the **Figlets Bridge** plugin in Figma Desktop and keep it open while the agent works. The plugin will show **"Listening for Agent"** when ready.
 
 ```bash
-# Start the bridge receiver (keep running in the background)
+# Optional health check for setup/debugging
+figlets-mcp doctor
+```
+
+For local development or debugging, the receiver can still be started manually:
+
+```bash
 npm run start -w @figlets/figma-bridge-plugin
 ```
 
-Then open the **Figlets Bridge** plugin in Figma Desktop. The plugin will show **"Listening for Agent"** when ready.
-
 `detect_design_system` and `audit_tokens` can also work offline if `.local/figma-data.json` already exists from a previous sync.
-

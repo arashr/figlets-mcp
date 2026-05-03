@@ -2750,6 +2750,62 @@ async function _buildShowcase(opts) {
 
   // ── Colors section ───────────────────────────────────────────────────────────
 
+  function _rankPrimitiveRamp(name) {
+    var n = String(name || '').toLowerCase();
+    var leaf = n.split('/').pop();
+    var order = {
+      'neutral': 100,
+      'neutral-variant': 110,
+      'red': 200,
+      'danger': 205,
+      'error': 205,
+      'green': 210,
+      'success': 210,
+      'yellow': 220,
+      'warning': 220,
+      'blue': 230,
+      'info': 230
+    };
+    if (order[leaf] !== undefined) return order[leaf];
+    return 10;
+  }
+
+  function _rankSemanticName(name) {
+    var n = String(name || '').toLowerCase();
+    var leaf = n.split('/').pop();
+    var rank = 100;
+    if (/(^|\/)(surface|bg|background)(\/|$)/.test(n)) rank = 0;
+    else if (/(^|\/)(on-surface|text|fg|foreground)(\/|$)/.test(n)) rank = 20;
+    else if (/(^|\/)(outline|border|stroke)(\/|$)/.test(n)) rank = 30;
+    else if (/(^|\/)icon(\/|$)/.test(n)) rank = 40;
+    else if (/(^|\/)(state|overlay|scrim)(\/|$)/.test(n)) rank = 70;
+
+    if (/brand|primary/.test(leaf)) rank += 5;
+    if (/neutral|default|variant|subtle|muted/.test(leaf)) rank += 10;
+    if (/success|positive|confirm|green/.test(leaf)) rank += 100;
+    if (/warning|caution|yellow/.test(leaf)) rank += 110;
+    if (/danger|error|destructive|red/.test(leaf)) rank += 120;
+    if (/info|blue/.test(leaf)) rank += 130;
+    if (/disabled/.test(leaf)) rank += 140;
+    return rank;
+  }
+
+  function _sortSemanticVars(vars) {
+    return vars.slice().sort(function(a, b) {
+      var ar = _rankSemanticName(a.name);
+      var br = _rankSemanticName(b.name);
+      return ar !== br ? ar - br : a.name.localeCompare(b.name);
+    });
+  }
+
+  function _sortSemanticGroups(groups) {
+    return groups.slice().sort(function(a, b) {
+      var ar = _rankSemanticName(a.key || a.label);
+      var br = _rankSemanticName(b.key || b.label);
+      return ar !== br ? ar - br : String(a.label).localeCompare(String(b.label));
+    });
+  }
+
   const _prevColors = _page.children.find(n =>
     (n.type === 'FRAME' || n.type === 'SECTION') && n.name === 'Token Showcase — Colors'
   );
@@ -2772,7 +2828,13 @@ async function _buildShowcase(opts) {
         });
         const _rampMap = groupByPath(_colorVars);
 
-        for (const [rampName, vars] of Object.entries(_rampMap)) {
+        const _rampEntries = Object.entries(_rampMap).sort(function(a, b) {
+          var ar = _rankPrimitiveRamp(a[0]);
+          var br = _rankPrimitiveRamp(b[0]);
+          return ar !== br ? ar - br : a[0].localeCompare(b[0]);
+        });
+
+        for (const [rampName, vars] of _rampEntries) {
           const sortedVars = _sortSteps(vars);
           const primRow = _buildPrimSwatchRow(rampName || coll.name, sortedVars);
           _primTable.appendChild(primRow);
@@ -2815,7 +2877,7 @@ async function _buildShowcase(opts) {
       const _bottomGroups = [];
 
       for (const [groupKey, groupVars] of _allSemGroupEntries) {
-        const nonOnVars = groupVars.filter(v => !v.name.split('/').some(seg => /^on[-_]/i.test(seg)));
+        const nonOnVars = _sortSemanticVars(groupVars.filter(v => !v.name.split('/').some(seg => /^on[-_]/i.test(seg))));
         const bgPairedRows = [], bgUnpairedRows = [], fgRows = [];
 
         for (const v of nonOnVars) {
@@ -2953,10 +3015,10 @@ async function _buildShowcase(opts) {
         const groupLabel = groupKey.split('/').pop() || groupKey;
 
         if (bgPairedRows.length) {
-          _mainGroups.push({ label: groupLabel, rows: [...bgPairedRows, ...bgUnpairedRows] });
-          if (fgRows.length) _bottomGroups.push({ label: groupLabel, rows: fgRows });
+          _mainGroups.push({ key: groupKey, label: groupLabel, rows: [...bgPairedRows, ...bgUnpairedRows] });
+          if (fgRows.length) _bottomGroups.push({ key: groupKey, label: groupLabel, rows: fgRows });
         } else {
-          _bottomGroups.push({ label: groupLabel, rows: [...fgRows, ...bgUnpairedRows] });
+          _bottomGroups.push({ key: groupKey, label: groupLabel, rows: [...fgRows, ...bgUnpairedRows] });
         }
       }
 
@@ -2972,7 +3034,7 @@ async function _buildShowcase(opts) {
         _semHeading.layoutSizingHorizontal = 'FILL';
         _addTableDivider(_semTable);
 
-        for (const { label, rows } of _mainGroups) {
+        for (const { label, rows } of _sortSemanticGroups(_mainGroups)) {
           const headerRow = _buildGroupHeader(label);
           _semTable.appendChild(headerRow);
           headerRow.layoutSizingHorizontal = 'FILL';
@@ -2986,7 +3048,7 @@ async function _buildShowcase(opts) {
         _appendFill(_semTable, _colorsFrame);
       }
 
-      for (const { label, rows } of _bottomGroups) {
+      for (const { label, rows } of _sortSemanticGroups(_bottomGroups)) {
         const _btTable = _buildTable(label, _colorTableDesc(label));
         const _btHeading = _buildTableHeading([
           { text: 'Token',   flex: true },

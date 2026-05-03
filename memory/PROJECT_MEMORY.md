@@ -421,6 +421,18 @@ Live validation note: Figma must reload the bridge plugin before a real `build_d
 
 ---
 
+### [2026-05-03 — showcase color ordering polish]
+
+After the neutral-variant primitive work, the live showcase was updated to sort color rows in a designer-facing order:
+
+- Primitive color ramps: likely brand ramps first, then `neutral`, then `neutral-variant`, then utility/status ramps (`red`, `green`, `yellow`, `blue/info`, etc.).
+- Semantic color groups: surfaces/backgrounds first, followed by text, outlines, icons, and then lower-priority status/info/warning/error/disabled rows.
+- The ordering lives only in `packages/figma-bridge-plugin/code.js` showcase rendering helpers. It does not alter variable generation, values, IDs, aliases, or binding policy.
+- Live showcase rebuild after one plugin reload returned `bindingWarnings: []`.
+- Full tests passed with the bundled modern Node runtime: `32/32`. Plain `npm test` in this shell resolved to `/usr/local/bin/node v10.1.0`, which is too old for existing tests (`matchAll`, `flatMap`, and newer HTTP listener behavior).
+
+---
+
 ### [2026-04-30 — shared semantic DS binding resolver started]
 
 Preparing for `/fig-qa` auto-fix, added a shared bridge-side resolver in `packages/figma-bridge-plugin/code.js`:

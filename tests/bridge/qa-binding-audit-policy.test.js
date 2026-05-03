@@ -54,6 +54,14 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("function _rankPrimitiveRamp(name)") &&
+    code.includes("function _rankSemanticName(name)") &&
+    code.includes("const _rampEntries = Object.entries(_rampMap).sort") &&
+    code.includes("for (const { label, rows } of _sortSemanticGroups(_mainGroups))"),
+  "Showcase colors must use deterministic primitive and semantic ordering"
+);
+
+assert.ok(
   code.includes("function pickFloatByNearest(value, purpose, preference, maxDistance)") &&
     code.includes("pickFloatByNearest,"),
   "Shared binding context must expose purpose-aware numeric nearest fallback"

@@ -590,6 +590,19 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-03] Showcase color sections use designer-facing order, not raw insertion order
+
+**Decision:** Token showcase color rows are sorted deterministically for scanning. Primitive ramps put likely brand palettes first, then neutral and neutral-variant, then status/utility ramps such as red, green, yellow, blue/info. Semantic color groups put surface/background rows first, then text, outline, icon, and push status/info/warning/error/disabled groups lower.
+
+**Why:**
+- Designers use the showcase as a visual QA surface, not as an implementation dump. Brand and surface tokens are the most common first-pass inspection targets.
+- Raw Figma variable insertion order can bury the important ramps under utility colors, especially after additive primitive updates create new ramps in an existing collection.
+- Sorting is presentation-only. Variable names, IDs, aliases, values, and binding behavior are unchanged.
+
+**Consequence:** Showcase rebuilds are visually more stable and easier to scan. If a future DS wants a different ordering policy, extend the ranking helpers in the showcase renderer rather than changing variable generation or semantic binding.
+
+---
+
 ## [2026-04-29] Spec sheet containers must FILL width and HUG height — no custom row builders
 
 **Decision:** Every container in `_buildComponentDoc` that holds variable-height content must set `layoutSizingHorizontal = 'FILL'` (fills the doc frame width) and either `counterAxisSizingMode = 'AUTO'` or `primaryAxisSizingMode = 'AUTO'` to hug content height. Text nodes inside containers must use `layoutSizingHorizontal = 'FILL'` + `textAutoResize = 'HEIGHT'` — never `WIDTH_AND_HEIGHT`. Custom row/cell builders are prohibited: always use the proven `_mkTable/_mkRow/_mkCell` helpers for tabular data.

@@ -81,6 +81,73 @@ function makeDs(overrides) {
   assert.strictEqual(cobalt.steps.length, 5, 'Custom steps should produce 5-step ramp');
 }
 
+// algorithm switch — default is oklch, hsl is selectable, the brand color
+// pins the 500 step exactly in both modes, and OKLCh keeps lights more chromatic
+{
+  const ds0 = computeDsConfig(makeDs()).ds;
+  const { ds: dsDefault, summary: summaryDefault } = generateColorRamps(ds0);
+  assert.ok(summaryDefault.includes('oklch'), 'Default summary should mention oklch algorithm');
+
+  const ds1 = computeDsConfig(makeDs()).ds;
+  ds1.color.algorithm = 'hsl';
+  const { ds: dsHsl, summary: summaryHsl } = generateColorRamps(ds1);
+  assert.ok(summaryHsl.includes('hsl'), 'HSL summary should mention hsl algorithm');
+
+  // 500 step pins to brand exactly under both algorithms
+  const brand = { r: 0x3b / 255, g: 0x82 / 255, b: 0xf6 / 255 };
+  for (const ramps of [dsDefault.color.ramps, dsHsl.color.ramps]) {
+    const cobalt = ramps.find(r => r.folder === 'color/cobalt');
+    const five = cobalt.steps.find(s => s[0] === 500);
+    assert.ok(Math.abs(five[1] - brand.r) < 1e-6, '500 step red channel must match brand');
+    assert.ok(Math.abs(five[2] - brand.g) < 1e-6, '500 step green channel must match brand');
+    assert.ok(Math.abs(five[3] - brand.b) < 1e-6, '500 step blue channel must match brand');
+  }
+
+  // OKLCh light tints should retain more chroma than HSL's heavy desaturation.
+  // Compare step 200 of cobalt: max(R,G,B) - min(R,G,B) is a rough chroma proxy.
+  function spread(stepRow) {
+    const [, r, g, b] = stepRow;
+    return Math.max(r, g, b) - Math.min(r, g, b);
+  }
+  const oklchStep = dsDefault.color.ramps.find(r => r.folder === 'color/cobalt').steps.find(s => s[0] === 200);
+  const hslStep   = dsHsl.color.ramps    .find(r => r.folder === 'color/cobalt').steps.find(s => s[0] === 200);
+  assert.ok(spread(oklchStep) > spread(hslStep),
+    `OKLCh light tint should be more chromatic than HSL (oklch=${spread(oklchStep).toFixed(3)}, hsl=${spread(hslStep).toFixed(3)})`);
+
+  // OKLCh neutral is intentionally achromatic; it must not inherit brand hue.
+  const neutral = dsDefault.color.ramps.find(r => r.folder === 'color/neutral');
+  for (const row of neutral.steps) {
+    const [, r, g, b] = row;
+    assert.ok(Math.abs(r - g) < 0.002, `neutral/${row[0]} red/green channels should match`);
+    assert.ok(Math.abs(g - b) < 0.002, `neutral/${row[0]} green/blue channels should match`);
+  }
+
+  // OKLCh also emits a deliberately subtle neutral-variant ramp for surfaces.
+  const neutralVariant = dsDefault.color.ramps.find(r => r.folder === 'color/neutral-variant');
+  assert.ok(neutralVariant, 'Default OKLCh output should include neutral-variant ramp');
+  for (const row of neutralVariant.steps) {
+    const [, r, g, b] = row;
+    assert.ok(spread(row) > 0.001, `neutral-variant/${row[0]} should carry a tiny hue`);
+    assert.ok(spread(row) < 0.05, `neutral-variant/${row[0]} hue must stay subtle`);
+  }
+
+  // It can be disabled for strict monochrome systems.
+  const dsMono = computeDsConfig(makeDs()).ds;
+  dsMono.color.neutralVariant = false;
+  const { ds: dsNoVariant } = generateColorRamps(dsMono);
+  assert.ok(!dsNoVariant.color.ramps.find(r => r.folder === 'color/neutral-variant'),
+    'neutralVariant=false should disable neutral-variant ramp');
+
+  // Invalid algorithm throws a clear error
+  const dsBad = computeDsConfig(makeDs()).ds;
+  dsBad.color.algorithm = 'lch';
+  assert.throws(
+    () => generateColorRamps(dsBad),
+    /algorithm/,
+    'Unknown algorithm should throw'
+  );
+}
+
 // ── validateSemanticPairs ────────────────────────────────────────────────────
 {
   let ds = computeDsConfig(makeDs()).ds;
@@ -91,6 +158,28 @@ function makeDs(overrides) {
   assert.ok(ds2.color.semantics,                        'DS.color.semantics must be set');
   assert.ok(Array.isArray(ds2.color.semantics.pairs),   'semantics.pairs must be an array');
   assert.strictEqual(typeof failCount, 'number',         'failCount must be a number');
+}
+
+// neutral-variant backfills generated surface semantics without clobbering unrelated pairs
+{
+  let ds = computeDsConfig(makeDs({ color: {
+    scale: '50-950',
+    convention: 'surface-based',
+    brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }],
+    semantics: {
+      pairs: [{
+        bg: 'color/surface/variant',
+        text: 'color/on-surface/default',
+        Light: { bg: 'color/neutral/100', text: 'color/neutral/950' },
+        Dark: { bg: 'color/neutral/900', text: 'color/neutral/50' },
+      }]
+    }
+  }})).ds;
+  ds = generateColorRamps(ds).ds;
+  ds = validateSemanticPairs(ds).ds;
+  const pair = ds.color.semantics.pairs.find(p => p.bg === 'color/surface/variant');
+  assert.strictEqual(pair.Light.bg, 'color/neutral-variant/100', 'surface variant Light should backfill to neutral-variant');
+  assert.strictEqual(pair.Dark.bg, 'color/neutral-variant/900', 'surface variant Dark should backfill to neutral-variant');
 }
 
 // ── generatePrimitivesData ───────────────────────────────────────────────────

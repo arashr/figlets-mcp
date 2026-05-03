@@ -1,5 +1,7 @@
 'use strict';
 
+const { srgbToOklch, oklchToSrgbClipped } = require('./oklch');
+
 /**
  * generate-color-ramps.js
  * Generates color ramps from DS.color.brand hex values, with WCAG + APCA analysis.
@@ -17,6 +19,10 @@ function generateColorRamps(ds) {
   }
 
   const scaleKey    = DS.color.scale || '50-950';
+  const algorithm   = (DS.color.algorithm || 'oklch').toLowerCase();
+  if (algorithm !== 'oklch' && algorithm !== 'hsl') {
+    throw new Error(`DS.color.algorithm must be "oklch" or "hsl" (got "${DS.color.algorithm}")`);
+  }
   const brandColors = DS.color.brand.slice();
 
   // ── Scale steps ─────────────────────────────────────────────────────────────
@@ -89,7 +95,7 @@ function generateColorRamps(ds) {
   const LIGHT_TARGET = 97;
   const DARK_TARGET  =  6;
 
-  function generateRamp(baseHex) {
+  function generateRampHsl(baseHex) {
     const { r, g, b } = hexToRgb(baseHex);
     const { h, s, l } = rgbToHsl(r, g, b);
     return steps.map((step, i) => {
@@ -111,7 +117,106 @@ function generateColorRamps(ds) {
     });
   }
 
+  // OKLCh ramp: perceptually uniform lightness, chroma held high.
+  // Light/dark targets are in OKLab L (0..1). The chroma curves are gentler
+  // than HSL's saturation crush, which is what keeps tints/shades vivid.
+  const OKLCH_LIGHT_TARGET = 0.97;
+  const OKLCH_DARK_TARGET  = 0.18;
+  const OKLCH_NEUTRAL_MID  = 0.56;
+
+  function generateRampOklch(baseHex) {
+    const base = hexToRgb(baseHex);
+    const { L: baseL, C: baseC, H } = srgbToOklch(base);
+    return steps.map((step, i) => {
+      if (i === midIdx) return { step, r: base.r, g: base.g, b: base.b };
+      let newL, newC;
+      if (i < midIdx) {
+        const t = Math.pow((midIdx - i) / midIdx, 0.8);
+        newL = baseL + (OKLCH_LIGHT_TARGET - baseL) * t;
+        newC = baseC * (1 - t * 0.55);
+      } else {
+        const t = Math.pow((i - midIdx) / (steps.length - 1 - midIdx), 0.9);
+        newL = baseL + (OKLCH_DARK_TARGET - baseL) * t;
+        newC = t < 0.5
+          ? baseC * (1 + t * 0.15)
+          : baseC * (1 + 0.5 * 0.15) * (1 - (t - 0.5) * 0.4);
+      }
+      const rgb = oklchToSrgbClipped(newL, Math.max(0, newC), H);
+      return { step, ...rgb };
+    });
+  }
+
+  const generateRamp = algorithm === 'hsl' ? generateRampHsl : generateRampOklch;
+
+  function neutralVariantOptions() {
+    const cfg = DS.color.neutralVariant;
+    if (cfg === false || cfg === 'none') return { enabled: false };
+    const obj = cfg && typeof cfg === 'object' ? cfg : {};
+    let chroma = typeof obj.chroma === 'number' ? obj.chroma : 0.01;
+    if (obj.chroma === 'soft') chroma = 0.014;
+    if (obj.chroma === 'subtle') chroma = 0.01;
+    if (obj.chroma === 'barely') chroma = 0.006;
+    return {
+      enabled: algorithm === 'oklch',
+      source: obj.source || 'primary',
+      chroma: Math.max(0, Math.min(chroma, 0.018))
+    };
+  }
+
+  function neutralVariantSourceHex(options) {
+    const source = options.source;
+    if (source === 'secondary') {
+      const secondary = brandColors.find(c => c.role === 'secondary') || null;
+      if (secondary && secondary.hex && secondary.hex !== 'TBD') return secondary.hex;
+    }
+    const named = brandColors.find(c => c.name === source) || null;
+    if (named && named.hex && named.hex !== 'TBD') return named.hex;
+    return primaryHex;
+  }
+
+  function generateNeutralRampOklch() {
+    return steps.map((step, i) => {
+      let newL;
+      if (i < midIdx) {
+        const t = Math.pow((midIdx - i) / midIdx, 0.8);
+        newL = OKLCH_NEUTRAL_MID + (OKLCH_LIGHT_TARGET - OKLCH_NEUTRAL_MID) * t;
+      } else if (i > midIdx) {
+        const t = Math.pow((i - midIdx) / (steps.length - 1 - midIdx), 0.9);
+        newL = OKLCH_NEUTRAL_MID + (OKLCH_DARK_TARGET - OKLCH_NEUTRAL_MID) * t;
+      } else {
+        newL = OKLCH_NEUTRAL_MID;
+      }
+      const rgb = oklchToSrgbClipped(newL, 0, 0);
+      return { step, ...rgb };
+    });
+  }
+
+  function generateNeutralVariantRampOklch(sourceHex, chroma) {
+    const source = hexToRgb(sourceHex);
+    const { H } = srgbToOklch(source);
+    const maxSide = Math.max(midIdx, steps.length - 1 - midIdx);
+    return steps.map((step, i) => {
+      let newL;
+      if (i < midIdx) {
+        const t = Math.pow((midIdx - i) / midIdx, 0.8);
+        newL = OKLCH_NEUTRAL_MID + (OKLCH_LIGHT_TARGET - OKLCH_NEUTRAL_MID) * t;
+      } else if (i > midIdx) {
+        const t = Math.pow((i - midIdx) / (steps.length - 1 - midIdx), 0.9);
+        newL = OKLCH_NEUTRAL_MID + (OKLCH_DARK_TARGET - OKLCH_NEUTRAL_MID) * t;
+      } else {
+        newL = OKLCH_NEUTRAL_MID;
+      }
+
+      const distance = Math.abs(i - midIdx) / maxSide;
+      const taperedC = chroma * (1 - distance * 0.55);
+      const rgb = oklchToSrgbClipped(newL, Math.max(0, taperedC), H);
+      return { step, ...rgb };
+    });
+  }
+
   function generateNeutralRamp(primaryHex) {
+    if (algorithm === 'oklch') return generateNeutralRampOklch();
+
     const { r, g, b } = hexToRgb(primaryHex);
     const { h, s } = rgbToHsl(r, g, b);
     const mid = hslToRgb(h, Math.min(s * 0.1, 8), 52);
@@ -259,6 +364,17 @@ function generateColorRamps(ds) {
     allAnalysis.push({ folder, rows: analyzeRamp(folder, stepsData), rangeWarns: checkRange(folder, stepsData) });
   }
 
+  const neutralVariant = neutralVariantOptions();
+  if (neutralVariant.enabled) {
+    const stepsData = generateNeutralVariantRampOklch(
+      neutralVariantSourceHex(neutralVariant),
+      neutralVariant.chroma
+    );
+    const folder = 'color/neutral-variant';
+    allRamps.push({ folder, steps: stepsData.map(({ step, r, g, b }) => [step, r, g, b]) });
+    allAnalysis.push({ folder, rows: analyzeRamp(folder, stepsData), rangeWarns: checkRange(folder, stepsData) });
+  }
+
   for (const { rangeWarns } of allAnalysis) {
     if (rangeWarns.length) warnings.push(...rangeWarns);
   }
@@ -301,7 +417,7 @@ function generateColorRamps(ds) {
     : '';
 
   const summary =
-    `Generated ${allRamps.length} ramps (${steps.length} steps each, ${scaleKey} scale):\n` +
+    `Generated ${allRamps.length} ramps (${steps.length} steps each, ${scaleKey} scale, ${algorithm} algorithm):\n` +
     rampList + derivedBlock + warnBlock;
 
   return { ds: DS, markdownTable, contrastAnnotations, derivedColors, summary };

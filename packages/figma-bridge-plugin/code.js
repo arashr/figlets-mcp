@@ -291,6 +291,23 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'update-primitives') {
+    try {
+      _appendSessionLog('Executing update_ds_primitives.');
+      const result = await _updateDsPrimitives(msg.data || {});
+      figma.ui.postMessage({ type: 'primitives-update-done', data: result });
+      if (result && result.error) {
+        _appendSessionLog('update_ds_primitives failed: ' + result.error);
+      } else {
+        _appendSessionLog('Completed update_ds_primitives.');
+        figma.notify('Primitives updated.');
+      }
+    } catch (err) {
+      _appendSessionLog('update_ds_primitives failed: ' + err.message);
+      figma.ui.postMessage({ type: 'primitives-update-done', data: { error: err.message } });
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // build-doc — generates a component spec sheet inside Figma and returns
   // markdown for the agent to write to component-specs/[Name].md.
@@ -318,6 +335,7 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing qa_binding_audit.');
       const result = await _runQaBindingAudit(msg.data || {});
+      if (msg.data && msg.data.local) result.local = true;
       figma.ui.postMessage({ type: 'qa-audit-done', data: result });
       _appendSessionLog(result && result.error ? ('qa_binding_audit failed: ' + result.error) : 'Completed qa_binding_audit.');
       if (!result.error) figma.notify('QA audit complete.');
@@ -2520,7 +2538,7 @@ async function _buildShowcase(opts) {
       sq.strokes      = [_paint(_accColor,        _V.outlineBrand)];
       sq.strokeWeight  = 1;
       sq.strokeAlign   = 'INSIDE';
-      sq.cornerRadius  = Math.min(px, 28);
+      sq.cornerRadius  = px;
       return sq;
     }
 
@@ -3985,6 +4003,166 @@ async function _applyDsSetup(DS) {
     message: built.length > 0
       ? 'Created: ' + built.join(', ') + (skipped.length ? '. Skipped: ' + skipped.join(', ') : '')
       : 'All collections already exist. ' + skipped.join(', '),
+  };
+}
+
+// ── In-place primitive update ────────────────────────────────────────────────
+// Updates values of existing variables in the Primitives collection without
+// recreating them. Variable IDs stay intact, so all aliases from Color,
+// Typography, Spacing, and Elevation collections continue to resolve.
+//
+// To add a new category later (e.g. shadow values once they become DS-driven),
+// add one entry to UPDATE_PRIMITIVE_SPECS that yields { name, type, value } rows
+// from the DS config — the rest of the loop is generic.
+//
+// ES6-era only: no `??`, `?.`, `**`. Figma plugin sandbox does not support them.
+
+function _updatePrimSanitize(n) {
+  return String(n).replace(/\./g, '_');
+}
+
+var UPDATE_PRIMITIVE_SPECS = {
+  color: function (DS) {
+    var entries = [];
+    if (!DS || !DS.color || !Array.isArray(DS.color.ramps)) return entries;
+    for (var ri = 0; ri < DS.color.ramps.length; ri++) {
+      var ramp = DS.color.ramps[ri];
+      for (var si = 0; si < ramp.steps.length; si++) {
+        var s = ramp.steps[si];
+        entries.push({
+          name: ramp.folder + '/' + s[0],
+          type: 'COLOR',
+          value: { r: s[1], g: s[2], b: s[3] },
+        });
+      }
+    }
+    return entries;
+  },
+  spacing: function (DS) {
+    var entries = [];
+    if (!DS || !DS.primitives || !Array.isArray(DS.primitives.spacing)) return entries;
+    for (var i = 0; i < DS.primitives.spacing.length; i++) {
+      var sp = DS.primitives.spacing[i];
+      entries.push({
+        name: 'space/' + _updatePrimSanitize(sp[0]),
+        type: 'FLOAT',
+        value: sp[1],
+      });
+    }
+    return entries;
+  },
+};
+
+function _colorEqual(a, b) {
+  if (!a || !b) return false;
+  var dr = (a.r || 0) - (b.r || 0);
+  var dg = (a.g || 0) - (b.g || 0);
+  var db = (a.b || 0) - (b.b || 0);
+  var aa = a.a == null ? 1 : a.a;
+  var ba = b.a == null ? 1 : b.a;
+  var dA = aa - ba;
+  return Math.abs(dr) < 1e-6 && Math.abs(dg) < 1e-6 && Math.abs(db) < 1e-6 && Math.abs(dA) < 1e-6;
+}
+
+async function _updateDsPrimitives(payload) {
+  var DS = (payload && payload.DS) || {};
+  var createMissing = !!(payload && payload.createMissing);
+  var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
+    ? payload.categories
+    : Object.keys(UPDATE_PRIMITIVE_SPECS);
+
+  var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
+
+  var allColls = await figma.variables.getLocalVariableCollectionsAsync();
+  var primColl = null;
+  for (var ci = 0; ci < allColls.length; ci++) {
+    if (allColls[ci].name === primName) { primColl = allColls[ci]; break; }
+  }
+  if (!primColl) {
+    return {
+      error: 'Primitives collection "' + primName + '" not found in this Figma file. Run apply_ds_setup first to create it.',
+    };
+  }
+
+  var primModeId = primColl.modes[0].modeId;
+  var allVars = await figma.variables.getLocalVariablesAsync();
+  var byName = {};
+  for (var vi = 0; vi < allVars.length; vi++) {
+    var v = allVars[vi];
+    if (v.variableCollectionId === primColl.id) byName[v.name] = v;
+  }
+
+  var report = {};
+  var unknown = [];
+
+  for (var ri2 = 0; ri2 < requested.length; ri2++) {
+    var cat = requested[ri2];
+    var spec = UPDATE_PRIMITIVE_SPECS[cat];
+    if (!spec) { unknown.push(cat); continue; }
+
+    var entries = spec(DS);
+    var updated = 0;
+    var unchanged = 0;
+    var created = 0;
+    var unmatched = [];
+    var typeMismatch = [];
+
+    for (var ei = 0; ei < entries.length; ei++) {
+      var entry = entries[ei];
+      var existing = byName[entry.name];
+      if (!existing) {
+        if (createMissing) {
+          try {
+            existing = figma.variables.createVariable(entry.name, primColl, entry.type);
+            byName[entry.name] = existing;
+            existing.setValueForMode(primModeId, entry.value);
+            created += 1;
+          } catch (err) {
+            unmatched.push(entry.name);
+          }
+        } else {
+          unmatched.push(entry.name);
+        }
+        continue;
+      }
+      if (existing.resolvedType !== entry.type) {
+        typeMismatch.push({ name: entry.name, expected: entry.type, actual: existing.resolvedType });
+        continue;
+      }
+      var current = existing.valuesByMode[primModeId];
+      var same = entry.type === 'COLOR'
+        ? _colorEqual(current, entry.value)
+        : current === entry.value;
+      if (same) { unchanged += 1; continue; }
+      existing.setValueForMode(primModeId, entry.value);
+      updated += 1;
+    }
+
+    report[cat] = {
+      entries: entries.length,
+      created: created,
+      updated: updated,
+      unchanged: unchanged,
+      unmatched: unmatched,
+      typeMismatch: typeMismatch,
+    };
+  }
+
+  var msgParts = [];
+  for (var k in report) {
+    if (Object.prototype.hasOwnProperty.call(report, k)) {
+      msgParts.push(k + ': ' + report[k].updated + ' updated, ' + report[k].unchanged + ' unchanged' +
+        (report[k].created ? ', ' + report[k].created + ' created' : '') +
+        (report[k].unmatched.length ? ', ' + report[k].unmatched.length + ' missing' : ''));
+    }
+  }
+
+  return {
+    collection: primName,
+    categories: requested,
+    unknownCategories: unknown,
+    report: report,
+    message: msgParts.length ? msgParts.join('; ') : 'No categories processed.',
   };
 }
 

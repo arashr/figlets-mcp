@@ -74,6 +74,10 @@ function formatDoctorReport(report) {
   if (report.receiverRunning && report.receiverHealth && !report.receiverHealth.error) {
     lines.push(`Figma plugin: ${report.pluginConnected ? "connected" : "not connected"}`);
     if (report.activeSessionId) lines.push(`Plugin session: ${report.activeSessionId}`);
+    if (report.pluginConnected) {
+      const canUpdatePrimitives = Boolean(report.receiverHealth.updatePrimitivesLive);
+      lines.push(`Primitive updates: ${canUpdatePrimitives ? "available" : "unavailable in this plugin session"}`);
+    }
   } else {
     lines.push("Figma plugin: unknown");
   }
@@ -86,6 +90,8 @@ function formatDoctorReport(report) {
     lines.push("Next step: connect or restart the MCP server. For local debugging, run the bridge receiver manually.");
   } else if (!report.pluginConnected) {
     lines.push("Next step: open the Figlets Bridge plugin in Figma Desktop and keep it open.");
+  } else if (report.receiverHealth && report.receiverHealth.updatePrimitivesLive === false) {
+    lines.push("Next step: for local development, reload the Figlets Bridge plugin so it loads the latest command set.");
   } else {
     lines.push("Ready for live Figma tools.");
   }

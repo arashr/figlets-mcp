@@ -10,6 +10,7 @@ const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js"
 const { buildShowcaseTool, handleBuildShowcase } = require("./tools/build-showcase.js");
 const { handlePrepareDsConfig } = require("./tools/prepare-ds-config.js");
 const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
+const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require("./tools/update-ds-primitives.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
 
@@ -154,6 +155,34 @@ server.tool(
     try {
       const result = await handleApplyDsSetup(args);
       if (result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- update_ds_primitives ---
+server.tool(
+  updateDsPrimitivesTool.name,
+  updateDsPrimitivesTool.description,
+  {
+    config_path: z.string().describe("Absolute path to design-system.config.js (must have been prepared by prepare_ds_config)."),
+    categories: z.array(z.string()).optional().describe('Optional list of primitive categories to update. Supported today: "color", "spacing". Defaults to all supported categories.'),
+    create_missing: z.boolean().optional().describe("When true, create missing primitive variables inside the existing Primitives collection before setting values. Existing variable IDs are preserved.")
+  },
+  async (args) => {
+    try {
+      const result = await handleUpdateDsPrimitives(args);
+      if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
           isError: true

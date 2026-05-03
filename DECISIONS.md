@@ -4,6 +4,84 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-03] OKLCh neutrals are achromatic, not brand-tinted
+
+**Decision:** The default OKLCh `neutral` ramp uses zero chroma across the scale. A separate `neutral-variant` ramp provides a very low-chroma palette tint for secondary surfaces and subtle outlines. HSL fallback preserves the old hue-derived neutral behavior for compatibility.
+
+**Why:**
+- A "neutral" primitive should remain visually neutral across projects. Deriving its hue from the primary color can turn grays green, red, or blue depending on the brand.
+- OKLCh already gives us perceptual lightness control, so the neutral ramp can be built directly as C=0 without losing tonal quality.
+- Designers still benefit from quiet palette character in panels and container backgrounds. That belongs in an explicit variant ramp with a tight chroma cap, not in every neutral.
+
+**Consequence:** Regenerating configs with the OKLCh default changes `color/neutral/*` values to true grays and adds `color/neutral-variant/*` unless `DS.color.neutralVariant` is disabled. Semantic surface variants and subtle outlines may use `neutral-variant`; text and contrast-critical defaults stay on `neutral`. Existing live Figma files that predate the new ramp can add those variables with `update_ds_primitives` and `create_missing: true`; existing variable IDs are preserved.
+
+---
+
+## [2026-05-03] Plugin QA buttons expose only safe automatic binding
+
+**Decision:** The bridge UI includes local QA actions: "Check" for report-only audit and "Bind Safe" for applying high-confidence fixes. The buttons use the same `_runQaBindingAudit` logic as the MCP tool and render the result in the plugin UI. `Bind Safe` intentionally keeps the existing rule that only high-confidence suggestions are applied.
+
+**Why:**
+- Designer-facing buttons need to do something useful without requiring an agent round-trip.
+- Exact scalar matches for spacing, radius, border width, and strongly resolved typography bindings are safe to apply by deterministic logic.
+- Color role guesses from layer names are useful as suggestions but are not safe enough to auto-bind broadly. Same visual color can mean different semantic roles, so hex/nearest-color auto-binding remains forbidden.
+
+**Consequence:** The plugin can provide a one-click cleanup for safe bindings and an immediate QA report. Making color binding feel magical requires a future high-confidence color policy (for example explicit role annotations or component anatomy metadata), not a broad value-match shortcut.
+
+---
+
+## [2026-05-03] Primitive updates may create missing variables additively
+
+**Decision:** `update_ds_primitives` accepts `create_missing: true` to add missing primitive variables inside an existing Primitives collection before setting their values.
+
+**Why:**
+- New generated ramps such as `color/neutral-variant/*` are additive migrations. They do not require deleting or recreating existing variables.
+- Reporting missing variables is still the safe default, but forcing a full rebuild for a new primitive ramp is too heavy and risks alias churn.
+
+**Consequence:** Existing variables are still updated in place and keep their IDs. Missing variables are created only when the caller opts in, so tools can distinguish "value update only" from "additive primitive migration."
+
+---
+
+## [2026-05-03] Bridge capabilities fail fast for stale plugin UIs
+
+**Decision:** The bridge UI advertises supported command capabilities on every `/poll`, and receiver `/health` reports whether primitive updates are live. `update_ds_primitives` now returns a 409 reload-required error immediately when the connected plugin does not advertise `update-primitives`.
+
+**Why:**
+- Figma plugin UI/code changes require closing and reopening the plugin window, and the old flow discovered stale code only after a 60-second timeout.
+- Fast, explicit capability checks make local live testing less painful and make `figlets-mcp doctor` useful before triggering state-changing operations.
+- This keeps the receiver protocol deterministic without trying to hot-reload Figma plugin code, which the Figma sandbox does not support.
+
+**Consequence:** A running receiver plus connected plugin is no longer treated as enough for every tool. Live workflows can check "Primitive updates: available" in doctor; otherwise the user needs one plugin reload before calling `update_ds_primitives`.
+
+---
+
+## [2026-05-02] In-place primitive updates via `update_ds_primitives` (category-pluggable)
+
+**Decision:** When primitive values change but the rest of the design system has not, the agent uses `update_ds_primitives` instead of deleting and rebuilding collections. The bridge plugin walks the existing Primitives collection and overwrites `valuesByMode` on variables matching DS-derived names; variable IDs stay intact, so all aliases from Color/Typography/Spacing/Elevation collections continue to resolve. Categories supported on day one: `color`, `spacing`. The plugin's `UPDATE_PRIMITIVE_SPECS` map is the single registry — adding a new category later (e.g. `shadow` once shadow values become DS-driven) is one entry yielding `{ name, type, value }` rows from the DS config.
+
+**Why:**
+- `apply_ds_setup` skips collections that already exist, so a re-run after tweaking the config is a no-op.
+- The destructive alternative (delete and rebuild) breaks every alias from semantic collections into Primitives until those are also rebuilt, losing manual edits along the way.
+- Most config tweaks (algorithm switch, brand color change, scale tweak, future shadow tuning) only change *values* of *existing* variables. Updating in place is the surgical match for that intent.
+- A category-pluggable design keeps the agent's surface area stable: new primitive categories don't require new tools or new prompts, only one new spec entry.
+
+**Consequence:** Adapters route "I changed X, push it to Figma" intents to `update_ds_primitives` with a `categories` filter rather than `apply_ds_setup`. Variables present in the config but missing from Figma are reported as `unmatched` and trigger an explicit decision (fresh setup vs. drop). Future primitive sources (shadows, type tracking presets, etc.) extend `UPDATE_PRIMITIVE_SPECS`; do not introduce parallel update tools.
+
+---
+
+## [2026-05-02] Color ramp algorithm is OKLCh by default, HSL is opt-in fallback
+
+**Decision:** `generateColorRamps` now dispatches on `DS.color.algorithm` (`"oklch"` default, `"hsl"` selectable). OKLCh interpolates lightness in a perceptually uniform space and holds chroma high through tints/shades; HSL is preserved unchanged for parity and for users who depend on the old output.
+
+**Why:**
+- HSL ramps crushed saturation by up to 85% on the light side and pinned hue, which produced washed-out tints regardless of brand color.
+- OKLCh lightness is perceptually uniform (a yellow at L=0.7 reads as bright as a blue at L=0.7), so chroma can stay high without violating the lightness curve. This is what gives Tailwind v4 / Radix / Carbon their vivid output.
+- Switching algorithms via config keeps the change opt-outable without forking the pipeline.
+
+**Consequence:** Existing configs without `DS.color.algorithm` will regenerate ramps as OKLCh on the next `prepare_ds_config`. Stored hex values change; semantic-pair WCAG validation downstream is algorithm-agnostic and continues to work. Designers who want the old palette can set `DS.color.algorithm: "hsl"`. Future per-brand or per-step chroma overrides should extend the same dispatcher rather than reintroducing parallel ramp pipelines.
+
+---
+
 ## [2026-05-02] Designer-facing agents guide workflows but do not own product logic
 
 **Decision:** Public designer-facing agents should translate plain designer intent into the right MCP workflow, but they must not implement or modify design-system logic in prompts. The bridge plugin, MCP tools, and shared core own detection, binding, rendering, QA, setup, and documentation output. Agents handle guidance, readiness checks, human-readable summaries, and supported tool options only.

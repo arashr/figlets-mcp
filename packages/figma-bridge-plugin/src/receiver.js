@@ -14,6 +14,8 @@ let pendingShowcaseRequest = null;
 let pendingDsSetupRequest = null;
 let pendingDocBuildRequest = null;
 let pendingQaAuditRequest = null;
+let pendingUpdatePrimitivesRequest = null;
+let activePluginCapabilities = [];
 
 const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
 
@@ -27,6 +29,21 @@ function _notConnectedPayload() {
     error: 'Figma plugin is not connected or listening.',
     activeSessionId: pendingPollSessionId || null
   };
+}
+
+function _parseCapabilities(raw) {
+  if (!raw) return [];
+  return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function _pluginHasCapability(name) {
+  return activePluginCapabilities.indexOf(name) !== -1;
+}
+
+function _clearPendingPoll() {
+  pendingPollResponse = null;
+  pendingPollSessionId = null;
+  activePluginCapabilities = [];
 }
 
 const server = http.createServer((req, res) => {
@@ -50,6 +67,8 @@ const server = http.createServer((req, res) => {
       receiver: 'running',
       pluginConnected: Boolean(pendingPollResponse),
       activeSessionId: pendingPollSessionId || null,
+      pluginCapabilities: activePluginCapabilities,
+      updatePrimitivesLive: _pluginHasCapability('update-primitives'),
       dataPath: DEST_FILE,
       selectionPath: DEST_FILE_SELECTION
     }));
@@ -59,6 +78,7 @@ const server = http.createServer((req, res) => {
   // 1. Figma Plugin long-polls this endpoint
   if (req.method === 'GET' && pathname === '/poll') {
     const sessionId = url.searchParams.get('sessionId') || '';
+    activePluginCapabilities = _parseCapabilities(url.searchParams.get('capabilities'));
     pendingPollResponse = res;
     pendingPollSessionId = sessionId || null;
     console.log(`[poll] Plugin connected${pendingPollSessionId ? ` (${pendingPollSessionId})` : ''}`);
@@ -68,8 +88,7 @@ const server = http.createServer((req, res) => {
       if (pendingPollResponse === res) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ command: 'ping' }));
-        pendingPollResponse = null;
-        pendingPollSessionId = null;
+        _clearPendingPoll();
       }
     }, 30000);
     return;
@@ -81,8 +100,7 @@ const server = http.createServer((req, res) => {
       // Tell Figma to wake up and extract everything
       pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
       pendingPollResponse.end(JSON.stringify({ command: 'extract-all' }));
-      pendingPollResponse = null;
-      pendingPollSessionId = null;
+      _clearPendingPoll();
       
       // Hold the agent's request open until Figma posts the payload back
       pendingSyncRequest = res;
@@ -107,8 +125,7 @@ const server = http.createServer((req, res) => {
     if (pendingPollResponse) {
       pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
       pendingPollResponse.end(JSON.stringify({ command: 'extract-selection' }));
-      pendingPollResponse = null;
-      pendingPollSessionId = null;
+      _clearPendingPoll();
       
       pendingSelectionRequest = res;
       
@@ -137,8 +154,7 @@ const server = http.createServer((req, res) => {
       if (pendingPollResponse) {
         pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
         pendingPollResponse.end(JSON.stringify({ command: 'build-showcase', data: parsed }));
-        pendingPollResponse = null;
-        pendingPollSessionId = null;
+        _clearPendingPoll();
 
         pendingShowcaseRequest = res;
 
@@ -188,8 +204,7 @@ const server = http.createServer((req, res) => {
 
         pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
         pendingPollResponse.end(JSON.stringify({ command: 'build-doc', data: docPayload }));
-        pendingPollResponse = null;
-        pendingPollSessionId = null;
+        _clearPendingPoll();
 
         pendingDocBuildRequest = res;
 
@@ -249,8 +264,7 @@ const server = http.createServer((req, res) => {
 
         pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
         pendingPollResponse.end(JSON.stringify({ command: 'qa-audit', data: qaPayload }));
-        pendingPollResponse = null;
-        pendingPollSessionId = null;
+        _clearPendingPoll();
       });
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
@@ -290,8 +304,7 @@ const server = http.createServer((req, res) => {
 
         pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
         pendingPollResponse.end(JSON.stringify({ command: 'apply-ds-setup', data: dsPayload }));
-        pendingPollResponse = null;
-        pendingPollSessionId = null;
+        _clearPendingPoll();
 
         pendingDsSetupRequest = res;
 
@@ -325,6 +338,68 @@ const server = http.createServer((req, res) => {
         pendingDsSetupRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingDsSetupRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingDsSetupRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 6c. MCP Agent calls this to update specific primitive categories in place
+  // (e.g. only color values, only spacing). Variable IDs are preserved so all
+  // aliases from higher-level collections continue to resolve.
+  if (req.method === 'POST' && pathname === '/request-update-primitives') {
+    if (pendingPollResponse) {
+      if (!_pluginHasCapability('update-primitives')) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'The Figlets Bridge plugin is connected but does not advertise the primitive-update command. If you are developing Figlets, reload the plugin from Figma Desktop so it loads the latest local code.',
+          activeSessionId: pendingPollSessionId || null,
+          pluginCapabilities: activePluginCapabilities
+        }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = JSON.parse(body); } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'update-primitives', data: payload }));
+        _clearPendingPoll();
+
+        pendingUpdatePrimitivesRequest = res;
+
+        setTimeout(() => {
+          if (pendingUpdatePrimitivesRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Primitive update timed out.' }));
+            pendingUpdatePrimitivesRequest = null;
+          }
+        }, 60000);
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  // 6d. Figma Plugin posts the primitive update result here
+  if (req.method === 'POST' && pathname === '/sync-update-primitives') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingUpdatePrimitivesRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingUpdatePrimitivesRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingUpdatePrimitivesRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingUpdatePrimitivesRequest = null;
       }
     });
     return;

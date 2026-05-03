@@ -4,9 +4,11 @@ const path = require("path");
 
 const repoRoot = path.resolve(__dirname, "../..");
 const codePath = path.join(repoRoot, "packages/figma-bridge-plugin/code.js");
+const uiPath = path.join(repoRoot, "packages/figma-bridge-plugin/ui.html");
 const toolPath = path.join(repoRoot, "packages/figlets-mcp-server/src/tools/qa-binding-audit.js");
 
 const code = fs.readFileSync(codePath, "utf8");
+const ui = fs.readFileSync(uiPath, "utf8");
 const tool = fs.readFileSync(toolPath, "utf8");
 
 assert.ok(
@@ -17,6 +19,18 @@ assert.ok(
 assert.ok(
   code.includes("if (suggestion.confidence !== 'high') return 'LOW_CONFIDENCE';"),
   "fix=true must only apply high-confidence suggestions"
+);
+
+assert.ok(
+  code.includes("if (msg.data && msg.data.local) result.local = true;"),
+  "Local plugin QA buttons must mark results so the UI can render them without receiver round-trip"
+);
+
+assert.ok(
+  ui.includes("Started local QA safe bind.") &&
+    ui.includes("_renderQaReport(msg.data)") &&
+    ui.includes("Applying high-confidence bindings only."),
+  "Plugin UI must expose designer-facing QA check and safe-bind controls"
 );
 
 assert.ok(
@@ -32,6 +46,11 @@ assert.ok(
 assert.ok(
   code.includes("if (_binding.bindVar(node, prop, variable)) return true;"),
   "Showcase numeric binding must apply variables through the shared binding context"
+);
+
+assert.ok(
+  code.includes("sq.cornerRadius  = px;") && !code.includes("sq.cornerRadius  = Math.min(px, 28);"),
+  "Showcase radius visuals must use token values directly so full radius can bind instead of producing raw 28px gaps"
 );
 
 assert.ok(

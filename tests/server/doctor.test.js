@@ -25,7 +25,8 @@ module.exports = (async () => {
       ok: true,
       receiver: "running",
       pluginConnected: true,
-      activeSessionId: "figlets-test-session"
+      activeSessionId: "figlets-test-session",
+      updatePrimitivesLive: true
     });
 
     try {
@@ -39,6 +40,7 @@ module.exports = (async () => {
       const formatted = formatDoctorReport(report);
       assert.ok(formatted.includes("Bridge receiver: running"));
       assert.ok(formatted.includes("Figma plugin: connected"));
+      assert.ok(formatted.includes("Primitive updates: available"));
       assert.ok(formatted.includes("Ready for live Figma tools."));
     } finally {
       await new Promise(resolve => server.close(resolve));
@@ -58,4 +60,16 @@ module.exports = (async () => {
     selection: { exists: false }
   });
   assert.ok(disconnected.includes("open the Figlets Bridge plugin"));
+
+  const stalePlugin = formatDoctorReport({
+    receiverUrl: "http://127.0.0.1:1337",
+    receiverRunning: true,
+    receiverHealth: { ok: true, pluginConnected: true, updatePrimitivesLive: false },
+    pluginConnected: true,
+    activeSessionId: "figlets-stale",
+    snapshot: { exists: false },
+    selection: { exists: false }
+  });
+  assert.ok(stalePlugin.includes("Primitive updates: unavailable in this plugin session"));
+  assert.ok(stalePlugin.includes("for local development"));
 })();

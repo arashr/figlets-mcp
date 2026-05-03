@@ -94,6 +94,8 @@ function validateSemanticPairs(ds) {
   const existingPairs = (DS.color.semantics && DS.color.semantics.pairs) ? DS.color.semantics.pairs : null;
 
   // ── Pair templates ────────────────────────────────────────────────────────────
+  const NEUTRAL_VARIANT = rampByName['neutral-variant'] ? 'neutral-variant' : 'neutral';
+
   const ROLE_PAIRS = [
     { bg: 'color/bg/default',        text: 'color/text/default',    L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5 },
     { bg: 'color/bg/default',        text: 'color/text/subtle',     L: { bg: 'neutral/50',  text: 'neutral/700' }, D: { bg: 'neutral/950', text: 'neutral/300' }, min: 4.5 },
@@ -115,7 +117,7 @@ function validateSemanticPairs(ds) {
   const SURFACE_PAIRS = [
     { bg: 'color/surface/default',       text: 'color/on-surface/default',  L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5 },
     { bg: 'color/surface/default',       text: 'color/on-surface/variant',  L: { bg: 'neutral/50',  text: 'neutral/700' }, D: { bg: 'neutral/950', text: 'neutral/300' }, min: 4.5 },
-    { bg: 'color/surface/variant',       text: 'color/on-surface/default',  L: { bg: 'neutral/100', text: 'neutral/950' }, D: { bg: 'neutral/900', text: 'neutral/50'  }, min: 4.5 },
+    { bg: 'color/surface/variant',       text: 'color/on-surface/default',  L: { bg: `${NEUTRAL_VARIANT}/100`, text: 'neutral/950' }, D: { bg: `${NEUTRAL_VARIANT}/900`, text: 'neutral/50'  }, min: 4.5 },
     { bg: 'color/surface/brand',         text: 'color/on-surface/brand',    L: { bg: 'primary/500', text: 'neutral/900' }, D: { bg: 'primary/500', text: 'neutral/950' }, min: 4.5 },
     { bg: 'color/surface/brand-variant', text: 'color/on-surface/default',  L: { bg: 'primary/50',  text: 'neutral/950' }, D: { bg: 'primary/950', text: 'neutral/50'  }, min: 4.5 },
     { bg: 'color/surface/danger',         text: 'color/on-surface/danger',   L: { bg: 'red/600',     text: 'neutral/50'  }, D: { bg: 'red/500',     text: 'neutral/950' }, min: 4.5 },
@@ -163,7 +165,7 @@ function validateSemanticPairs(ds) {
   const SURFACE_UNPAIRED = [
     { token: 'color/on-surface/disabled', L: 'neutral/400', D: 'neutral/600', note: 'exempt — WCAG 1.4.3' },
     { token: 'color/outline/default',     L: 'neutral/300', D: 'neutral/700' },
-    { token: 'color/outline/subtle',      L: 'neutral/200', D: 'neutral/800' },
+    { token: 'color/outline/subtle',      L: `${NEUTRAL_VARIANT}/200`, D: `${NEUTRAL_VARIANT}/800` },
     { token: 'color/outline/strong',      L: 'neutral/500', D: 'neutral/500' },
     { token: 'color/outline/brand',       L: 'primary/500', D: 'primary/500' },
     { token: 'color/outline/focus',       L: 'primary/500', D: 'primary/400', note: '3:1 vs adjacent bg required' },
@@ -182,14 +184,22 @@ function validateSemanticPairs(ds) {
 
   let sourceTemplates;
   if (existingPairs) {
-    sourceTemplates = existingPairs.map(p => ({
-      bg:   p.bg,
-      text: p.text,
-      min:  (pairTemplates.find(t => t.bg === p.bg && t.text === p.text) || {}).min || 4.5,
-      note: (pairTemplates.find(t => t.bg === p.bg && t.text === p.text) || {}).note,
-      L: p.Light ? { bg: p.Light.bg.replace(/^color\//, ''), text: p.Light.text.replace(/^color\//, '') } : null,
-      D: p.Dark  ? { bg: p.Dark.bg.replace(/^color\//, ''),  text: p.Dark.text.replace(/^color\//, '')  } : null,
-    }));
+    sourceTemplates = existingPairs.map(p => {
+      const template = pairTemplates.find(t => t.bg === p.bg && t.text === p.text) || {};
+      const row = {
+        bg:   p.bg,
+        text: p.text,
+        min:  template.min || 4.5,
+        note: template.note,
+        L: p.Light ? { bg: p.Light.bg.replace(/^color\//, ''), text: p.Light.text.replace(/^color\//, '') } : null,
+        D: p.Dark  ? { bg: p.Dark.bg.replace(/^color\//, ''),  text: p.Dark.text.replace(/^color\//, '')  } : null,
+      };
+      if (NEUTRAL_VARIANT !== 'neutral' && p.bg === 'color/surface/variant' && p.text === 'color/on-surface/default') {
+        if (row.L && row.L.bg === 'neutral/100') row.L.bg = `${NEUTRAL_VARIANT}/100`;
+        if (row.D && row.D.bg === 'neutral/900') row.D.bg = `${NEUTRAL_VARIANT}/900`;
+      }
+      return row;
+    });
   } else {
     sourceTemplates = pairTemplates;
   }

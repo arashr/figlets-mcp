@@ -61,6 +61,44 @@
     display: flex;
     flex-direction: column;
   }
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .action-button {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.08);
+    color: #f5f8fb;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .action-button:hover {
+    background: rgba(255, 255, 255, 0.13);
+  }
+  .action-button:disabled {
+    color: #7f8a96;
+    cursor: default;
+    background: rgba(255, 255, 255, 0.04);
+  }
+  #qa-report {
+    max-height: 96px;
+    overflow-y: auto;
+    font-size: 11px;
+    color: #d5dde5;
+    line-height: 1.45;
+  }
+  .qa-stat {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .qa-empty {
+    color: #8d9aa7;
+  }
   .panel-title {
     font-size: 11px;
     font-weight: 600;
@@ -124,6 +162,14 @@
     <div class="panel-title">Current Selection</div>
     <div id="selection-state" class="empty">No selection yet.</div>
   </div>
+  <div class="panel">
+    <div class="panel-title">QA</div>
+    <div class="actions">
+      <button id="qa-check" class="action-button" type="button">Check</button>
+      <button id="qa-fix" class="action-button" type="button">Bind Safe</button>
+    </div>
+    <div id="qa-report" class="qa-empty">No QA run yet.</div>
+  </div>
   <div class="panel log-panel">
     <div class="panel-title">Session Log</div>
     <div id="session-log" class="empty">No actions yet.</div>
@@ -135,6 +181,15 @@
   let _watchdog = null;
   let _sessionLog = [];
   let _sessionId = '';
+  const _capabilities = [
+    'extract-all',
+    'extract-selection',
+    'build-showcase',
+    'apply-ds-setup',
+    'build-doc',
+    'qa-audit',
+    'update-primitives'
+  ];
 
   function _fmtTime(ts) {
     const d = new Date(ts);
@@ -172,6 +227,58 @@
       message: message
     });
     _renderSessionLog();
+  }
+
+  function _setQaButtonsDisabled(disabled) {
+    document.getElementById('qa-check').disabled = disabled;
+    document.getElementById('qa-fix').disabled = disabled;
+  }
+
+  function _renderQaReport(data) {
+    const el = document.getElementById('qa-report');
+    if (!data) {
+      el.className = 'qa-empty';
+      el.innerText = 'No QA run yet.';
+      return;
+    }
+    if (data.error) {
+      el.className = '';
+      el.innerText = 'QA failed: ' + data.error;
+      return;
+    }
+
+    const byType = data.byType || {};
+    const parts = [
+      ['Scope', data.scope || 'selection'],
+      ['Violations', data.violationCount || 0],
+      ['Fixed', data.fixedCount || 0],
+      ['Needs review', data.failedCount || 0],
+      ['Color', byType.color || 0],
+      ['Spacing', byType.spacing || 0],
+      ['Type', byType.typography || 0],
+      ['Border', byType.border || 0]
+    ];
+    el.className = '';
+    el.innerHTML = parts.map(function(row) {
+      return '<div class="qa-stat"><span>' +
+        _escapeHtml(row[0]) +
+        '</span><strong>' +
+        _escapeHtml(row[1]) +
+        '</strong></div>';
+    }).join('');
+  }
+
+  function _runLocalQa(fix) {
+    if (isExtracting) return;
+    isExtracting = true;
+    _setQaButtonsDisabled(true);
+    _armWatchdog(fix ? 'QA safe bind' : 'QA check', 60000);
+    document.getElementById('status').innerText = fix ? 'Binding safe variables...' : 'Running QA...';
+    document.getElementById('substatus').innerText = fix
+      ? 'Applying high-confidence bindings only.'
+      : 'Checking selection or current page.';
+    _appendLog(fix ? 'Started local QA safe bind.' : 'Started local QA check.');
+    parent.postMessage({ pluginMessage: { type: 'qa-audit', data: { fix: !!fix, local: true } } }, '*');
   }
 
   function _escapeHtml(value) {
@@ -249,7 +356,12 @@
     }
 
     try {
-      const res = await fetch('http://localhost:1337/poll?sessionId=' + encodeURIComponent(_sessionId));
+      const res = await fetch(
+        'http://localhost:1337/poll?sessionId=' +
+        encodeURIComponent(_sessionId) +
+        '&capabilities=' +
+        encodeURIComponent(_capabilities.join(','))
+      );
       if (res.ok) {
         const data = await res.json();
         if (data.command === 'extract' || data.command === 'extract-all') {
@@ -294,6 +406,13 @@
           document.getElementById('substatus').innerText = 'Checking bindings in Figma.';
           _appendLog('Received command: qa_binding_audit.');
           parent.postMessage({ pluginMessage: { type: 'qa-audit', data: data.data } }, '*');
+        } else if (data.command === 'update-primitives') {
+          isExtracting = true;
+          _armWatchdog('Primitives update', 60000);
+          document.getElementById('status').innerText = 'Updating primitives...';
+          document.getElementById('substatus').innerText = 'Overwriting primitive values in Figma.';
+          _appendLog('Received command: update_ds_primitives.');
+          parent.postMessage({ pluginMessage: { type: 'update-primitives', data: data.data } }, '*');
         }
       }
     } catch (err) {
@@ -399,8 +518,41 @@
       return;
     }
 
+    if (msg.type === 'primitives-update-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch('http://localhost:1337/sync-update-primitives', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Update failed.' : 'Primitives updated.';
+        _appendLog(msg.data.error ? 'Primitives update failed in plugin.' : 'Primitives update result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send primitives update result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
     if (msg.type === 'qa-audit-done') {
       _disarmWatchdog();
+      if (msg.data && msg.data.local) {
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'QA failed.' : 'QA ready.';
+        _renderQaReport(msg.data);
+        _appendLog(msg.data.error ? 'Local QA failed.' : 'Local QA complete.');
+        _setQaButtonsDisabled(false);
+        isExtracting = false;
+        poll();
+        return;
+      }
+
       document.getElementById('status').innerText = 'Sending result...';
       try {
         await fetch('http://localhost:1337/sync-qa-audit', {
@@ -455,6 +607,8 @@
   }
 
   // Start polling immediately
+  document.getElementById('qa-check').onclick = function() { _runLocalQa(false); };
+  document.getElementById('qa-fix').onclick = function() { _runLocalQa(true); };
   parent.postMessage({ pluginMessage: { type: 'ui-ready' } }, '*');
   _appendLog('Plugin UI ready.');
   poll();

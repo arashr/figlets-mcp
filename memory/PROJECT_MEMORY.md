@@ -16,6 +16,24 @@ As of 2026-05-02, designer-facing agents guide workflows but do **not** own prod
 
 Practical rule for future work: agents may choose supported tool options and may ignore or summarize parts of tool output based on the designer's request, but they must not edit showcase scripts, binding logic, QA rules, or generated output as part of a public workflow. Unsupported designer requests become product/dev backlog items unless the developer is explicitly working in this repo.
 
+## Current Pillar Decision — Color Ramp Algorithm
+
+As of 2026-05-02, color ramps default to **OKLCh** interpolation. `DS.color.algorithm` switches between `"oklch"` (default) and `"hsl"` (preserved fallback). OKLCh keeps tints/shades vivid because it interpolates lightness in a perceptually uniform space and only gently reduces chroma; HSL crushed saturation up to 85% on the light side, which is why ramps looked dull.
+
+Practical rule for future work: any new ramp tuning (per-brand chroma boost, custom curves, named presets like "vivid"/"muted") should extend the existing `generateRamp` dispatcher in `packages/figlets-core/src/ds-config/generate-color-ramps.js` and the shared `oklch.js` utilities. Do not introduce parallel ramp pipelines. The semantic-pair WCAG validator and primitives writer downstream are algorithm-agnostic and consume only the resulting `[step, r, g, b]` rows.
+
+As of 2026-05-03, OKLCh `color/neutral/*` is achromatic by default (C=0), not derived from the primary brand hue. A separate `color/neutral-variant/*` ramp carries a very subtle low-chroma tint for secondary surfaces and subtle outlines. Future warm/cool behavior should stay in explicit variant configuration, never implicit in the base neutral ramp.
+
+`update_ds_primitives` supports `create_missing: true` for additive primitive migrations such as adding `color/neutral-variant/*` to an existing Primitives collection. Use it when adding new variables is intended; leave it false for value-only updates.
+
+## Current Live-Figma Rule — Plugin Capability Checks
+
+As of 2026-05-03, the bridge UI advertises command capabilities on `/poll`, receiver `/health` reports `updatePrimitivesLive`, and `update_ds_primitives` fails fast with reload guidance if the open plugin UI is stale. Use `figlets-mcp doctor` before live primitive updates; "Primitive updates: available" means the plugin was reopened with the latest UI.
+
+## Current Designer Button Rule — Safe QA Binding
+
+As of 2026-05-03, the bridge UI has local QA buttons: "Check" renders a report in the plugin, and "Bind Safe" applies only high-confidence fixes through `_runQaBindingAudit({ fix: true })`. Exact scalar matches can be bound automatically. Color role guesses stay report-only unless future work adds stronger semantic evidence; do not reintroduce broad hex or nearest-color auto-binding.
+
 ---
 
 ## Project Identity

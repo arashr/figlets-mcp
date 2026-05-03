@@ -24,6 +24,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
 | `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, WCAG validation, spacing scale | After intake and before building collections — validates everything before touching Figma |
 | `apply_ds_setup` | Creates all 5 variable collections in Figma from the prepared config (Primitives, Color, Typography, Spacing, Elevation) | After `prepare_ds_config` confirms `readyToBuild === true` |
+| `update_ds_primitives` | Updates values of EXISTING primitive variables in place (variable IDs preserved, aliases stay intact). Supported categories today: `color`, `spacing`. Use after re-running `prepare_ds_config` to push only changed values into Figma without recreating collections. | After tweaking the config (e.g. switching color algorithm, adjusting spacing scale) when the Primitives collection already exists in Figma. |
 | `generate_component_doc` | Renders a complete spec sheet for a component inside Figma (preview, variants, properties, sizing, anatomy, usage) AND returns the markdown body for `component-specs/[Name].md`. Also writes a `[SPEC]` block to the component description for MCP handover. | When the user wants to document a component for design + LLM code handover. The component must be on the current Figma page. |
 
 ---
@@ -92,6 +93,16 @@ Keep the designer-facing language non-technical. Say "I'll check what's availabl
 9. Call `apply_ds_setup` with the config path
 10. Report: collections created, any skipped (already existed), config path for reference
 
+### Update primitive values in place
+Use this when only some primitive values changed — for example, the designer switched `DS.color.algorithm` from HSL to OKLCh, or adjusted the spacing scale — and the Primitives collection already exists in Figma. This avoids the destructive delete-and-rebuild path and keeps every alias from Color/Typography/Spacing/Elevation collections intact.
+
+1. Confirm the user has already run `prepare_ds_config` on the updated config (so `DS.color.ramps` reflects the new values).
+2. Ask the user to keep the Figlets Bridge plugin open in Figma Desktop.
+3. Ask which categories they want updated. Today: `color`, `spacing`. If they don't say, default to all supported categories.
+4. Call `update_ds_primitives` with `config_path` and optional `categories`.
+5. Report per-category counts: updated, unchanged, missing (variables in the config that don't exist in Figma — usually means the scale grew and a fresh `apply_ds_setup` is needed for those).
+6. Do not call this for first-time creation — use `apply_ds_setup` for that. Do not call this to add new categories of primitives that don't exist in Figma yet.
+
 ### Document a component
 The Figma spec sheet is for **humans**; the markdown handover is for **agents**. The plugin renders structure and tangible data (variants, sizing, anatomy, token names). The agent must supply the human-readable content — never rely on generic defaults.
 
@@ -136,6 +147,10 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 | `prepare_ds_config` returns error about missing ramps | Config missing `DS.color.brand` | "Add brand color(s) to the config (name + hex) and try again." |
 | `prepare_ds_config` returns `failCount > 0` | Semantic pairs fail contrast | Show the pairs table, suggest the nearest passing step, update the config, re-run |
 | `apply_ds_setup` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
+| `update_ds_primitives` returns "Primitives collection ... not found" | The collection has not been built yet in this Figma file | Tell the user to run `apply_ds_setup` first; in-place update only works on an existing Primitives collection |
+| `update_ds_primitives` returns variables in `unmatched` | The config defines tokens that don't exist in Figma yet (e.g. new color stops added after setup) | Tell the user; offer either a fresh `apply_ds_setup` (after deleting the old Primitives) or to drop those new tokens from the config |
+| `update_ds_primitives` says the connected plugin does not advertise the command | Local development build mismatch | For designers, say "The bridge is connected but this command is unavailable in the current plugin session." For developers, reload the local Figlets Bridge plugin so it loads the latest code. |
+| `update_ds_primitives` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `generate_component_doc` returns "Component not found on current page" | The component is on a different page or named differently | Ask the user to navigate to the page with the component, or confirm the exact component name |
 | `generate_component_doc` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `apply_ds_setup` collection skipped | Collection already exists | Report which were skipped; offer to delete and rebuild if user wants a clean slate |

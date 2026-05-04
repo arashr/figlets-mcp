@@ -29,6 +29,7 @@ module.exports = (async () => {
   const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require(toolModule);
   assert.strictEqual(updateDsPrimitivesTool.name, "update_ds_primitives");
   assert.ok(updateDsPrimitivesTool.description.length > 0);
+  assert.ok(updateDsPrimitivesTool.description.includes("semantic aliases"), "tool description should mention semantic alias updates");
   assert.ok(updateDsPrimitivesTool.inputSchema.properties.create_missing, "tool schema should expose create_missing");
 
   // Missing config_path → clear error

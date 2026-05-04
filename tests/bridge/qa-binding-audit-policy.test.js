@@ -39,6 +39,14 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("const maxNodes = typeof opts.maxNodes === 'number'") &&
+    code.includes("truncateReason = 'MAX_NODES';") &&
+    code.includes("truncateReason = 'DEADLINE';") &&
+    code.includes("auditedNodeCount: auditedNodeCount"),
+  "QA page audits must be bounded and report truncation instead of hanging on very large pages"
+);
+
+assert.ok(
   code.includes("const _binding = await _createDsBindingContext();"),
   "Showcase flow must use the shared live binding resolver"
 );
@@ -65,6 +73,21 @@ assert.ok(
   code.includes("function pickFloatByNearest(value, purpose, preference, maxDistance)") &&
     code.includes("pickFloatByNearest,"),
   "Shared binding context must expose purpose-aware numeric nearest fallback"
+);
+
+assert.ok(
+  code.includes("'color-semantics': function ()") &&
+    code.includes("function _semanticColorEntries(DS)") &&
+    code.includes("semVar.setValueForMode(lightModeId, lightAlias)") &&
+    code.includes("semVar.setValueForMode(darkModeId, darkAlias)"),
+  "Primitive update flow must also refresh existing Color semantic aliases without recreating collections"
+);
+
+assert.ok(
+  code.includes("function _resolveSemanticTarget(byName, targetName)") &&
+    code.includes("substituted: true") &&
+    code.includes("substituted: semSubstituted"),
+  "Semantic alias updates must fall back to the nearest existing primitive step instead of skipping when an exact-name target is missing"
 );
 
 assert.ok(

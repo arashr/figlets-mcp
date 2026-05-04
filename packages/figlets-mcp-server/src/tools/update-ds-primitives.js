@@ -6,14 +6,14 @@
  *
  * Reads a prepared design-system.config.js and asks the bridge plugin to
  * overwrite values of EXISTING variables in the Primitives collection that
- * match the requested categories (e.g. color, spacing). Variable IDs are
- * preserved, so aliases from Color/Typography/Spacing/Elevation collections
- * keep resolving.
+ * match the requested categories (e.g. color, spacing). It can also refresh
+ * Color collection semantic aliases that point at those primitives. Variable
+ * IDs are preserved, so existing component bindings keep resolving.
  *
  * Use this when ramps or other primitive values change but the rest of the
  * design system has not. For first-time creation, use apply_ds_setup.
  *
- * Categories supported today: "color", "spacing".
+ * Categories supported today: "color", "spacing", "color-semantics".
  * The plugin's UPDATE_PRIMITIVE_SPECS map is the source of truth for the full
  * set; unknown categories are reported back, never silently ignored.
  */
@@ -24,7 +24,7 @@ const path = require('path');
 const updateDsPrimitivesTool = {
   name: 'update_ds_primitives',
   description:
-    'Update existing variable values in the Primitives collection in place, without recreating the collection or breaking aliases. Pass a prepared design-system.config.js path and an optional list of categories (e.g. ["color"], ["spacing"]). Use after re-running prepare_ds_config to push only the changed primitive values into Figma.',
+    'Update existing variable values and semantic aliases in place, without recreating collections or breaking bindings. Pass a prepared design-system.config.js path and an optional list of categories (e.g. ["color"], ["spacing"], ["color-semantics"]). Use after re-running prepare_ds_config to push changed primitive values and Color collection aliases into Figma.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -35,7 +35,7 @@ const updateDsPrimitivesTool = {
       categories: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Optional list of primitive categories to update. Supported today: "color", "spacing". Defaults to all supported categories.',
+        description: 'Optional list of categories to update. Supported today: "color", "spacing", "color-semantics". Defaults to all supported categories.',
       },
       create_missing: {
         type: 'boolean',
@@ -109,7 +109,15 @@ function handleUpdateDsPrimitives(args) {
             error: result.error,
           });
         } else if (res.statusCode === 503) {
-          resolve({ error: 'Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop and try again.' });
+          let parsed = {};
+          try { parsed = JSON.parse(data); } catch (e) {}
+          const retryHint = parsed.pluginRecentlySeen
+            ? 'The plugin was connected recently and may be finishing another action; wait a moment, then try again.'
+            : 'Open the Figlets Bridge plugin in Figma Desktop and try again.';
+          resolve({
+            error: `Figma plugin is not listening for primitive updates. ${retryHint}`,
+            activeSessionId: parsed.activeSessionId || null,
+          });
         } else if (res.statusCode === 504) {
           resolve({ error: 'Primitive update timed out — try again with the plugin open.' });
         } else if (res.statusCode === 409) {

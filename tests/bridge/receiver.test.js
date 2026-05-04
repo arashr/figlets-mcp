@@ -9,7 +9,9 @@ const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-receiver-test-")
 const TEMP_FILE = path.join(TEMP_DIR, "figma-data.json");
 process.env.FIGLETS_LOCAL_DIR = TEMP_DIR;
 
-const server = require("../../packages/figma-bridge-plugin/src/receiver.js");
+const receiverPath = "../../packages/figma-bridge-plugin/src/receiver.js";
+delete require.cache[require.resolve(receiverPath)];
+const server = require(receiverPath);
 
 module.exports = new Promise((resolve, reject) => {
   // Start server on a random port for testing

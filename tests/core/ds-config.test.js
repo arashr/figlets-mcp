@@ -182,6 +182,29 @@ function makeDs(overrides) {
   assert.strictEqual(pair.Dark.bg, 'color/neutral-variant/900', 'surface variant Dark should backfill to neutral-variant');
 }
 
+// generated surface success foreground backfills to a passing contrast value
+{
+  let ds = computeDsConfig(makeDs({ color: {
+    scale: '100-900',
+    convention: 'surface-based',
+    brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }],
+    semantics: {
+      pairs: [{
+        bg: 'color/surface/success',
+        text: 'color/on-surface/success',
+        Light: { bg: 'color/green/600', text: 'color/neutral/900' },
+        Dark: { bg: 'color/green/500', text: 'color/neutral/950' },
+      }]
+    }
+  }})).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  const pair = result.ds.color.semantics.pairs.find(p => p.bg === 'color/surface/success');
+  assert.strictEqual(pair.Light.bg, 'color/green/700', 'surface success Light bg should darken when neutral/50 is unavailable');
+  assert.strictEqual(pair.Light.text, 'color/neutral/100', 'surface success Light text should resolve to the lightest available neutral foreground');
+  assert.strictEqual(result.failCount, 0, 'surface success backfill should clear the generated contrast failure');
+}
+
 // ── generatePrimitivesData ───────────────────────────────────────────────────
 {
   let ds = computeDsConfig(makeDs()).ds;

@@ -421,6 +421,34 @@ Live validation note: Figma must reload the bridge plugin before a real `build_d
 
 ---
 
+### [2026-05-04 — update_ds_primitives now refreshes Color semantic aliases]
+
+**Problem:** `update_ds_primitives` updated primitive values (e.g. swapped `color/neutral-variant/*` to its real low-chroma ramp) but did not touch existing Color collection aliases. So `color/surface/variant` Light/Dark stayed aliased to whatever primitive they were originally created against (the old neutral / sage), and the swatch in the showcase did not change even after the underlying primitives did.
+
+**Fix landed in this session:**
+
+- Added a `color-semantics` category to `UPDATE_PRIMITIVE_SPECS` in `packages/figma-bridge-plugin/code.js`. The category does not yield primitive rows; instead the plugin walks `DS.color.semantics` (`pairs`, `icons`, `unpaired`), finds matching variables in the Color collection, and re-points Light/Dark mode values to the primitive variables named in the config. Variable IDs are preserved, so existing component bindings keep resolving.
+- `create_missing: true` now also creates missing Color semantic variables alongside missing primitives. Default (`false`) reports them as `unmatched` rather than mutating the collection.
+- The existing 503 path was upgraded with `pluginRecentlySeen` / `lastPluginSeenAt` hints so callers can tell "plugin disconnected" from "plugin connected but mid-command".
+- `update_ds_primitives` MCP tool, schema, and description updated to mention `"color-semantics"` and semantic alias refresh.
+- Tests added: `tests/bridge/qa-binding-audit-policy.test.js` enforces that the plugin keeps the new alias-update path; `tests/server/update-ds-primitives-tool.test.js` checks the description mentions semantic aliases; `tests/bridge/receiver-lifecycle.test.js` covers the recently-seen 503 hint and `/health` capability reporting around an in-flight request.
+
+**Live verification (Green Apple file):**
+
+- `update_ds_primitives` with `categories=["color-semantics"]`, `create_missing: false`: report was `entries: 41, updated: 5, unchanged: 33, unmatched: 3` (`color/surface/{success,warning,info}-variant` — those Color variables do not exist in the live collection yet, and `create_missing` was off).
+- `build_ds_showcase` after the alias refresh returned `bindingWarnings: []` and rendered all 5 sections on `00 · Tokens`.
+- Full test runner: `33/33 passed` against Node 24.
+
+**Follow-up — primitive nearest-step fallback (same session):**
+
+Added `_resolveSemanticTarget(byName, targetName)` to the plugin's color-semantics path. When a templated primitive target (e.g. `color/green/950`) does not exist in the live Primitives collection, the helper walks the same ramp prefix and binds to the nearest existing numeric step (e.g. `color/green/900`). Each substitution is reported as `{ token, mode, requested, used }` in `report['color-semantics'].substituted`, and the human-readable message now includes `N substituted` when present. This means a stale primitive scale never blocks the alias refresh; the agent decides whether to surface the gap to the designer (e.g. "your `green` ramp is missing step `950` — add it to your config and re-run setup") without halting the live update. Variable IDs are still preserved in the substitution path, so existing component bindings keep resolving.
+
+Policy assertion in `tests/bridge/qa-binding-audit-policy.test.js` now requires the helper, the `substituted: true` return shape, and the report field to all stay present.
+
+**Resolved same session:** the designer chose to create the missing variant aliases. Re-ran with `create_missing: true` → `created: 3, updated: 3, unchanged: 38, unmatched: [], substituted: []`. Targets were standard `*/100` and `*/900` steps that already exist in the Primitives collection, so the new nearest-step fallback was not exercised on this run; it stays in place for future cases where ramp scale and config templates diverge. Final showcase rebuild returned `bindingWarnings: []`. The agent-side prompt for "create vs leave" is the recommended UX whenever `unmatched` lists Color semantic variables.
+
+---
+
 ### [2026-05-03 — showcase color ordering polish]
 
 After the neutral-variant primitive work, the live showcase was updated to sort color rows in a designer-facing order:

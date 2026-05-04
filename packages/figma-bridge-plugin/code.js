@@ -848,6 +848,9 @@ async function _createDsBindingContext() {
 async function _runQaBindingAudit(opts) {
   opts = opts || {};
   const shouldFix = !!opts.fix;
+  const maxNodes = typeof opts.maxNodes === 'number' && opts.maxNodes > 0 ? opts.maxNodes : 2500;
+  const deadlineMs = typeof opts.deadlineMs === 'number' && opts.deadlineMs > 0 ? opts.deadlineMs : 45000;
+  const startedAt = Date.now();
   const _ds = await _createDsBindingContext();
   const scopeNodes = figma.currentPage.selection.length > 0
     ? figma.currentPage.selection.slice()
@@ -856,6 +859,9 @@ async function _runQaBindingAudit(opts) {
   const violations = [];
   const fixed = [];
   const failed = [];
+  let auditedNodeCount = 0;
+  let truncated = false;
+  let truncateReason = '';
 
   function _rgbText(c) {
     return 'rgb(' + Math.round(c.r * 255) + ',' + Math.round(c.g * 255) + ',' + Math.round(c.b * 255) + ')';
@@ -1014,7 +1020,20 @@ async function _runQaBindingAudit(opts) {
   }
 
   function _auditNode(node) {
+    if (truncated) return;
     if (!node || node.type === 'INSTANCE') return;
+    if (auditedNodeCount >= maxNodes) {
+      truncated = true;
+      truncateReason = 'MAX_NODES';
+      return;
+    }
+    if ((Date.now() - startedAt) > deadlineMs) {
+      truncated = true;
+      truncateReason = 'DEADLINE';
+      return;
+    }
+
+    auditedNodeCount++;
 
     if (node.fills && Array.isArray(node.fills)) {
       for (let i = 0; i < node.fills.length; i++) {
@@ -1087,11 +1106,17 @@ async function _runQaBindingAudit(opts) {
     }
 
     if ('children' in node && node.children) {
-      for (let i = 0; i < node.children.length; i++) _auditNode(node.children[i]);
+      for (let i = 0; i < node.children.length; i++) {
+        if (truncated) break;
+        _auditNode(node.children[i]);
+      }
     }
   }
 
-  for (let i = 0; i < scopeNodes.length; i++) _auditNode(scopeNodes[i]);
+  for (let i = 0; i < scopeNodes.length; i++) {
+    if (truncated) break;
+    _auditNode(scopeNodes[i]);
+  }
 
   if (shouldFix) {
     for (let i = 0; i < violations.length; i++) {
@@ -1111,6 +1136,11 @@ async function _runQaBindingAudit(opts) {
     pageName: figma.currentPage ? figma.currentPage.name : '',
     selectedCount: figma.currentPage.selection.length,
     checkedRootCount: scopeNodes.length,
+    auditedNodeCount: auditedNodeCount,
+    truncated: truncated,
+    truncateReason: truncateReason,
+    maxNodes: maxNodes,
+    deadlineMs: deadlineMs,
     violationCount: violations.length,
     byType: byType,
     fixApplied: shouldFix,
@@ -4069,9 +4099,8 @@ async function _applyDsSetup(DS) {
 }
 
 // ── In-place primitive update ────────────────────────────────────────────────
-// Updates values of existing variables in the Primitives collection without
-// recreating them. Variable IDs stay intact, so all aliases from Color,
-// Typography, Spacing, and Elevation collections continue to resolve.
+// Updates existing variables and Color semantic aliases without recreating
+// collections. Variable IDs stay intact, so component bindings keep resolving.
 //
 // To add a new category later (e.g. shadow values once they become DS-driven),
 // add one entry to UPDATE_PRIMITIVE_SPECS that yields { name, type, value } rows
@@ -4113,6 +4142,9 @@ var UPDATE_PRIMITIVE_SPECS = {
     }
     return entries;
   },
+  'color-semantics': function () {
+    return null;
+  },
 };
 
 function _colorEqual(a, b) {
@@ -4124,6 +4156,98 @@ function _colorEqual(a, b) {
   var ba = b.a == null ? 1 : b.a;
   var dA = aa - ba;
   return Math.abs(dr) < 1e-6 && Math.abs(dg) < 1e-6 && Math.abs(db) < 1e-6 && Math.abs(dA) < 1e-6;
+}
+
+function _aliasEqual(a, b) {
+  return Boolean(a && b && a.type === 'VARIABLE_ALIAS' && b.type === 'VARIABLE_ALIAS' && a.id === b.id);
+}
+
+// Resolve a primitive target by exact name; if missing, fall back to the
+// nearest existing numeric step in the same ramp (e.g. green/950 -> green/900).
+// Returns null only when the ramp has no numeric siblings at all. The caller
+// surfaces substitutions in the report so the agent can prompt the designer
+// to fill the gap, but the live update keeps moving.
+function _resolveSemanticTarget(byName, targetName) {
+  if (!targetName) return null;
+  if (byName[targetName]) return { variable: byName[targetName], substituted: false };
+
+  var match = String(targetName).match(/^(.*)\/(\d+)$/);
+  if (!match) return null;
+  var prefix = match[1] + '/';
+  var targetStep = parseInt(match[2], 10);
+
+  var best = null;
+  var names = Object.keys(byName);
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    if (name.indexOf(prefix) !== 0) continue;
+    var rest = name.slice(prefix.length);
+    if (!/^\d+$/.test(rest)) continue;
+    var step = parseInt(rest, 10);
+    var distance = Math.abs(step - targetStep);
+    if (best === null || distance < best.distance || (distance === best.distance && step < best.step)) {
+      best = { name: name, step: step, distance: distance };
+    }
+  }
+  if (!best) return null;
+  return {
+    variable: byName[best.name],
+    substituted: true,
+    originalName: targetName,
+    fallbackName: best.name,
+  };
+}
+
+function _modeIdByName(collection, name, fallbackIndex) {
+  if (!collection || !collection.modes || collection.modes.length === 0) return null;
+  var wanted = String(name || '').toLowerCase();
+  for (var i = 0; i < collection.modes.length; i++) {
+    if (String(collection.modes[i].name || '').toLowerCase() === wanted) return collection.modes[i].modeId;
+  }
+  var idx = typeof fallbackIndex === 'number' ? fallbackIndex : 0;
+  return collection.modes[idx] ? collection.modes[idx].modeId : collection.modes[0].modeId;
+}
+
+function _semanticColorEntries(DS) {
+  var entries = [];
+  var sem = DS && DS.color ? DS.color.semantics : null;
+  if (!sem) return entries;
+  var tokenMap = {};
+  var pairs = sem.pairs || [];
+  for (var pi = 0; pi < pairs.length; pi++) {
+    var pair = pairs[pi];
+    if (!tokenMap[pair.bg]) {
+      tokenMap[pair.bg] = {
+        Light: pair.Light ? pair.Light.bg : null,
+        Dark: pair.Dark ? pair.Dark.bg : null,
+      };
+    }
+    if (!tokenMap[pair.text]) {
+      tokenMap[pair.text] = {
+        Light: pair.Light ? pair.Light.text : null,
+        Dark: pair.Dark ? pair.Dark.text : null,
+      };
+    }
+  }
+  var icons = sem.icons || [];
+  for (var ii = 0; ii < icons.length; ii++) {
+    tokenMap[icons[ii].token] = {
+      Light: icons[ii].Light || null,
+      Dark: icons[ii].Dark || null,
+    };
+  }
+  var unpaired = sem.unpaired || [];
+  for (var ui = 0; ui < unpaired.length; ui++) {
+    tokenMap[unpaired[ui].token] = {
+      Light: unpaired[ui].Light || null,
+      Dark: unpaired[ui].Dark || null,
+    };
+  }
+  var names = Object.keys(tokenMap);
+  for (var ni = 0; ni < names.length; ni++) {
+    entries.push({ name: names[ni], type: 'COLOR', Light: tokenMap[names[ni]].Light, Dark: tokenMap[names[ni]].Dark });
+  }
+  return entries;
 }
 
 async function _updateDsPrimitives(payload) {
@@ -4149,9 +4273,20 @@ async function _updateDsPrimitives(payload) {
   var primModeId = primColl.modes[0].modeId;
   var allVars = await figma.variables.getLocalVariablesAsync();
   var byName = {};
+  var allByName = {};
   for (var vi = 0; vi < allVars.length; vi++) {
     var v = allVars[vi];
+    allByName[v.name] = v;
     if (v.variableCollectionId === primColl.id) byName[v.name] = v;
+  }
+  var colorName = (DS.collections && DS.collections.color) ? DS.collections.color : '2. Color';
+  var colorColl = null;
+  for (var cc = 0; cc < allColls.length; cc++) {
+    if (allColls[cc].name === colorName) { colorColl = allColls[cc]; break; }
+  }
+  var colorByName = {};
+  for (var cv = 0; cv < allVars.length; cv++) {
+    if (colorColl && allVars[cv].variableCollectionId === colorColl.id) colorByName[allVars[cv].name] = allVars[cv];
   }
 
   var report = {};
@@ -4161,6 +4296,115 @@ async function _updateDsPrimitives(payload) {
     var cat = requested[ri2];
     var spec = UPDATE_PRIMITIVE_SPECS[cat];
     if (!spec) { unknown.push(cat); continue; }
+
+    if (cat === 'color-semantics') {
+      var semEntries = _semanticColorEntries(DS);
+      var semUpdated = 0;
+      var semUnchanged = 0;
+      var semCreated = 0;
+      var semUnmatched = [];
+      var semSubstituted = [];
+      var semTypeMismatch = [];
+
+      if (!colorColl) {
+        report[cat] = {
+          entries: semEntries.length,
+          created: 0,
+          updated: 0,
+          unchanged: 0,
+          unmatched: [colorName],
+          substituted: [],
+          typeMismatch: [],
+        };
+        continue;
+      }
+
+      var lightModeId = _modeIdByName(colorColl, 'Light', 0);
+      var darkModeId = _modeIdByName(colorColl, 'Dark', 1);
+
+      for (var sei = 0; sei < semEntries.length; sei++) {
+        var semEntry = semEntries[sei];
+        var semVar = colorByName[semEntry.name];
+        if (!semVar) {
+          if (createMissing) {
+            try {
+              semVar = figma.variables.createVariable(semEntry.name, colorColl, 'COLOR');
+              colorByName[semEntry.name] = semVar;
+              allByName[semEntry.name] = semVar;
+              semCreated += 1;
+            } catch (semCreateErr) {
+              semUnmatched.push(semEntry.name);
+              continue;
+            }
+          } else {
+            semUnmatched.push(semEntry.name);
+            continue;
+          }
+        }
+        if (semVar.resolvedType !== 'COLOR') {
+          semTypeMismatch.push({ name: semEntry.name, expected: 'COLOR', actual: semVar.resolvedType });
+          continue;
+        }
+
+        var changed = false;
+        var missingAlias = false;
+        if (semEntry.Light && lightModeId) {
+          var lightLookup = _resolveSemanticTarget(byName, semEntry.Light);
+          if (!lightLookup) {
+            missingAlias = true;
+            semUnmatched.push(semEntry.name + ' Light -> ' + semEntry.Light);
+          } else {
+            if (lightLookup.substituted) {
+              semSubstituted.push({
+                token: semEntry.name,
+                mode: 'Light',
+                requested: lightLookup.originalName,
+                used: lightLookup.fallbackName,
+              });
+            }
+            var lightAlias = { type: 'VARIABLE_ALIAS', id: lightLookup.variable.id };
+            if (!_aliasEqual(semVar.valuesByMode[lightModeId], lightAlias)) {
+              semVar.setValueForMode(lightModeId, lightAlias);
+              changed = true;
+            }
+          }
+        }
+        if (semEntry.Dark && darkModeId) {
+          var darkLookup = _resolveSemanticTarget(byName, semEntry.Dark);
+          if (!darkLookup) {
+            missingAlias = true;
+            semUnmatched.push(semEntry.name + ' Dark -> ' + semEntry.Dark);
+          } else {
+            if (darkLookup.substituted) {
+              semSubstituted.push({
+                token: semEntry.name,
+                mode: 'Dark',
+                requested: darkLookup.originalName,
+                used: darkLookup.fallbackName,
+              });
+            }
+            var darkAlias = { type: 'VARIABLE_ALIAS', id: darkLookup.variable.id };
+            if (!_aliasEqual(semVar.valuesByMode[darkModeId], darkAlias)) {
+              semVar.setValueForMode(darkModeId, darkAlias);
+              changed = true;
+            }
+          }
+        }
+        if (changed) semUpdated += 1;
+        else if (!missingAlias) semUnchanged += 1;
+      }
+
+      report[cat] = {
+        entries: semEntries.length,
+        created: semCreated,
+        updated: semUpdated,
+        unchanged: semUnchanged,
+        unmatched: semUnmatched,
+        substituted: semSubstituted,
+        typeMismatch: semTypeMismatch,
+      };
+      continue;
+    }
 
     var entries = spec(DS);
     var updated = 0;
@@ -4213,8 +4457,10 @@ async function _updateDsPrimitives(payload) {
   var msgParts = [];
   for (var k in report) {
     if (Object.prototype.hasOwnProperty.call(report, k)) {
+      var subCount = report[k].substituted ? report[k].substituted.length : 0;
       msgParts.push(k + ': ' + report[k].updated + ' updated, ' + report[k].unchanged + ' unchanged' +
         (report[k].created ? ', ' + report[k].created + ' created' : '') +
+        (subCount ? ', ' + subCount + ' substituted' : '') +
         (report[k].unmatched.length ? ', ' + report[k].unmatched.length + ' missing' : ''));
     }
   }

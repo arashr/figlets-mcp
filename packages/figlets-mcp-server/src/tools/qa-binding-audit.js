@@ -10,6 +10,14 @@ const qaBindingAuditTool = {
       fix: {
         type: "boolean",
         description: "When true, apply all high-confidence variable/style suggestions in Figma. Defaults to false for report-only QA."
+      },
+      max_nodes: {
+        type: "number",
+        description: "Optional safety cap for page-scope audits. Defaults to 2500 nodes so large pages return a bounded partial report instead of timing out."
+      },
+      deadline_ms: {
+        type: "number",
+        description: "Optional audit time budget in milliseconds. Defaults to 45000."
       }
     },
     required: []
@@ -18,7 +26,10 @@ const qaBindingAuditTool = {
 
 function handleQaBindingAudit(args = {}) {
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
-  const body = JSON.stringify({ fix: !!args.fix });
+  const payload = { fix: !!args.fix };
+  if (typeof args.max_nodes === "number") payload.maxNodes = args.max_nodes;
+  if (typeof args.deadline_ms === "number") payload.deadlineMs = args.deadline_ms;
+  const body = JSON.stringify(payload);
 
   return new Promise((resolve) => {
     const req = http.request(
@@ -54,6 +65,11 @@ function handleQaBindingAudit(args = {}) {
                   pageName: result.pageName || "",
                   selectedCount: result.selectedCount || 0,
                   checkedRootCount: result.checkedRootCount || 0,
+                  auditedNodeCount: result.auditedNodeCount || 0,
+                  truncated: !!result.truncated,
+                  truncateReason: result.truncateReason || "",
+                  maxNodes: result.maxNodes || 0,
+                  deadlineMs: result.deadlineMs || 0,
                   violationCount: result.violationCount || 0,
                   byType: result.byType || {},
                   fixApplied: !!result.fixApplied,
@@ -72,8 +88,11 @@ function handleQaBindingAudit(args = {}) {
             const activeSessionText = parsed && parsed.activeSessionId
               ? ` Active plugin session: ${parsed.activeSessionId}.`
               : "";
+            const retryText = parsed && parsed.pluginRecentlySeen
+              ? " The plugin was connected recently and may be finishing another action; wait a moment, then retry."
+              : " Open the Figlets Bridge plugin in Figma Desktop, then retry.";
             resolve({
-              content: [{ type: "text", text: `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${activeSessionText}` }],
+              content: [{ type: "text", text: `Error: Figma plugin is not listening for QA commands.${retryText}${activeSessionText}` }],
               isError: true
             });
           } else if (res.statusCode === 504) {

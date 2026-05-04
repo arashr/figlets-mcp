@@ -16,6 +16,8 @@ let pendingDocBuildRequest = null;
 let pendingQaAuditRequest = null;
 let pendingUpdatePrimitivesRequest = null;
 let activePluginCapabilities = [];
+let lastPluginSessionId = null;
+let lastPluginSeenAt = 0;
 
 const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
 
@@ -25,9 +27,15 @@ function _getSessionId(req) {
 }
 
 function _notConnectedPayload() {
+  const recentlySeen = lastPluginSeenAt && (Date.now() - lastPluginSeenAt < 60000);
   return {
-    error: 'Figma plugin is not connected or listening.',
-    activeSessionId: pendingPollSessionId || null
+    error: recentlySeen
+      ? 'Figma plugin was connected recently but is not listening for a new command yet.'
+      : 'Figma plugin is not connected or listening.',
+    activeSessionId: pendingPollSessionId || lastPluginSessionId || null,
+    lastPluginSeenAt: lastPluginSeenAt || null,
+    pluginRecentlySeen: Boolean(recentlySeen),
+    pluginCapabilities: recentlySeen ? activePluginCapabilities : []
   };
 }
 
@@ -43,7 +51,6 @@ function _pluginHasCapability(name) {
 function _clearPendingPoll() {
   pendingPollResponse = null;
   pendingPollSessionId = null;
-  activePluginCapabilities = [];
 }
 
 const server = http.createServer((req, res) => {
@@ -61,14 +68,17 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && pathname === '/health') {
+    const pluginRecentlySeen = Boolean(lastPluginSeenAt && (Date.now() - lastPluginSeenAt < 60000));
+    const pluginCapabilities = (pendingPollResponse || pluginRecentlySeen) ? activePluginCapabilities : [];
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       ok: true,
       receiver: 'running',
       pluginConnected: Boolean(pendingPollResponse),
-      activeSessionId: pendingPollSessionId || null,
-      pluginCapabilities: activePluginCapabilities,
-      updatePrimitivesLive: _pluginHasCapability('update-primitives'),
+      pluginRecentlySeen: pluginRecentlySeen,
+      activeSessionId: pendingPollSessionId || lastPluginSessionId || null,
+      pluginCapabilities: pluginCapabilities,
+      updatePrimitivesLive: pluginCapabilities.indexOf('update-primitives') !== -1,
       dataPath: DEST_FILE,
       selectionPath: DEST_FILE_SELECTION
     }));
@@ -81,6 +91,8 @@ const server = http.createServer((req, res) => {
     activePluginCapabilities = _parseCapabilities(url.searchParams.get('capabilities'));
     pendingPollResponse = res;
     pendingPollSessionId = sessionId || null;
+    lastPluginSessionId = pendingPollSessionId;
+    lastPluginSeenAt = Date.now();
     console.log(`[poll] Plugin connected${pendingPollSessionId ? ` (${pendingPollSessionId})` : ''}`);
     
     // Keep connection alive: if no sync requested within 30 seconds, send ping

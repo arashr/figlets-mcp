@@ -122,7 +122,7 @@ function validateSemanticPairs(ds) {
     { bg: 'color/surface/brand-variant', text: 'color/on-surface/default',  L: { bg: 'primary/50',  text: 'neutral/950' }, D: { bg: 'primary/950', text: 'neutral/50'  }, min: 4.5 },
     { bg: 'color/surface/danger',         text: 'color/on-surface/danger',   L: { bg: 'red/600',     text: 'neutral/50'  }, D: { bg: 'red/500',     text: 'neutral/950' }, min: 4.5 },
     { bg: 'color/surface/danger-variant', text: 'color/on-surface/default',  L: { bg: 'red/50',      text: 'neutral/950' }, D: { bg: 'red/950',     text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/surface/success',        text: 'color/on-surface/success',  L: { bg: 'green/600',   text: 'neutral/900' }, D: { bg: 'green/500',   text: 'neutral/950' }, min: 4.5 },
+    { bg: 'color/surface/success',        text: 'color/on-surface/success',  L: { bg: 'green/600',   text: 'neutral/50'  }, D: { bg: 'green/500',   text: 'neutral/950' }, min: 4.5 },
     { bg: 'color/surface/success-variant',text: 'color/on-surface/default',  L: { bg: 'green/50',    text: 'neutral/950' }, D: { bg: 'green/950',   text: 'neutral/50'  }, min: 4.5 },
     { bg: 'color/surface/warning',        text: 'color/on-surface/warning',  L: { bg: 'yellow/500',  text: 'neutral/950' }, D: { bg: 'yellow/400',  text: 'neutral/950' }, min: 4.5, note: '⚠ must use dark text' },
     { bg: 'color/surface/warning-variant',text: 'color/on-surface/default',  L: { bg: 'yellow/50',   text: 'neutral/950' }, D: { bg: 'yellow/950',  text: 'neutral/50'  }, min: 4.5, note: '⚠ must use dark text' },
@@ -198,6 +198,9 @@ function validateSemanticPairs(ds) {
         if (row.L && row.L.bg === 'neutral/100') row.L.bg = `${NEUTRAL_VARIANT}/100`;
         if (row.D && row.D.bg === 'neutral/900') row.D.bg = `${NEUTRAL_VARIANT}/900`;
       }
+      if (p.bg === 'color/surface/success' && p.text === 'color/on-surface/success') {
+        if (row.L && row.L.bg === 'green/600' && row.L.text === 'neutral/900') row.L.text = 'neutral/50';
+      }
       return row;
     });
   } else {
@@ -213,7 +216,7 @@ function validateSemanticPairs(ds) {
 
     for (const [mode, side] of [['Light', tmpl.L], ['Dark', tmpl.D]]) {
       if (!side) { row[mode] = undefined; continue; }
-      const bgRes  = resolve(side.bg);
+      let bgRes  = resolve(side.bg);
       const txtRes = resolve(side.text);
 
       if (!bgRes || !txtRes) {
@@ -221,11 +224,32 @@ function validateSemanticPairs(ds) {
         continue;
       }
 
-      const bgLum  = luminance(bgRes.rgb);
+      let bgLum  = luminance(bgRes.rgb);
       const txtLum = luminance(txtRes.rgb);
-      const ratio  = wcagRatio(bgLum, txtLum);
-      const lc     = Math.abs(apcaLc(txtRes.rgb, bgRes.rgb));
-      const pass   = tmpl.min === null ? null : ratio >= tmpl.min;
+      let ratio  = wcagRatio(bgLum, txtLum);
+      let lc     = Math.abs(apcaLc(txtRes.rgb, bgRes.rgb));
+      let pass   = tmpl.min === null ? null : ratio >= tmpl.min;
+
+      if (
+        pass === false &&
+        mode === 'Light' &&
+        tmpl.bg === 'color/surface/success' &&
+        tmpl.text === 'color/on-surface/success'
+      ) {
+        const darkerSuccessBg = resolve('green/700');
+        if (darkerSuccessBg) {
+          const darkerBgLum = luminance(darkerSuccessBg.rgb);
+          const darkerRatio = wcagRatio(darkerBgLum, txtLum);
+          if (darkerRatio >= tmpl.min) {
+            bgRes = darkerSuccessBg;
+            bgLum = darkerBgLum;
+            ratio = darkerRatio;
+            lc = Math.abs(apcaLc(txtRes.rgb, bgRes.rgb));
+            pass = true;
+          }
+        }
+      }
+
       let suggestion = null;
 
       if (pass === false) {

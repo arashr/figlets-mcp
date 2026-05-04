@@ -1312,17 +1312,19 @@ async function _buildShowcase(opts) {
            0.7151522 * Math.pow(rgb.g, 2.4) +
            0.0721750 * Math.pow(rgb.b, 2.4);
   }
+  // Full APCA 0.0.98G implementation — matches validate-semantic-pairs.js exactly.
+  // Soft-clamps near-black values (BC/BE) and applies polarity-aware rounding.
+  // Returns a signed integer Lc: positive = dark text on light bg, negative = light on dark.
   function _apcaLc(fg, bg) {
-    var Yfg = _apcaLum(fg);
-    var Ybg = _apcaLum(bg);
-    var Sapc;
-    if (Ybg >= Yfg) {
-      Sapc = (Math.pow(Ybg, 0.56) - Math.pow(Yfg, 0.57)) * 1.14;
-    } else {
-      Sapc = (Math.pow(Ybg, 0.65) - Math.pow(Yfg, 0.62)) * 1.14;
-    }
-    if (Math.abs(Sapc) < 0.1) { return 0; }
-    return Sapc * 100;
+    var BC = 0.022, BE = 1.414;
+    var Yt = _apcaLum(fg), Yb = _apcaLum(bg);
+    var Yt2 = Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt;
+    var Yb2 = Yb < BC ? Yb + Math.pow(BC - Yb, BE) : Yb;
+    var lc;
+    if (Yb2 >= Yt2) { lc = (Math.pow(Yb2, 0.56) - Math.pow(Yt2, 0.57)) * 1.14; }
+    else             { lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14; }
+    if (Math.abs(lc) < 0.1) { return 0; }
+    return Math.round(lc > 0 ? lc * 100 - 12.5 : lc * 100 + 12.5);
   }
 
   const _semColl       = dsCollections.find(c => c.isAlias && c.colorVarCount > 0);

@@ -197,8 +197,10 @@ assert.ok(
 assert.ok(
   code.includes("function _apcaLum(rgb)") &&
     code.includes("function _apcaLc(fg, bg)") &&
-    code.includes("Math.pow(rgb.r, 2.4)"),
-  "Showcase must include APCA luminance and contrast helpers ported from the validator"
+    code.includes("Math.pow(rgb.r, 2.4)") &&
+    code.includes("var BC = 0.022, BE = 1.414") &&
+    code.includes("Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt"),
+  "Showcase APCA helper must match the validator's full APCA 0.0.98G implementation (soft clamp + polarity rounding)"
 );
 
 assert.ok(

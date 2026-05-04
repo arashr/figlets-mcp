@@ -1307,6 +1307,23 @@ async function _buildShowcase(opts) {
     const L1 = _lum(c1), L2 = _lum(c2);
     return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
   }
+  function _apcaLum(rgb) {
+    return 0.2126729 * Math.pow(rgb.r, 2.4) +
+           0.7151522 * Math.pow(rgb.g, 2.4) +
+           0.0721750 * Math.pow(rgb.b, 2.4);
+  }
+  function _apcaLc(fg, bg) {
+    var Yfg = _apcaLum(fg);
+    var Ybg = _apcaLum(bg);
+    var Sapc;
+    if (Ybg >= Yfg) {
+      Sapc = (Math.pow(Ybg, 0.56) - Math.pow(Yfg, 0.57)) * 1.14;
+    } else {
+      Sapc = (Math.pow(Ybg, 0.65) - Math.pow(Yfg, 0.62)) * 1.14;
+    }
+    if (Math.abs(Sapc) < 0.1) { return 0; }
+    return Sapc * 100;
+  }
 
   const _semColl       = dsCollections.find(c => c.isAlias && c.colorVarCount > 0);
   const _primColls     = dsCollections.filter(c => c.isPrimitive && c.colorVarCount > c.floatVarCount);
@@ -1966,6 +1983,42 @@ async function _buildShowcase(opts) {
     return badge;
   }
 
+  function _buildApcaBadge(lc) {
+    var absLc = Math.abs(lc);
+    var bg, border, fg, bgV, bdV, fgV, sign, score;
+    if (absLc >= 75) {
+      bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
+      bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
+      sign = '✓'; score = 'AA';
+    } else if (absLc >= 60) {
+      bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
+      bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
+      sign = '~'; score = 'Lc 60';
+    } else {
+      bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
+      bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
+      sign = '✗'; score = 'Fail';
+    }
+    var badge = _f('APCA Badge', 'HORIZONTAL');
+    badge.paddingLeft = 8; badge.paddingRight = 8;
+    badge.paddingTop  = 4; badge.paddingBottom = 4;
+    badge.itemSpacing = 4;
+    badge.cornerRadius = 8;
+    badge.primaryAxisAlignItems = 'CENTER';
+    badge.counterAxisAlignItems = 'CENTER';
+    badge.fills = [_paint(bg, bgV)];
+    if (bdV) {
+      badge.strokes = [_paint(border, bdV)];
+      badge.strokeWeight = 1;
+      badge.strokeAlign  = 'INSIDE';
+    } else {
+      badge.strokes = [];
+    }
+    badge.appendChild(_tDS(sign,  10, fg, true, fgV));
+    badge.appendChild(_tDS(score, 10, fg, true, fgV));
+    return badge;
+  }
+
   function _buildGroupHeader(label) {
     const row = _f('Group Header', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
@@ -2343,6 +2396,26 @@ async function _buildShowcase(opts) {
     swatchCell.layoutSizingVertical   = 'FILL';
 
     if (hasPairing) {
+      const lc = _apcaLc(fgRGB, bgRGB);
+
+      const apcaLcCell = _f('APCALcCell', 'HORIZONTAL');
+      apcaLcCell.primaryAxisAlignItems = 'CENTER';
+      apcaLcCell.counterAxisAlignItems = 'CENTER';
+      apcaLcCell.appendChild(_tDS('Lc ' + Math.round(Math.abs(lc)), 14, _textColor, false, _V.text));
+      row.appendChild(apcaLcCell);
+      apcaLcCell.layoutSizingHorizontal = 'FIXED';
+      apcaLcCell.resize(128, 1);
+      apcaLcCell.layoutSizingVertical   = 'FILL';
+
+      const apcaBadgeCell = _f('APCABadgeCell', 'HORIZONTAL');
+      apcaBadgeCell.primaryAxisAlignItems = 'CENTER';
+      apcaBadgeCell.counterAxisAlignItems = 'CENTER';
+      apcaBadgeCell.appendChild(_buildApcaBadge(lc));
+      row.appendChild(apcaBadgeCell);
+      apcaBadgeCell.layoutSizingHorizontal = 'FIXED';
+      apcaBadgeCell.resize(128, 1);
+      apcaBadgeCell.layoutSizingVertical   = 'FILL';
+
       const metricCell = _f('MetricCell', 'HORIZONTAL');
       metricCell.primaryAxisAlignItems = 'CENTER';
       metricCell.counterAxisAlignItems = 'CENTER';

@@ -193,3 +193,24 @@ assert.ok(
   !tool.includes("text styles first, then variables"),
   "qa_binding_audit description must not claim styles are globally first"
 );
+
+assert.ok(
+  code.includes("function _apcaLum(rgb)") &&
+    code.includes("function _apcaLc(fg, bg)") &&
+    code.includes("Math.pow(rgb.r, 2.4)"),
+  "Showcase must include APCA luminance and contrast helpers ported from the validator"
+);
+
+assert.ok(
+  code.includes("function _buildApcaBadge(lc)") &&
+    code.includes("absLc >= 75") &&
+    code.includes("absLc >= 60"),
+  "Showcase must include APCA badge builder with Lc 75 and Lc 60 thresholds"
+);
+
+assert.ok(
+  code.includes("const lc = _apcaLc(fgRGB, bgRGB)") &&
+    code.includes("'Lc ' + Math.round(Math.abs(lc))") &&
+    code.includes("_buildApcaBadge(lc)"),
+  "Semantic color rows must include APCA Lc value cell and APCA badge cell before the WCAG cells"
+);

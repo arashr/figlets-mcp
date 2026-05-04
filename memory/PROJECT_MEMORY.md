@@ -449,6 +449,43 @@ Policy assertion in `tests/bridge/qa-binding-audit-policy.test.js` now requires 
 
 ---
 
+### [2026-05-04 — APCA contrast option (planned, not yet implemented)]
+
+**Problem (per designer feedback):** the showcase and `prepare_ds_config` readiness loop currently report only WCAG 2.2 contrast. APCA Lc is already computed and stored on every pair by the validator at [packages/figlets-core/src/ds-config/validate-semantic-pairs.js](../packages/figlets-core/src/ds-config/validate-semantic-pairs.js) (lines 62–75 and 264–265) but never reaches the designer. WCAG over-fails dark themes and under-fails bright yellows; APCA is perceptually accurate and is the contrast model behind WCAG 3.
+
+**Plan landed for next session.** Full plan file: `/Users/arash/.claude/plans/i-want-to-give-foamy-backus.md`.
+
+**Confirmed designer decisions (from clarification round):**
+
+- Both APCA and WCAG columns stay always visible side-by-side in the showcase. Designers learn the difference by seeing both verdicts on the same row.
+- APCA gate threshold for `failCount` / `suggestStep`: `Lc 75` for surface and text pairs (APCA "Bronze use case" for body text ≥ 14px); `Lc 60` for icon pairs.
+- New config field `DS.color.contrastAlgorithm` defaults to `'apca'`, mirroring the precedent of `DS.color.algorithm` (oklch/hsl). Configs without the field upgrade transparently to APCA.
+- APCA Lc is stored as the **signed** value internally (positive = dark text on light bg, negative = light on dark) but rendered as `Math.abs` in the showcase. The sign is reserved for a future "polarity" indicator and is not shown to designers today.
+
+**Phasing (must ship in this order):**
+
+- **Phase 1 — Logic.** Touches only [validate-semantic-pairs.js](../packages/figlets-core/src/ds-config/validate-semantic-pairs.js), [prepare-ds-config.js](../packages/figlets-mcp-server/src/tools/prepare-ds-config.js), the adapter docs ([CLAUDE.md](../packages/figlets-adapter/CLAUDE.md), [AGENTS.md](../packages/figlets-adapter/AGENTS.md)), and core tests. Adds the new field, gates `pass`/`failCount` on the chosen algorithm, refactors `suggestStep` to take a scorer + threshold so WCAG and APCA share the ramp walk, adds an APCA column to the readiness markdown. No plugin code change. Ships as one commit: `feat(ds-config): APCA contrast option with default to APCA`.
+- **Phase 2 — Presentation.** Touches only [code.js](../packages/figma-bridge-plugin/code.js) and [qa-binding-audit-policy.test.js](../tests/bridge/qa-binding-audit-policy.test.js). Ports `_apcaLc` from the validator, adds `_buildApcaBadge(lc)` that wraps the existing `_buildBadge` with Lc thresholds (≥75 → AA-style, ≥60 → 3:1-style, <60 → fail) — no new palette, no aesthetic retuning. Inserts two cells in `_buildSemColorRow` (line 2303) **before** the existing WCAG cells: `apcaLcCell` (128px, "Lc 78") and `apcaBadgeCell` (128px, badge). Ships as one commit: `feat(showcase): show APCA Lc and badge columns before WCAG`.
+
+**Constraint from the designer:** UI changes in Phase 2 are surgical — same column widths as the WCAG cells (128px), same badge component, no use-case tier labels ("Body ≥ 14px") in this cut. The tier label is a Phase 3 polish so the visual surface can iterate without re-touching the data layer.
+
+**Blind spots being held open:**
+
+1. APCA pass is size-dependent. The first cut uses a single Lc gate per pair; the long-term answer is a use-case tier label, deferred to Phase 3 polish.
+2. `failCount` semantics change when the algorithm flips. The adapter should explicitly tell the designer when switching algorithms changes the deliverable ("switching to APCA cleared 2 previously failing pairs").
+3. Section width budget: Phase 2 adds 256px of fixed columns. If the colors section overflows on standard pages, the fix is layout-only and goes in a separate ticket.
+4. Pair templates need `tmpl.minLc` siblings; rows with `min: null` (decorative) get `minLc: null` so APCA doesn't suddenly fail them.
+
+**Next agent's resume order:**
+
+1. Read this entry + the plan file.
+2. Execute Phase 1 only. Commit. Stop.
+3. Phase 2 in a separate session if Phase 1 verifies.
+
+**Live validation note for Phase 2:** the Figma plugin auto-reloads `code.js` per invocation in dev mode (verified earlier this session), so no manual reload is needed before a `build_ds_showcase` call picks up the new columns.
+
+---
+
 ### [2026-05-03 — showcase color ordering polish]
 
 After the neutral-variant primitive work, the live showcase was updated to sort color rows in a designer-facing order:

@@ -22,7 +22,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `audit_tokens` | Reports unaliased values, duplicate tokens, and naming violations in the snapshot | When the user wants a token health check |
 | `qa_binding_audit` | Audits the current Figma selection/page for raw unbound layer properties and optional safe binding fixes | When the user wants QA on designed frames/components, especially before documentation |
 | `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
-| `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, WCAG validation, spacing scale | After intake and before building collections — validates everything before touching Figma |
+| `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, contrast validation (APCA or WCAG), spacing scale | After intake and before building collections — validates everything before touching Figma |
 | `apply_ds_setup` | Creates all 5 variable collections in Figma from the prepared config (Primitives, Color, Typography, Spacing, Elevation) | After `prepare_ds_config` confirms `readyToBuild === true` |
 | `update_ds_primitives` | Updates values of EXISTING primitive variables in place (variable IDs preserved, aliases stay intact). Supported categories today: `color`, `spacing`. Use after re-running `prepare_ds_config` to push only changed values into Figma without recreating collections. | After tweaking the config (e.g. switching color algorithm, adjusting spacing scale) when the Primitives collection already exists in Figma. |
 | `generate_component_doc` | Renders a complete spec sheet for a component inside Figma (preview, variants, properties, sizing, anatomy, usage) AND returns the markdown body for `component-specs/[Name].md`. Also writes a `[SPEC]` block to the component description for MCP handover. | When the user wants to document a component for design + LLM code handover. The component must be on the current Figma page. |
@@ -82,11 +82,14 @@ Keep the designer-facing language non-technical. Say "I'll check what's availabl
 6. Tell the user to look at the "00 · Tokens" page in their Figma file
 
 ### Set up a new design system (bootstrap collections)
-1. Run intake: project name, platform, grid base (4px/8px), breakpoints (3-tier/4-tier), naming convention (role-based/surface-based), color scale, brand colors (name + hex), typeface, typography preset
-2. Write `design-system.config.js` with all intake answers: `DS.grid`, `DS.breakpoints`, `DS.typography.families`, `DS.typography.scalePreset`, `DS.color.brand`, `DS.color.scale`, `DS.color.convention`, `DS.collections.*`, `DS.naming.*`
+1. Run intake: project name, platform, grid base (4px/8px), breakpoints (3-tier/4-tier), naming convention (role-based/surface-based), **contrast standard (APCA default / WCAG 2.2)**, color scale, brand colors (name + hex), typeface, typography preset.
+   When asking about contrast standard, give the short pros/cons:
+   - **APCA (default)** — perceptually accurate, designed for WCAG 3, more lenient on yellows and accurate on dark mode where WCAG is overly strict; *not yet a legal standard*.
+   - **WCAG 2.2** — current legal standard for ADA / Section 508 / EN 301 549; well understood; can over-fail dark themes and under-fail bright yellows.
+2. Write `design-system.config.js` with all intake answers: `DS.grid`, `DS.breakpoints`, `DS.typography.families`, `DS.typography.scalePreset`, `DS.color.brand`, `DS.color.scale`, `DS.color.convention`, `DS.color.contrastAlgorithm` (`'apca'` default, `'wcag'` if the user picked it), `DS.collections.*`, `DS.naming.*`
 3. Call `prepare_ds_config` with the config path
-4. Show the user: spacing preview, color ramps table, semantic pairs table (with WCAG ratios), failCount
-5. If `failCount > 0`: show which pairs fail, suggest the nearest passing step, update `DS.color.semantics.pairs` in the config, re-run `prepare_ds_config` until `failCount === 0`
+4. Show the user: spacing preview, color ramps table, semantic pairs table (both APCA Lc and WCAG ratios are visible side-by-side; the gated `failCount` reflects whichever standard the designer chose)
+5. If `failCount > 0`: show which pairs fail under the chosen standard, suggest the nearest passing step, update `DS.color.semantics.pairs` in the config, re-run `prepare_ds_config` until `failCount === 0`
 6. If `needsClaude` contains `DS.typography.scale`: generate the custom scale, write it to the config, re-run `prepare_ds_config`
 7. Ask: "Does this all look right? Ready to build in Figma?"
 8. Once confirmed and `readyToBuild === true`: ask the user to keep the Figlets Bridge plugin open
@@ -94,7 +97,9 @@ Keep the designer-facing language non-technical. Say "I'll check what's availabl
 10. Report: collections created, any skipped (already existed), config path for reference
 
 ### Update primitive values in place
-Use this when only some primitive values changed — for example, the designer switched `DS.color.algorithm` from HSL to OKLCh, or adjusted the spacing scale — and the Primitives collection already exists in Figma. This avoids the destructive delete-and-rebuild path and keeps every alias from Color/Typography/Spacing/Elevation collections intact.
+Use this when only some primitive values changed — for example, the designer switched `DS.color.algorithm` from HSL to OKLCh, switched `DS.color.contrastAlgorithm` between APCA and WCAG, or adjusted the spacing scale — and the Primitives collection already exists in Figma. This avoids the destructive delete-and-rebuild path and keeps every alias from Color/Typography/Spacing/Elevation collections intact.
+
+When the designer flips `DS.color.contrastAlgorithm`, expect `failCount` to change — APCA and WCAG do not always agree on which pairs pass. Surface the difference plainly: "switching to APCA cleared 2 previously failing pairs" or "switching to WCAG flagged 3 pairs that passed APCA". The choice itself is not a code change in Figma; only the readiness verdict and the showcase render reflect it.
 
 1. Confirm the user has already run `prepare_ds_config` on the updated config (so `DS.color.ramps` reflects the new values).
 2. Ask the user to keep the Figlets Bridge plugin open in Figma Desktop.
@@ -169,4 +174,4 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 - Never add agent reasoning steps to `build_ds_showcase` unless the user explicitly opts into a supported parameter such as `numericFallback`. Showcase descriptions are deterministic by default; agent-enriched description polish is post-MVP and should only run when the user asks for it.
 - Never call `apply_ds_setup` until `prepare_ds_config` returns `readyToBuild === true` — building with failing pairs will produce inaccessible tokens
 - Never hardcode token values in intake — all values come from the user and are written to the config file
-- Never skip showing the semantic pairs table before building — the user must confirm WCAG ratios before any collections are created
+- Never skip showing the semantic pairs table before building — the user must confirm contrast ratios before any collections are created

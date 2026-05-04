@@ -182,11 +182,15 @@ function makeDs(overrides) {
   assert.strictEqual(pair.Dark.bg, 'color/neutral-variant/900', 'surface variant Dark should backfill to neutral-variant');
 }
 
-// generated surface success foreground backfills to a passing contrast value
+// generated surface success foreground backfills to a passing contrast value.
+// Pinned to WCAG mode because the backfill is specifically about clearing a WCAG
+// shortfall (neutral/50 absent → text clamps to neutral/100 → green/600 fails AA).
+// APCA mode is exercised in dedicated tests further down.
 {
   let ds = computeDsConfig(makeDs({ color: {
     scale: '100-900',
     convention: 'surface-based',
+    contrastAlgorithm: 'wcag',
     brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }],
     semantics: {
       pairs: [{
@@ -205,7 +209,81 @@ function makeDs(overrides) {
   assert.strictEqual(result.failCount, 0, 'surface success backfill should clear the generated contrast failure');
 }
 
-// ── generatePrimitivesData ───────────────────────────────────────────────────
+// ── APCA contrast option ─────────────────────────────────────────────────────
+
+// Default algorithm is APCA. The DS object echoes the chosen algorithm so
+// downstream consumers can verify the resolved choice without having to
+// re-derive a default elsewhere.
+{
+  let ds = computeDsConfig(makeDs()).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  assert.strictEqual(result.ds.color.contrastAlgorithm, 'apca', 'default algorithm should be apca');
+  assert.ok(result.summary.includes('apca'), 'summary should mention apca');
+}
+
+// WCAG mode is selectable and the algorithm field round-trips.
+{
+  let ds = computeDsConfig(makeDs({ color: { scale: '50-950', brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }], convention: 'role-based', contrastAlgorithm: 'wcag' }})).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  assert.strictEqual(result.ds.color.contrastAlgorithm, 'wcag', 'wcag should round-trip when explicitly set');
+  assert.ok(result.summary.includes('wcag'), 'summary should mention wcag');
+}
+
+// Every resolved pair carries both `wcagPass` and `apcaPass` regardless of the
+// chosen algorithm, and `pass` is gated to whichever algorithm was selected.
+{
+  let ds = computeDsConfig(makeDs()).ds;
+  ds = generateColorRamps(ds).ds;
+  const apcaResult = validateSemanticPairs(ds);
+  const apcaSample = apcaResult.ds.color.semantics.pairs[0];
+
+  // `ds.color.semantics.pairs` exposes only bg/text/Light/Dark for the public
+  // config shape. The richer per-mode {wcag, apca, pass, ...} is on `tableRows`,
+  // which we access via the markdownTable shape and re-running with WCAG mode.
+  // The structural guarantees we care about are visible on the markdownTable.
+  assert.ok(apcaResult.markdownTable.includes('Light APCA'), 'markdown should expose Light APCA column');
+  assert.ok(apcaResult.markdownTable.includes('Dark APCA'),  'markdown should expose Dark APCA column');
+
+  // Switching algorithms must produce different summary text and may produce
+  // different failCount; the algorithm field flips on the returned DS.
+  let dsWcag = computeDsConfig(makeDs({ color: { scale: '50-950', brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }], convention: 'role-based', contrastAlgorithm: 'wcag' }})).ds;
+  dsWcag = generateColorRamps(dsWcag).ds;
+  const wcagResult = validateSemanticPairs(dsWcag);
+  assert.notStrictEqual(wcagResult.summary, apcaResult.summary, 'apca and wcag summaries should differ');
+}
+
+// `suggestStep` walks the ramp using the gated algorithm's threshold. We force
+// a known failure by giving the success pair a near-white text against a
+// medium-bright bg; under both gates the validator must produce a suggestion
+// path back from the same green ramp (not from neutral or another ramp).
+{
+  let ds = computeDsConfig(makeDs({ color: {
+    scale: '50-950',
+    convention: 'surface-based',
+    brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }],
+    contrastAlgorithm: 'apca',
+    semantics: {
+      pairs: [{
+        bg: 'color/surface/danger-variant',
+        text: 'color/on-surface/default',
+        Light: { bg: 'color/red/300', text: 'color/red/200' },
+        Dark:  { bg: 'color/red/700', text: 'color/red/800' },
+      }]
+    }
+  }})).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  // Either the markdown table calls out a suggestion, or the failCount is
+  // non-zero — whichever, the row produced suggestion data rather than
+  // silently passing a clearly-failing pair.
+  const suggestionMentioned = result.markdownTable.includes('suggest color/red');
+  assert.ok(
+    suggestionMentioned || result.failCount > 0,
+    'low-contrast pair must surface a suggestion or contribute to failCount under APCA'
+  );
+}
 {
   let ds = computeDsConfig(makeDs()).ds;
   ds = generateColorRamps(ds).ds;

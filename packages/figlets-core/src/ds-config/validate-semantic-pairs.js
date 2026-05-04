@@ -17,6 +17,13 @@ function validateSemanticPairs(ds) {
     throw new Error('DS.color.ramps missing. Run generateColorRamps first.');
   }
 
+  // Contrast algorithm gate. APCA is the default; WCAG remains a first-class
+  // option for teams with formal WCAG 2.x compliance obligations. Both metrics
+  // are *always computed and stored* on every row regardless of the choice;
+  // only `pass`, `failCount`, and `suggestStep` honor the chosen algorithm.
+  const algorithm = DS.color.contrastAlgorithm === 'wcag' ? 'wcag' : 'apca';
+  DS.color.contrastAlgorithm = algorithm;
+
   const convention = DS.color.convention || 'role-based';
   const primaryEntry = (DS.color.brand || []).find(c => c.role === 'primary') || (DS.color.brand || [])[0];
   if (!primaryEntry) throw new Error('No primary brand color found in DS.color.brand.');
@@ -74,20 +81,34 @@ function validateSemanticPairs(ds) {
     return Math.round(lc > 0 ? lc * 100 - 12.5 : lc * 100 + 12.5);
   }
 
-  function suggestStep(textRampRef, bgRgb, minRatio) {
+  // Score helpers — same signature `(txtRgb, bgRgb) => number`, higher is more legible.
+  // WCAG returns the contrast ratio; APCA returns the absolute Lc.
+  const wcagScorer = (txt, bg) => wcagRatio(luminance(bg), luminance(txt));
+  const apcaScorer = (txt, bg) => Math.abs(apcaLc(txt, bg));
+
+  // Generic ramp walker: pick the nearest existing step whose `scorer` against `bgRgb`
+  // meets `threshold`. WCAG and APCA share the same walk, only the scorer + threshold change.
+  function suggestStepFor(textRampRef, bgRgb, scorer, threshold) {
     let [rampName] = textRampRef.split('/');
     if (rampName === 'primary') rampName = PRIMARY;
     const ramp = rampByName[rampName];
     if (!ramp) return null;
-    const bgLum = luminance(bgRgb);
     const passing = ramp
-      .map(([step, r, g, b]) => ({ step, ratio: wcagRatio(bgLum, luminance({ r, g, b })) }))
-      .filter(e => e.ratio >= minRatio);
+      .map(([step, r, g, b]) => ({ step, rgb: { r, g, b }, score: scorer({ r, g, b }, bgRgb) }))
+      .filter(e => e.score >= threshold);
     if (!passing.length) return null;
     const currentStep = parseInt(textRampRef.split('/')[1], 10);
     passing.sort((a, b) => Math.abs(a.step - currentStep) - Math.abs(b.step - currentStep));
     const best = passing[0];
-    return { step: best.step, path: `color/${rampName}/${best.step}`, ratio: best.ratio };
+    // Always carry the WCAG ratio back so legacy callers + markdown still render `:1`.
+    const ratio = wcagRatio(luminance(bgRgb), luminance(best.rgb));
+    return { step: best.step, path: `color/${rampName}/${best.step}`, ratio, score: best.score };
+  }
+
+  // Back-compat shim — internal callers below still use suggestStep(ref, bg, minRatio)
+  // for WCAG-only scoring (the surface/success backfill retry preserves old behavior).
+  function suggestStep(textRampRef, bgRgb, minRatio) {
+    return suggestStepFor(textRampRef, bgRgb, wcagScorer, minRatio);
   }
 
   // ── Preserve manually edited pairs on re-run ─────────────────────────────────
@@ -96,38 +117,43 @@ function validateSemanticPairs(ds) {
   // ── Pair templates ────────────────────────────────────────────────────────────
   const NEUTRAL_VARIANT = rampByName['neutral-variant'] ? 'neutral-variant' : 'neutral';
 
+  // `min` is the WCAG ratio gate (4.5 = AA body); `minLc` is the APCA Lc gate
+  // (75 = APCA "Bronze" body ≥ 14px). Both metrics are computed on every row
+  // regardless of which one gates pass/failCount; the row's `pass` switches based
+  // on `DS.color.contrastAlgorithm`. `minLc: null` mirrors `min: null` for tokens
+  // that are explicitly decorative (e.g. text/muted) — those are exempt under both.
   const ROLE_PAIRS = [
-    { bg: 'color/bg/default',        text: 'color/text/default',    L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/bg/default',        text: 'color/text/subtle',     L: { bg: 'neutral/50',  text: 'neutral/700' }, D: { bg: 'neutral/950', text: 'neutral/300' }, min: 4.5 },
-    { bg: 'color/bg/default',        text: 'color/text/muted',      L: { bg: 'neutral/50',  text: 'neutral/500' }, D: { bg: 'neutral/950', text: 'neutral/500' }, min: null, note: 'decorative — may be sub-AA by design' },
-    { bg: 'color/bg/subtle',         text: 'color/text/default',    L: { bg: 'neutral/100', text: 'neutral/950' }, D: { bg: 'neutral/900', text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/bg/muted',          text: 'color/text/default',    L: { bg: 'neutral/200', text: 'neutral/950' }, D: { bg: 'neutral/800', text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/bg/brand',          text: 'color/text/on-brand',   L: { bg: 'primary/600', text: 'neutral/50'  }, D: { bg: 'primary/500', text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/bg/brand-subtle',   text: 'color/text/brand',      L: { bg: 'primary/50',  text: 'primary/700' }, D: { bg: 'primary/950', text: 'primary/300' }, min: 4.5 },
-    { bg: 'color/bg/danger',         text: 'color/text/on-danger',  L: { bg: 'red/600',     text: 'neutral/50'  }, D: { bg: 'red/500',     text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/bg/danger-subtle',  text: 'color/text/danger',     L: { bg: 'red/50',      text: 'red/700'     }, D: { bg: 'red/950',     text: 'red/300'     }, min: 4.5 },
-    { bg: 'color/bg/success',        text: 'color/text/on-success', L: { bg: 'green/600',   text: 'neutral/50'  }, D: { bg: 'green/500',   text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/bg/success-subtle', text: 'color/text/success',    L: { bg: 'green/50',    text: 'green/700'   }, D: { bg: 'green/950',   text: 'green/300'   }, min: 4.5 },
-    { bg: 'color/bg/warning',        text: 'color/text/on-warning', L: { bg: 'yellow/500',  text: 'neutral/950' }, D: { bg: 'yellow/400',  text: 'neutral/950' }, min: 4.5, note: '⚠ must use dark text — yellow fails with light' },
-    { bg: 'color/bg/warning-subtle', text: 'color/text/warning',    L: { bg: 'yellow/50',   text: 'yellow/800'  }, D: { bg: 'yellow/950',  text: 'yellow/300'  }, min: 4.5 },
-    { bg: 'color/bg/info',           text: 'color/text/on-info',    L: { bg: 'blue/600',    text: 'neutral/50'  }, D: { bg: 'blue/500',    text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/bg/info-subtle',    text: 'color/text/info',       L: { bg: 'blue/50',     text: 'blue/700'    }, D: { bg: 'blue/950',    text: 'blue/300'    }, min: 4.5 },
+    { bg: 'color/bg/default',        text: 'color/text/default',    L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/default',        text: 'color/text/subtle',     L: { bg: 'neutral/50',  text: 'neutral/700' }, D: { bg: 'neutral/950', text: 'neutral/300' }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/default',        text: 'color/text/muted',      L: { bg: 'neutral/50',  text: 'neutral/500' }, D: { bg: 'neutral/950', text: 'neutral/500' }, min: null, minLc: null, note: 'decorative — may be sub-AA by design' },
+    { bg: 'color/bg/subtle',         text: 'color/text/default',    L: { bg: 'neutral/100', text: 'neutral/950' }, D: { bg: 'neutral/900', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/muted',          text: 'color/text/default',    L: { bg: 'neutral/200', text: 'neutral/950' }, D: { bg: 'neutral/800', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/brand',          text: 'color/text/on-brand',   L: { bg: 'primary/600', text: 'neutral/50'  }, D: { bg: 'primary/500', text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/brand-subtle',   text: 'color/text/brand',      L: { bg: 'primary/50',  text: 'primary/700' }, D: { bg: 'primary/950', text: 'primary/300' }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/danger',         text: 'color/text/on-danger',  L: { bg: 'red/600',     text: 'neutral/50'  }, D: { bg: 'red/500',     text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/danger-subtle',  text: 'color/text/danger',     L: { bg: 'red/50',      text: 'red/700'     }, D: { bg: 'red/950',     text: 'red/300'     }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/success',        text: 'color/text/on-success', L: { bg: 'green/600',   text: 'neutral/50'  }, D: { bg: 'green/500',   text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/success-subtle', text: 'color/text/success',    L: { bg: 'green/50',    text: 'green/700'   }, D: { bg: 'green/950',   text: 'green/300'   }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/warning',        text: 'color/text/on-warning', L: { bg: 'yellow/500',  text: 'neutral/950' }, D: { bg: 'yellow/400',  text: 'neutral/950' }, min: 4.5, minLc: 75, note: '⚠ must use dark text — yellow fails with light' },
+    { bg: 'color/bg/warning-subtle', text: 'color/text/warning',    L: { bg: 'yellow/50',   text: 'yellow/800'  }, D: { bg: 'yellow/950',  text: 'yellow/300'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/info',           text: 'color/text/on-info',    L: { bg: 'blue/600',    text: 'neutral/50'  }, D: { bg: 'blue/500',    text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/bg/info-subtle',    text: 'color/text/info',       L: { bg: 'blue/50',     text: 'blue/700'    }, D: { bg: 'blue/950',    text: 'blue/300'    }, min: 4.5, minLc: 75 },
   ];
 
   const SURFACE_PAIRS = [
-    { bg: 'color/surface/default',       text: 'color/on-surface/default',  L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/surface/default',       text: 'color/on-surface/variant',  L: { bg: 'neutral/50',  text: 'neutral/700' }, D: { bg: 'neutral/950', text: 'neutral/300' }, min: 4.5 },
-    { bg: 'color/surface/variant',       text: 'color/on-surface/default',  L: { bg: `${NEUTRAL_VARIANT}/100`, text: 'neutral/950' }, D: { bg: `${NEUTRAL_VARIANT}/900`, text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/surface/brand',         text: 'color/on-surface/brand',    L: { bg: 'primary/500', text: 'neutral/900' }, D: { bg: 'primary/500', text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/surface/brand-variant', text: 'color/on-surface/default',  L: { bg: 'primary/50',  text: 'neutral/950' }, D: { bg: 'primary/950', text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/surface/danger',         text: 'color/on-surface/danger',   L: { bg: 'red/600',     text: 'neutral/50'  }, D: { bg: 'red/500',     text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/surface/danger-variant', text: 'color/on-surface/default',  L: { bg: 'red/50',      text: 'neutral/950' }, D: { bg: 'red/950',     text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/surface/success',        text: 'color/on-surface/success',  L: { bg: 'green/600',   text: 'neutral/50'  }, D: { bg: 'green/500',   text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/surface/success-variant',text: 'color/on-surface/default',  L: { bg: 'green/50',    text: 'neutral/950' }, D: { bg: 'green/950',   text: 'neutral/50'  }, min: 4.5 },
-    { bg: 'color/surface/warning',        text: 'color/on-surface/warning',  L: { bg: 'yellow/500',  text: 'neutral/950' }, D: { bg: 'yellow/400',  text: 'neutral/950' }, min: 4.5, note: '⚠ must use dark text' },
-    { bg: 'color/surface/warning-variant',text: 'color/on-surface/default',  L: { bg: 'yellow/50',   text: 'neutral/950' }, D: { bg: 'yellow/950',  text: 'neutral/50'  }, min: 4.5, note: '⚠ must use dark text' },
-    { bg: 'color/surface/info',           text: 'color/on-surface/info',     L: { bg: 'blue/600',    text: 'neutral/50'  }, D: { bg: 'blue/500',    text: 'neutral/950' }, min: 4.5 },
-    { bg: 'color/surface/info-variant',   text: 'color/on-surface/default',  L: { bg: 'blue/50',     text: 'neutral/950' }, D: { bg: 'blue/950',    text: 'neutral/50'  }, min: 4.5 },
+    { bg: 'color/surface/default',       text: 'color/on-surface/default',  L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/default',       text: 'color/on-surface/variant',  L: { bg: 'neutral/50',  text: 'neutral/700' }, D: { bg: 'neutral/950', text: 'neutral/300' }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/variant',       text: 'color/on-surface/default',  L: { bg: `${NEUTRAL_VARIANT}/100`, text: 'neutral/950' }, D: { bg: `${NEUTRAL_VARIANT}/900`, text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/brand',         text: 'color/on-surface/brand',    L: { bg: 'primary/500', text: 'neutral/900' }, D: { bg: 'primary/500', text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/brand-variant', text: 'color/on-surface/default',  L: { bg: 'primary/50',  text: 'neutral/950' }, D: { bg: 'primary/950', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/danger',         text: 'color/on-surface/danger',   L: { bg: 'red/600',     text: 'neutral/50'  }, D: { bg: 'red/500',     text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/danger-variant', text: 'color/on-surface/default',  L: { bg: 'red/50',      text: 'neutral/950' }, D: { bg: 'red/950',     text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/success',        text: 'color/on-surface/success',  L: { bg: 'green/600',   text: 'neutral/50'  }, D: { bg: 'green/500',   text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/success-variant',text: 'color/on-surface/default',  L: { bg: 'green/50',    text: 'neutral/950' }, D: { bg: 'green/950',   text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/warning',        text: 'color/on-surface/warning',  L: { bg: 'yellow/500',  text: 'neutral/950' }, D: { bg: 'yellow/400',  text: 'neutral/950' }, min: 4.5, minLc: 75, note: '⚠ must use dark text' },
+    { bg: 'color/surface/warning-variant',text: 'color/on-surface/default',  L: { bg: 'yellow/50',   text: 'neutral/950' }, D: { bg: 'yellow/950',  text: 'neutral/50'  }, min: 4.5, minLc: 75, note: '⚠ must use dark text' },
+    { bg: 'color/surface/info',           text: 'color/on-surface/info',     L: { bg: 'blue/600',    text: 'neutral/50'  }, D: { bg: 'blue/500',    text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/info-variant',   text: 'color/on-surface/default',  L: { bg: 'blue/50',     text: 'neutral/950' }, D: { bg: 'blue/950',    text: 'neutral/50'  }, min: 4.5, minLc: 75 },
   ];
 
   const ROLE_ICONS = [
@@ -187,10 +213,11 @@ function validateSemanticPairs(ds) {
     sourceTemplates = existingPairs.map(p => {
       const template = pairTemplates.find(t => t.bg === p.bg && t.text === p.text) || {};
       const row = {
-        bg:   p.bg,
-        text: p.text,
-        min:  template.min || 4.5,
-        note: template.note,
+        bg:    p.bg,
+        text:  p.text,
+        min:   template.min   === null ? null : (template.min   || 4.5),
+        minLc: template.minLc === null ? null : (template.minLc || 75),
+        note:  template.note,
         L: p.Light ? { bg: p.Light.bg.replace(/^color\//, ''), text: p.Light.text.replace(/^color\//, '') } : null,
         D: p.Dark  ? { bg: p.Dark.bg.replace(/^color\//, ''),  text: p.Dark.text.replace(/^color\//, '')  } : null,
       };
@@ -211,8 +238,17 @@ function validateSemanticPairs(ds) {
   const resolvedPairs = [];
   const tableRows = [];
 
+  // Algorithm-gated "did this pair pass?" decision. Returns the gated boolean
+  // alongside the underlying wcag/apca pass values, so the row can store all three.
+  function gatePass(ratio, lc, tmpl) {
+    const wcagPass = tmpl.min   === null ? null : ratio        >= tmpl.min;
+    const apcaPass = tmpl.minLc === null ? null : Math.abs(lc) >= tmpl.minLc;
+    const pass     = algorithm === 'apca' ? apcaPass : wcagPass;
+    return { wcagPass, apcaPass, pass };
+  }
+
   for (const tmpl of sourceTemplates) {
-    const row = { bg: tmpl.bg, text: tmpl.text, min: tmpl.min, note: tmpl.note };
+    const row = { bg: tmpl.bg, text: tmpl.text, min: tmpl.min, minLc: tmpl.minLc, note: tmpl.note };
 
     for (const [mode, side] of [['Light', tmpl.L], ['Dark', tmpl.D]]) {
       if (!side) { row[mode] = undefined; continue; }
@@ -227,9 +263,12 @@ function validateSemanticPairs(ds) {
       let bgLum  = luminance(bgRes.rgb);
       const txtLum = luminance(txtRes.rgb);
       let ratio  = wcagRatio(bgLum, txtLum);
-      let lc     = Math.abs(apcaLc(txtRes.rgb, bgRes.rgb));
-      let pass   = tmpl.min === null ? null : ratio >= tmpl.min;
+      let lc     = apcaLc(txtRes.rgb, bgRes.rgb); // signed; rendered as Math.abs in UI
+      let { wcagPass, apcaPass, pass } = gatePass(ratio, lc, tmpl);
 
+      // Surface-success Light retry — if the gated metric currently fails, walk
+      // the green ramp to a darker step and re-evaluate. Works under both
+      // algorithms because gatePass returns the gated `pass` for the new bg.
       if (
         pass === false &&
         mode === 'Light' &&
@@ -240,12 +279,16 @@ function validateSemanticPairs(ds) {
         if (darkerSuccessBg) {
           const darkerBgLum = luminance(darkerSuccessBg.rgb);
           const darkerRatio = wcagRatio(darkerBgLum, txtLum);
-          if (darkerRatio >= tmpl.min) {
-            bgRes = darkerSuccessBg;
-            bgLum = darkerBgLum;
-            ratio = darkerRatio;
-            lc = Math.abs(apcaLc(txtRes.rgb, bgRes.rgb));
-            pass = true;
+          const darkerLc    = apcaLc(txtRes.rgb, darkerSuccessBg.rgb);
+          const darkerGate  = gatePass(darkerRatio, darkerLc, tmpl);
+          if (darkerGate.pass) {
+            bgRes    = darkerSuccessBg;
+            bgLum    = darkerBgLum;
+            ratio    = darkerRatio;
+            lc       = darkerLc;
+            wcagPass = darkerGate.wcagPass;
+            apcaPass = darkerGate.apcaPass;
+            pass     = darkerGate.pass;
           }
         }
       }
@@ -254,17 +297,25 @@ function validateSemanticPairs(ds) {
 
       if (pass === false) {
         failCount++;
-        suggestion = suggestStep(side.text, bgRes.rgb, tmpl.min);
+        const scorer    = algorithm === 'apca' ? apcaScorer : wcagScorer;
+        const threshold = algorithm === 'apca' ? tmpl.minLc : tmpl.min;
+        suggestion = suggestStepFor(side.text, bgRes.rgb, scorer, threshold);
       }
 
       const wcagLabel = ratio >= 7 ? 'AAA' : ratio >= 4.5 ? 'AA' : ratio >= 3 ? '3:1' : 'fail';
+      const apcaLabel = apcaPass === null ? 'exempt' : apcaPass ? 'pass' : 'fail';
 
       row[mode] = {
         bg: bgRes.path, text: txtRes.path,
         wcag: Math.round(ratio * 10) / 10,
-        wcagLabel, apca: lc, pass,
+        wcagLabel,
+        wcagPass,
+        apca: lc,                // signed — see plan blind-spot #2
+        apcaLabel,
+        apcaPass,
+        pass,
         bgClamped: bgRes.clamped, txtClamped: txtRes.clamped,
-        suggestion: suggestion ? { path: suggestion.path, wcag: Math.round(suggestion.ratio * 10) / 10 } : null,
+        suggestion: suggestion ? { path: suggestion.path, wcag: Math.round(suggestion.ratio * 10) / 10, score: suggestion.score } : null,
       };
     }
 
@@ -291,6 +342,11 @@ function validateSemanticPairs(ds) {
     }
   }
 
+  // Icon contrast gates. WCAG icon minimum is 3:1 (graphical objects, WCAG 2.2 SC 1.4.11).
+  // APCA icon minimum is Lc 60 (essential graphical info, "spot reading" tier).
+  const iconScorer    = algorithm === 'apca' ? apcaScorer : wcagScorer;
+  const iconThreshold = algorithm === 'apca' ? 60 : 3;
+
   const resolvedIcons = ROLE_ICONS.map(ic => {
     // Prefer saved values from a previous run; fall back to template defaults.
     const saved = existingIconMap[ic.token];
@@ -301,14 +357,21 @@ function validateSemanticPairs(ds) {
     const dIcon = resolve(dRef), dBg = resolve(ic.D.bg);
 
     let lRatio = null, dRatio = null, lPass = null, dPass = null;
-    if (lIcon && lBg) { lRatio = Math.round(wcagRatio(luminance(lBg.rgb), luminance(lIcon.rgb)) * 10) / 10; lPass = lRatio >= 3; }
-    if (dIcon && dBg) { dRatio = Math.round(wcagRatio(luminance(dBg.rgb), luminance(dIcon.rgb)) * 10) / 10; dPass = dRatio >= 3; }
+    if (lIcon && lBg) {
+      lRatio = Math.round(wcagRatio(luminance(lBg.rgb), luminance(lIcon.rgb)) * 10) / 10;
+      lPass  = iconScorer(lIcon.rgb, lBg.rgb) >= iconThreshold;
+    }
+    if (dIcon && dBg) {
+      dRatio = Math.round(wcagRatio(luminance(dBg.rgb), luminance(dIcon.rgb)) * 10) / 10;
+      dPass  = iconScorer(dIcon.rgb, dBg.rgb) >= iconThreshold;
+    }
 
-    // Auto-adjust: if an icon step fails 3:1, find the nearest passing step in the same ramp.
-    // This handles light-dominant primaries (e.g. lime) without requiring a manual fix loop.
+    // Auto-adjust: if an icon step fails the gated threshold, find the nearest
+    // passing step in the same ramp. Handles light-dominant primaries (e.g. lime)
+    // without a manual fix loop. Uses the chosen algorithm's scorer.
     let finalLIcon = lIcon, finalDIcon = dIcon;
     if (lPass === false && lIcon && lBg) {
-      const adj = suggestStep(lRef, lBg.rgb, 3);
+      const adj = suggestStepFor(lRef, lBg.rgb, iconScorer, iconThreshold);
       if (adj) {
         finalLIcon = resolve(adj.path.replace(/^color\//, ''));
         lRatio = Math.round(adj.ratio * 10) / 10;
@@ -316,7 +379,7 @@ function validateSemanticPairs(ds) {
       }
     }
     if (dPass === false && dIcon && dBg) {
-      const adj = suggestStep(dRef, dBg.rgb, 3);
+      const adj = suggestStepFor(dRef, dBg.rgb, iconScorer, iconThreshold);
       if (adj) {
         finalDIcon = resolve(adj.path.replace(/^color\//, ''));
         dRatio = Math.round(adj.ratio * 10) / 10;
@@ -335,10 +398,16 @@ function validateSemanticPairs(ds) {
 
   // ── Format output ────────────────────────────────────────────────────────────
   const r2 = x => x != null ? `${x.toFixed(1)}:1` : '—';
+  // Badge text reflects the gated algorithm. Both algorithms surface their own
+  // numeric column (`Light ratio`, `Light APCA`); the badge calls out the verdict
+  // tied to whichever algorithm the designer picked.
   const badge = (pass, lc) => {
     if (pass === null) return '— exempt';
-    if (pass) return `✓ AA (Lc ${lc})`;
-    return '✗ FAIL';
+    if (algorithm === 'apca') {
+      const lcAbs = lc == null ? '?' : Math.abs(lc);
+      return pass ? `✓ APCA (Lc ${lcAbs})` : '✗ APCA fail';
+    }
+    return pass ? `✓ AA` : '✗ FAIL';
   };
 
   let markdownTable = `| bg token | text token | Light ratio | Light APCA | Light | Dark ratio | Dark APCA | Dark | Note |\n`;
@@ -348,8 +417,8 @@ function validateSemanticPairs(ds) {
     const L = row.Light, D = row.Dark;
     const lRatio = L && L.wcag != null ? r2(L.wcag) : '—';
     const dRatio = D && D.wcag != null ? r2(D.wcag) : '—';
-    const lApca  = L && L.apca != null ? `Lc ${L.apca}` : '—';
-    const dApca  = D && D.apca != null ? `Lc ${D.apca}` : '—';
+    const lApca  = L && L.apca != null ? `Lc ${Math.abs(L.apca)}` : '—';
+    const dApca  = D && D.apca != null ? `Lc ${Math.abs(D.apca)}` : '—';
     const lBadge = L ? badge(L.pass, L.apca) : '—';
     const dBadge = D ? badge(D.pass, D.apca) : '—';
 
@@ -361,11 +430,13 @@ function validateSemanticPairs(ds) {
     markdownTable += `| \`${row.bg}\` | \`${row.text}\` | ${lRatio} | ${lApca} | ${lBadge} | ${dRatio} | ${dApca} | ${dBadge} | ${noteCol} |\n`;
   }
 
+  // Icon table: render the chosen algorithm's verdict label.
+  const iconBadgeOk = algorithm === 'apca' ? '✓ Lc≥60' : '✓ 3:1';
   let iconTable = `| icon token | Light ratio | Light | Dark ratio | Dark |\n`;
   iconTable    += `|---|---|---|---|---|\n`;
   for (const ic of resolvedIcons) {
-    const lB = ic.lPass === false ? '✗ FAIL' : ic.lPass ? '✓ 3:1' : '—';
-    const dB = ic.dPass === false ? '✗ FAIL' : ic.dPass ? '✓ 3:1' : '—';
+    const lB = ic.lPass === false ? '✗ FAIL' : ic.lPass ? iconBadgeOk : '—';
+    const dB = ic.dPass === false ? '✗ FAIL' : ic.dPass ? iconBadgeOk : '—';
     iconTable += `| \`${ic.token}\` | ${r2(ic.lRatio)} | ${lB} | ${r2(ic.dRatio)} | ${dB} |\n`;
   }
 
@@ -380,9 +451,10 @@ function validateSemanticPairs(ds) {
     unpaired: resolvedUnpaired,
   };
 
+  const passLabel = algorithm === 'apca' ? 'APCA Lc minimum' : 'AA minimum';
   const failBlock = failCount
-    ? `\n⚠️  ${failCount} pair(s) fail — see "suggest" column for nearest passing step.`
-    : '\n✓ All pairs pass AA minimum.';
+    ? `\n⚠️  ${failCount} pair(s) fail ${passLabel} — see "suggest" column for nearest passing step.`
+    : `\n✓ All pairs pass ${passLabel}.`;
 
   const clampedPairs = resolvedPairs.filter(r =>
     (r.Light && (r.Light.bgClamped || r.Light.txtClamped)) ||
@@ -393,7 +465,7 @@ function validateSemanticPairs(ds) {
     : '';
 
   const summary =
-    `Validated ${resolvedPairs.length} pairs + ${resolvedIcons.length} icon tokens (${convention}).` +
+    `Validated ${resolvedPairs.length} pairs + ${resolvedIcons.length} icon tokens (${convention}, ${algorithm}).` +
     failBlock + clampBlock +
     '\nDS.color.semantics written to config.';
 

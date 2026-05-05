@@ -1327,9 +1327,18 @@ async function _buildShowcase(opts) {
     return Math.round(lc > 0 ? lc * 100 - 12.5 : lc * 100 + 12.5);
   }
 
-  const _semColl       = dsCollections.find(c => c.isAlias && c.colorVarCount > 0);
-  const _primColls     = dsCollections.filter(c => c.isPrimitive && c.colorVarCount > c.floatVarCount);
-  const _semanticColls = dsCollections.filter(c => c.isAlias && c.colorVarCount > 0);
+  var _cfgSemName  = (opts.DS && opts.DS.collections && opts.DS.collections.color)       ? opts.DS.collections.color       : null;
+  var _cfgPrimName = (opts.DS && opts.DS.collections && opts.DS.collections.primitives)  ? opts.DS.collections.primitives  : null;
+
+  const _semColl = _cfgSemName
+    ? (dsCollections.find(c => c.name === _cfgSemName) || dsCollections.find(c => c.isAlias && c.colorVarCount > 0))
+    : dsCollections.find(c => c.isAlias && c.colorVarCount > 0);
+  const _primColls = _cfgPrimName
+    ? dsCollections.filter(c => c.name === _cfgPrimName)
+    : dsCollections.filter(c => c.isPrimitive && c.colorVarCount > c.floatVarCount);
+  const _semanticColls = _cfgSemName
+    ? dsCollections.filter(c => c.name === _cfgSemName)
+    : dsCollections.filter(c => c.isAlias && c.colorVarCount > 0);
   const _floatColls    = dsCollections.filter(c =>
     c.floatVarCount > c.colorVarCount &&
     (!c.isAlias || (c.colorVarCount === 0 && c.floatVarCount > 0))
@@ -4328,6 +4337,7 @@ function _semanticColorEntries(DS) {
 async function _updateDsPrimitives(payload) {
   var DS = (payload && payload.DS) || {};
   var createMissing = !!(payload && payload.createMissing);
+  var pruneOffScale = !!(payload && payload.pruneOffScale);
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : Object.keys(UPDATE_PRIMITIVE_SPECS);
@@ -4529,6 +4539,34 @@ async function _updateDsPrimitives(payload) {
     };
   }
 
+  var pruneCount = 0;
+  if (pruneOffScale && DS.color && Array.isArray(DS.color.ramps) && DS.color.ramps.length > 0) {
+    var validStepsByFolder = {};
+    for (var pri = 0; pri < DS.color.ramps.length; pri++) {
+      var rampDef = DS.color.ramps[pri];
+      var validSet = {};
+      for (var psi = 0; psi < rampDef.steps.length; psi++) {
+        validSet[String(rampDef.steps[psi][0])] = true;
+      }
+      validStepsByFolder[rampDef.folder + '/'] = validSet;
+    }
+    var byNameKeys = Object.keys(byName);
+    for (var bki = 0; bki < byNameKeys.length; bki++) {
+      var bkName = byNameKeys[bki];
+      var matchedFolder = null;
+      var folderKeys = Object.keys(validStepsByFolder);
+      for (var fki = 0; fki < folderKeys.length; fki++) {
+        if (bkName.indexOf(folderKeys[fki]) === 0) { matchedFolder = folderKeys[fki]; break; }
+      }
+      if (!matchedFolder) continue;
+      var leafStep = bkName.slice(matchedFolder.length);
+      if (!/^\d+$/.test(leafStep)) continue;
+      if (!validStepsByFolder[matchedFolder][leafStep]) {
+        try { byName[bkName].remove(); pruneCount++; } catch (e) {}
+      }
+    }
+  }
+
   var msgParts = [];
   for (var k in report) {
     if (Object.prototype.hasOwnProperty.call(report, k)) {
@@ -4539,12 +4577,14 @@ async function _updateDsPrimitives(payload) {
         (report[k].unmatched.length ? ', ' + report[k].unmatched.length + ' missing' : ''));
     }
   }
+  if (pruneCount) msgParts.push('pruned ' + pruneCount + ' off-scale steps');
 
   return {
     collection: primName,
     categories: requested,
     unknownCategories: unknown,
     report: report,
+    pruned: pruneCount,
     message: msgParts.length ? msgParts.join('; ') : 'No categories processed.',
   };
 }

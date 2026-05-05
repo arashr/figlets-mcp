@@ -41,6 +41,15 @@ function generateColorRamps(ds) {
       Math.abs(v - 500) < Math.abs(steps[best] - 500) ? i : best, 0);
   })();
 
+  function brandAnchorIdx(brand) {
+    if (brand.step == null) return midIdx;
+    const target = Number(brand.step);
+    const exact = steps.indexOf(target);
+    if (exact !== -1) return exact;
+    return steps.reduce((best, v, i) =>
+      Math.abs(v - target) < Math.abs(steps[best] - target) ? i : best, 0);
+  }
+
   // ── Color math ───────────────────────────────────────────────────────────────
   function hexToRgb(hex) {
     const h = hex.replace('#', '');
@@ -95,18 +104,19 @@ function generateColorRamps(ds) {
   const LIGHT_TARGET = 97;
   const DARK_TARGET  =  6;
 
-  function generateRampHsl(baseHex) {
+  function generateRampHsl(baseHex, anchorIdx) {
+    if (anchorIdx === undefined) anchorIdx = midIdx;
     const { r, g, b } = hexToRgb(baseHex);
     const { h, s, l } = rgbToHsl(r, g, b);
     return steps.map((step, i) => {
-      if (i === midIdx) return { step, r, g, b };
+      if (i === anchorIdx) return { step, r, g, b };
       let newL, newS;
-      if (i < midIdx) {
-        const t = Math.pow((midIdx - i) / midIdx, 0.75);
+      if (i < anchorIdx) {
+        const t = Math.pow((anchorIdx - i) / Math.max(1, anchorIdx), 0.75);
         newL = l + (LIGHT_TARGET - l) * t;
         newS = s * (1 - t * 0.85);
       } else {
-        const t = Math.pow((i - midIdx) / (steps.length - 1 - midIdx), 0.8);
+        const t = Math.pow((i - anchorIdx) / Math.max(1, steps.length - 1 - anchorIdx), 0.8);
         newL = l + (DARK_TARGET - l) * t;
         newS = t < 0.55
           ? s * (1 + t * 0.18)
@@ -124,18 +134,19 @@ function generateColorRamps(ds) {
   const OKLCH_DARK_TARGET  = 0.18;
   const OKLCH_NEUTRAL_MID  = 0.56;
 
-  function generateRampOklch(baseHex) {
+  function generateRampOklch(baseHex, anchorIdx) {
+    if (anchorIdx === undefined) anchorIdx = midIdx;
     const base = hexToRgb(baseHex);
     const { L: baseL, C: baseC, H } = srgbToOklch(base);
     return steps.map((step, i) => {
-      if (i === midIdx) return { step, r: base.r, g: base.g, b: base.b };
+      if (i === anchorIdx) return { step, r: base.r, g: base.g, b: base.b };
       let newL, newC;
-      if (i < midIdx) {
-        const t = Math.pow((midIdx - i) / midIdx, 0.8);
+      if (i < anchorIdx) {
+        const t = Math.pow((anchorIdx - i) / Math.max(1, anchorIdx), 0.8);
         newL = baseL + (OKLCH_LIGHT_TARGET - baseL) * t;
         newC = baseC * (1 - t * 0.55);
       } else {
-        const t = Math.pow((i - midIdx) / (steps.length - 1 - midIdx), 0.9);
+        const t = Math.pow((i - anchorIdx) / Math.max(1, steps.length - 1 - anchorIdx), 0.9);
         newL = baseL + (OKLCH_DARK_TARGET - baseL) * t;
         newC = t < 0.5
           ? baseC * (1 + t * 0.15)
@@ -351,7 +362,8 @@ function generateColorRamps(ds) {
 
   for (const brand of brandColors) {
     if (!brand.hex || brand.hex === 'TBD') continue;
-    const stepsData = generateRamp(brand.hex);
+    const anchorIdx = brandAnchorIdx(brand);
+    const stepsData = generateRamp(brand.hex, anchorIdx);
     const folder    = `color/${brand.name}`;
     allRamps.push({ folder, steps: stepsData.map(({ step, r, g, b }) => [step, r, g, b]) });
     allAnalysis.push({ folder, rows: analyzeRamp(folder, stepsData), rangeWarns: checkRange(folder, stepsData) });

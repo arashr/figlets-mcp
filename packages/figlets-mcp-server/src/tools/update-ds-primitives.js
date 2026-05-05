@@ -41,6 +41,10 @@ const updateDsPrimitivesTool = {
         type: 'boolean',
         description: 'When true, add missing primitive variables in the existing Primitives collection before setting their values. Existing variable IDs are preserved.',
       },
+      prune_off_scale: {
+        type: 'boolean',
+        description: 'When true, delete primitive color variables whose step number is not in the configured scale (e.g. removes /50 and /950 orphans after switching from a 50-950 to a 100-900 scale).',
+      },
     },
     required: ['config_path'],
   },
@@ -50,6 +54,7 @@ function handleUpdateDsPrimitives(args) {
   const configPath = args && args.config_path;
   const categories = args && Array.isArray(args.categories) ? args.categories : undefined;
   const createMissing = !!(args && args.create_missing);
+  const pruneOffScale = !!(args && args.prune_off_scale);
 
   if (!configPath) {
     return Promise.resolve({ error: 'config_path is required.' });
@@ -82,7 +87,7 @@ function handleUpdateDsPrimitives(args) {
     return Promise.resolve({ error: 'Config is missing DS.primitives. Run prepare_ds_config first.' });
   }
 
-  const body = JSON.stringify({ DS: ds, categories: categories, createMissing: createMissing });
+  const body = JSON.stringify({ DS: ds, categories: categories, createMissing: createMissing, pruneOffScale: pruneOffScale });
 
   return new Promise((resolve) => {
     const req = http.request(`${receiverUrl}/request-update-primitives`, {

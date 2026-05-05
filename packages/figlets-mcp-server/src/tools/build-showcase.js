@@ -1,4 +1,6 @@
 const http = require("http");
+const path = require("path");
+const fs   = require("fs");
 
 const buildShowcaseTool = {
   name: "build_ds_showcase",
@@ -25,8 +27,23 @@ const buildShowcaseTool = {
 
 function handleBuildShowcase(args = {}) {
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+
+  let dsCollections = null;
+  try {
+    const vm = require("vm");
+    const configPath = path.resolve(process.cwd(), ".local/design-system.config.js");
+    if (fs.existsSync(configPath)) {
+      const src = fs.readFileSync(configPath, "utf8")
+        .replace(/^\s*(const|let|var)\s+DS\s*=/m, "DS =");
+      const ctx = {};
+      vm.runInNewContext(src, ctx);
+      if (ctx.DS && ctx.DS.collections) dsCollections = ctx.DS.collections;
+    }
+  } catch (_) {}
+
   const payload = JSON.stringify({
-    numericFallback: args.numericFallback || null
+    numericFallback: args.numericFallback || null,
+    DS: dsCollections ? { collections: dsCollections } : undefined
   });
 
   return new Promise((resolve, reject) => {

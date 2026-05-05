@@ -2030,6 +2030,65 @@ async function _buildShowcase(opts) {
     return badge;
   }
 
+  // Algorithm-aware status badge. Uses APCA thresholds when contrastAlgorithm === 'apca',
+  // WCAG thresholds otherwise. lc = signed APCA Lc, ratio = WCAG ratio.
+  function _buildStatusBadge(lc, ratio) {
+    var algorithm = (opts.DS && opts.DS.color && opts.DS.color.contrastAlgorithm) || 'wcag';
+    var absLc = Math.abs(lc);
+    var bg, border, fg, bgV, bdV, fgV, sign, score;
+    if (algorithm === 'apca') {
+      if (absLc >= 75) {
+        bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
+        bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
+        sign = '✓'; score = 'Lc 75';
+      } else if (absLc >= 60) {
+        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
+        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
+        sign = '✓'; score = 'Lc 60';
+      } else {
+        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
+        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
+        sign = '✗'; score = 'Fail';
+      }
+    } else {
+      if (ratio >= 7) {
+        bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
+        bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
+        sign = '✓'; score = 'AAA';
+      } else if (ratio >= 4.5) {
+        bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
+        bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
+        sign = '✓'; score = 'AA';
+      } else if (ratio >= 3) {
+        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
+        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
+        sign = '~'; score = 'Large';
+      } else {
+        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
+        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
+        sign = '✗'; score = 'Fail';
+      }
+    }
+    var badge = _f('Status Badge', 'HORIZONTAL');
+    badge.paddingLeft = 8; badge.paddingRight = 8;
+    badge.paddingTop  = 4; badge.paddingBottom = 4;
+    badge.itemSpacing = 4;
+    badge.cornerRadius = 8;
+    badge.primaryAxisAlignItems = 'CENTER';
+    badge.counterAxisAlignItems = 'CENTER';
+    badge.fills = [_paint(bg, bgV)];
+    if (bdV) {
+      badge.strokes = [_paint(border, bdV)];
+      badge.strokeWeight = 1;
+      badge.strokeAlign  = 'INSIDE';
+    } else {
+      badge.strokes = [];
+    }
+    badge.appendChild(_tDS(sign,  10, fg, true, fgV));
+    badge.appendChild(_tDS(score, 10, fg, true, fgV));
+    return badge;
+  }
+
   function _buildGroupHeader(label) {
     const row = _f('Group Header', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
@@ -2418,32 +2477,23 @@ async function _buildShowcase(opts) {
       apcaLcCell.resize(128, 1);
       apcaLcCell.layoutSizingVertical   = 'FILL';
 
-      const apcaBadgeCell = _f('APCABadgeCell', 'HORIZONTAL');
-      apcaBadgeCell.primaryAxisAlignItems = 'CENTER';
-      apcaBadgeCell.counterAxisAlignItems = 'CENTER';
-      apcaBadgeCell.appendChild(_buildApcaBadge(lc));
-      row.appendChild(apcaBadgeCell);
-      apcaBadgeCell.layoutSizingHorizontal = 'FIXED';
-      apcaBadgeCell.resize(128, 1);
-      apcaBadgeCell.layoutSizingVertical   = 'FILL';
+      const statusCell = _f('StatusCell', 'HORIZONTAL');
+      statusCell.primaryAxisAlignItems = 'CENTER';
+      statusCell.counterAxisAlignItems = 'CENTER';
+      statusCell.appendChild(_buildStatusBadge(lc, ratio));
+      row.appendChild(statusCell);
+      statusCell.layoutSizingHorizontal = 'FIXED';
+      statusCell.resize(128, 1);
+      statusCell.layoutSizingVertical   = 'FILL';
 
       const metricCell = _f('MetricCell', 'HORIZONTAL');
       metricCell.primaryAxisAlignItems = 'CENTER';
       metricCell.counterAxisAlignItems = 'CENTER';
-      metricCell.appendChild(_tDS(`${ratio.toFixed(2)}:1`, 14, _textColor, false, _V.text));
+      metricCell.appendChild(_tDS(ratio.toFixed(2) + ':1', 14, _textColor, false, _V.text));
       row.appendChild(metricCell);
       metricCell.layoutSizingHorizontal = 'FIXED';
       metricCell.resize(128, 1);
       metricCell.layoutSizingVertical   = 'FILL';
-
-      const badgeCell = _f('BadgeCell', 'HORIZONTAL');
-      badgeCell.primaryAxisAlignItems = 'CENTER';
-      badgeCell.counterAxisAlignItems = 'CENTER';
-      badgeCell.appendChild(_buildBadge(ratio));
-      row.appendChild(badgeCell);
-      badgeCell.layoutSizingHorizontal = 'FIXED';
-      badgeCell.resize(128, 1);
-      badgeCell.layoutSizingVertical   = 'FILL';
     }
 
     return row;
@@ -3139,10 +3189,11 @@ async function _buildShowcase(opts) {
       if (_mainGroups.length) {
         const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
         const _semHeading = _buildTableHeading([
-          { text: 'Token',    flex: true },
-          { text: 'Example',  flex: true },
-          { text: 'Contrast', width: 128, center: true },
-          { text: 'WCAG',     width: 128, center: true },
+          { text: 'Token',   flex: true },
+          { text: 'Example', flex: true },
+          { text: 'APCA Lc', width: 128, center: true },
+          { text: 'Status',  width: 128, center: true },
+          { text: 'WCAG',    width: 128, center: true },
         ], 16);
         _semTable.appendChild(_semHeading);
         _semHeading.layoutSizingHorizontal = 'FILL';
@@ -3167,6 +3218,9 @@ async function _buildShowcase(opts) {
         const _btHeading = _buildTableHeading([
           { text: 'Token',   flex: true },
           { text: 'Example', flex: true },
+          { text: 'APCA Lc', width: 128, center: true },
+          { text: 'Status',  width: 128, center: true },
+          { text: 'WCAG',    width: 128, center: true },
         ], 16);
         _btTable.appendChild(_btHeading);
         _btHeading.layoutSizingHorizontal = 'FILL';
@@ -4337,7 +4391,8 @@ function _semanticColorEntries(DS) {
 async function _updateDsPrimitives(payload) {
   var DS = (payload && payload.DS) || {};
   var createMissing = !!(payload && payload.createMissing);
-  var pruneOffScale = !!(payload && payload.pruneOffScale);
+  var pruneOffScale    = !!(payload && payload.pruneOffScale);
+  var pruneUnusedRamps = !!(payload && payload.pruneUnusedRamps);
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : Object.keys(UPDATE_PRIMITIVE_SPECS);
@@ -4579,12 +4634,36 @@ async function _updateDsPrimitives(payload) {
   }
   if (pruneCount) msgParts.push('pruned ' + pruneCount + ' off-scale steps');
 
+  var pruneRampCount = 0;
+  if (pruneUnusedRamps && DS.color && Array.isArray(DS.color.ramps) && DS.color.ramps.length > 0) {
+    var configuredFolders = {};
+    for (var cri = 0; cri < DS.color.ramps.length; cri++) {
+      configuredFolders[DS.color.ramps[cri].folder] = true;
+    }
+    var allPrimKeys = Object.keys(byName);
+    for (var uki = 0; uki < allPrimKeys.length; uki++) {
+      var ukName = allPrimKeys[uki];
+      // Match exactly color/<name>/<digits> — three segments, numeric leaf.
+      var ukParts = ukName.split('/');
+      if (ukParts.length !== 3) continue;
+      if (ukParts[0] !== 'color') continue;
+      if (!/^\d+$/.test(ukParts[2])) continue;
+      var rampFolder = 'color/' + ukParts[1];
+      if (configuredFolders[rampFolder]) continue;
+      try { byName[ukName].remove(); pruneRampCount++; } catch (e) {}
+    }
+    if (pruneRampCount && report['color']) {
+      report['color'].prunedRamps = pruneRampCount;
+    }
+  }
+  if (pruneRampCount) msgParts.push('pruned ' + pruneRampCount + ' variables from unused ramps');
+
   return {
     collection: primName,
     categories: requested,
     unknownCategories: unknown,
     report: report,
-    pruned: pruneCount,
+    pruned: pruneCount + pruneRampCount,
     message: msgParts.length ? msgParts.join('; ') : 'No categories processed.',
   };
 }

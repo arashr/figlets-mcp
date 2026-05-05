@@ -4,6 +4,54 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-05 — auto-anchor + showcase columns + rebrand demo]
+
+**Shipped this session:**
+
+1. **Auto-anchor brand step from luminance** (`generate-color-ramps.js`): `brandAnchorIdx` now returns `{ idx, step, isAuto }`. When `brand.step` is omitted, the step is derived from OKLab L via `t = (OKLCH_LIGHT_TARGET − L) / (OKLCH_LIGHT_TARGET − OKLCH_DARK_TARGET)` and snapped to the nearest configured scale step. When explicit, `isAuto: false`. The ramp summary shows each brand with its resolved step and source (auto/override). Test: `tests/core/brand-anchor.test.js`.
+
+2. **Showcase contrast columns** (`code.js`): Replaced single `Contrast` header with three explicit headers — `APCA Lc`, `Status`, `WCAG` — on both the main semantic table and the icon bottom table. `Status` badge is algorithm-aware: APCA mode uses Lc 75 / Lc 60 / Fail thresholds; WCAG mode uses AAA / AA / Large / Fail. The WCAG badge cell (previously a 4th column) was removed; WCAG ratio stays as a plain number. `_buildStatusBadge(lc, ratio)` is the new entry point.
+
+3. **`prune_unused_ramps` flag** (`update-ds-primitives.js` + `code.js`): New `prune_unused_ramps: true` tool option. Plugin deletes any `color/<name>/<digits>` variable in Primitives whose `color/<name>` folder is not in `DS.color.ramps`. Count reported in `report['color'].prunedRamps` and added to `pruned` total.
+
+4. **Cascade-safety warnings** (`index.js` + `prepare-ds-config.js`): `runDsPipeline` scans resolved semantics for `color/<name>/<step>` refs where `<name>` is not a configured brand or utility ramp. Surfaces as `staleSemantics: [{ token, ref, currentName }]` (non-throwing). `apcaFailCount` is now explicitly named in the prepare output. Both surface in the prepare summary message.
+
+5. **Full rebrand demo — Green Apple → lime/teal/sand**: Replaced peach/lime/teal/gold brand config with lime (primary, step 500 override), teal (secondary, auto→600), sand (no role, auto→500). `prune_unused_ramps` deleted 18 variables (peach + gold ramps). 9 created (sand). 5 semantics updated. Zero binding warnings in showcase. 11 APCA failures remain: 9 pre-existing utility-color failures (same step choices as before), 2 from `surface/brand` (Lc 50 — brand hex at mid-luminance, accepted for large-text usage).
+
+**Resolved open issues from prior session:**
+- Brand-step is now auto-derived (issue 2) ✓
+- Showcase contrast columns standardized (issue 3) ✓
+- Brand-removal cascade is now handled by `prune_unused_ramps` for primitives + `staleSemantics` warning for semantic refs (issue 1, partial) ✓
+
+**Open for next session:**
+- `surface/brand` Lc 50 (both modes): the lime hex at mid-luminance gives insufficient APCA for body text. Either a lighter lime surface step or white text would fix it. Designer accepted Lc 50 for this session.
+- `surface/default`/`on-surface/variant` Dark: Lc 56 (neutral/300 on dark surface). Pre-existing, needs a step bump.
+- Status-color surfaces (danger/success/warning/info): 9 pre-existing APCA failures from the utility-color step choices.
+- **Swatch indicators ignore `contrastAlgorithm`**: `_buildSwatch` and `_swatchIndicator` both use WCAG ≥ 4.5 hardcoded. On an APCA project the indicator fires on WCAG-passing swatches that fail APCA Lc 60. Will be fixed next commit: indicator gates on the configured algo, shows "✓ Lc XX" (APCA) or "✓" (WCAG), and displays the ramp step number instead of "Aa".
+
+---
+
+### [2026-05-05 — per-brand step anchor + scoped semantic showcase]
+
+**Shipped this session (commit `13362e2`):**
+- `generate-color-ramps.js`: brand entries accept `step: NNN`. The brand hex anchors at that step instead of the scale midpoint (default `midIdx`). Light side fans toward step 100 (L≈0.97), dark side toward step 900 (L≈0.18) from the declared anchor. Backward-compatible — `step` omitted falls back to old behavior.
+- `update-ds-primitives` (tool + plugin): new `prune_off_scale: true` flag deletes primitives in the configured ramp folders whose step number is outside the active scale (e.g. `/50` and `/950` after switching to a 100–900 scale). Scoped to ramps in `DS.color.ramps`; never touches arbitrary variables.
+- `build-showcase` (tool + plugin): the tool now reads `.local/design-system.config.js` and forwards `DS.collections` to the plugin. The plugin filters `_semanticColls` and `_primColls` by name when the config is provided, falling back to the existing heuristic only when not. Stops component-scoped alias collections (e.g. `Button · Type`) from being rendered as semantic color tokens.
+- `.local/design-system.config.js`: added `step: 400` to lime, `step: 700` to teal, added a `gold` accent brand entry with `#C9943A` at `step: 500`. Pipeline regenerated all ramps; lime/400, teal/700, and gold/500 hold the brand hexes exactly.
+
+**Live verification on the Green Apple file:**
+- `color/lime/400` = `#88bf2e`, `color/teal/700` = `#2f6b6b`, `color/gold/100..900` created (9 new variables).
+- Orphan `/50` and `/950` from lime, teal, neutral, red, green, yellow, blue all pruned. Every ramp is now a clean 9-step 100–900.
+- Showcase rebuilds with zero binding warnings (was 2). Button · Type collection no longer pollutes the semantic-color table.
+
+**Open issues surfaced for the next session (not yet addressed):**
+1. **Brand-removal cascade is manual.** When a brand color is removed from `DS.color.brand[]`, the agent must also rewrite `DS.color.semantics` (which still hard-codes `color/<name>/<step>` paths), purge the `color/<name>/*` primitives in Figma (the new `prune_off_scale` only handles steps within configured ramps, not whole removed ramps), and surface any direct component bindings to those primitives. There is no tool for this today; the designer experiences the gap as "the config is polluted."
+2. **Brand-step is not auto-derived.** The `step` field is honored when set but defaults to scale-mid when omitted. Auto-detection should map OKLab L → step using the same `LIGHT_TARGET`/`DARK_TARGET` constants the ramp generator uses. `step` stays as an explicit override.
+3. **Showcase contrast columns are inconsistent.** The third "badge" column mixes APCA conventions ("Lc 60", "Lc 75", "Fail") with WCAG conventions ("✓ AA", "✓ AAA"), and the new APCA-Lc and badge columns have no headers. Designer can't tell what each column means. Should standardize on the configured `DS.color.contrastAlgorithm` for the badge and add explicit headers for "APCA Lc" and "WCAG".
+4. **Add/remove ramp safety.** Adding a brand ramp is silent (config is rewritten, designer doesn't see what changed at the semantic level); removing a brand ramp without an offered reassignment leaves the semantic section pointing at non-existent primitives. Both flows need a confirmation step from the agent before semantics are written.
+
+---
+
 ## Current Pillar Decision — Binding Policy
 
 As of 2026-05-02, design-system binding is **variable-first** for colors, spacing, radii, borders, and scalar layer properties. Figma color/effect styles are fallback metadata, not the primary color binding target. **Typography is the exception:** text styles may be preferred because they can bundle size, line-height, weight, tracking, and family decisions that may themselves be variable-backed.

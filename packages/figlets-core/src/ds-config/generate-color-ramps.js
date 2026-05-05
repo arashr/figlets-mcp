@@ -41,13 +41,27 @@ function generateColorRamps(ds) {
       Math.abs(v - 500) < Math.abs(steps[best] - 500) ? i : best, 0);
   })();
 
+  // Returns { idx, step, isAuto }
   function brandAnchorIdx(brand) {
-    if (brand.step == null) return midIdx;
-    const target = Number(brand.step);
-    const exact = steps.indexOf(target);
-    if (exact !== -1) return exact;
-    return steps.reduce((best, v, i) =>
-      Math.abs(v - target) < Math.abs(steps[best] - target) ? i : best, 0);
+    if (brand.step != null) {
+      const target = Number(brand.step);
+      const exact = steps.indexOf(target);
+      const idx = exact !== -1 ? exact : steps.reduce(function(best, v, i) {
+        return Math.abs(v - target) < Math.abs(steps[best] - target) ? i : best;
+      }, 0);
+      return { idx: idx, step: steps[idx], isAuto: false };
+    }
+    // Derive anchor from OKLab L: light hex → low step number, dark hex → high step number
+    const rgb = hexToRgb(brand.hex);
+    const oklch = srgbToOklch(rgb);
+    const L = oklch.L;
+    const t = (OKLCH_LIGHT_TARGET - L) / (OKLCH_LIGHT_TARGET - OKLCH_DARK_TARGET);
+    const clampedT = Math.max(0, Math.min(1, t));
+    const targetStep = steps[0] + clampedT * (steps[steps.length - 1] - steps[0]);
+    const idx = steps.reduce(function(best, v, i) {
+      return Math.abs(v - targetStep) < Math.abs(steps[best] - targetStep) ? i : best;
+    }, 0);
+    return { idx: idx, step: steps[idx], isAuto: true };
   }
 
   // ── Color math ───────────────────────────────────────────────────────────────
@@ -356,17 +370,19 @@ function generateColorRamps(ds) {
       note: `Split-complementary (+150° hue) from primary ${primaryHex}` });
   }
 
-  const allRamps    = [];
-  const allAnalysis = [];
-  const warnings    = [];
+  const allRamps          = [];
+  const allAnalysis       = [];
+  const warnings          = [];
+  const brandAnchorReport = [];
 
   for (const brand of brandColors) {
     if (!brand.hex || brand.hex === 'TBD') continue;
-    const anchorIdx = brandAnchorIdx(brand);
-    const stepsData = generateRamp(brand.hex, anchorIdx);
-    const folder    = `color/${brand.name}`;
+    const anchorInfo = brandAnchorIdx(brand);
+    const stepsData  = generateRamp(brand.hex, anchorInfo.idx);
+    const folder     = `color/${brand.name}`;
     allRamps.push({ folder, steps: stepsData.map(({ step, r, g, b }) => [step, r, g, b]) });
     allAnalysis.push({ folder, rows: analyzeRamp(folder, stepsData), rangeWarns: checkRange(folder, stepsData) });
+    brandAnchorReport.push({ name: brand.name, hex: brand.hex, step: anchorInfo.step, isAuto: anchorInfo.isAuto });
   }
 
   for (const u of UTILITY_BASES) {
@@ -428,9 +444,17 @@ function generateColorRamps(ds) {
       derivedColors.map(d => `  ${d.role}: ${d.name} ${d.hex} — ${d.note}`).join('\n')
     : '';
 
+  const anchorBlock = brandAnchorReport.length
+    ? `\nBrand anchors:\n` +
+      brandAnchorReport.map(function(b) {
+        const pad = b.name.length < 8 ? b.name + new Array(8 - b.name.length + 1).join(' ') : b.name;
+        return `  ${pad}  ${b.hex}  → step ${b.step} (${b.isAuto ? 'auto' : 'override'})`;
+      }).join('\n')
+    : '';
+
   const summary =
     `Generated ${allRamps.length} ramps (${steps.length} steps each, ${scaleKey} scale, ${algorithm} algorithm):\n` +
-    rampList + derivedBlock + warnBlock;
+    rampList + anchorBlock + derivedBlock + warnBlock;
 
   return { ds: DS, markdownTable, contrastAnnotations, derivedColors, summary };
 }

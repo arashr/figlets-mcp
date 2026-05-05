@@ -45,6 +45,10 @@ const updateDsPrimitivesTool = {
         type: 'boolean',
         description: 'When true, delete primitive color variables whose step number is not in the configured scale (e.g. removes /50 and /950 orphans after switching from a 50-950 to a 100-900 scale).',
       },
+      prune_unused_ramps: {
+        type: 'boolean',
+        description: 'When true, delete primitive color variables that belong to ramp folders not present in the current DS.color.ramps config (e.g. removes an old "peach" ramp entirely after a rebrand). Only removes color/<name>/<step> shaped variables with a numeric leaf.',
+      },
     },
     required: ['config_path'],
   },
@@ -53,8 +57,9 @@ const updateDsPrimitivesTool = {
 function handleUpdateDsPrimitives(args) {
   const configPath = args && args.config_path;
   const categories = args && Array.isArray(args.categories) ? args.categories : undefined;
-  const createMissing = !!(args && args.create_missing);
-  const pruneOffScale = !!(args && args.prune_off_scale);
+  const createMissing    = !!(args && args.create_missing);
+  const pruneOffScale    = !!(args && args.prune_off_scale);
+  const pruneUnusedRamps = !!(args && args.prune_unused_ramps);
 
   if (!configPath) {
     return Promise.resolve({ error: 'config_path is required.' });
@@ -87,7 +92,7 @@ function handleUpdateDsPrimitives(args) {
     return Promise.resolve({ error: 'Config is missing DS.primitives. Run prepare_ds_config first.' });
   }
 
-  const body = JSON.stringify({ DS: ds, categories: categories, createMissing: createMissing, pruneOffScale: pruneOffScale });
+  const body = JSON.stringify({ DS: ds, categories: categories, createMissing: createMissing, pruneOffScale: pruneOffScale, pruneUnusedRamps: pruneUnusedRamps });
 
   return new Promise((resolve) => {
     const req = http.request(`${receiverUrl}/request-update-primitives`, {

@@ -93,14 +93,16 @@ function makeDs(overrides) {
   const { ds: dsHsl, summary: summaryHsl } = generateColorRamps(ds1);
   assert.ok(summaryHsl.includes('hsl'), 'HSL summary should mention hsl algorithm');
 
-  // 500 step pins to brand exactly under both algorithms
+  // Anchor step pins to brand exactly under both algorithms.
+  // The anchor is auto-derived from luminance (cobalt L≈0.62 → step 400 on 50-950 scale).
   const brand = { r: 0x3b / 255, g: 0x82 / 255, b: 0xf6 / 255 };
   for (const ramps of [dsDefault.color.ramps, dsHsl.color.ramps]) {
     const cobalt = ramps.find(r => r.folder === 'color/cobalt');
-    const five = cobalt.steps.find(s => s[0] === 500);
-    assert.ok(Math.abs(five[1] - brand.r) < 1e-6, '500 step red channel must match brand');
-    assert.ok(Math.abs(five[2] - brand.g) < 1e-6, '500 step green channel must match brand');
-    assert.ok(Math.abs(five[3] - brand.b) < 1e-6, '500 step blue channel must match brand');
+    // Find the step that exactly matches the brand hex (the anchor step)
+    const anchorRow = cobalt.steps.find(function(s) {
+      return Math.abs(s[1] - brand.r) < 1e-6 && Math.abs(s[2] - brand.g) < 1e-6 && Math.abs(s[3] - brand.b) < 1e-6;
+    });
+    assert.ok(anchorRow, 'anchor step red channel must match brand exactly');
   }
 
   // OKLCh light tints should retain more chroma than HSL's heavy desaturation.

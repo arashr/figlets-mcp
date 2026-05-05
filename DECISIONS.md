@@ -4,6 +4,75 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-05] Auto-anchor maps OKLab L linearly to the configured step scale
+
+**Decision:** When `brand.step` is omitted, `brandAnchorIdx` computes `t = (OKLCH_LIGHT_TARGET − L) / (OKLCH_LIGHT_TARGET − OKLCH_DARK_TARGET)` where L is the brand hex's OKLab L, then maps `t` linearly across `steps[0]` → `steps[last]` and snaps to the nearest configured step. Constants used: `OKLCH_LIGHT_TARGET = 0.97`, `OKLCH_DARK_TARGET = 0.18`.
+
+**Why:** A linear map produces results that match designer intuition without any calibration data. Tested against three brand hexes: lime (#88bf2e, L≈0.74 → step 300), teal (#2f6b6b, L≈0.49 → step 600), sand (#8D7971, L≈0.59 → step 500) — all confirmed correct on the 100-900 scale.
+
+**Consequence:** The explicit `step` override is still respected and flagged as `(override)` in the prepare summary. Auto-derived steps are flagged as `(auto)`. A future session could use a non-linear map if the linear result proves poor for very dark or very light hexes, but that would be a tuning change only, not an API change.
+
+---
+
+## [2026-05-05] Status badge unifies APCA and WCAG conventions; WCAG badge column removed
+
+**Decision:** The showcase semantic-colors table was using four contrast columns (APCA Lc number, APCA badge, WCAG ratio, WCAG badge), but the heading only declared two (Contrast, WCAG), causing a layout misalignment. Collapsed to three columns: `APCA Lc` (always numeric), `Status` (algorithm-aware badge driven by `DS.color.contrastAlgorithm`), `WCAG` (always numeric ratio). The fourth WCAG badge column was dropped.
+
+**APCA thresholds for Status badge:** Lc ≥ 75 → `✓ Lc 75` (green); Lc ≥ 60 → `✓ Lc 60` (warning); else → `✗ Fail`.
+**WCAG thresholds for Status badge:** ≥ 7 → `✓ AAA`; ≥ 4.5 → `✓ AA`; ≥ 3 → `~ Large`; else → `✗ Fail`.
+
+**Why:** Designers reading the showcase couldn't tell which algorithm's verdict to trust. The mixed "Lc 60" / "✓ AA" labels on the same row implied both applied. Collapsing to a single `Status` column keyed to the project's declared algorithm removes ambiguity while keeping both raw numbers visible for reference.
+
+---
+
+## [2026-05-05] `prune_unused_ramps` scopes strictly to `color/<name>/<digits>` shape
+
+**Decision:** `pruneUnusedRamps` deletes Primitives variables matching `color/<name>/<digits>` (exactly 3 path segments, numeric leaf) where `color/<name>` is not in `DS.color.ramps`. It does not touch `color/scrim/*`, `color/neutral-variant/*` when not in ramps, or any variable with a non-numeric leaf or more than 3 segments.
+
+**Why:** A broader pattern (e.g., deleting any `color/<name>/*`) would silently remove hand-crafted scrim or elevation helpers. The 3-segment + numeric-leaf shape is unique to ramp step variables and is safe to delete by formula.
+
+**Consequence:** Non-ramp `color/` variables (scrims, shadows, any flat `color/<name>`) are never pruned. If a ramp is not configured but its folder remains in Figma, only the numeric-step children are deleted — the folder itself would become empty and can be cleaned up manually.
+
+---
+
+## [2026-05-05] Brand entries declare their step in the ramp
+
+**Decision:** Each entry in `DS.color.brand[]` may carry an optional `step` field that names which step of the configured scale the brand hex anchors at. When absent, the next session will auto-derive the step from the brand's OKLab L (mapped against `OKLCH_LIGHT_TARGET = 0.97` at the lightest step and `OKLCH_DARK_TARGET = 0.18` at the darkest). Until auto-derivation lands, omitted `step` defaults to the scale midpoint for backward compatibility.
+
+**Why:**
+- A vivid mid-light brand hex (e.g. lime `#88bf2e`, L ≈ 0.755) anchored at /500 produces an over-saturated middle and weak tints. Designers recognized this immediately from the screenshot and asked why the system ignored the natural step.
+- A deep brand (e.g. teal `#2f6b6b`, L ≈ 0.451) anchored at /500 forces /600–/900 to crash to near-black. The intent is `/700`, not `/500`.
+- Industry-standard libraries (Tailwind, Material) place brand hexes at the steps they natively belong to. Forcing `/500` betrays designer intuition.
+
+**Consequence:** Brand step is no longer implicit. Configs that omit `step` continue to work; new ramp introspection (showcase header, prepare summary) should display the resolved anchor. The API contract (`step: number`) is fixed and will not change when auto-derivation lands.
+
+---
+
+## [2026-05-05] Primitive pruning is scope-bound to configured ramps
+
+**Decision:** `update_ds_primitives` ships with `prune_off_scale: true` to delete primitives whose step is outside the configured scale, but **only within the folders enumerated in `DS.color.ramps`**. The plugin never deletes variables in unmanaged folders.
+
+**Why:**
+- Hand-crafted ramps from prior sessions (lime, teal at 50–950) collided with the new 100–900 pipeline scale and left orphan `/50` and `/950` entries. A blanket delete-by-shape rule would also delete user-added primitives that happen to match a numeric-step shape.
+- Scoping to `DS.color.ramps` keeps the operation predictable: if it isn't in the config, it isn't touched.
+
+**Consequence:** Removing an entire ramp (e.g., dropping peach from `brand[]`) is **not** covered by `prune_off_scale`. A separate operation — currently manual — is required to delete a removed ramp's full primitive set. The next session is expected to introduce a `rebrand` flow that handles ramp removal, semantic re-pointing, and primitive deletion as one confirmed operation.
+
+---
+
+## [2026-05-05] Showcase scopes to the named semantic collection when config is present
+
+**Decision:** When `.local/design-system.config.js` exists at showcase build time, `build_ds_showcase` reads `DS.collections` and forwards it to the plugin. The plugin filters `_semanticColls` and `_primColls` by exact collection name. The existing structural heuristic (`isAlias && colorVarCount > 0`) remains as a fallback when no config is available.
+
+**Why:**
+- The structural heuristic mistakenly included `Button · Type` (3 alias color vars × 4 component-state modes) and rendered `button/bg`, `button/fg`, `button/stroke` in the semantic-color table. Designers experienced this as "the showcase is randomly binding component variables."
+- A name-based filter matches the designer's mental model: the collection declared in `DS.collections.color` is the authoritative semantic source.
+- Falling back to the heuristic preserves zero-config use of the showcase tool against arbitrary Figma files.
+
+**Consequence:** Future component-state collections will not pollute the showcase as long as the config declares the semantic collection name. The build_ds_showcase payload schema gained an optional `DS` field carrying `{ collections }`. Other showcase consumers can rely on the same precedence: explicit DS config wins, heuristic fills in.
+
+---
+
 ## [2026-05-03] OKLCh neutrals are achromatic, not brand-tinted
 
 **Decision:** The default OKLCh `neutral` ramp uses zero chroma across the scale. A separate `neutral-variant` ramp provides a very low-chroma palette tint for secondary surfaces and subtle outlines. HSL fallback preserves the old hue-derived neutral behavior for compatibility.

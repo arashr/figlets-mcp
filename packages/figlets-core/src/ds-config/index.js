@@ -68,11 +68,43 @@ function runDsPipeline(configPath) {
   const step3 = validateSemanticPairs(ds);
   ds = step3.ds;
 
+  // Step 3.5 — cascade-safety: scan semantics for refs to ramps not in current brand/utility config
+  const UTILITY_RAMP_NAMES = new Set(['neutral', 'red', 'green', 'yellow', 'blue', 'neutral-variant']);
+  const configuredBrandNames = new Set((ds.color.brand || []).map(b => b.name));
+  const staleSemantics = [];
+
+  function _checkSemRef(token, ref) {
+    if (!ref || typeof ref !== 'string') return;
+    const m = ref.match(/^color\/([^/]+)\/\d+$/);
+    if (!m) return;
+    const rampName = m[1];
+    if (!configuredBrandNames.has(rampName) && !UTILITY_RAMP_NAMES.has(rampName)) {
+      staleSemantics.push({ token: token, ref: ref, currentName: rampName });
+    }
+  }
+
+  const sem = ds.color.semantics || {};
+  for (const pair of (sem.pairs || [])) {
+    const pairLabel = pair.bg || 'pair';
+    if (pair.Light) { _checkSemRef(pairLabel, pair.Light.bg); _checkSemRef(pairLabel, pair.Light.text); }
+    if (pair.Dark)  { _checkSemRef(pairLabel, pair.Dark.bg);  _checkSemRef(pairLabel, pair.Dark.text);  }
+  }
+  for (const icon of (sem.icons || [])) {
+    _checkSemRef(icon.token, icon.Light);
+    _checkSemRef(icon.token, icon.Dark);
+  }
+  for (const u of (sem.unpaired || [])) {
+    _checkSemRef(u.token || 'unpaired', u.Light);
+    _checkSemRef(u.token || 'unpaired', u.Dark);
+  }
+
   // Step 4 — primitives data
   const step4 = generatePrimitivesData(ds);
 
   // Write updated config
   writeDsConfig(configPath, ds);
+
+  const apcaFailCount = step3.failCount || 0;
 
   return {
     spacingPreview:       step1.preview,
@@ -84,7 +116,9 @@ function runDsPipeline(configPath) {
     derivedColors:        step2.derivedColors,
     semanticPairsTable:   step3.markdownTable,
     iconTable:            step3.iconTable,
-    failCount:            step3.failCount,
+    failCount:            apcaFailCount,
+    apcaFailCount:        apcaFailCount,
+    staleSemantics:       staleSemantics,
     semanticSummary:      step3.summary,
     primitivesData:       step4,
   };

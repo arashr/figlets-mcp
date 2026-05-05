@@ -42,9 +42,15 @@ function handlePrepareDsConfig({ config_path }) {
   const {
     spacingPreview, computed, needsClaude,
     colorRampsSummary, colorRampsTable, contrastAnnotations, derivedColors,
-    semanticSummary, semanticPairsTable, iconTable, failCount,
+    semanticSummary, semanticPairsTable, iconTable, failCount, apcaFailCount,
+    staleSemantics,
     primitivesData,
   } = result;
+
+  const staleWarning = staleSemantics && staleSemantics.length > 0
+    ? `⚠️  ${staleSemantics.length} semantic token(s) reference ramp(s) not in the current brand config. ` +
+      `Confirm with the designer before proceeding: ${staleSemantics.map(s => s.token + ' → ' + s.ref).join(', ')}`
+    : null;
 
   return {
     spacingPreview,
@@ -57,11 +63,13 @@ function handlePrepareDsConfig({ config_path }) {
       derived:     derivedColors,
     },
     semanticPairs: {
-      summary:   semanticSummary,
-      table:     semanticPairsTable,
+      summary:        semanticSummary,
+      table:          semanticPairsTable,
       iconTable,
       failCount,
-      ready:     failCount === 0,
+      apcaFailCount:  apcaFailCount || 0,
+      staleSemantics: staleSemantics || [],
+      ready:          failCount === 0 && (!staleSemantics || staleSemantics.length === 0),
     },
     primitives: {
       collectionName: primitivesData.collectionName,
@@ -74,8 +82,10 @@ function handlePrepareDsConfig({ config_path }) {
       },
     },
     configPath: resolvedPath,
-    readyToBuild: failCount === 0 && needsClaude.length === 0,
-    message: failCount > 0
+    readyToBuild: failCount === 0 && needsClaude.length === 0 && (!staleSemantics || staleSemantics.length === 0),
+    message: staleWarning
+      ? staleWarning
+      : failCount > 0
       ? `Config computed but ${failCount} semantic pair(s) fail contrast. Fix before building.`
       : needsClaude.length > 0
       ? `Config computed but ${needsClaude.join(', ')} need manual input before building.`

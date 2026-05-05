@@ -1329,6 +1329,7 @@ async function _buildShowcase(opts) {
 
   var _cfgSemName  = (opts.DS && opts.DS.collections && opts.DS.collections.color)       ? opts.DS.collections.color       : null;
   var _cfgPrimName = (opts.DS && opts.DS.collections && opts.DS.collections.primitives)  ? opts.DS.collections.primitives  : null;
+  var _contrastAlgorithm = (opts.DS && opts.DS.color && opts.DS.color.contrastAlgorithm) ? opts.DS.color.contrastAlgorithm : 'wcag';
 
   const _semColl = _cfgSemName
     ? (dsCollections.find(c => c.name === _cfgSemName) || dsCollections.find(c => c.isAlias && c.colorVarCount > 0))
@@ -2254,9 +2255,11 @@ async function _buildShowcase(opts) {
       { fg: _RC.onBrandVariant, varRef: _V.onBrandVariant },
     ];
     for (var i = 0; i < candidates.length; i++) {
-      if (candidates[i].varRef && _contrastRatio(swatchRGB, candidates[i].fg) >= 4.5) {
-        return { fg: candidates[i].fg, varRef: candidates[i].varRef, show: true };
-      }
+      if (!candidates[i].varRef) continue;
+      var passes = _contrastAlgorithm === 'apca'
+        ? Math.abs(_apcaLc(candidates[i].fg, swatchRGB)) >= 60
+        : _contrastRatio(swatchRGB, candidates[i].fg) >= 4.5;
+      if (passes) return { fg: candidates[i].fg, varRef: candidates[i].varRef, show: true };
     }
     if (allowNeutralFallback) {
       var neutral = _pickReadableNeutralExtreme(swatchRGB);
@@ -2283,23 +2286,27 @@ async function _buildShowcase(opts) {
     container.strokeWeight = 0.5;
     container.strokeAlign  = 'INSIDE';
 
-    const ratio = _contrastRatio(swatchRGB, fgRGB);
-    if ((forceIndicator || ratio >= 4.5) && sampleText) {
-      const aaText = _tDS(sampleText, sampleFontSize, fgRGB, true, fgVar);
-      aaText.name = 'Aa';
-      aaText.x = 7; aaText.y = 7;
-      container.appendChild(aaText);
+    var ratio = _contrastRatio(swatchRGB, fgRGB);
+    var lc    = _apcaLc(fgRGB, swatchRGB);
+    var passes = _contrastAlgorithm === 'apca'
+      ? Math.abs(lc) >= 60
+      : ratio >= 4.5;
+    if ((forceIndicator || passes) && sampleText) {
+      const stepText = _tDS(sampleText, sampleFontSize, fgRGB, true, fgVar);
+      stepText.name = 'Step Label';
+      stepText.x = 7; stepText.y = 7;
+      container.appendChild(stepText);
 
-      const dot = figma.createFrame();
-      dot.name = 'Contrast Indicator';
-      dot.resize(6, 6);
-      dot.cornerRadius = 9999;
-      dot.layoutMode = 'NONE';
-      dot.fills = [_paint(fgRGB, fgVar)];
-      dot.x = 80 - 6.75 - 6;
-      dot.y = 56 - 7 - 6;
-      dot.constraints = { horizontal: 'MAX', vertical: 'MAX' };
-      container.appendChild(dot);
+      // Checkmark badge — "✓ Lc XX" (APCA) or "✓" (WCAG), bottom-right corner
+      var badgeLabel = _contrastAlgorithm === 'apca'
+        ? ('✓ Lc ' + Math.round(Math.abs(lc)))
+        : '✓';
+      const badge = _tDS(badgeLabel, 8, fgRGB, false, fgVar);
+      badge.name = 'Contrast Indicator';
+      badge.x = 80 - 5 - badge.width;
+      badge.y = 56 - 5 - badge.height;
+      badge.constraints = { horizontal: 'MAX', vertical: 'MAX' };
+      container.appendChild(badge);
     }
 
     swatch.appendChild(container);
@@ -2359,7 +2366,7 @@ async function _buildShowcase(opts) {
         : { r: 0.8, g: 0.8, b: 0.8 };
       const ind = _swatchIndicator(swatchRGB, true);
       const fgRGB = ind.show ? ind.fg : _textColor;
-      const swatch = _buildSwatch(swatchRGB, fgRGB, ind.show ? 'Aa' : null, {
+      const swatch = _buildSwatch(swatchRGB, fgRGB, ind.show ? stepName : null, {
         stepLabel: stepName,
         hexLabel:  rawVal && 'r' in rawVal ? _hex(rawVal) : '—',
         swatchVar: v,

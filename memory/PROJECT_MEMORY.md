@@ -23,11 +23,12 @@ Active context for the project so future sessions can recover quickly without re
 - Showcase contrast columns standardized (issue 3) ✓
 - Brand-removal cascade is now handled by `prune_unused_ramps` for primitives + `staleSemantics` warning for semantic refs (issue 1, partial) ✓
 
+6. **Algorithm-aware swatch indicators** (`code.js`): `_swatchIndicator` and `_buildSwatch` now gate on `_contrastAlgorithm` (hoisted to `_buildShowcase` scope from `DS.color.contrastAlgorithm`). APCA mode: shows indicator when Lc ≥ 60. WCAG mode: shows indicator when ratio ≥ 4.5. Sample text is the ramp step number (e.g. `300`) instead of `Aa`. Badge is `✓ Lc XX` (APCA, where XX = `Math.round(|Lc|)`) or `✓` (WCAG), rendered via `_tDS` at 8px. No indicator shown when the swatch fails the configured threshold.
+
 **Open for next session:**
 - `surface/brand` Lc 50 (both modes): the lime hex at mid-luminance gives insufficient APCA for body text. Either a lighter lime surface step or white text would fix it. Designer accepted Lc 50 for this session.
 - `surface/default`/`on-surface/variant` Dark: Lc 56 (neutral/300 on dark surface). Pre-existing, needs a step bump.
 - Status-color surfaces (danger/success/warning/info): 9 pre-existing APCA failures from the utility-color step choices.
-- **Swatch indicators ignore `contrastAlgorithm`**: `_buildSwatch` and `_swatchIndicator` both use WCAG ≥ 4.5 hardcoded. On an APCA project the indicator fires on WCAG-passing swatches that fail APCA Lc 60. Will be fixed next commit: indicator gates on the configured algo, shows "✓ Lc XX" (APCA) or "✓" (WCAG), and displays the ramp step number instead of "Aa".
 
 ---
 

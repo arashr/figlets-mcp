@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-05] Swatch indicators gate on configured contrast algorithm; show step number + text badge
+
+**Decision:** `_swatchIndicator` and `_buildSwatch` in `code.js` read `_contrastAlgorithm` (derived from `DS.color.contrastAlgorithm`, defaulting to `'wcag'`) hoisted to the `_buildShowcase` scope. Indicator visibility gate: APCA → `|Lc| ≥ 60`; WCAG → ratio ≥ 4.5. The sample text label is the ramp step number (e.g. `300`) instead of the static string `Aa`. The badge is a `_tDS`-rendered text node: `✓ Lc XX` (APCA, XX = `Math.round(|Lc|)`) or `✓` (WCAG), 8px, anchored to the bottom-right corner via `constraints: { horizontal: 'MAX', vertical: 'MAX' }`. The old 6×6 filled-rectangle dot is removed.
+
+**Why:** The swatch indicators were hardcoded to WCAG ≥ 4.5, so on an APCA-configured project they fired on swatches that fail Lc 60 — giving a false positive. Designers would pick a swatch based on the indicator, then see a red `✗ Fail` in the semantic table. The fix ensures both layers (primitive swatch, semantic showcase table) agree on the same threshold. Showing the step number rather than `Aa` makes the indicator immediately informative (no need to cross-reference the row). The `✓ Lc XX` label makes the passing Lc value scannable without opening the semantic table.
+
+**Consequence:** WCAG-mode projects still see `✓` (not a number) because WCAG doesn't produce a single canonical "score" for a swatch — the ratio varies with the text colour chosen, and we don't track a canonical text colour at the swatch level. A future session could show `✓ X.X:1` if desired.
+
+---
+
 ## [2026-05-05] Auto-anchor maps OKLab L linearly to the configured step scale
 
 **Decision:** When `brand.step` is omitted, `brandAnchorIdx` computes `t = (OKLCH_LIGHT_TARGET − L) / (OKLCH_LIGHT_TARGET − OKLCH_DARK_TARGET)` where L is the brand hex's OKLab L, then maps `t` linearly across `steps[0]` → `steps[last]` and snaps to the nearest configured step. Constants used: `OKLCH_LIGHT_TARGET = 0.97`, `OKLCH_DARK_TARGET = 0.18`.

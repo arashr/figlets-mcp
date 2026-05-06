@@ -2281,32 +2281,44 @@ async function _buildShowcase(opts) {
     container.layoutMode = 'NONE';
     container.resize(80, 56);
     container.cornerRadius = 8;
-    container.fills   = [_paint(swatchRGB, swatchVar)];
-    container.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
-    container.strokeWeight = 0.5;
-    container.strokeAlign  = 'INSIDE';
+    container.fills = [_paint(swatchRGB, swatchVar)];
+    if (_V.outlineSubtle) {
+      container.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
+      container.strokeWeight = 0.5;
+      container.strokeAlign  = 'INSIDE';
+    }
 
     var ratio = _contrastRatio(swatchRGB, fgRGB);
     var lc    = _apcaLc(fgRGB, swatchRGB);
     var passes = _contrastAlgorithm === 'apca'
       ? Math.abs(lc) >= 60
       : ratio >= 4.5;
+
     if ((forceIndicator || passes) && sampleText) {
       const stepText = _tDS(sampleText, sampleFontSize, fgRGB, true, fgVar);
       stepText.name = 'Step Label';
-      stepText.x = 7; stepText.y = 7;
+      stepText.textAutoResize = 'WIDTH_AND_HEIGHT';
+      stepText.x = 8; stepText.y = 8;
+      stepText.constraints = { horizontal: 'MIN', vertical: 'MIN' };
       container.appendChild(stepText);
 
-      // Checkmark badge — "✓ Lc XX" (APCA) or "✓" (WCAG), bottom-right corner
+      // Badge: bottom-right corner, 8px from right/bottom edges.
+      // Create inline so textAutoResize is set before characters — guarantees width is computed.
       var badgeLabel = _contrastAlgorithm === 'apca'
-        ? ('✓ Lc ' + Math.round(Math.abs(lc)))
+        ? ('Lc ' + Math.round(Math.abs(lc)) + '%')
         : '✓';
-      const badge = _tDS(badgeLabel, 8, fgRGB, false, fgVar);
-      badge.name = 'Contrast Indicator';
-      badge.x = 80 - 5 - badge.width;
-      badge.y = 56 - 5 - badge.height;
-      badge.constraints = { horizontal: 'MAX', vertical: 'MAX' };
-      container.appendChild(badge);
+      var _badge = figma.createText();
+      _badge.name = 'Contrast Indicator';
+      _badge.fontSize = 8;
+      _badge.fontName = { family: _dsFamily, style: 'Regular' };
+      _badge.textAutoResize = 'WIDTH_AND_HEIGHT';
+      _badge.characters = badgeLabel;
+      _badge.fills = _textFill(fgRGB, fgVar);
+      container.appendChild(_badge);
+      // Width is now computed; position then lock with MAX constraints
+      _badge.x = container.width - _badge.width - 12;
+      _badge.y = container.height - _badge.height - 12;
+      _badge.constraints = { horizontal: 'MAX', vertical: 'MAX' };
     }
 
     swatch.appendChild(container);
@@ -3046,6 +3058,7 @@ async function _buildShowcase(opts) {
 
       const _mainGroups   = [];
       const _bottomGroups = [];
+      const _allOutlineRows = [];
 
       for (const [groupKey, groupVars] of _allSemGroupEntries) {
         const nonOnVars = _sortSemanticVars(groupVars.filter(v => !v.name.split('/').some(seg => /^on[-_]/i.test(seg))));
@@ -3063,10 +3076,10 @@ async function _buildShowcase(opts) {
           const desc       = _tokenDesc(v.name);
 
           if (isOutline) {
-            // Outline tokens: surface bg + stroke — no contrast columns
+            // Outline tokens: surface bg + stroke — no contrast columns; collected separately
             const outlineRGB = { r: raw.r, g: raw.g, b: raw.b };
             const row = _buildOutlineRow(tokenLabel, desc, outlineRGB, v);
-            bgUnpairedRows.push(row);
+            _allOutlineRows.push(row);
           } else if (isIcon) {
             // Icons are foreground colors — find the best surface to show them on.
             // Priority 1: semantic pairing (replace 'icon' with 'surface' in the path),
@@ -3238,6 +3251,23 @@ async function _buildShowcase(opts) {
           _addTableDivider(_btTable);
         }
         _appendFill(_btTable, _colorsFrame);
+      }
+
+      if (_allOutlineRows.length) {
+        const _outTable = _buildTable('Outlines & Borders', 'Border and outline color tokens for dividers, controls, and focus rings.');
+        const _outHeading = _buildTableHeading([
+          { text: 'Token',   flex: true },
+          { text: 'Example', flex: true },
+        ], 16);
+        _outTable.appendChild(_outHeading);
+        _outHeading.layoutSizingHorizontal = 'FILL';
+        _addTableDivider(_outTable);
+        for (var _ori = 0; _ori < _allOutlineRows.length; _ori++) {
+          _outTable.appendChild(_allOutlineRows[_ori]);
+          _allOutlineRows[_ori].layoutSizingHorizontal = 'FILL';
+          _addTableDivider(_outTable);
+        }
+        _appendFill(_outTable, _colorsFrame);
       }
     }
 

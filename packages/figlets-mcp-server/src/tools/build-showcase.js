@@ -29,6 +29,7 @@ function handleBuildShowcase(args = {}) {
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
 
   let dsCollections = null;
+  let dsContrastAlgorithm = null;
   try {
     const vm = require("vm");
     const configPath = path.resolve(process.cwd(), ".local/design-system.config.js");
@@ -38,12 +39,17 @@ function handleBuildShowcase(args = {}) {
       const ctx = {};
       vm.runInNewContext(src, ctx);
       if (ctx.DS && ctx.DS.collections) dsCollections = ctx.DS.collections;
+      if (ctx.DS && ctx.DS.color && ctx.DS.color.contrastAlgorithm) dsContrastAlgorithm = ctx.DS.color.contrastAlgorithm;
     }
   } catch (_) {}
 
+  const dsPayload = {};
+  if (dsCollections) dsPayload.collections = dsCollections;
+  if (dsContrastAlgorithm) dsPayload.color = { contrastAlgorithm: dsContrastAlgorithm };
+
   const payload = JSON.stringify({
     numericFallback: args.numericFallback || null,
-    DS: dsCollections ? { collections: dsCollections } : undefined
+    DS: Object.keys(dsPayload).length ? dsPayload : undefined
   });
 
   return new Promise((resolve, reject) => {

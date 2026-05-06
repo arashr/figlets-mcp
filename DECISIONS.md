@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-06] Per-Figma-file isolation under .local/<fileKey>/
+
+**Decision:** All bridge-written files (`figma-data.json`, `figma-selection.json`) are stored under `.local/<fileKey>/` rather than the flat `.local/` root. `active-file.json` in the root tracks the last-seen fileKey. Tools that auto-detect paths (`build_ds_showcase`, `audit_tokens`) read `active-file.json` and resolve against the active directory. Tools that take an explicit path (`prepare_ds_config`, `update_ds_primitives`) are unaffected — callers pass `.local/<fileKey>/design-system.config.js`.
+
+**Why:** A single `.local/design-system.config.js` was overwritten whenever a different Figma file was synced, corrupting the design system of the previously active file. The fileKey (`figma.fileKey`) is stable, unique per file, and available in the plugin main thread, making it the correct scoping key. fileName is not used because it can change.
+
+**Consequence:** Switching the active file requires running `sync_figma_data` once to update `active-file.json`. Existing `.local/design-system.config.js` must be migrated manually: `cp .local/design-system.config.js .local/<fileKey>/design-system.config.js`. The flat-root legacy paths are kept in `paths.js` for backward compatibility with any external tooling.
+
+---
+
 ## [2026-05-05] Swatch indicators gate on configured contrast algorithm; show step number + text badge
 
 **Decision:** `_swatchIndicator` and `_buildSwatch` in `code.js` read `_contrastAlgorithm` (derived from `DS.color.contrastAlgorithm`, forwarded by `build-showcase.js` from the local config, defaulting to `'wcag'`) hoisted to the `_buildShowcase` scope. Indicator gate: APCA → `|Lc| ≥ 60`; WCAG → ratio ≥ 4.5. Step number (e.g. `300`) shown top-left at 8px font, semibold. Badge format: `Lc XX%` (APCA) or `✓` (WCAG), 8px Regular, bottom-right at 12px from both edges. Badge is created inline (not via `_tDS`) with `textAutoResize = 'WIDTH_AND_HEIGHT'` set **before** `characters` so width is computed immediately; then appended, x/y set using computed width, then `constraints: { horizontal: 'MAX', vertical: 'MAX' }` locked in — this order guarantees the correct 12px right offset is stored. Swatch stroke uses `_V.outlineSubtle` only when that variable exists. Outline/border/stroke semantic tokens rendered in a separate "Outlines & Borders" table with a `[Token, Example]` 2-column heading.

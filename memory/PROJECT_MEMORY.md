@@ -4,6 +4,22 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-06 — per-file config isolation + swatch indicator polish]
+
+**Shipped this session:**
+
+1. **Per-Figma-file config isolation** (`code.js`, `ui.html`, `receiver.js`, `paths.js`, `build-showcase.js`, `audit-tokens.js`): All `.local/` files are now namespaced under `.local/<fileKey>/`. `figma.fileKey` is included in every plugin→UI postMessage; UI forwards it as `?fileKey=` on all receiver fetch calls. Receiver writes `figma-data.json` and `figma-selection.json` to `.local/<fileKey>/` and maintains `.local/active-file.json = { fileKey, updatedAt }`. `paths.js` gains `getFilePaths(fileKey)`, `readActiveFile()`, `getActiveFilePaths()`. `build-showcase` and `audit-tokens` use the active file automatically. `prepare_ds_config` and `update_ds_primitives` take an explicit `config_path` — use `.local/<fileKey>/design-system.config.js`. Switching files: open in Figma, run `sync_figma_data`, active pointer flips.
+
+2. **Algorithm-aware swatch indicators** (`code.js`, `build-showcase.js`): Badge shows `Lc XX%` (APCA, Lc ≥ 60) or `✓` (WCAG, ratio ≥ 4.5). Step number top-left, badge bottom-right at 12px from edges. Badge created inline with `textAutoResize` set before `characters`; `MAX` constraints set after x/y. `build-showcase.js` forwards `DS.color.contrastAlgorithm` from config to plugin. Swatch stroke conditional on `_V.outlineSubtle` existing. Outline/border/stroke tokens in their own "Outlines & Borders" table with `[Token, Example]` heading only.
+
+**Open for next session:**
+- `surface/brand` Lc 50 (both modes): accepted for now. Needs lighter lime surface step or white text for body copy.
+- `surface/default`/`on-surface/variant` Dark: Lc 56 pre-existing.
+- Status-color surfaces: 9 pre-existing APCA failures.
+- **Migration**: existing `.local/design-system.config.js` must be moved to `.local/<fileKey>/design-system.config.js` manually (run one sync to discover the fileKey).
+
+---
+
 ### [2026-05-05 — auto-anchor + showcase columns + rebrand demo]
 
 **Shipped this session:**

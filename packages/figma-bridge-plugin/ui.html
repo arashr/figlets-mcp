@@ -181,6 +181,7 @@
   let _watchdog = null;
   let _sessionLog = [];
   let _sessionId = '';
+  var _currentFileKey = '';
   const _capabilities = [
     'extract-all',
     'extract-selection',
@@ -360,7 +361,9 @@
         'http://localhost:1337/poll?sessionId=' +
         encodeURIComponent(_sessionId) +
         '&capabilities=' +
-        encodeURIComponent(_capabilities.join(','))
+        encodeURIComponent(_capabilities.join(',')) +
+        '&fileKey=' +
+        encodeURIComponent(_currentFileKey)
       );
       if (res.ok) {
         const data = await res.json();
@@ -429,6 +432,10 @@
   onmessage = async (event) => {
     const msg = event.data.pluginMessage;
 
+    if (msg.fileKey) {
+      _currentFileKey = msg.fileKey;
+    }
+
     if (msg.type === 'selection-state') {
       _setSelectionState(msg.data);
       return;
@@ -456,7 +463,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-showcase', {
+        await fetch('http://localhost:1337/sync-showcase?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -478,7 +485,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-doc-build', {
+        await fetch('http://localhost:1337/sync-doc-build?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -500,7 +507,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-ds-setup', {
+        await fetch('http://localhost:1337/sync-ds-setup?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -522,7 +529,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-update-primitives', {
+        await fetch('http://localhost:1337/sync-update-primitives?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -555,7 +562,7 @@
 
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-qa-audit', {
+        await fetch('http://localhost:1337/sync-qa-audit?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -577,9 +584,9 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending payload...';
       const endpoint = msg.type === 'selection-extracted' ? '/sync-selection' : '/sync';
-      
+
       try {
-        const response = await fetch(`http://localhost:1337${endpoint}`, {
+        const response = await fetch('http://localhost:1337' + endpoint + '?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)

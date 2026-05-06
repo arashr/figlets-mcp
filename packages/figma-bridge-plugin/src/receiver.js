@@ -4,7 +4,6 @@ const path = require('path');
 
 const PORT = 1337;
 const DEST_DIR = process.env.FIGLETS_LOCAL_DIR || path.resolve(__dirname, '../../../.local');
-const DEST_FILE = path.join(DEST_DIR, 'figma-data.json');
 
 let pendingPollResponse = null;
 let pendingPollSessionId = null;
@@ -18,8 +17,21 @@ let pendingUpdatePrimitivesRequest = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
 let lastPluginSeenAt = 0;
+let lastFileKey = '';
 
-const DEST_FILE_SELECTION = path.join(DEST_DIR, 'figma-selection.json');
+function _getFileKey(req) {
+  const url = new URL(req.url, 'http://localhost:' + PORT);
+  return (url.searchParams.get('fileKey') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+}
+
+function _filePaths(fileKey) {
+  const dir = fileKey ? path.join(DEST_DIR, fileKey) : DEST_DIR;
+  return {
+    dir: dir,
+    data:      path.join(dir, 'figma-data.json'),
+    selection: path.join(dir, 'figma-selection.json'),
+  };
+}
 
 function _getSessionId(req) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -70,6 +82,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname === '/health') {
     const pluginRecentlySeen = Boolean(lastPluginSeenAt && (Date.now() - lastPluginSeenAt < 60000));
     const pluginCapabilities = (pendingPollResponse || pluginRecentlySeen) ? activePluginCapabilities : [];
+    const healthPaths = _filePaths(lastFileKey);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       ok: true,
@@ -77,10 +90,11 @@ const server = http.createServer((req, res) => {
       pluginConnected: Boolean(pendingPollResponse),
       pluginRecentlySeen: pluginRecentlySeen,
       activeSessionId: pendingPollSessionId || lastPluginSessionId || null,
+      activeFileKey: lastFileKey,
       pluginCapabilities: pluginCapabilities,
       updatePrimitivesLive: pluginCapabilities.indexOf('update-primitives') !== -1,
-      dataPath: DEST_FILE,
-      selectionPath: DEST_FILE_SELECTION
+      dataPath: healthPaths.data,
+      selectionPath: healthPaths.selection
     }));
     return;
   }
@@ -88,12 +102,14 @@ const server = http.createServer((req, res) => {
   // 1. Figma Plugin long-polls this endpoint
   if (req.method === 'GET' && pathname === '/poll') {
     const sessionId = url.searchParams.get('sessionId') || '';
+    const pollFileKey = _getFileKey(req);
+    if (pollFileKey) lastFileKey = pollFileKey;
     activePluginCapabilities = _parseCapabilities(url.searchParams.get('capabilities'));
     pendingPollResponse = res;
     pendingPollSessionId = sessionId || null;
     lastPluginSessionId = pendingPollSessionId;
     lastPluginSeenAt = Date.now();
-    console.log(`[poll] Plugin connected${pendingPollSessionId ? ` (${pendingPollSessionId})` : ''}`);
+    console.log('[poll] Plugin connected' + (pendingPollSessionId ? ' (' + pendingPollSessionId + ')' : '') + (pollFileKey ? ' file=' + pollFileKey : ''));
     
     // Keep connection alive: if no sync requested within 30 seconds, send ping
     setTimeout(() => {
@@ -424,14 +440,19 @@ const server = http.createServer((req, res) => {
       body += chunk.toString();
     });
     req.on('end', () => {
+      const fp = _filePaths(_getFileKey(req));
       try {
-        if (!fs.existsSync(DEST_DIR)) {
-          fs.mkdirSync(DEST_DIR, { recursive: true });
-        }
-        
-        fs.writeFileSync(DEST_FILE, body);
-        console.log(`[success] Wrote payload to ${DEST_FILE}`);
-        
+        fs.mkdirSync(fp.dir, { recursive: true });
+        fs.writeFileSync(fp.data, body);
+        console.log('[success] Wrote payload to ' + fp.data);
+
+        try {
+          fs.writeFileSync(
+            path.join(DEST_DIR, 'active-file.json'),
+            JSON.stringify({ fileKey: _getFileKey(req), updatedAt: new Date().toISOString() })
+          );
+        } catch (_) {}
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
 
@@ -462,20 +483,18 @@ const server = http.createServer((req, res) => {
       body += chunk.toString();
     });
     req.on('end', () => {
+      const fp = _filePaths(_getFileKey(req));
       try {
-        if (!fs.existsSync(DEST_DIR)) {
-          fs.mkdirSync(DEST_DIR, { recursive: true });
-        }
-        
-        fs.writeFileSync(DEST_FILE_SELECTION, body);
-        console.log(`[success] Wrote selection to ${DEST_FILE_SELECTION}`);
-        
+        fs.mkdirSync(fp.dir, { recursive: true });
+        fs.writeFileSync(fp.selection, body);
+        console.log('[success] Wrote selection to ' + fp.selection);
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
 
         if (pendingSelectionRequest) {
           pendingSelectionRequest.writeHead(200, { 'Content-Type': 'application/json' });
-          pendingSelectionRequest.end(JSON.stringify({ success: true, message: 'Selection synced', path: DEST_FILE_SELECTION, sessionId: _getSessionId(req) || null }));
+          pendingSelectionRequest.end(JSON.stringify({ success: true, message: 'Selection synced', path: fp.selection, sessionId: _getSessionId(req) || null }));
           pendingSelectionRequest = null;
         }
       } catch (err) {
@@ -509,9 +528,9 @@ if (require.main === module) {
   });
 
   server.listen(PORT, () => {
-    console.log(`Figma Bridge Receiver listening on http://localhost:${PORT}`);
-    console.log(`Will write data to: ${DEST_FILE}`);
-    console.log(`Open the Figlets Bridge plugin in Figma Desktop to connect.`);
+    console.log('Figma Bridge Receiver listening on http://localhost:' + PORT);
+    console.log('Will write data to: ' + path.join(DEST_DIR, '<fileKey>/figma-data.json'));
+    console.log('Open the Figlets Bridge plugin in Figma Desktop to connect.');
   });
 }
 

@@ -1,6 +1,7 @@
 const http = require("http");
 const path = require("path");
 const fs   = require("fs");
+const { getActiveFilePaths } = require("../utils/paths.js");
 
 const buildShowcaseTool = {
   name: "build_ds_showcase",
@@ -32,7 +33,8 @@ function handleBuildShowcase(args = {}) {
   let dsContrastAlgorithm = null;
   try {
     const vm = require("vm");
-    const configPath = path.resolve(process.cwd(), ".local/design-system.config.js");
+    const fp = getActiveFilePaths();
+    const configPath = fp.config;
     if (fs.existsSync(configPath)) {
       const src = fs.readFileSync(configPath, "utf8")
         .replace(/^\s*(const|let|var)\s+DS\s*=/m, "DS =");

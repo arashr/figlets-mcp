@@ -1,6 +1,6 @@
 const fs = require("fs");
 const { auditTokens } = require("../../../figlets-core/src/index.js");
-const { FIGMA_DATA_PATH, DS_CONTEXT_PATH } = require("../utils/paths.js");
+const { FIGMA_DATA_PATH, DS_CONTEXT_PATH, getActiveFilePaths } = require("../utils/paths.js");
 
 const auditTokensTool = {
   name: "audit_tokens",
@@ -19,19 +19,21 @@ const auditTokensTool = {
   }
 };
 
-function loadDsContext() {
-  if (!fs.existsSync(DS_CONTEXT_PATH)) return null;
+function loadDsContext(dsContextPath) {
+  if (!fs.existsSync(dsContextPath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(DS_CONTEXT_PATH, "utf-8"));
+    return JSON.parse(fs.readFileSync(dsContextPath, "utf-8"));
   } catch {
     return null;
   }
 }
 
 function handleAuditTokens(args = {}) {
+  const activePaths = getActiveFilePaths();
   const dataPath = args.figmaDataPath
     ? require("path").resolve(args.figmaDataPath)
-    : FIGMA_DATA_PATH;
+    : activePaths.data;
+  const dsContextPath = activePaths.dsContext;
 
   if (!fs.existsSync(dataPath)) {
     throw new Error(
@@ -43,7 +45,7 @@ function handleAuditTokens(args = {}) {
 
   // Load the saved DS context indexes for richer token matching
   // (produced by detect_design_system — if missing, audit still runs but without match suggestions)
-  const dsContext = loadDsContext();
+  const dsContext = loadDsContext(dsContextPath);
   const contextIndexes = dsContext && dsContext.context && dsContext.context.indexes
     ? dsContext.context.indexes
     : null;

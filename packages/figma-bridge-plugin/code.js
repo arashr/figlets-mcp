@@ -197,7 +197,7 @@ figma.ui.onmessage = async (msg) => {
       }))
     };
 
-    figma.ui.postMessage({ type: 'data-extracted', data: payload });
+    figma.ui.postMessage({ type: 'data-extracted', fileKey: figma.fileKey || '', data: payload });
     _appendSessionLog('Completed sync_figma_data.');
   }
 
@@ -243,11 +243,11 @@ figma.ui.onmessage = async (msg) => {
           cachedAgeMs: usedFallback ? (liveSnapshot.ts - lastNonEmpty.ts) : 0
         }
       };
-      figma.ui.postMessage({ type: 'selection-extracted', data: payload });
+      figma.ui.postMessage({ type: 'selection-extracted', fileKey: figma.fileKey || '', data: payload });
       _appendSessionLog('Completed inspect_component.');
     } catch (err) {
       _appendSessionLog('inspect_component failed: ' + (err && err.message ? err.message : 'serializeNode failed'));
-      figma.ui.postMessage({ type: 'selection-extracted', data: { error: err.message || 'serializeNode failed', selection: [] } });
+      figma.ui.postMessage({ type: 'selection-extracted', fileKey: figma.fileKey || '', data: { error: err.message || 'serializeNode failed', selection: [] } });
     }
   }
 
@@ -264,13 +264,13 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing build_ds_showcase.');
       const result = await _buildShowcase(msg.data || {});
-      figma.ui.postMessage({ type: 'showcase-built', data: result });
+      figma.ui.postMessage({ type: 'showcase-built', fileKey: figma.fileKey || '', data: result });
       _appendSessionLog('Completed build_ds_showcase.');
       figma.notify('Token showcase built!');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
       _appendSessionLog('build_ds_showcase failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'showcase-built', data: { error: _errMsg || 'Unknown error' } });
+      figma.ui.postMessage({ type: 'showcase-built', fileKey: figma.fileKey || '', data: { error: _errMsg || 'Unknown error' } });
     }
   }
 
@@ -282,12 +282,12 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing apply_ds_setup.');
       const result = await _applyDsSetup(msg.data);
-      figma.ui.postMessage({ type: 'ds-setup-done', data: result });
+      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: figma.fileKey || '', data: result });
       _appendSessionLog('Completed apply_ds_setup.');
       figma.notify('Design system collections created!');
     } catch (err) {
       _appendSessionLog('apply_ds_setup failed: ' + err.message);
-      figma.ui.postMessage({ type: 'ds-setup-done', data: { error: err.message } });
+      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: figma.fileKey || '', data: { error: err.message } });
     }
   }
 
@@ -295,7 +295,7 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing update_ds_primitives.');
       const result = await _updateDsPrimitives(msg.data || {});
-      figma.ui.postMessage({ type: 'primitives-update-done', data: result });
+      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: figma.fileKey || '', data: result });
       if (result && result.error) {
         _appendSessionLog('update_ds_primitives failed: ' + result.error);
       } else {
@@ -304,7 +304,7 @@ figma.ui.onmessage = async (msg) => {
       }
     } catch (err) {
       _appendSessionLog('update_ds_primitives failed: ' + err.message);
-      figma.ui.postMessage({ type: 'primitives-update-done', data: { error: err.message } });
+      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: figma.fileKey || '', data: { error: err.message } });
     }
   }
 
@@ -317,13 +317,13 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing generate_component_doc.');
       const result = await _buildComponentDoc(msg.data || {});
-      figma.ui.postMessage({ type: 'doc-built', data: result });
+      figma.ui.postMessage({ type: 'doc-built', fileKey: figma.fileKey || '', data: result });
       _appendSessionLog(result && result.error ? ('generate_component_doc failed: ' + result.error) : 'Completed generate_component_doc.');
       if (!result.error) figma.notify('Component spec sheet built!');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
       _appendSessionLog('generate_component_doc failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'doc-built', data: { error: _errMsg || 'Unknown error' } });
+      figma.ui.postMessage({ type: 'doc-built', fileKey: figma.fileKey || '', data: { error: _errMsg || 'Unknown error' } });
     }
   }
 
@@ -336,13 +336,13 @@ figma.ui.onmessage = async (msg) => {
       _appendSessionLog('Executing qa_binding_audit.');
       const result = await _runQaBindingAudit(msg.data || {});
       if (msg.data && msg.data.local) result.local = true;
-      figma.ui.postMessage({ type: 'qa-audit-done', data: result });
+      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: figma.fileKey || '', data: result });
       _appendSessionLog(result && result.error ? ('qa_binding_audit failed: ' + result.error) : 'Completed qa_binding_audit.');
       if (!result.error) figma.notify('QA audit complete.');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
       _appendSessionLog('qa_binding_audit failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'qa-audit-done', data: { error: _errMsg || 'Unknown error' } });
+      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: figma.fileKey || '', data: { error: _errMsg || 'Unknown error' } });
     }
   }
 };

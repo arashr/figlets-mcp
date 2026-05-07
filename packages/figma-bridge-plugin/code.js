@@ -1411,6 +1411,27 @@ async function _buildShowcase(opts) {
     const L1 = _lum(c1), L2 = _lum(c2);
     return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
   }
+  function _apcaLum({ r, g, b }) {
+    return 0.2126729 * Math.pow(r, 2.4) + 0.7151522 * Math.pow(g, 2.4) + 0.0721750 * Math.pow(b, 2.4);
+  }
+  function _apcaLc(txt, bg) {
+    const BC = 0.022, BE = 1.414;
+    const Yt = _apcaLum(txt), Yb = _apcaLum(bg);
+    const Yt2 = Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt;
+    const Yb2 = Yb < BC ? Yb + Math.pow(BC - Yb, BE) : Yb;
+    let lc;
+    if (Yb2 >= Yt2) lc = (Math.pow(Yb2, 0.56) - Math.pow(Yt2, 0.57)) * 1.14;
+    else             lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14;
+    if (Math.abs(lc) < 0.1) return 0;
+    return Math.round(lc > 0 ? lc * 100 - 12.5 : lc * 100 + 12.5);
+  }
+  function _lcLabel(lc, threshold) {
+    threshold = threshold || 75;
+    return (lc >= threshold ? '✓ ' : '✗ ') + 'Lc ' + lc;
+  }
+  function _setMinWidth(node, width) {
+    try { node.minWidth = width; } catch (_) {}
+  }
 
   const _configuredCollections = opts.DS && opts.DS.collections ? opts.DS.collections : null;
   const _configuredPrimName = _configuredCollections ? _configuredCollections.primitives : null;
@@ -2292,6 +2313,55 @@ async function _buildShowcase(opts) {
     return { fg: null, varRef: null, show: false };
   }
 
+  function _pickNeutralTextForSwatch(swatchRGB) {
+    var white = { r: 1, g: 1, b: 1 };
+    var black = { r: 0, g: 0, b: 0 };
+    var whiteLc = Math.abs(_apcaLc(white, swatchRGB));
+    var blackLc = Math.abs(_apcaLc(black, swatchRGB));
+    var picked = whiteLc > blackLc
+      ? { fg: white, lc: whiteLc, varRef: null }
+      : { fg: black, lc: blackLc, varRef: null };
+    var neutral = _pickReadableNeutralExtreme(swatchRGB);
+    if (neutral) {
+      var neutralLc = Math.abs(_apcaLc(neutral.fg, swatchRGB));
+      if (neutralLc >= picked.lc - 3) {
+        picked = { fg: neutral.fg, lc: neutralLc, varRef: neutral.varRef };
+      }
+    }
+    return picked;
+  }
+
+  function _pickNeutralBackgroundForSwatchText(swatchRGB) {
+    var white = { r: 1, g: 1, b: 1 };
+    var black = { r: 0, g: 0, b: 0 };
+    var whiteLc = Math.abs(_apcaLc(swatchRGB, white));
+    var blackLc = Math.abs(_apcaLc(swatchRGB, black));
+    var targetDarkBg = blackLc >= whiteLc;
+    var best = {
+      bg: targetDarkBg ? black : white,
+      lc: targetDarkBg ? blackLc : whiteLc,
+      varRef: null
+    };
+    var bestDistance = Infinity;
+    for (var i = 0; i < _scored.length; i++) {
+      var s = _scored[i];
+      if (!/^color\/neutral\//i.test(s.name)) continue;
+      if (/(?:scrim|overlay|surface|foreground|text|on[-_]surface|shadow|elevation)/i.test(s.name)) continue;
+      if (s.rgb.a !== undefined && s.rgb.a < 0.95) continue;
+      var lum = _lum(s.rgb);
+      if (targetDarkBg && lum > 0.2) continue;
+      if (!targetDarkBg && lum < 0.8) continue;
+      var lcAbs = Math.abs(_apcaLc(swatchRGB, s.rgb));
+      if (lcAbs < 45) continue;
+      var distance = targetDarkBg ? lum : (1 - lum);
+      if (lcAbs > best.lc || (Math.abs(lcAbs - best.lc) <= 3 && distance < bestDistance)) {
+        best = { bg: s.rgb, lc: lcAbs, varRef: s.v };
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
   function _buildSwatch(swatchRGB, fgRGB, sampleText, opts) {
     opts = opts || {};
     const { stepLabel = null, hexLabel = null, swatchVar = null, fgVar = null, sampleFontSize = 10, forceIndicator = false } = opts;
@@ -2363,6 +2433,67 @@ async function _buildShowcase(opts) {
     });
   }
 
+  function _buildPrimitiveContrastSwatch(swatchRGB, stepLabel, hexLabel, swatchVar) {
+    var top = _pickNeutralTextForSwatch(swatchRGB);
+    var bottom = _pickNeutralBackgroundForSwatchText(swatchRGB);
+
+    const swatch = _f('Primitive Contrast Swatch 1.0.0', 'VERTICAL');
+    swatch.itemSpacing = 8;
+    swatch.counterAxisAlignItems = 'MIN';
+
+    const stepText = _tDS(stepLabel, 11, _subColor, false, _V.textSub);
+    swatch.appendChild(stepText);
+    stepText.layoutSizingHorizontal = 'FILL';
+
+    const container = figma.createFrame();
+    container.name = 'Color Container';
+    container.layoutMode = 'VERTICAL';
+    container.primaryAxisSizingMode = 'FIXED';
+    container.counterAxisSizingMode = 'FIXED';
+    container.resize(56, 64);
+    _setMinWidth(container, 56);
+    container.cornerRadius = 8;
+    container.clipsContent = true;
+    container.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
+    container.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
+    container.strokeWeight = 0.5;
+    container.strokeAlign = 'INSIDE';
+
+    const topHalf = _f('Neutral on swatch', 'HORIZONTAL');
+    topHalf.primaryAxisAlignItems = 'CENTER';
+    topHalf.counterAxisAlignItems = 'CENTER';
+    topHalf.resize(56, 32);
+    topHalf.fills = [_paint(swatchRGB, swatchVar)];
+    const topText = _tDS(_lcLabel(top.lc, 75), 9, top.fg, true, top.varRef);
+    topHalf.appendChild(topText);
+    container.appendChild(topHalf);
+    topHalf.layoutSizingHorizontal = 'FILL';
+    topHalf.layoutSizingVertical = 'FIXED';
+
+    const bottomHalf = _f('Swatch on neutral', 'HORIZONTAL');
+    bottomHalf.primaryAxisAlignItems = 'CENTER';
+    bottomHalf.counterAxisAlignItems = 'CENTER';
+    bottomHalf.resize(56, 32);
+    bottomHalf.fills = [_paint(bottom.bg, bottom.varRef)];
+    const bottomText = _tDS(_lcLabel(bottom.lc, 75), 9, swatchRGB, true, swatchVar);
+    bottomHalf.appendChild(bottomText);
+    container.appendChild(bottomHalf);
+    bottomHalf.layoutSizingHorizontal = 'FILL';
+    bottomHalf.layoutSizingVertical = 'FIXED';
+
+    swatch.appendChild(container);
+    container.layoutSizingHorizontal = 'FILL';
+    container.layoutSizingVertical = 'FIXED';
+
+    if (hexLabel) {
+      const ht = _tDS(hexLabel, 9, _subColor, false, _V.textSub);
+      swatch.appendChild(ht);
+      ht.layoutSizingHorizontal = 'FILL';
+    }
+
+    return swatch;
+  }
+
   function _buildPrimSwatchRow(rampName, vars) {
     const row = _f('Table / Row / Primary Color Swatches 1.0.0', 'VERTICAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
@@ -2375,7 +2506,7 @@ async function _buildShowcase(opts) {
     title.layoutSizingHorizontal = 'FILL';
 
     const strip = _f('Swatches', 'HORIZONTAL');
-    strip.itemSpacing = 8;
+    strip.itemSpacing = 6;
     strip.counterAxisAlignItems = 'MIN';
 
     for (const v of vars) {
@@ -2384,17 +2515,17 @@ async function _buildShowcase(opts) {
       const swatchRGB = rawVal && 'r' in rawVal
         ? { r: rawVal.r, g: rawVal.g, b: rawVal.b }
         : { r: 0.8, g: 0.8, b: 0.8 };
-      const ind = _swatchIndicator(swatchRGB, true);
-      const fgRGB = ind.show ? ind.fg : _textColor;
-      const swatch = _buildSwatch(swatchRGB, fgRGB, ind.show ? 'Aa' : null, {
-        stepLabel: stepName,
-        hexLabel:  rawVal && 'r' in rawVal ? _hex(rawVal) : '—',
-        swatchVar: v,
-        fgVar: ind.varRef,
-      });
+      const swatch = _buildPrimitiveContrastSwatch(
+        swatchRGB,
+        stepName,
+        rawVal && 'r' in rawVal ? _hex(rawVal) : '—',
+        v
+      );
       strip.appendChild(swatch);
       swatch.layoutSizingHorizontal = 'FILL';
       swatch.layoutSizingVertical   = 'HUG';
+      swatch.layoutGrow = 1;
+      _setMinWidth(swatch, 56);
     }
 
     row.appendChild(strip);
@@ -2455,6 +2586,8 @@ async function _buildShowcase(opts) {
     var fgVar    = opts.fgVar    !== undefined ? opts.fgVar    : null;
     var hasPairing = opts.hasPairing !== undefined ? opts.hasPairing : true;
     const ratio = _contrastRatio(bgRGB, fgRGB);
+    var lcAbs = Math.abs(_apcaLc(fgRGB, bgRGB));
+    var lcThreshold = opts.isIcon ? 60 : 75;
     const row = _f('Table / Row / Semantic Color Pairs 1.0.0', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
     row.paddingTop  = 16; row.paddingBottom = 16;
@@ -2480,11 +2613,11 @@ async function _buildShowcase(opts) {
     const swatchCell = _f('SwatchCell', 'VERTICAL');
     swatchCell.primaryAxisAlignItems = 'CENTER';
     swatchCell.counterAxisAlignItems = 'CENTER';
-    const swatch = _buildSwatch(bgRGB, fgRGB, opts.isIcon ? '☻' : (opts.previewText || token), {
+    const swatch = _buildSwatch(bgRGB, fgRGB, _lcLabel(lcAbs, lcThreshold), {
       swatchVar: bgVar,
       fgVar: fgVar,
-      sampleFontSize: opts.isIcon ? 16 : 10,
-      forceIndicator: opts.isIcon ? true : false,
+      sampleFontSize: 11,
+      forceIndicator: true,
     });
     swatchCell.appendChild(swatch);
     swatch.layoutSizingHorizontal = 'FILL';

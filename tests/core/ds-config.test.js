@@ -81,6 +81,81 @@ function makeDs(overrides) {
   assert.strictEqual(cobalt.steps.length, 5, 'Custom steps should produce 5-step ramp');
 }
 
+// contrast-harmonized ramp strategy treats the brand color as hue/chroma seed,
+// then places it on a fixed perceptual lightness ladder. This is inspired by
+// contrast-contract palette tools, but remains Figlets' own deterministic path.
+{
+  function rowLc(markdown, folder, step, column) {
+    const afterFolder = markdown.split('**' + folder + '**')[1];
+    const block = afterFolder.split('\n**')[0];
+    const line = block.split('\n').find(l => l.includes('`/' + step + '`'));
+    assert.ok(line, 'Missing markdown row for ' + folder + '/' + step);
+    const cells = line.split('|').map(s => s.trim());
+    const cell = column === 'black' ? cells[6] : cells[4];
+    const match = cell.match(/Lc\s+(\d+)/);
+    assert.ok(match, 'Missing APCA value in ' + folder + '/' + step + ' ' + column);
+    return Number(match[1]);
+  }
+  function range(values) {
+    return Math.max.apply(null, values) - Math.min.apply(null, values);
+  }
+  function assertMonotonicLightness(ramp) {
+    const { srgbToOklch } = require('../../packages/figlets-core/src/ds-config/oklch.js');
+    let prev = null;
+    for (const row of ramp.steps) {
+      const L = srgbToOklch({ r: row[1], g: row[2], b: row[3] }).L;
+      if (prev !== null) {
+        assert.ok(
+          L < prev,
+          ramp.folder + ' must darken monotonically; step ' + row[0] + ' L=' + L.toFixed(3) + ' after ' + prev.toFixed(3)
+        );
+      }
+      prev = L;
+    }
+  }
+
+  const base = makeDs({
+    color: {
+      scale: '50-950',
+      algorithm: 'oklch',
+      convention: 'role-based',
+      brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }]
+    }
+  });
+
+  const standard = generateColorRamps(computeDsConfig(base).ds);
+  const harmonizedDs = computeDsConfig(base).ds;
+  harmonizedDs.color.rampStrategy = 'contrast-harmonized';
+  const harmonized = generateColorRamps(harmonizedDs);
+
+  assert.ok(harmonized.summary.includes('contrast-harmonized'), 'summary should mention contrast-harmonized strategy');
+
+  const utilityFolders = ['color/red', 'color/green', 'color/blue'];
+  const standardLightRange = range(utilityFolders.map(folder => rowLc(standard.markdownTable, folder, 200, 'black')));
+  const harmonizedLightRange = range(utilityFolders.map(folder => rowLc(harmonized.markdownTable, folder, 200, 'black')));
+  const standardDarkRange = range(utilityFolders.map(folder => rowLc(standard.markdownTable, folder, 800, 'white')));
+  const harmonizedDarkRange = range(utilityFolders.map(folder => rowLc(harmonized.markdownTable, folder, 800, 'white')));
+
+  assert.ok(
+    harmonizedLightRange < standardLightRange,
+    'contrast-harmonized /200 steps should have tighter APCA-on-black spread'
+  );
+  assert.ok(
+    harmonizedDarkRange <= standardDarkRange,
+    'contrast-harmonized /800 steps should not loosen APCA-on-white spread'
+  );
+  for (const folder of ['color/cobalt', 'color/red', 'color/green', 'color/yellow', 'color/blue']) {
+    assertMonotonicLightness(harmonized.ds.color.ramps.find(r => r.folder === folder));
+  }
+
+  const validated = validateSemanticPairs(harmonized.ds);
+  assert.strictEqual(
+    validated.failCount,
+    0,
+    'contrast-harmonized generated role-based semantic pairs should pass APCA'
+  );
+}
+
 // algorithm switch — default is oklch, hsl is selectable, the brand color
 // pins the 500 step exactly in both modes, and OKLCh keeps lights more chromatic
 {
@@ -147,6 +222,15 @@ function makeDs(overrides) {
     () => generateColorRamps(dsBad),
     /algorithm/,
     'Unknown algorithm should throw'
+  );
+
+  const dsBadStrategy = computeDsConfig(makeDs()).ds;
+  dsBadStrategy.color.algorithm = 'hsl';
+  dsBadStrategy.color.rampStrategy = 'contrast-harmonized';
+  assert.throws(
+    () => generateColorRamps(dsBadStrategy),
+    /contrast-harmonized/,
+    'Contrast-harmonized strategy should require OKLCh'
   );
 }
 

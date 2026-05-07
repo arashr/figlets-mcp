@@ -207,6 +207,65 @@ function validateSemanticPairs(ds) {
 
   const pairTemplates     = convention === 'surface-based' ? SURFACE_PAIRS    : ROLE_PAIRS;
   const unpairedTemplates = convention === 'surface-based' ? SURFACE_UNPAIRED : ROLE_UNPAIRED;
+  const contrastHarmonized = DS.color.rampStrategy === 'contrast-harmonized';
+
+  function applyContrastHarmonizedPair(row) {
+    const map = {
+      'color/bg/default|color/text/subtle': {
+        L: { bg: 'neutral/50', text: 'neutral/700' },
+        D: { bg: 'neutral/950', text: 'neutral/100' },
+      },
+      'color/bg/muted|color/text/default': {
+        L: { bg: 'neutral/100', text: 'neutral/950' },
+        D: { bg: 'neutral/800', text: 'neutral/50' },
+      },
+      'color/bg/brand|color/text/on-brand': {
+        L: { bg: 'primary/900', text: 'neutral/50' },
+        D: { bg: 'primary/50', text: 'neutral/950' },
+      },
+      'color/bg/brand-subtle|color/text/brand': {
+        L: { bg: 'primary/50', text: 'primary/900' },
+        D: { bg: 'primary/950', text: 'primary/50' },
+      },
+      'color/bg/danger|color/text/danger': {
+        L: { bg: 'red/50', text: 'red/900' },
+        D: { bg: 'red/950', text: 'red/100' },
+      },
+      'color/fill/danger|color/text/on-danger': {
+        L: { bg: 'red/900', text: 'neutral/50' },
+        D: { bg: 'red/100', text: 'neutral/950' },
+      },
+      'color/bg/success|color/text/success': {
+        L: { bg: 'green/50', text: 'green/900' },
+        D: { bg: 'green/950', text: 'green/100' },
+      },
+      'color/fill/success|color/text/on-success': {
+        L: { bg: 'green/900', text: 'neutral/50' },
+        D: { bg: 'green/100', text: 'neutral/950' },
+      },
+      'color/bg/warning|color/text/warning': {
+        L: { bg: 'yellow/50', text: 'yellow/900' },
+        D: { bg: 'yellow/950', text: 'yellow/100' },
+      },
+      'color/fill/warning|color/text/on-warning': {
+        L: { bg: 'yellow/100', text: 'neutral/950' },
+        D: { bg: 'yellow/100', text: 'neutral/950' },
+      },
+      'color/bg/info|color/text/info': {
+        L: { bg: 'blue/50', text: 'blue/900' },
+        D: { bg: 'blue/950', text: 'blue/100' },
+      },
+      'color/fill/info|color/text/on-info': {
+        L: { bg: 'blue/900', text: 'neutral/50' },
+        D: { bg: 'blue/100', text: 'neutral/950' },
+      },
+    };
+    const override = map[row.bg + '|' + row.text];
+    if (!override) return row;
+    row.L = override.L;
+    row.D = override.D;
+    return row;
+  }
 
   let sourceTemplates;
   if (existingPairs) {
@@ -228,10 +287,22 @@ function validateSemanticPairs(ds) {
       if (p.bg === 'color/surface/success' && p.text === 'color/on-surface/success') {
         if (row.L && row.L.bg === 'green/600' && row.L.text === 'neutral/900') row.L.text = 'neutral/50';
       }
-      return row;
+      return contrastHarmonized ? applyContrastHarmonizedPair(row) : row;
     });
   } else {
-    sourceTemplates = pairTemplates;
+    sourceTemplates = contrastHarmonized
+      ? pairTemplates.map(function(t) {
+        return applyContrastHarmonizedPair({
+          bg: t.bg,
+          text: t.text,
+          min: t.min,
+          minLc: t.minLc,
+          note: t.note,
+          L: { bg: t.L.bg, text: t.L.text },
+          D: { bg: t.D.bg, text: t.D.text },
+        });
+      })
+      : pairTemplates;
   }
 
   let failCount = 0;

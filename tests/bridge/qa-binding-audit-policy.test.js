@@ -139,15 +139,28 @@ assert.ok(
 );
 
 assert.ok(
-  code.includes("fgVar: ind.varRef"),
-  "Showcase primitive swatch text and indicators must receive the chosen foreground variable"
+  code.includes("function _buildPrimitiveContrastSwatch(swatchRGB, stepLabel, hexLabel, swatchVar)") &&
+    code.includes("const topText = _tDS(_lcLabel(top.lc, 75), 9, top.fg, true, top.varRef);") &&
+    code.includes("const bottomText = _tDS(_lcLabel(bottom.lc, 75), 9, swatchRGB, true, swatchVar);") &&
+    code.includes("swatch.layoutGrow = 1;") &&
+    code.includes("_setMinWidth(swatch, 56);"),
+  "Showcase primitive swatches must bind split APCA labels to variables and flex within the row"
+);
+
+assert.ok(
+  code.includes("function _lcLabel(lc, threshold)") &&
+    code.includes("return (lc >= threshold ? '✓ ' : '✗ ') + 'Lc ' + lc;") &&
+    code.includes("var lcAbs = Math.abs(_apcaLc(fgRGB, bgRGB));") &&
+    code.includes("var lcThreshold = opts.isIcon ? 60 : 75;") &&
+    code.includes("const swatch = _buildSwatch(bgRGB, fgRGB, _lcLabel(lcAbs, lcThreshold), {"),
+  "Showcase semantic pair swatches must show APCA pass/fail labels at text/icon thresholds"
 );
 
 assert.ok(
   code.includes("function _pickReadableNeutralExtreme(swatchRGB)") &&
     code.includes("if (!/^color\\/neutral\\//i.test(s.name)) continue;") &&
     code.includes("scrim|overlay|surface|foreground|text|on[-_]surface|shadow|elevation") &&
-    code.includes("_swatchIndicator(swatchRGB, true)"),
+    code.includes("_pickNeutralTextForSwatch(swatchRGB)"),
   "Showcase primitive swatches must fall back only to readable neutral-ramp variables when semantic variables do not contrast"
 );
 

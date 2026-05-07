@@ -23,6 +23,13 @@ function generateColorRamps(ds) {
   if (algorithm !== 'oklch' && algorithm !== 'hsl') {
     throw new Error(`DS.color.algorithm must be "oklch" or "hsl" (got "${DS.color.algorithm}")`);
   }
+  const rampStrategy = (DS.color.rampStrategy || 'standard').toLowerCase();
+  if (rampStrategy !== 'standard' && rampStrategy !== 'contrast-harmonized') {
+    throw new Error(`DS.color.rampStrategy must be "standard" or "contrast-harmonized" (got "${DS.color.rampStrategy}")`);
+  }
+  if (rampStrategy === 'contrast-harmonized' && algorithm !== 'oklch') {
+    throw new Error('DS.color.rampStrategy="contrast-harmonized" requires DS.color.algorithm="oklch".');
+  }
   const brandColors = DS.color.brand.slice();
 
   // ── Scale steps ─────────────────────────────────────────────────────────────
@@ -171,7 +178,57 @@ function generateColorRamps(ds) {
     });
   }
 
-  const generateRamp = algorithm === 'hsl' ? generateRampHsl : generateRampOklch;
+  function contrastChroma(baseC, i, anchorIdx) {
+    const maxSide = Math.max(anchorIdx, steps.length - 1 - anchorIdx);
+    const distance = Math.abs(i - anchorIdx) / Math.max(1, maxSide);
+    const centerBoost = 1 + 0.08 * (1 - distance);
+    const edgeTaper = 0.40 + 0.60 * (1 - Math.pow(distance, 1.25));
+    return baseC * centerBoost * edgeTaper;
+  }
+
+  function contrastHarmonizedLightness(i) {
+    const targets = [0.97, 0.93, 0.86, 0.78, 0.68, 0.56, 0.47, 0.39, 0.32, 0.25, 0.18];
+    if (steps.length === targets.length) return targets[i];
+    const pos = i / Math.max(1, steps.length - 1) * (targets.length - 1);
+    const lo = Math.floor(pos);
+    const hi = Math.min(targets.length - 1, Math.ceil(pos));
+    const t = pos - lo;
+    return targets[lo] + (targets[hi] - targets[lo]) * t;
+  }
+
+  function generateRampOklchContrastHarmonized(baseHex, anchorIdx) {
+    if (anchorIdx === undefined) anchorIdx = midIdx;
+    const base = hexToRgb(baseHex);
+    const { C: baseC, H } = srgbToOklch(base);
+    const minLStep = 0.024;
+    const out = steps.map((step, i) => {
+      const C = Math.max(0, contrastChroma(baseC, i, anchorIdx));
+      let L = contrastHarmonizedLightness(i);
+      const rgb = oklchToSrgbClipped(L, C, H);
+      return { step, L, C, ...rgb };
+    });
+    for (let i = anchorIdx - 1; i >= 0; i--) {
+      if (out[i].L <= out[i + 1].L + minLStep) {
+        out[i].L = Math.min(OKLCH_LIGHT_TARGET, out[i + 1].L + minLStep);
+        const rgb = oklchToSrgbClipped(out[i].L, out[i].C, H);
+        out[i].r = rgb.r; out[i].g = rgb.g; out[i].b = rgb.b;
+      }
+    }
+    for (let i = anchorIdx + 1; i < out.length; i++) {
+      if (out[i].L >= out[i - 1].L - minLStep) {
+        out[i].L = Math.max(OKLCH_DARK_TARGET, out[i - 1].L - minLStep);
+        const rgb = oklchToSrgbClipped(out[i].L, out[i].C, H);
+        out[i].r = rgb.r; out[i].g = rgb.g; out[i].b = rgb.b;
+      }
+    }
+    return out.map(function(row) {
+      return { step: row.step, r: row.r, g: row.g, b: row.b };
+    });
+  }
+
+  const generateRamp = algorithm === 'hsl'
+    ? generateRampHsl
+    : (rampStrategy === 'contrast-harmonized' ? generateRampOklchContrastHarmonized : generateRampOklch);
 
   function neutralVariantOptions() {
     const cfg = DS.color.neutralVariant;
@@ -452,8 +509,11 @@ function generateColorRamps(ds) {
       }).join('\n')
     : '';
 
+  const strategyLabel = rampStrategy === 'contrast-harmonized'
+    ? ', contrast-harmonized ramp strategy'
+    : '';
   const summary =
-    `Generated ${allRamps.length} ramps (${steps.length} steps each, ${scaleKey} scale, ${algorithm} algorithm):\n` +
+    `Generated ${allRamps.length} ramps (${steps.length} steps each, ${scaleKey} scale, ${algorithm} algorithm${strategyLabel}):\n` +
     rampList + anchorBlock + derivedBlock + warnBlock;
 
   return { ds: DS, markdownTable, contrastAnnotations, derivedColors, summary };

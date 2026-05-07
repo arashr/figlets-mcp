@@ -675,3 +675,62 @@ Fixes shipped:
 - Should `figma-selection.json` and `figma-data.json` be merged into one file with namespaced keys, or stay separate?
 - Which adapter to build first — Claude or Codex?
 - Why does `figma.currentPage.selection` return `[]` when something is selected? (Pinned — investigate next session)
+
+---
+
+### [2026-05-07 — contrast-harmonized OKLCh ramps + APCA swatch showcase]
+
+**Objective completed:** Added an opt-in OKLCh `DS.color.rampStrategy = "contrast-harmonized"` and updated the Colors showcase to make primitive and semantic contrast behavior visible.
+
+**What changed:**
+
+- `packages/figlets-core/src/ds-config/generate-color-ramps.js`
+  - Adds `rampStrategy: "contrast-harmonized"` alongside the existing default `"standard"`.
+  - Requires `DS.color.algorithm = "oklch"`.
+  - Treats brand colors as hue/chroma seeds rather than exact numbered anchors.
+  - Places every ramp on a fixed OKLCh lightness ladder (`50` light → `950` dark), with chroma tapering toward the extremes.
+  - Keeps monotonic lightness, avoiding the observed 400/500 inversion and muddy first-step jumps.
+
+- `packages/figlets-core/src/ds-config/validate-semantic-pairs.js`
+  - Adds contrast-harmonized semantic pair defaults so role-based generated pairs validate cleanly under APCA.
+  - Soft backgrounds stay on `bg/*` / `surface/*`; strong fills stay on `fill/*` + `text/on-*`.
+
+- `packages/figma-bridge-plugin/code.js`
+  - Primitive ramp swatches now use a split tile:
+    - top half: readable neutral text on the swatch
+    - bottom half: swatch color as text on a readable neutral extreme
+  - Both halves show `✓ Lc NN` or `✗ Lc NN` using Lc 75 as the body-text threshold.
+  - Swatches flex across the row with a 56px minimum so the full 50-950 ramp fits the showcase width.
+  - Semantic pair swatches now show the same APCA pass/fail label for the actual paired foreground/background. Text pairs use Lc 75; icon-like rows use Lc 60.
+
+**Active live file:**
+
+- Figma file: `Figlets DS`
+- Active local config: `.local/local_movbxur3_6gow4h4j/design-system.config.js`
+- Preview SVG: `.local/local_movbxur3_6gow4h4j/design-system.preview.svg`
+- Active config includes `"rampStrategy": "contrast-harmonized"` and prepared cleanly:
+  - `readyToBuild: true`
+  - `failCount: 0`
+  - `apcaFailCount: 0`
+
+**Live verification:**
+
+- User reloaded the Figlets Bridge plugin after `code.js` changed.
+- Receiver connected to `file=local_movbxur3_6gow4h4j`.
+- Ran `update_ds_primitives` with `categories: ["color", "color-semantics"]`, `create_missing: true`:
+  - color: `67 updated`, `32 unchanged`, no unmatched/type mismatches
+  - color-semantics: `1 updated`, `51 unchanged`, no unmatched/type mismatches
+- Ran `build_ds_showcase`:
+  - rendered `Colors`, `Typography`, `Spacing`, `Elevation`, `Scrims` on `00 · Tokens`
+  - only expected raw chrome warnings remained (`radius 16`, `spacing 6`, `font size 9`, etc.)
+
+**Tests and checks:**
+
+- `node --check packages/figma-bridge-plugin/code.js` passed.
+- Forbidden modern operators check for `??`, `?.`, `**` in plugin code found only existing comments/markdown strings.
+- Full test suite passed with bundled modern Node: `37/37`.
+- `git diff --check` clean.
+
+**TODO / follow-up:**
+
+- WCAG parity for the new swatch treatment is not implemented. The visual structure can work, but labels must be ratio-based (`✓ AAA`, `✓ AA`, `~ Large`, `✗ Fail`, or ratio text) instead of APCA `Lc`. If the project needs WCAG-mode showcase parity, update primitive and semantic swatch labels to branch on `DS.color.contrastAlgorithm`.

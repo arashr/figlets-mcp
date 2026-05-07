@@ -14,6 +14,26 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-07] Contrast-harmonized OKLCh ramps are opt-in
+
+**Decision:** `DS.color.rampStrategy = "contrast-harmonized"` adds an optional OKLCh ramp generator that treats brand colors as hue/chroma seeds and places the full ramp on a fixed perceptual lightness ladder. Brand colors do not have to be forced into an exact numbered stop; the generated ramp keeps their character while tightening level-to-level APCA consistency across hues. The default remains the existing `"standard"` OKLCh ramp behavior.
+
+**Why:** External palette tools such as Harmonizer point to a useful product principle: palette levels should behave like contrast/lightness contracts, not only interpolated color stops. Figlets should learn from that principle without copying code or making the first OKLCh implementation unstable.
+
+**Consequence:** Designers can opt into contrast-harmonized ramps for more predictable primitive levels while existing configs remain unchanged. The strategy requires `DS.color.algorithm = "oklch"` and is covered by core tests comparing APCA spread across generated utility hues.
+
+---
+
+## [2026-05-07] Showcase swatches expose APCA pass/fail context
+
+**Decision:** Primitive color ramp swatches use a split preview: readable neutral text on the swatch, and the swatch color as text on a readable neutral extreme. Both halves show `✓ Lc NN` or `✗ Lc NN` at the body-text APCA threshold of Lc 75. Semantic pair swatches now show the same APCA label treatment for the actual paired foreground/background relationship; semantic text pairs use Lc 75, icon-like rows use Lc 60.
+
+**Why:** Designers need to understand whether a primitive step can carry text, not only whether the color looks good in isolation. The split treatment makes both common uses visible without forcing a primitive ramp to imply one semantic pairing.
+
+**Consequence:** The swatch treatment is APCA-specific today. A WCAG version should use ratio-based labels such as `✓ AA`, `✓ AAA`, `~ Large`, or `✗ Fail` rather than `Lc`; this is a follow-up task if the project needs WCAG-mode showcase parity.
+
+---
+
 ## [2026-05-07] Setup preview is generated before any Figma apply
 
 **Decision:** `prepare_ds_config` now writes a lightweight SVG preview next to the active file-scoped config and returns it as `setupPreview.svgPath`. The preview shows generated ramps and semantic pairs as actual swatches/text samples before `apply_ds_setup` is allowed to touch Figma.

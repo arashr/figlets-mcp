@@ -4,6 +4,44 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-06 — fresh DS setup for new file + merge-populate fix]
+
+**Shipped this session:**
+
+0. **Flat config guard**: Fixed the per-file isolation footgun where a new/unsaved Figma file could inherit `.local/design-system.config.js`. Server tools now refuse the legacy flat config for active file workflows: `prepare_ds_config`, `apply_ds_setup`, and `update_ds_primitives`; `build_ds_showcase` only auto-reads a config when `.local/<fileKey>/design-system.config.js` can be resolved.
+
+0. **Persistent local identity for keyless drafts**: New/unsaved Figma files that return empty `figma.fileKey` now get a stable `local_*` key stored in `figma.root` plugin data (`figletsFileKey`). The UI forwards this as `fileKey`, so sync/config/showcase state routes to `.local/<local-id>/` instead of the flat root. Real Figma fileKey still takes precedence when available.
+
+0. **Scrim/text binding guard**: Reinstated the semantic binding decision that decorative color variables are not valid automatic text/foreground candidates. Both `_createDsBindingContext()` and the restored showcase builder now exclude `scrim`, `overlay`, `state`, `shadow`, and `elevation` color names from role fallback scoring. Scrim variables still render in the Scrims section; they just cannot become generated copy text fills.
+
+0. **Showcase rollback after failed color-migration coupling**: `_buildShowcase` and `build_ds_showcase` payload shape were restored to the pre-Sunday-17:13 baseline (`eda38ad`). Product decisions around color primitive regeneration, semantic alias updates, per-file isolation, and additive setup repair are preserved, but showcase presentation is frozen back to the prior working builder. Do not reintroduce APCA-specific showcase columns, config-driven showcase grouping, or outline/border showcase restructuring as part of color update work.
+
+0. **Setup preview before apply**: `prepare_ds_config` writes `design-system.preview.svg` next to the active file-scoped config and returns `setupPreview.svgPath`. Use this in the conversation to review ramps and semantic pairs visually before `apply_ds_setup`; do not apply to Figma until the designer confirms after preview + readiness.
+
+0. **Utility status semantic split**: Default generated utility semantics now treat `bg/*` / `surface/*` as soft readable status backgrounds, while strong saturated status colors use explicit `fill/*` + `text/on-*` pairs. This keeps background semantics aligned with common design-system practice and avoids baking a strong-fill opinion into `bg`.
+
+0. **Showcase semantic-pair restoration**: `build_ds_showcase` now forwards `DS.color.semantics.pairs` from the active file-scoped config. The bridge plugin renders the Semantic Colors table from those validated pair relationships instead of trying to infer pairs from names. This fixed clean-file showcase regressions where role-based tokens were split into `surface`/`icon`/`fill` sub-tables and table text bound to purpose-specific tokens such as `color/text/on-brand`, making labels invisible. Muted pairs remain exempt and may not show the paired-text indicator when below the indicator threshold; threshold tuning is a follow-up product decision.
+
+1. **DS config for new Figma file** (`.local/design-system.config.js`): Primary `#A6D56A`/400, Secondary `#609190`/500, Accent `#CCBDB7`/300. 11-step `50–950` OKLCh ramps. APCA contrast. Light + Dark modes. Standard utility ramps (neutral, red, green, yellow, blue, neutral-variant). Sora + JetBrains Mono. Material3 type scale. 8px grid, 4-breakpoint (Mobile/Tablet/Desktop/Wide). All 15 APCA semantic pairs pass Lc ≥ 75 after manual step fixes (e.g. bg/brand → primary/800 Light, primary/200 Dark; utility status pairs bumped to /700–/800 range). Zero failures.
+
+2. **Showcase rendered** on page `00 · Tokens` — Colors, Typography, Spacing, Elevation, Scrims (5 sections). Two binding warnings remained after the first pass: no border-8 variable, and a QA binding pass with unresolved gaps from stale Typography/Spacing variable names.
+
+3. **`getOrCreateCollection` merge-populate fix** (`code.js`): When Primitives collection exists but has no COLOR variables (user deleted ramps but kept FLOAT/STRING vars), the plugin now re-enters the population block instead of skipping. Uses a `_primHasColors` check before the `if (existed)` branch. The population block pre-builds `_primMergeMap = await buildVarMap(primColl.id)` and wraps every `createVariable` call with `if (_primMergeMap[name]) continue` to skip existing vars. Same merge-map pattern applied to Typography and Spacing blocks for mode dedup safety (pre-existing FLOAT vars are not recreated). `getOrCreateCollection` falls back to empty-shell detection (any vars → existed = true) for all other collections.
+
+4. **Color alias self-repair** (`code.js`): When Color collection exists, the plugin scans `variable.valuesByMode` across all Color vars to check for any `VARIABLE_ALIAS` value. If none exist (`_semNeedsRepair = true`), it runs a full alias rewiring pass — rebuilds `_repPrimMap` + `_repSemVarObj` from `getLocalVariablesAsync`, resolves Light/Dark mode IDs from the existing collection, then iterates pairs/icons/unpaired from `DS.color.semantics` and calls `v.setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id })` on each existing semantic variable. Reports as `Color (aliases repaired)` in the built list. This handles the case where Color was created before Primitives had ramp vars.
+
+5. **Typography/Spacing additive stale-collection repair** (`code.js`): Existing Typography and Spacing collections no longer skip blindly. If the collection exists but is missing current generated DS names (`type/{role}/...`, `space/{semantic}`, `space/radius/{key}`, `space/border/{key}`), `apply_ds_setup` enters merge mode, adds missing vars/modes only, and leaves old variables intact. Also fixed Typography aliasing so fresh Typography creation after Primitives already exists still points at the configured type/font primitive names.
+
+6. **QA safe-bind accounting fix** (`code.js`): `_runQaBindingAudit({ fix: true })` now only attempts high-confidence suggestions. Low/medium/none suggestions are still reported in audits but are not counted as failed safe-bind fixes. This addresses the misleading showcase warning where 31 intentionally skipped suggestions were reported as unresolved gaps.
+
+**Per-file isolation status:**
+- Flat `.local/design-system.config.js` is legacy only. If `active-file.json` has no fileKey, tools must not use it. Migration for an existing saved file remains: reload plugin, run `sync_figma_data` to get a real fileKey, then move/copy the intended config to `.local/<fileKey>/design-system.config.js`.
+
+**Open for next session:**
+- Reload the Figlets Bridge plugin after the showcase rollback, then rebuild the showcase. Expected behavior: old working showcase grouping/readability, with color primitives/semantics still updateable through the dedicated setup/update paths.
+
+---
+
 ### [2026-05-06 — per-file config isolation + swatch indicator polish]
 
 **Shipped this session:**

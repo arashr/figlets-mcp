@@ -13,10 +13,13 @@
 
 const http = require('http');
 const path = require('path');
+const { getConfigPathGuardError } = require('../utils/paths.js');
 
 function handleApplyDsSetup({ config_path }) {
   const resolvedPath = path.resolve(config_path);
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || 'http://localhost:1337';
+  const guardError = getConfigPathGuardError(resolvedPath);
+  if (guardError) return Promise.resolve(guardError);
 
   let readDsConfig;
   try {

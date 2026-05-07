@@ -189,7 +189,8 @@
     'apply-ds-setup',
     'build-doc',
     'qa-audit',
-    'update-primitives'
+    'update-primitives',
+    'reset-figlets-file'
   ];
 
   function _fmtTime(ts) {
@@ -416,6 +417,13 @@
           document.getElementById('substatus').innerText = 'Overwriting primitive values in Figma.';
           _appendLog('Received command: update_ds_primitives.');
           parent.postMessage({ pluginMessage: { type: 'update-primitives', data: data.data } }, '*');
+        } else if (data.command === 'reset-figlets-file') {
+          isExtracting = true;
+          _armWatchdog('Reset', 60000);
+          document.getElementById('status').innerText = 'Resetting file...';
+          document.getElementById('substatus').innerText = 'Removing local variables, styles, and canvas content.';
+          _appendLog('Received command: reset_figlets_file.');
+          parent.postMessage({ pluginMessage: { type: 'reset-figlets-file', data: data.data || {} } }, '*');
         }
       }
     } catch (err) {
@@ -541,6 +549,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
         _appendLog('Failed to send primitives update result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'figlets-reset-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch('http://localhost:1337/sync-reset-figlets-file?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Reset failed.' : 'File reset complete.';
+        _appendLog(msg.data.error ? 'Reset failed in plugin.' : 'Reset result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send reset result to receiver.');
       }
       isExtracting = false;
       poll();

@@ -107,6 +107,7 @@ function runDsPipeline(configPath) {
   const apcaFailCount = step3.failCount || 0;
 
   return {
+    ds,
     spacingPreview:       step1.preview,
     computed:             step1.computed,
     needsClaude:          step1.needsClaude,

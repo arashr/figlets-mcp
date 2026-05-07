@@ -160,6 +160,14 @@ function makeDs(overrides) {
   assert.ok(ds2.color.semantics,                        'DS.color.semantics must be set');
   assert.ok(Array.isArray(ds2.color.semantics.pairs),   'semantics.pairs must be an array');
   assert.strictEqual(typeof failCount, 'number',         'failCount must be a number');
+  const successBg = ds2.color.semantics.pairs.find(p => p.bg === 'color/bg/success');
+  const successFill = ds2.color.semantics.pairs.find(p => p.bg === 'color/fill/success');
+  assert.ok(successBg, 'role-based utility backgrounds should expose soft bg/success');
+  assert.ok(successFill, 'role-based utility strong states should expose explicit fill/success');
+  assert.strictEqual(successBg.text, 'color/text/success');
+  assert.strictEqual(successFill.text, 'color/text/on-success');
+  assert.ok(/green\/50$/.test(successBg.Light.bg), 'bg/success Light should be a soft surface tint');
+  assert.ok(/green\/800$/.test(successFill.Light.bg), 'fill/success Light should be the strong filled surface');
 }
 
 // neutral-variant backfills generated surface semantics without clobbering unrelated pairs

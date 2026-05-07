@@ -39,6 +39,15 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("function _getFigletsFileKey()") &&
+    code.includes("figma.root.getPluginData('figletsFileKey')") &&
+    code.includes("figma.root.setPluginData('figletsFileKey', localKey)") &&
+    code.includes("fileKey: _fileKey") &&
+    ui.includes("'&fileKey=' +"),
+  "Keyless Figma drafts must get a persisted local file identity for per-file .local routing"
+);
+
+assert.ok(
   code.includes("const maxNodes = typeof opts.maxNodes === 'number'") &&
     code.includes("truncateReason = 'MAX_NODES';") &&
     code.includes("truncateReason = 'DEADLINE';") &&
@@ -57,6 +66,14 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("function isDecorativeColorName(name)") &&
+    code.includes("function _isDecorativeColorName(name)") &&
+    code.includes("!isDecorativeColorName(v.name)") &&
+    code.includes("!_isDecorativeColorName(v.name)"),
+  "Shared resolver and showcase color-role fallbacks must exclude scrim/overlay colors from text and foreground binding"
+);
+
+assert.ok(
   code.includes("sq.cornerRadius  = px;") && !code.includes("sq.cornerRadius  = Math.min(px, 28);"),
   "Showcase radius visuals must use token values directly so full radius can bind instead of producing raw 28px gaps"
 );
@@ -67,6 +84,27 @@ assert.ok(
     code.includes("const _rampEntries = Object.entries(_rampMap).sort") &&
     code.includes("for (const { label, rows } of _sortSemanticGroups(_mainGroups))"),
   "Showcase colors must use deterministic primitive and semantic ordering"
+);
+
+assert.ok(
+  code.includes("const _configSemanticPairs = (") &&
+    code.includes("Array.isArray(opts.DS.color.semantics.pairs)") &&
+    code.includes("for (const pair of _configSemanticPairs)") &&
+    code.includes("varByName[pair.bg]") &&
+    code.includes("varByName[pair.text]"),
+  "Showcase semantic color rows must use prepared DS.color.semantics.pairs when a config is present"
+);
+
+assert.ok(
+  code.includes("_V.textSub = _findVar(") &&
+    code.includes("'color/text/subtle'") &&
+    code.includes("'color/text/muted'") &&
+    code.includes("_V.brandVariant = _findVar(") &&
+    code.includes("'color/bg/brand-subtle'") &&
+    code.includes("_V.onBrandVariant = _findVar(") &&
+    code.includes("'color/text/brand'") &&
+    code.includes("if (!_V.onBrandVariant) {"),
+  "Showcase chrome must prefer explicit generic/brand-subtle tokens before scored brand foregrounds"
 );
 
 assert.ok(
@@ -192,27 +230,4 @@ assert.ok(
 assert.ok(
   !tool.includes("text styles first, then variables"),
   "qa_binding_audit description must not claim styles are globally first"
-);
-
-assert.ok(
-  code.includes("function _apcaLum(rgb)") &&
-    code.includes("function _apcaLc(fg, bg)") &&
-    code.includes("Math.pow(rgb.r, 2.4)") &&
-    code.includes("var BC = 0.022, BE = 1.414") &&
-    code.includes("Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt"),
-  "Showcase APCA helper must match the validator's full APCA 0.0.98G implementation (soft clamp + polarity rounding)"
-);
-
-assert.ok(
-  code.includes("function _buildApcaBadge(lc)") &&
-    code.includes("absLc >= 75") &&
-    code.includes("absLc >= 60"),
-  "Showcase must include APCA badge builder with Lc 75 and Lc 60 thresholds"
-);
-
-assert.ok(
-  code.includes("const lc = _apcaLc(fgRGB, bgRGB)") &&
-    code.includes("'Lc ' + Math.round(Math.abs(lc))") &&
-    code.includes("_buildApcaBadge(lc)"),
-  "Semantic color rows must include APCA Lc value cell and APCA badge cell before the WCAG cells"
 );

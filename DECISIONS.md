@@ -4,6 +4,106 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-07] Showcase semantic colors use prepared pair relationships when available
+
+**Decision:** When `build_ds_showcase` can read the active file-scoped config, it forwards `DS.color.semantics.pairs` to the bridge plugin. The Colors showcase renders the Semantic Colors table directly from those pair relationships instead of rediscovering background/foreground pairings from variable names. Showcase chrome also prefers explicit generic/brand-subtle tokens (`color/text/subtle`, `color/text/muted`, `color/bg/brand-subtle`, `color/text/brand`) before broad role scoring.
+
+**Why:** Role-based names such as `color/bg/default` + `color/text/default` do not follow the older `surface` → `on-surface` naming pattern. Name-rediscovery split clean semantic tokens into unrelated groups (`surface`, `icon`, `fill`) and bound table/tag text to purpose-specific tokens like `color/text/on-brand`, making labels disappear on neutral table rows.
+
+**Consequence:** Generated design-system files get one coherent Semantic Colors table that matches the validated setup config. Zero-config showcase builds can still fall back to structural/name heuristics, but prepared config pairings are authoritative. Exempt muted pairs may still render without the paired-text indicator when below the indicator threshold; whether to lower that threshold is a future product choice, not part of this restoration.
+
+---
+
+## [2026-05-07] Setup preview is generated before any Figma apply
+
+**Decision:** `prepare_ds_config` now writes a lightweight SVG preview next to the active file-scoped config and returns it as `setupPreview.svgPath`. The preview shows generated ramps and semantic pairs as actual swatches/text samples before `apply_ds_setup` is allowed to touch Figma.
+
+**Why:** Hex-only setup review is too abstract for designers and agents alike. The setup protocol needs a cheap, local, human-readable preview so color scale and semantic decisions can be checked in the conversation before variables are created or updated in Figma.
+
+**Consequence:** The setup flow remains two-phase: prepare, review preview + readiness, then apply only after explicit confirmation. The preview is an aid for discussion, not a replacement for APCA/WCAG gating or the final Figma showcase.
+
+---
+
+## [2026-05-07] Utility `bg/*` tokens are soft backgrounds; strong status colors use `fill/*`
+
+**Decision:** Default generated utility/status semantics distinguish soft background surfaces from strong fills. Role-based naming now emits pairs such as `color/bg/success` + `color/text/success` for soft status surfaces, and `color/fill/success` + `color/text/on-success` for strong filled badges/buttons. Surface-based naming follows the same model with `color/surface/success` and `color/fill/success`.
+
+**Why:** Designers generally expect `bg`/`surface` status tokens to support readable text on quiet UI backgrounds, while saturated status colors are a different purpose: fills for badges, controls, charts, or emphasis. Using mid/strong tones for `bg/*` made generated systems feel opinionated and could fail accessibility for body text.
+
+**Consequence:** Future generated configs provide both intents by default. Agents should not “fix” soft backgrounds into saturated fills unless the designer explicitly asks for high-emphasis status surfaces; use `fill/*` for that purpose instead.
+
+---
+
+## [2026-05-06] Keyless Figma files must not inherit the flat DS config
+
+**Decision:** A sync from a Figma file with no usable `figma.fileKey` records `active-file.json` with `fileKey: null`. Server tools must not read or mutate from the legacy flat `.local/design-system.config.js` for an active Figma file. `build_ds_showcase` only auto-reads `.local/<fileKey>/design-system.config.js`, and `prepare_ds_config`, `apply_ds_setup`, and `update_ds_primitives` refuse the flat config whenever a file-scoped config should be used.
+
+**Why:** New or unsaved Figma files can report an empty file key through the bridge. Falling back to `.local/design-system.config.js` made a fresh file inherit a previous file's DS config, which is exactly the cross-file bleed the per-file isolation work was meant to prevent. Ignoring the empty file key in the receiver is also unsafe because it leaves the previous file's active pointer in place.
+
+**Consequence:** A fresh file must first have a file-scoped key before DS setup/update tools can use a config. The flat `.local/design-system.config.js` remains a legacy artifact only; it is no longer a valid config source for active file workflows.
+
+---
+
+## [2026-05-07] Keyless Figma drafts get a persistent local file identity
+
+**Decision:** When `figma.fileKey` is empty, the bridge plugin creates or reuses a file-local `local_*` identity stored on `figma.root` plugin data under `figletsFileKey`. The UI forwards that value as `fileKey`, so receiver paths still resolve to `.local/<local-id>/` instead of the flat root. When Figma provides a real `figma.fileKey`, that real key wins.
+
+**Why:** Refusing the flat config prevented cross-file bleed, but it left new/unsaved Figma drafts unable to participate in the per-file config workflow. The product requirement is per-file isolation, not "saved-cloud-file only" isolation.
+
+**Consequence:** Fresh drafts and saved files both get isolated local state. Draft identities are local to the file and plugin data; if a future save starts returning a real Figma fileKey, the active path will move to `.local/<real-fileKey>/`, and any wanted draft config can be migrated deliberately.
+
+---
+
+## [2026-05-06] Decorative colors are excluded from binding role fallbacks
+
+**Decision:** `scrim`, `overlay`, `state`, `shadow`, and `elevation` color variables must not participate in text/foreground/background role fallback selection. They may still render in their own showcase sections and remain valid variables, but the shared binding resolver and showcase `_V` palette must exclude them when looking for readable text or structural UI colors.
+
+**Why:** When a file lacks recognized foreground names, a pure luminance fallback can pick black scrim variables as "best text" because they are dark. That makes generated showcase copy bind to overlay tokens, which violates the variable-first binding policy: automatic binding can use semantics and exact scalar matches, but it must not infer text purpose from decorative overlay values.
+
+**Consequence:** Text, foreground, and structural showcase chrome now fall back only among non-decorative color variables. Scrim variables are still documented in the Scrims section and can still be semantic aliases for overlay use cases.
+
+---
+
+## [2026-05-06] Showcase builder restored to pre-migration baseline
+
+**Decision:** The token showcase renderer (`_buildShowcase`) and `build_ds_showcase` payload shape are restored to the Sunday 2026-05-03 pre-17:13 baseline (`eda38ad`). The later color-migration work remains available in setup/update tools, but the showcase should not consume the active DS config, introduce APCA-specific row layouts, split new outline/border groups, or otherwise change grouping/readability while the color migration stabilizes.
+
+**Why:** The requested product operation was narrow: regenerate primitive colors and update semantic color aliases. Coupling that migration to showcase rendering changed the visual output, grouping, and text readability, making the showcase feel broken even when the variable update path was the real target.
+
+**Consequence:** Preserve the product decisions around OKLCh ramps, primitive updates, semantic alias refresh, and per-file isolation, but treat showcase redesign as frozen until it is planned and verified separately. Future color update work must not rewrite showcase presentation as a side effect.
+
+---
+
+## [2026-05-06] QA safe-bind failure count excludes intentionally skipped low-confidence suggestions
+
+**Decision:** `_runQaBindingAudit({ fix: true })` only attempts fixes for high-confidence suggestions. Low/medium/none-confidence suggestions remain report-only and are not counted as failed fixes.
+
+**Why:** The showcase final QA pass reported 31 unresolved gaps even after the relevant Typography/Spacing variables existed. Those were not failed high-confidence bindings; they were intentionally skipped low/medium-confidence suggestions. Counting them as failures made the showcase state look broken and contradicted the safe-bind policy.
+
+**Consequence:** `fixedCount` and `failedCount` now describe attempted safe fixes only. `violationCount` still reports all detected issues for audits, preserving visibility without overstating unresolved generated-showcase gaps.
+
+---
+
+## [2026-05-06] `apply_ds_setup` repairs stale Typography/Spacing collections additively
+
+**Decision:** Typography and Spacing now check for the current DS token names before skipping an existing collection. If an old collection exists but is missing generated names such as `type/{role}/size`, `type/{role}/weight`, `space/{semantic}`, `space/radius/{key}`, or `space/border/{key}`, `apply_ds_setup` enters merge mode and creates only the missing variables. Existing variables and modes are preserved; missing breakpoint modes are added by name.
+
+**Why:** The fresh showcase was left with unresolved QA gaps because old Typography and Spacing collections had variables from a previous naming shape. Deleting those collections manually would restore the showcase but risks breaking unrelated bindings. Additive repair matches the existing merge-populate decision and restores the showcase binding surface without destructive collection surgery.
+
+**Consequence:** Re-running `apply_ds_setup` after the plugin is reloaded can repair stale Typography/Spacing collections in place. If old variables remain, they are intentionally left alone; cleanup can be a separate confirmed maintenance task.
+
+---
+
+## [2026-05-06] `apply_ds_setup` merge-populate: Primitives with existing FLOAT/STRING vars
+
+**Decision:** `getOrCreateCollection` treats a collection as "existed" when it has any variables. For the Primitives collection specifically, after `getOrCreateCollection` returns, the setup block checks for COLOR vars separately (`_primHasColors`). If the collection exists but has zero COLOR vars, the full population block runs in merge mode: `_primMergeMap = await buildVarMap(primColl.id)` is pre-fetched and every `createVariable` call is guarded by `if (_primMergeMap[name]) continue`. Typography and Spacing blocks use the same merge-map pattern if they are entered, plus safe mode-dedup (check existing mode names before calling `addMode`).
+
+**Why:** A user who deletes only the color ramps (leaving spacing/type FLOAT vars in place) would see all three collections skip on the next `apply_ds_setup` run. The COLOR-specific check for Primitives corrects this without overwriting the intact FLOAT/STRING vars.
+
+**Consequence:** If the Primitives collection already has COLOR vars (normal case), nothing changes — it skips as before. The merge guard also prevents crashes when the collection has a partial set of FLOAT/STRING vars with identical names.
+
+---
+
 ## [2026-05-06] Per-Figma-file isolation under .local/<fileKey>/
 
 **Decision:** All bridge-written files (`figma-data.json`, `figma-selection.json`) are stored under `.local/<fileKey>/` rather than the flat `.local/` root. `active-file.json` in the root tracks the last-seen fileKey. Tools that auto-detect paths (`build_ds_showcase`, `audit_tokens`) read `active-file.json` and resolve against the active directory. Tools that take an explicit path (`prepare_ds_config`, `update_ds_primitives`) are unaffected — callers pass `.local/<fileKey>/design-system.config.js`.

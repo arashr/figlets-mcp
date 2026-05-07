@@ -3,6 +3,30 @@ figma.showUI(__html__, { width: 320, height: 420, themeColors: true });
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
+function _sanitizeFileKey(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+}
+
+function _makeLocalFileKey() {
+  return 'local_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
+
+function _getFigletsFileKey() {
+  var realKey = _sanitizeFileKey(figma.fileKey || '');
+  if (realKey) return realKey;
+
+  try {
+    var stored = _sanitizeFileKey(figma.root.getPluginData('figletsFileKey'));
+    if (stored) return stored;
+
+    var localKey = _makeLocalFileKey();
+    figma.root.setPluginData('figletsFileKey', localKey);
+    return localKey;
+  } catch (e) {
+    return '';
+  }
+}
+
 function _appendSessionLog(message) {
   var entry = {
     ts: Date.now(),
@@ -143,8 +167,10 @@ figma.ui.onmessage = async (msg) => {
     });
     figma.ui.postMessage({
       type: 'session-meta',
+      fileKey: _getFigletsFileKey(),
       data: {
-        sessionId: _sessionId
+        sessionId: _sessionId,
+        fileKey: _getFigletsFileKey()
       }
     });
     _captureSelectionSnapshot("ui-ready");
@@ -153,6 +179,7 @@ figma.ui.onmessage = async (msg) => {
 
   if (msg.type === 'extract-all') {
     _appendSessionLog('Executing sync_figma_data.');
+    var _fileKey = _getFigletsFileKey();
     const collections = await figma.variables.getLocalVariableCollectionsAsync();
     const variables = await figma.variables.getLocalVariablesAsync();
     const textStyles = await figma.getLocalTextStylesAsync();
@@ -161,6 +188,8 @@ figma.ui.onmessage = async (msg) => {
     const componentNodes = figma.root.findAllWithCriteria({ types: ['COMPONENT', 'COMPONENT_SET'] });
 
     const payload = {
+      fileKey: _fileKey,
+      fileName: figma.root ? figma.root.name : "",
       collections: collections.map(c => ({
         id: c.id,
         name: c.name,
@@ -197,7 +226,7 @@ figma.ui.onmessage = async (msg) => {
       }))
     };
 
-    figma.ui.postMessage({ type: 'data-extracted', fileKey: figma.fileKey || '', data: payload });
+    figma.ui.postMessage({ type: 'data-extracted', fileKey: _fileKey, data: payload });
     _appendSessionLog('Completed sync_figma_data.');
   }
 
@@ -243,11 +272,11 @@ figma.ui.onmessage = async (msg) => {
           cachedAgeMs: usedFallback ? (liveSnapshot.ts - lastNonEmpty.ts) : 0
         }
       };
-      figma.ui.postMessage({ type: 'selection-extracted', fileKey: figma.fileKey || '', data: payload });
+      figma.ui.postMessage({ type: 'selection-extracted', fileKey: _getFigletsFileKey(), data: payload });
       _appendSessionLog('Completed inspect_component.');
     } catch (err) {
       _appendSessionLog('inspect_component failed: ' + (err && err.message ? err.message : 'serializeNode failed'));
-      figma.ui.postMessage({ type: 'selection-extracted', fileKey: figma.fileKey || '', data: { error: err.message || 'serializeNode failed', selection: [] } });
+      figma.ui.postMessage({ type: 'selection-extracted', fileKey: _getFigletsFileKey(), data: { error: err.message || 'serializeNode failed', selection: [] } });
     }
   }
 
@@ -264,13 +293,13 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing build_ds_showcase.');
       const result = await _buildShowcase(msg.data || {});
-      figma.ui.postMessage({ type: 'showcase-built', fileKey: figma.fileKey || '', data: result });
+      figma.ui.postMessage({ type: 'showcase-built', fileKey: _getFigletsFileKey(), data: result });
       _appendSessionLog('Completed build_ds_showcase.');
       figma.notify('Token showcase built!');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
       _appendSessionLog('build_ds_showcase failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'showcase-built', fileKey: figma.fileKey || '', data: { error: _errMsg || 'Unknown error' } });
+      figma.ui.postMessage({ type: 'showcase-built', fileKey: _getFigletsFileKey(), data: { error: _errMsg || 'Unknown error' } });
     }
   }
 
@@ -282,12 +311,25 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing apply_ds_setup.');
       const result = await _applyDsSetup(msg.data);
-      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: figma.fileKey || '', data: result });
+      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: _getFigletsFileKey(), data: result });
       _appendSessionLog('Completed apply_ds_setup.');
       figma.notify('Design system collections created!');
     } catch (err) {
       _appendSessionLog('apply_ds_setup failed: ' + err.message);
-      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: figma.fileKey || '', data: { error: err.message } });
+      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
+  if (msg.type === 'reset-figlets-file') {
+    try {
+      _appendSessionLog('Executing reset_figlets_file.');
+      const result = await _resetFigletsFile(msg.data || {});
+      figma.ui.postMessage({ type: 'figlets-reset-done', fileKey: _getFigletsFileKey(), data: result });
+      _appendSessionLog('Completed reset_figlets_file.');
+      figma.notify('Figlets file content reset.');
+    } catch (err) {
+      _appendSessionLog('reset_figlets_file failed: ' + err.message);
+      figma.ui.postMessage({ type: 'figlets-reset-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
     }
   }
 
@@ -295,7 +337,7 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing update_ds_primitives.');
       const result = await _updateDsPrimitives(msg.data || {});
-      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: figma.fileKey || '', data: result });
+      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: _getFigletsFileKey(), data: result });
       if (result && result.error) {
         _appendSessionLog('update_ds_primitives failed: ' + result.error);
       } else {
@@ -304,7 +346,7 @@ figma.ui.onmessage = async (msg) => {
       }
     } catch (err) {
       _appendSessionLog('update_ds_primitives failed: ' + err.message);
-      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: figma.fileKey || '', data: { error: err.message } });
+      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
     }
   }
 
@@ -317,13 +359,13 @@ figma.ui.onmessage = async (msg) => {
     try {
       _appendSessionLog('Executing generate_component_doc.');
       const result = await _buildComponentDoc(msg.data || {});
-      figma.ui.postMessage({ type: 'doc-built', fileKey: figma.fileKey || '', data: result });
+      figma.ui.postMessage({ type: 'doc-built', fileKey: _getFigletsFileKey(), data: result });
       _appendSessionLog(result && result.error ? ('generate_component_doc failed: ' + result.error) : 'Completed generate_component_doc.');
       if (!result.error) figma.notify('Component spec sheet built!');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
       _appendSessionLog('generate_component_doc failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'doc-built', fileKey: figma.fileKey || '', data: { error: _errMsg || 'Unknown error' } });
+      figma.ui.postMessage({ type: 'doc-built', fileKey: _getFigletsFileKey(), data: { error: _errMsg || 'Unknown error' } });
     }
   }
 
@@ -336,13 +378,13 @@ figma.ui.onmessage = async (msg) => {
       _appendSessionLog('Executing qa_binding_audit.');
       const result = await _runQaBindingAudit(msg.data || {});
       if (msg.data && msg.data.local) result.local = true;
-      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: figma.fileKey || '', data: result });
+      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: _getFigletsFileKey(), data: result });
       _appendSessionLog(result && result.error ? ('qa_binding_audit failed: ' + result.error) : 'Completed qa_binding_audit.');
       if (!result.error) figma.notify('QA audit complete.');
     } catch (err) {
       const _errMsg = err instanceof Error ? err.message : String(err);
       _appendSessionLog('qa_binding_audit failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: figma.fileKey || '', data: { error: _errMsg || 'Unknown error' } });
+      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: _getFigletsFileKey(), data: { error: _errMsg || 'Unknown error' } });
     }
   }
 };
@@ -467,41 +509,45 @@ async function _createDsBindingContext() {
     const val = resolveVarValue(v);
     return val && typeof val === 'object' && 'r' in val ? { r: val.r, g: val.g, b: val.b } : null;
   }
+  function isDecorativeColorName(name) {
+    return /(?:^|\/)(scrim|overlay|state|shadow|elevation)(?:\/|$)/i.test(String(name || ''));
+  }
 
   const semanticColl = dsCollections.find(function (c) { return c.isAlias && c.colorVarCount > 0; });
   const semanticVars = semanticColl
     ? semanticColl.vars.filter(function (v) { return v.resolvedType === 'COLOR'; })
     : Object.keys(varByName).map(function (k) { return varByName[k]; }).filter(function (v) { return v.resolvedType === 'COLOR'; });
+  const semanticRoleVars = semanticVars.filter(function (v) { return !isDecorativeColorName(v.name); });
 
   function bestBgVar() {
-    for (let i = 0; i < semanticVars.length; i++) {
-      const name = semanticVars[i].name;
+    for (let i = 0; i < semanticRoleVars.length; i++) {
+      const name = semanticRoleVars[i].name;
       if (/(?:^|\/)on[-_]/i.test(name)) continue;
-      if (/(?:surface|background|base|page)(?:[/_-]default)?$/i.test(name)) return semanticVars[i];
+      if (/(?:surface|background|base|page)(?:[/_-]default)?$/i.test(name)) return semanticRoleVars[i];
     }
     let best = null, bestLum = -1;
-    for (let i = 0; i < semanticVars.length; i++) {
-      const c = rgb(semanticVars[i]);
-      if (c && lum(c) > bestLum) { best = semanticVars[i]; bestLum = lum(c); }
+    for (let i = 0; i < semanticRoleVars.length; i++) {
+      const c = rgb(semanticRoleVars[i]);
+      if (c && lum(c) > bestLum) { best = semanticRoleVars[i]; bestLum = lum(c); }
     }
     return best;
   }
   function bestTextVar() {
-    for (let i = 0; i < semanticVars.length; i++) {
-      if (/(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(semanticVars[i].name)) return semanticVars[i];
+    for (let i = 0; i < semanticRoleVars.length; i++) {
+      if (/(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(semanticRoleVars[i].name)) return semanticRoleVars[i];
     }
     let best = null, bestLum = 2;
-    for (let i = 0; i < semanticVars.length; i++) {
-      const c = rgb(semanticVars[i]);
-      if (c && lum(c) < bestLum) { best = semanticVars[i]; bestLum = lum(c); }
+    for (let i = 0; i < semanticRoleVars.length; i++) {
+      const c = rgb(semanticRoleVars[i]);
+      if (c && lum(c) < bestLum) { best = semanticRoleVars[i]; bestLum = lum(c); }
     }
     return best;
   }
   function bestAccentVar() {
     let best = null, bestSat = -1;
-    for (let i = 0; i < semanticVars.length; i++) {
-      const c = rgb(semanticVars[i]);
-      if (c && sat(c) > bestSat) { best = semanticVars[i]; bestSat = sat(c); }
+    for (let i = 0; i < semanticRoleVars.length; i++) {
+      const c = rgb(semanticRoleVars[i]);
+      if (c && sat(c) > bestSat) { best = semanticRoleVars[i]; bestSat = sat(c); }
     }
     return best;
   }
@@ -573,6 +619,7 @@ async function _createDsBindingContext() {
   const scored = Object.keys(varByName).map(function (k) {
     const v = varByName[k];
     if (v.resolvedType !== 'COLOR') return null;
+    if (isDecorativeColorName(v.name)) return null;
     const c = rgb(v);
     if (!c) return null;
     return { v: v, rgb: c, lum: lum(c), sat: sat(c), contrast: contrastRatio(c, bgRGB), name: v.name.toLowerCase() };
@@ -610,7 +657,9 @@ async function _createDsBindingContext() {
     minRatio = minRatio || 4.5;
     let best = null, bestRatio = 0;
     const preferred = Object.keys(varByName).map(function (k) { return varByName[k]; }).filter(function (v) {
-      return v.resolvedType === 'COLOR' && /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_\/]|$))/i.test(v.name);
+      return v.resolvedType === 'COLOR' &&
+        !isDecorativeColorName(v.name) &&
+        /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_\/]|$))/i.test(v.name);
     });
     const candidates = preferred.length ? preferred : scored.map(function (s) { return s.v; });
     for (let i = 0; i < candidates.length; i++) {
@@ -843,6 +892,60 @@ async function _createDsBindingContext() {
     paint,
     bindVar
   };
+}
+
+async function _resetFigletsFile(opts) {
+  opts = opts || {};
+  var result = {
+    removedVariables: 0,
+    removedCollections: 0,
+    removedTextStyles: 0,
+    removedEffectStyles: 0,
+    removedPages: 0,
+    clearedPages: 0,
+    removedNodes: 0
+  };
+
+  var vars = await figma.variables.getLocalVariablesAsync();
+  for (var vi = 0; vi < vars.length; vi++) {
+    try { vars[vi].remove(); result.removedVariables++; } catch (e) {}
+  }
+
+  var colls = await figma.variables.getLocalVariableCollectionsAsync();
+  for (var ci = 0; ci < colls.length; ci++) {
+    try { colls[ci].remove(); result.removedCollections++; } catch (e2) {}
+  }
+
+  var textStyles = await figma.getLocalTextStylesAsync();
+  for (var ti = 0; ti < textStyles.length; ti++) {
+    try { textStyles[ti].remove(); result.removedTextStyles++; } catch (e3) {}
+  }
+
+  var effectStyles = await figma.getLocalEffectStylesAsync();
+  for (var ei = 0; ei < effectStyles.length; ei++) {
+    try { effectStyles[ei].remove(); result.removedEffectStyles++; } catch (e4) {}
+  }
+
+  var pages = figma.root.children.slice();
+  var keepPage = pages[0] || figma.currentPage;
+  for (var pi = 0; pi < pages.length; pi++) {
+    var page = pages[pi];
+    if (page !== keepPage) {
+      try { page.remove(); result.removedPages++; } catch (e5) {}
+    }
+  }
+
+  if (keepPage) {
+    await figma.setCurrentPageAsync(keepPage);
+    var children = keepPage.children.slice();
+    for (var ni = 0; ni < children.length; ni++) {
+      try { children[ni].remove(); result.removedNodes++; } catch (e6) {}
+    }
+    keepPage.name = 'Page 1';
+    result.clearedPages++;
+  }
+
+  return result;
 }
 
 async function _runQaBindingAudit(opts) {
@@ -1121,6 +1224,7 @@ async function _runQaBindingAudit(opts) {
   if (shouldFix) {
     for (let i = 0; i < violations.length; i++) {
       const v = violations[i];
+      if (!v.suggestion || v.suggestion.confidence !== 'high') continue;
       const result = _applyQaFix(v);
       if (result === 'OK') fixed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, boundTo: v.suggestion.name });
       else failed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, reason: result });
@@ -1307,41 +1411,33 @@ async function _buildShowcase(opts) {
     const L1 = _lum(c1), L2 = _lum(c2);
     return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
   }
-  function _apcaLum(rgb) {
-    return 0.2126729 * Math.pow(rgb.r, 2.4) +
-           0.7151522 * Math.pow(rgb.g, 2.4) +
-           0.0721750 * Math.pow(rgb.b, 2.4);
-  }
-  // Full APCA 0.0.98G implementation — matches validate-semantic-pairs.js exactly.
-  // Soft-clamps near-black values (BC/BE) and applies polarity-aware rounding.
-  // Returns a signed integer Lc: positive = dark text on light bg, negative = light on dark.
-  function _apcaLc(fg, bg) {
-    var BC = 0.022, BE = 1.414;
-    var Yt = _apcaLum(fg), Yb = _apcaLum(bg);
-    var Yt2 = Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt;
-    var Yb2 = Yb < BC ? Yb + Math.pow(BC - Yb, BE) : Yb;
-    var lc;
-    if (Yb2 >= Yt2) { lc = (Math.pow(Yb2, 0.56) - Math.pow(Yt2, 0.57)) * 1.14; }
-    else             { lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14; }
-    if (Math.abs(lc) < 0.1) { return 0; }
-    return Math.round(lc > 0 ? lc * 100 - 12.5 : lc * 100 + 12.5);
-  }
 
-  var _cfgSemName  = (opts.DS && opts.DS.collections && opts.DS.collections.color)       ? opts.DS.collections.color       : null;
-  var _cfgPrimName = (opts.DS && opts.DS.collections && opts.DS.collections.primitives)  ? opts.DS.collections.primitives  : null;
-  var _contrastAlgorithm = (opts.DS && opts.DS.color && opts.DS.color.contrastAlgorithm) ? opts.DS.color.contrastAlgorithm : 'wcag';
+  const _configuredCollections = opts.DS && opts.DS.collections ? opts.DS.collections : null;
+  const _configuredPrimName = _configuredCollections ? _configuredCollections.primitives : null;
+  const _configuredColorName = _configuredCollections ? _configuredCollections.color : null;
+  const _configuredTypoName = _configuredCollections ? _configuredCollections.typography : null;
+  const _configuredSpacingName = _configuredCollections ? _configuredCollections.spacing : null;
+  const _configuredElevationName = _configuredCollections ? _configuredCollections.elevation : null;
 
-  const _semColl = _cfgSemName
-    ? (dsCollections.find(c => c.name === _cfgSemName) || dsCollections.find(c => c.isAlias && c.colorVarCount > 0))
+  const _semColl = _configuredColorName
+    ? dsCollections.find(c => c.name === _configuredColorName && c.colorVarCount > 0)
     : dsCollections.find(c => c.isAlias && c.colorVarCount > 0);
-  const _primColls = _cfgPrimName
-    ? dsCollections.filter(c => c.name === _cfgPrimName)
+  const _primColls = _configuredPrimName
+    ? dsCollections.filter(c => c.name === _configuredPrimName && c.colorVarCount > c.floatVarCount)
     : dsCollections.filter(c => c.isPrimitive && c.colorVarCount > c.floatVarCount);
-  const _semanticColls = _cfgSemName
-    ? dsCollections.filter(c => c.name === _cfgSemName)
+  const _semanticColls = _configuredColorName
+    ? dsCollections.filter(c => c.name === _configuredColorName && c.colorVarCount > 0)
     : dsCollections.filter(c => c.isAlias && c.colorVarCount > 0);
   const _floatColls    = dsCollections.filter(c =>
     c.floatVarCount > c.colorVarCount &&
+    (!_configuredTypoName || c.name !== _configuredTypoName || c.floatVarCount > 0) &&
+    (!_configuredSpacingName || c.name !== _configuredSpacingName || c.floatVarCount > 0) &&
+    (!_configuredElevationName || c.name !== _configuredElevationName || c.floatVarCount > 0) &&
+    (!_configuredCollections ||
+      c.name === _configuredTypoName ||
+      c.name === _configuredSpacingName ||
+      c.name === _configuredElevationName ||
+      (!c.isAlias || (c.colorVarCount === 0 && c.floatVarCount > 0))) &&
     (!c.isAlias || (c.colorVarCount === 0 && c.floatVarCount > 0))
   );
 
@@ -1355,21 +1451,25 @@ async function _buildShowcase(opts) {
     const c = resolveVarValue(v);
     return c && 'r' in c ? { r: c.r, g: c.g, b: c.b } : null;
   }
+  function _isDecorativeColorName(name) {
+    return /(?:^|\/)(scrim|overlay|state|shadow|elevation)(?:\/|$)/i.test(String(name || ''));
+  }
+  const _semRoleVars = _semVars.filter(v => !_isDecorativeColorName(v.name));
 
   const _bgRaw = (() => {
-    const named = _semVars.find(v => {
+    const named = _semRoleVars.find(v => {
       if (/(?:^|\/)on[-_]/i.test(v.name)) return false;
       return /(?:surface|background|base|page)(?:[/_-]default)?$/i.test(v.name);
     });
     if (named) return { v: named };
-    return _semVars.map(v => ({ v, l: _resolvedRGB(v) ? _lum(_resolvedRGB(v)) : 0 })).sort((a, b) => b.l - a.l)[0];
+    return _semRoleVars.map(v => ({ v, l: _resolvedRGB(v) ? _lum(_resolvedRGB(v)) : 0 })).sort((a, b) => b.l - a.l)[0];
   })();
   const _textRaw = (() => {
-    const named = _semVars.find(v => /(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(v.name));
+    const named = _semRoleVars.find(v => /(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(v.name));
     if (named) return { v: named };
-    return _semVars.map(v => ({ v, l: _resolvedRGB(v) ? _lum(_resolvedRGB(v)) : 1 })).sort((a, b) => a.l - b.l)[0];
+    return _semRoleVars.map(v => ({ v, l: _resolvedRGB(v) ? _lum(_resolvedRGB(v)) : 1 })).sort((a, b) => a.l - b.l)[0];
   })();
-  const _accRaw  = _semVars.map(v => ({ v, s: _resolvedRGB(v) ? _sat(_resolvedRGB(v)) : 0 })).sort((a, b) => b.s - a.s)[0];
+  const _accRaw  = _semRoleVars.map(v => ({ v, s: _resolvedRGB(v) ? _sat(_resolvedRGB(v)) : 0 })).sort((a, b) => b.s - a.s)[0];
 
   const _bgColor   = _bgRaw   ? _resolvedRGB(_bgRaw.v)   : { r: 1,   g: 1,   b: 1   };
   const _textColor = _textRaw ? _resolvedRGB(_textRaw.v) : { r: 0.1, g: 0.1, b: 0.1 };
@@ -1607,7 +1707,7 @@ async function _buildShowcase(opts) {
     return funcBest ? funcBest.v : null;
   }
 
-  const _allColorVars = Object.values(varByName).filter(v => v.resolvedType === 'COLOR');
+  const _allColorVars = Object.values(varByName).filter(v => v.resolvedType === 'COLOR' && !_isDecorativeColorName(v.name));
   const _scored = _allColorVars.map(v => {
     const rgb = _resolvedRGB(v);
     if (!rgb) return null;
@@ -1660,8 +1760,28 @@ async function _buildShowcase(opts) {
     warningText:   _semPick('warningText',   s => s.contrast >= 4.5 ? s.contrast : 0, true, ['FG',      'WARNING']),
   };
 
-  // textSub alias — same variable, two reference names used across the file
-  _V.textSub = _V.onSurfaceVar;
+  // Showcase chrome should prefer explicit generic tokens over scored brand
+  // foregrounds. The segment scorer may correctly identify color/text/on-brand
+  // as a foreground, but it is only readable on brand fills, not on table rows.
+  _V.textSub = _findVar(
+    'color/text/subtle', 'text/subtle',
+    'color/text/muted', 'text/muted',
+    'color/on-surface/variant', 'on-surface/variant'
+  ) || _V.onSurfaceVar;
+
+  _V.brandVariant = _findVar(
+    'color/bg/brand-subtle',
+    'color/surface/brand-variant',
+    'color/surface/primary-container',
+    'color/bg/brand'
+  ) || _V.brandVariant;
+
+  _V.onBrandVariant = _findVar(
+    'color/text/brand',
+    'color/on-surface/brand-variant',
+    'color/text/on-brand',
+    'color/on-brand'
+  ) || _V.onBrandVariant;
 
   // Kept for onBrandVariant fallback below — scans all vars by contrast
   function _findContrastVar(bgRGB, minRatio) {
@@ -1669,10 +1789,11 @@ async function _buildShowcase(opts) {
     var best = null, bestRatio = 0;
     var preferred = Object.values(varByName).filter(function(v) {
       return v.resolvedType === 'COLOR' &&
+        !_isDecorativeColorName(v.name) &&
         /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_\/]|$))/i.test(v.name);
     });
     var candidates = preferred.length ? preferred : Object.values(varByName).filter(function(v) {
-      return v.resolvedType === 'COLOR';
+      return v.resolvedType === 'COLOR' && !_isDecorativeColorName(v.name);
     });
     for (var i = 0; i < candidates.length; i++) {
       var v = candidates[i];
@@ -1691,7 +1812,7 @@ async function _buildShowcase(opts) {
   }
 
   // onBrandVariant: scored against the actual brand surface, not the default bg
-  {
+  if (!_V.onBrandVariant) {
     var _bvRaw = _V.brandVariant ? resolveVarValue(_V.brandVariant) : null;
     var _bvRGB = _bvRaw && 'r' in _bvRaw ? { r: _bvRaw.r, g: _bvRaw.g, b: _bvRaw.b } : _C.brandVariant;
     _V.onBrandVariant = _semPick(
@@ -1995,101 +2116,6 @@ async function _buildShowcase(opts) {
     return badge;
   }
 
-  function _buildApcaBadge(lc) {
-    var absLc = Math.abs(lc);
-    var bg, border, fg, bgV, bdV, fgV, sign, score;
-    if (absLc >= 75) {
-      bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
-      bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
-      sign = '✓'; score = 'AA';
-    } else if (absLc >= 60) {
-      bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
-      bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
-      sign = '~'; score = 'Lc 60';
-    } else {
-      bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
-      bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
-      sign = '✗'; score = 'Fail';
-    }
-    var badge = _f('APCA Badge', 'HORIZONTAL');
-    badge.paddingLeft = 8; badge.paddingRight = 8;
-    badge.paddingTop  = 4; badge.paddingBottom = 4;
-    badge.itemSpacing = 4;
-    badge.cornerRadius = 8;
-    badge.primaryAxisAlignItems = 'CENTER';
-    badge.counterAxisAlignItems = 'CENTER';
-    badge.fills = [_paint(bg, bgV)];
-    if (bdV) {
-      badge.strokes = [_paint(border, bdV)];
-      badge.strokeWeight = 1;
-      badge.strokeAlign  = 'INSIDE';
-    } else {
-      badge.strokes = [];
-    }
-    badge.appendChild(_tDS(sign,  10, fg, true, fgV));
-    badge.appendChild(_tDS(score, 10, fg, true, fgV));
-    return badge;
-  }
-
-  // Algorithm-aware status badge. Uses APCA thresholds when contrastAlgorithm === 'apca',
-  // WCAG thresholds otherwise. lc = signed APCA Lc, ratio = WCAG ratio.
-  function _buildStatusBadge(lc, ratio) {
-    var algorithm = (opts.DS && opts.DS.color && opts.DS.color.contrastAlgorithm) || 'wcag';
-    var absLc = Math.abs(lc);
-    var bg, border, fg, bgV, bdV, fgV, sign, score;
-    if (algorithm === 'apca') {
-      if (absLc >= 75) {
-        bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
-        bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
-        sign = '✓'; score = 'Lc 75';
-      } else if (absLc >= 60) {
-        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
-        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
-        sign = '✓'; score = 'Lc 60';
-      } else {
-        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
-        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
-        sign = '✗'; score = 'Fail';
-      }
-    } else {
-      if (ratio >= 7) {
-        bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
-        bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
-        sign = '✓'; score = 'AAA';
-      } else if (ratio >= 4.5) {
-        bg = _RC.successBg; border = _RC.successBorder; fg = _RC.successText;
-        bgV = _C_successBgV; bdV = _C_successBdV; fgV = _C_successTxtV;
-        sign = '✓'; score = 'AA';
-      } else if (ratio >= 3) {
-        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
-        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
-        sign = '~'; score = 'Large';
-      } else {
-        bg = _RC.warningBg; border = _RC.warningBorder; fg = _RC.warningText;
-        bgV = _C_warningBgV; bdV = _C_warningBdV; fgV = _C_warningTxtV;
-        sign = '✗'; score = 'Fail';
-      }
-    }
-    var badge = _f('Status Badge', 'HORIZONTAL');
-    badge.paddingLeft = 8; badge.paddingRight = 8;
-    badge.paddingTop  = 4; badge.paddingBottom = 4;
-    badge.itemSpacing = 4;
-    badge.cornerRadius = 8;
-    badge.primaryAxisAlignItems = 'CENTER';
-    badge.counterAxisAlignItems = 'CENTER';
-    badge.fills = [_paint(bg, bgV)];
-    if (bdV) {
-      badge.strokes = [_paint(border, bdV)];
-      badge.strokeWeight = 1;
-      badge.strokeAlign  = 'INSIDE';
-    } else {
-      badge.strokes = [];
-    }
-    badge.appendChild(_tDS(sign,  10, fg, true, fgV));
-    badge.appendChild(_tDS(score, 10, fg, true, fgV));
-    return badge;
-  }
-
   function _buildGroupHeader(label) {
     const row = _f('Group Header', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
@@ -2255,11 +2281,9 @@ async function _buildShowcase(opts) {
       { fg: _RC.onBrandVariant, varRef: _V.onBrandVariant },
     ];
     for (var i = 0; i < candidates.length; i++) {
-      if (!candidates[i].varRef) continue;
-      var passes = _contrastAlgorithm === 'apca'
-        ? Math.abs(_apcaLc(candidates[i].fg, swatchRGB)) >= 60
-        : _contrastRatio(swatchRGB, candidates[i].fg) >= 4.5;
-      if (passes) return { fg: candidates[i].fg, varRef: candidates[i].varRef, show: true };
+      if (candidates[i].varRef && _contrastRatio(swatchRGB, candidates[i].fg) >= 4.5) {
+        return { fg: candidates[i].fg, varRef: candidates[i].varRef, show: true };
+      }
     }
     if (allowNeutralFallback) {
       var neutral = _pickReadableNeutralExtreme(swatchRGB);
@@ -2281,44 +2305,28 @@ async function _buildShowcase(opts) {
     container.layoutMode = 'NONE';
     container.resize(80, 56);
     container.cornerRadius = 8;
-    container.fills = [_paint(swatchRGB, swatchVar)];
-    if (_V.outlineSubtle) {
-      container.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
-      container.strokeWeight = 0.5;
-      container.strokeAlign  = 'INSIDE';
-    }
+    container.fills   = [_paint(swatchRGB, swatchVar)];
+    container.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
+    container.strokeWeight = 0.5;
+    container.strokeAlign  = 'INSIDE';
 
-    var ratio = _contrastRatio(swatchRGB, fgRGB);
-    var lc    = _apcaLc(fgRGB, swatchRGB);
-    var passes = _contrastAlgorithm === 'apca'
-      ? Math.abs(lc) >= 60
-      : ratio >= 4.5;
+    const ratio = _contrastRatio(swatchRGB, fgRGB);
+    if ((forceIndicator || ratio >= 4.5) && sampleText) {
+      const aaText = _tDS(sampleText, sampleFontSize, fgRGB, true, fgVar);
+      aaText.name = 'Aa';
+      aaText.x = 7; aaText.y = 7;
+      container.appendChild(aaText);
 
-    if ((forceIndicator || passes) && sampleText) {
-      const stepText = _tDS(sampleText, sampleFontSize, fgRGB, true, fgVar);
-      stepText.name = 'Step Label';
-      stepText.textAutoResize = 'WIDTH_AND_HEIGHT';
-      stepText.x = 8; stepText.y = 8;
-      stepText.constraints = { horizontal: 'MIN', vertical: 'MIN' };
-      container.appendChild(stepText);
-
-      // Badge: bottom-right corner, 8px from right/bottom edges.
-      // Create inline so textAutoResize is set before characters — guarantees width is computed.
-      var badgeLabel = _contrastAlgorithm === 'apca'
-        ? ('Lc ' + Math.round(Math.abs(lc)) + '%')
-        : '✓';
-      var _badge = figma.createText();
-      _badge.name = 'Contrast Indicator';
-      _badge.fontSize = 8;
-      _badge.fontName = { family: _dsFamily, style: 'Regular' };
-      _badge.textAutoResize = 'WIDTH_AND_HEIGHT';
-      _badge.characters = badgeLabel;
-      _badge.fills = _textFill(fgRGB, fgVar);
-      container.appendChild(_badge);
-      // Width is now computed; position then lock with MAX constraints
-      _badge.x = container.width - _badge.width - 12;
-      _badge.y = container.height - _badge.height - 12;
-      _badge.constraints = { horizontal: 'MAX', vertical: 'MAX' };
+      const dot = figma.createFrame();
+      dot.name = 'Contrast Indicator';
+      dot.resize(6, 6);
+      dot.cornerRadius = 9999;
+      dot.layoutMode = 'NONE';
+      dot.fills = [_paint(fgRGB, fgVar)];
+      dot.x = 80 - 6.75 - 6;
+      dot.y = 56 - 7 - 6;
+      dot.constraints = { horizontal: 'MAX', vertical: 'MAX' };
+      container.appendChild(dot);
     }
 
     swatch.appendChild(container);
@@ -2378,7 +2386,7 @@ async function _buildShowcase(opts) {
         : { r: 0.8, g: 0.8, b: 0.8 };
       const ind = _swatchIndicator(swatchRGB, true);
       const fgRGB = ind.show ? ind.fg : _textColor;
-      const swatch = _buildSwatch(swatchRGB, fgRGB, ind.show ? stepName : null, {
+      const swatch = _buildSwatch(swatchRGB, fgRGB, ind.show ? 'Aa' : null, {
         stepLabel: stepName,
         hexLabel:  rawVal && 'r' in rawVal ? _hex(rawVal) : '—',
         swatchVar: v,
@@ -2485,34 +2493,23 @@ async function _buildShowcase(opts) {
     swatchCell.layoutSizingVertical   = 'FILL';
 
     if (hasPairing) {
-      const lc = _apcaLc(fgRGB, bgRGB);
-
-      const apcaLcCell = _f('APCALcCell', 'HORIZONTAL');
-      apcaLcCell.primaryAxisAlignItems = 'CENTER';
-      apcaLcCell.counterAxisAlignItems = 'CENTER';
-      apcaLcCell.appendChild(_tDS('Lc ' + Math.round(Math.abs(lc)), 14, _textColor, false, _V.text));
-      row.appendChild(apcaLcCell);
-      apcaLcCell.layoutSizingHorizontal = 'FIXED';
-      apcaLcCell.resize(128, 1);
-      apcaLcCell.layoutSizingVertical   = 'FILL';
-
-      const statusCell = _f('StatusCell', 'HORIZONTAL');
-      statusCell.primaryAxisAlignItems = 'CENTER';
-      statusCell.counterAxisAlignItems = 'CENTER';
-      statusCell.appendChild(_buildStatusBadge(lc, ratio));
-      row.appendChild(statusCell);
-      statusCell.layoutSizingHorizontal = 'FIXED';
-      statusCell.resize(128, 1);
-      statusCell.layoutSizingVertical   = 'FILL';
-
       const metricCell = _f('MetricCell', 'HORIZONTAL');
       metricCell.primaryAxisAlignItems = 'CENTER';
       metricCell.counterAxisAlignItems = 'CENTER';
-      metricCell.appendChild(_tDS(ratio.toFixed(2) + ':1', 14, _textColor, false, _V.text));
+      metricCell.appendChild(_tDS(`${ratio.toFixed(2)}:1`, 14, _textColor, false, _V.text));
       row.appendChild(metricCell);
       metricCell.layoutSizingHorizontal = 'FIXED';
       metricCell.resize(128, 1);
       metricCell.layoutSizingVertical   = 'FILL';
+
+      const badgeCell = _f('BadgeCell', 'HORIZONTAL');
+      badgeCell.primaryAxisAlignItems = 'CENTER';
+      badgeCell.counterAxisAlignItems = 'CENTER';
+      badgeCell.appendChild(_buildBadge(ratio));
+      row.appendChild(badgeCell);
+      badgeCell.layoutSizingHorizontal = 'FIXED';
+      badgeCell.resize(128, 1);
+      badgeCell.layoutSizingVertical   = 'FILL';
     }
 
     return row;
@@ -3038,6 +3035,49 @@ async function _buildShowcase(opts) {
         }
       }
 
+      const _configSemanticPairs = (
+        opts.DS &&
+        opts.DS.color &&
+        opts.DS.color.semantics &&
+        Array.isArray(opts.DS.color.semantics.pairs)
+      ) ? opts.DS.color.semantics.pairs : [];
+
+      if (_configSemanticPairs.length) {
+        const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
+        const _semHeading = _buildTableHeading([
+          { text: 'Token',    flex: true },
+          { text: 'Example',  flex: true },
+          { text: 'Contrast', width: 128, center: true },
+          { text: 'WCAG',     width: 128, center: true },
+        ], 16);
+        _semTable.appendChild(_semHeading);
+        _semHeading.layoutSizingHorizontal = 'FILL';
+        _addTableDivider(_semTable);
+
+        for (const pair of _configSemanticPairs) {
+          const bgVar = varByName[pair.bg] || null;
+          const fgVar = varByName[pair.text] || null;
+          const bgRaw = bgVar ? resolveVarValue(bgVar) : null;
+          const fgRaw = fgVar ? resolveVarValue(fgVar) : null;
+          if (!bgRaw || !fgRaw || !('r' in bgRaw) || !('r' in fgRaw)) continue;
+          const bgRGB = { r: bgRaw.r, g: bgRaw.g, b: bgRaw.b };
+          const fgRGB = { r: fgRaw.r, g: fgRaw.g, b: fgRaw.b };
+          const bgLabel = _tokenLabel(pair.bg);
+          const fgLabel = _tokenLabel(pair.text);
+          const leaf = String(pair.bg || '').split('/').pop();
+          const desc = 'Paired with ' + fgLabel + '.';
+          const row = _buildSemColorRow(bgLabel + ' + ' + fgLabel, desc, bgRGB, fgRGB, bgVar, {
+            fgVar: fgVar,
+            hasPairing: true,
+            previewText: leaf
+          });
+          _semTable.appendChild(row);
+          row.layoutSizingHorizontal = 'FILL';
+          _addTableDivider(_semTable);
+        }
+
+        _appendFill(_semTable, _colorsFrame);
+      } else {
       function _findFgPair(bgVarName) {
         const parts = bgVarName.split('/');
         for (let i = parts.length - 1; i >= 0; i--) {
@@ -3058,7 +3098,6 @@ async function _buildShowcase(opts) {
 
       const _mainGroups   = [];
       const _bottomGroups = [];
-      const _allOutlineRows = [];
 
       for (const [groupKey, groupVars] of _allSemGroupEntries) {
         const nonOnVars = _sortSemanticVars(groupVars.filter(v => !v.name.split('/').some(seg => /^on[-_]/i.test(seg))));
@@ -3076,10 +3115,10 @@ async function _buildShowcase(opts) {
           const desc       = _tokenDesc(v.name);
 
           if (isOutline) {
-            // Outline tokens: surface bg + stroke — no contrast columns; collected separately
+            // Outline tokens: surface bg + stroke — no contrast columns
             const outlineRGB = { r: raw.r, g: raw.g, b: raw.b };
             const row = _buildOutlineRow(tokenLabel, desc, outlineRGB, v);
-            _allOutlineRows.push(row);
+            bgUnpairedRows.push(row);
           } else if (isIcon) {
             // Icons are foreground colors — find the best surface to show them on.
             // Priority 1: semantic pairing (replace 'icon' with 'surface' in the path),
@@ -3209,11 +3248,10 @@ async function _buildShowcase(opts) {
       if (_mainGroups.length) {
         const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
         const _semHeading = _buildTableHeading([
-          { text: 'Token',   flex: true },
-          { text: 'Example', flex: true },
-          { text: 'APCA Lc', width: 128, center: true },
-          { text: 'Status',  width: 128, center: true },
-          { text: 'WCAG',    width: 128, center: true },
+          { text: 'Token',    flex: true },
+          { text: 'Example',  flex: true },
+          { text: 'Contrast', width: 128, center: true },
+          { text: 'WCAG',     width: 128, center: true },
         ], 16);
         _semTable.appendChild(_semHeading);
         _semHeading.layoutSizingHorizontal = 'FILL';
@@ -3238,9 +3276,6 @@ async function _buildShowcase(opts) {
         const _btHeading = _buildTableHeading([
           { text: 'Token',   flex: true },
           { text: 'Example', flex: true },
-          { text: 'APCA Lc', width: 128, center: true },
-          { text: 'Status',  width: 128, center: true },
-          { text: 'WCAG',    width: 128, center: true },
         ], 16);
         _btTable.appendChild(_btHeading);
         _btHeading.layoutSizingHorizontal = 'FILL';
@@ -3252,22 +3287,6 @@ async function _buildShowcase(opts) {
         }
         _appendFill(_btTable, _colorsFrame);
       }
-
-      if (_allOutlineRows.length) {
-        const _outTable = _buildTable('Outlines & Borders', 'Border and outline color tokens for dividers, controls, and focus rings.');
-        const _outHeading = _buildTableHeading([
-          { text: 'Token',   flex: true },
-          { text: 'Example', flex: true },
-        ], 16);
-        _outTable.appendChild(_outHeading);
-        _outHeading.layoutSizingHorizontal = 'FILL';
-        _addTableDivider(_outTable);
-        for (var _ori = 0; _ori < _allOutlineRows.length; _ori++) {
-          _outTable.appendChild(_allOutlineRows[_ori]);
-          _allOutlineRows[_ori].layoutSizingHorizontal = 'FILL';
-          _addTableDivider(_outTable);
-        }
-        _appendFill(_outTable, _colorsFrame);
       }
     }
 
@@ -3756,7 +3775,20 @@ async function _applyDsSetup(DS) {
   async function getOrCreateCollection(name, initialMode) {
     var existing = await figma.variables.getLocalVariableCollectionsAsync();
     for (var i = 0; i < existing.length; i++) {
-      if (existing[i].name === name) return { collection: existing[i], existed: true };
+      if (existing[i].name === name) {
+        // Collection exists — check if it has any variables at all
+        var allVars = await figma.variables.getLocalVariablesAsync();
+        var varCount = 0;
+        for (var j = 0; j < allVars.length; j++) {
+          if (allVars[j].variableCollectionId === existing[i].id) { varCount++; break; }
+        }
+        if (varCount > 0) return { collection: existing[i], existed: true };
+        // Empty shell — rename the first mode and treat as new
+        if (initialMode && existing[i].modes[0]) {
+          existing[i].renameMode(existing[i].modes[0].modeId, initialMode);
+        }
+        return { collection: existing[i], existed: false };
+      }
     }
     var coll = figma.variables.createVariableCollection(name);
     if (initialMode && coll.modes[0]) {
@@ -3777,6 +3809,28 @@ async function _applyDsSetup(DS) {
     return map;
   }
 
+  function buildModeMap(collection, modeNames) {
+    var map = {};
+    for (var i = 0; i < modeNames.length; i++) {
+      var modeName = modeNames[i];
+      var existingModeId = null;
+      for (var j = 0; j < collection.modes.length; j++) {
+        if (collection.modes[j].name === modeName) { existingModeId = collection.modes[j].modeId; break; }
+      }
+      if (existingModeId !== null) {
+        map[modeName] = existingModeId;
+      } else if (i === 0 && collection.modes[0]) {
+        map[modeName] = collection.modes[0].modeId;
+      } else {
+        map[modeName] = collection.addMode(modeName);
+      }
+    }
+    return map;
+  }
+
+  var _typePrefixSetup = (DS.naming && DS.naming.typePrefix) ? DS.naming.typePrefix : 'type';
+  var _fontFamilyPatternSetup = (DS.naming && DS.naming.fontFamily) ? DS.naming.fontFamily : 'font/{variant}';
+
   // ── Collection 1 — Primitives ─────────────────────────────────────────────
 
   var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
@@ -3784,9 +3838,23 @@ async function _applyDsSetup(DS) {
   var primColl = _primRes.collection;
   var primModeId = primColl.modes[0].modeId;
 
+  // Check if Primitives is missing COLOR vars (user may have deleted ramps but kept FLOAT/STRING vars)
+  var _primHasColors = false;
   if (_primRes.existed) {
+    var _primCheckVars = await figma.variables.getLocalVariablesAsync();
+    for (var _pci = 0; _pci < _primCheckVars.length; _pci++) {
+      if (_primCheckVars[_pci].variableCollectionId === primColl.id && _primCheckVars[_pci].resolvedType === 'COLOR') {
+        _primHasColors = true; break;
+      }
+    }
+  }
+
+  if (_primRes.existed && _primHasColors) {
     skipped.push(primName + ' (already exists — skipped)');
   } else {
+    // Merge mode: skip vars that already exist (collection may have existing FLOAT/STRING vars)
+    var _primMergeMap = await buildVarMap(primColl.id);
+
     // 1A — color ramps
     if (DS.color && DS.color.ramps) {
       for (var ri = 0; ri < DS.color.ramps.length; ri++) {
@@ -3794,6 +3862,7 @@ async function _applyDsSetup(DS) {
         for (var si = 0; si < ramp.steps.length; si++) {
           var step = ramp.steps[si];
           var vName = ramp.folder + '/' + step[0];
+          if (_primMergeMap[vName]) continue;
           var v = figma.variables.createVariable(vName, primColl, 'COLOR');
           v.setValueForMode(primModeId, { r: step[1], g: step[2], b: step[3] });
         }
@@ -3815,6 +3884,7 @@ async function _applyDsSetup(DS) {
     ];
     for (var sci = 0; sci < SCRIMS.length; sci++) {
       var sc = SCRIMS[sci];
+      if (_primMergeMap[sc.name]) continue;
       var sv = figma.variables.createVariable(sc.name, primColl, 'COLOR');
       sv.setValueForMode(primModeId, { r: sc.r, g: sc.g, b: sc.b, a: sc.a });
     }
@@ -3831,12 +3901,13 @@ async function _applyDsSetup(DS) {
     ];
     for (var sfi = 0; sfi < SHADOW_FLOATS.length; sfi++) {
       var sf = SHADOW_FLOATS[sfi];
+      if (_primMergeMap[sf.name]) continue;
       var sfv = figma.variables.createVariable(sf.name, primColl, 'FLOAT');
       sfv.setValueForMode(primModeId, sf.value);
     }
 
     // 1B — type primitives (FLOAT + STRING)
-    var _tp = (DS.naming && DS.naming.typePrefix) ? DS.naming.typePrefix : 'type';
+    var _tp = _typePrefixSetup;
     var TYPE_WEIGHTS = [
       { name: _tp + '/weight/regular', value: 400 }, { name: _tp + '/weight/medium', value: 500 },
       { name: _tp + '/weight/semibold', value: 600 }, { name: _tp + '/weight/bold', value: 700 },
@@ -3864,12 +3935,13 @@ async function _applyDsSetup(DS) {
     var allTypeFloats = TYPE_WEIGHTS.concat(TYPE_LH).concat(TYPE_TRACKING).concat(TYPE_SIZES);
     for (var tfi = 0; tfi < allTypeFloats.length; tfi++) {
       var tf = allTypeFloats[tfi];
+      if (_primMergeMap[tf.name]) continue;
       var tfv = figma.variables.createVariable(tf.name, primColl, 'FLOAT');
       tfv.setValueForMode(primModeId, tf.value);
     }
 
     // Font family strings
-    var _ff = (DS.naming && DS.naming.fontFamily) ? DS.naming.fontFamily : 'font/{variant}';
+    var _ff = _fontFamilyPatternSetup;
     var families = (DS.typography && DS.typography.families) ? DS.typography.families : {};
     var famEntries = [
       { key: 'sans',  value: families.sans  || 'Inter' },
@@ -3878,7 +3950,9 @@ async function _applyDsSetup(DS) {
     if (families.serif) famEntries.push({ key: 'serif', value: families.serif });
     for (var fami = 0; fami < famEntries.length; fami++) {
       var fam = famEntries[fami];
-      var famv = figma.variables.createVariable(_ff.replace('{variant}', fam.key), primColl, 'STRING');
+      var famVarName = _ff.replace('{variant}', fam.key);
+      if (_primMergeMap[famVarName]) continue;
+      var famv = figma.variables.createVariable(famVarName, primColl, 'STRING');
       famv.setValueForMode(primModeId, fam.value);
     }
 
@@ -3886,7 +3960,9 @@ async function _applyDsSetup(DS) {
     if (DS.primitives && DS.primitives.spacing) {
       for (var spi = 0; spi < DS.primitives.spacing.length; spi++) {
         var sp = DS.primitives.spacing[spi];
-        var spv = figma.variables.createVariable('space/' + sanitize(sp[0]), primColl, 'FLOAT');
+        var spVarName = 'space/' + sanitize(sp[0]);
+        if (_primMergeMap[spVarName]) continue;
+        var spv = figma.variables.createVariable(spVarName, primColl, 'FLOAT');
         spv.setValueForMode(primModeId, sp[1]);
       }
     }
@@ -3903,7 +3979,92 @@ async function _applyDsSetup(DS) {
   var _semRes = await getOrCreateCollection(semName, 'Light');
   var semColl = _semRes.collection;
 
+  // Check if Color collection's vars are missing aliases (created before Primitives had ramp vars)
+  var _semNeedsRepair = false;
   if (_semRes.existed) {
+    var _semCheckVars = await figma.variables.getLocalVariablesAsync();
+    var _semHasAlias = false;
+    for (var _sci = 0; _sci < _semCheckVars.length; _sci++) {
+      var _scv = _semCheckVars[_sci];
+      if (_scv.variableCollectionId !== semColl.id) continue;
+      var _scvModeIds = Object.keys(_scv.valuesByMode || {});
+      for (var _scmi = 0; _scmi < _scvModeIds.length; _scmi++) {
+        var _scvVal = _scv.valuesByMode[_scvModeIds[_scmi]];
+        if (_scvVal && _scvVal.type === 'VARIABLE_ALIAS') { _semHasAlias = true; break; }
+      }
+      if (_semHasAlias) break;
+    }
+    _semNeedsRepair = !_semHasAlias;
+  }
+
+  if (_semRes.existed && _semNeedsRepair) {
+    // Primitives ramp vars now exist — rewire the empty semantic aliases
+    var _repAllVars = await figma.variables.getLocalVariablesAsync();
+    var _repPrimMap = {};
+    var _repSemVarObj = {};
+    for (var _rvi = 0; _rvi < _repAllVars.length; _rvi++) {
+      if (_repAllVars[_rvi].variableCollectionId === primColl.id) {
+        _repPrimMap[_repAllVars[_rvi].name] = _repAllVars[_rvi].id;
+      }
+      if (_repAllVars[_rvi].variableCollectionId === semColl.id) {
+        _repSemVarObj[_repAllVars[_rvi].name] = _repAllVars[_rvi];
+      }
+    }
+
+    var _repLightModeId = semColl.modes[0].modeId;
+    var _repDarkModeId = null;
+    for (var _rmi2 = 0; _rmi2 < semColl.modes.length; _rmi2++) {
+      if (/dark/i.test(semColl.modes[_rmi2].name)) { _repDarkModeId = semColl.modes[_rmi2].modeId; break; }
+    }
+
+    function _repAlias(primName) {
+      var id = _repPrimMap[primName];
+      return id ? { type: 'VARIABLE_ALIAS', id: id } : null;
+    }
+
+    function _repSetAlias(tokenName, lightRef, darkRef) {
+      var v = _repSemVarObj[tokenName];
+      if (!v) return;
+      if (lightRef) { var _rla = _repAlias(lightRef); if (_rla) v.setValueForMode(_repLightModeId, _rla); }
+      if (darkRef && _repDarkModeId) { var _rda = _repAlias(darkRef); if (_rda) v.setValueForMode(_repDarkModeId, _rda); }
+    }
+
+    if (DS.color && DS.color.semantics) {
+      var _repSem = DS.color.semantics;
+      // Pairs (deduplicated token map)
+      var _repTokMap = {};
+      var _repPairs = _repSem.pairs || [];
+      for (var _rpi2 = 0; _rpi2 < _repPairs.length; _rpi2++) {
+        var _rp2 = _repPairs[_rpi2];
+        if (!_repTokMap[_rp2.bg])   _repTokMap[_rp2.bg]   = { L: _rp2.Light ? _rp2.Light.bg   : null, D: _rp2.Dark ? _rp2.Dark.bg   : null };
+        if (!_repTokMap[_rp2.text]) _repTokMap[_rp2.text] = { L: _rp2.Light ? _rp2.Light.text : null, D: _rp2.Dark ? _rp2.Dark.text : null };
+      }
+      var _repTokNames = Object.keys(_repTokMap);
+      for (var _rti2 = 0; _rti2 < _repTokNames.length; _rti2++) {
+        var _rtn2 = _repTokNames[_rti2];
+        _repSetAlias(_rtn2, _repTokMap[_rtn2].L, _repTokMap[_rtn2].D);
+      }
+      // Icons
+      var _repIcons = _repSem.icons || [];
+      for (var _rii2 = 0; _rii2 < _repIcons.length; _rii2++) {
+        var _ri2 = _repIcons[_rii2];
+        _repSetAlias(_ri2.token, _ri2.Light, _ri2.Dark);
+      }
+      // Unpaired (borders, surfaces, scrims, shadows)
+      var _repUnpaired = _repSem.unpaired || [];
+      var _repCreated = {};
+      for (var _rui2 = 0; _rui2 < _repUnpaired.length; _rui2++) {
+        var _ru2 = _repUnpaired[_rui2];
+        if (_repCreated[_ru2.token]) continue;
+        _repCreated[_ru2.token] = true;
+        var _ruL = (typeof _ru2.Light === 'string') ? _ru2.Light : null;
+        var _ruD = (typeof _ru2.Dark  === 'string') ? _ru2.Dark  : null;
+        _repSetAlias(_ru2.token, _ruL, _ruD);
+      }
+    }
+
+    built.push(semName + ' (aliases repaired)');
+  } else if (_semRes.existed) {
     skipped.push(semName + ' (already exists — skipped)');
   } else {
     // Add Dark mode
@@ -4006,16 +4167,29 @@ async function _applyDsSetup(DS) {
   var modes3 = (DS.breakpoints && DS.breakpoints.modes) ? DS.breakpoints.modes : ['Mobile', 'Tablet', 'Desktop'];
   var _typoRes = await getOrCreateCollection(typoName, modes3[0]);
   var typoColl = _typoRes.collection;
+  var _typoMergeMap = await buildVarMap(typoColl.id);
+  var _typoNeedsMerge = false;
+  if (_typoRes.existed && DS.typography && DS.typography.scale) {
+    var _typoPrefixCheck = (DS.naming && DS.naming.textStyle) ? DS.naming.textStyle.split('/')[0] : 'type';
+    var _typoScaleCheck = DS.typography.scale || {};
+    for (var _tckRole in _typoScaleCheck) {
+      if (!_typoScaleCheck.hasOwnProperty(_tckRole)) continue;
+      var _tckBase = _typoPrefixCheck + '/' + _tckRole;
+      if (!_typoMergeMap[_tckBase + '/size'] ||
+          !_typoMergeMap[_tckBase + '/line-height'] ||
+          !_typoMergeMap[_tckBase + '/weight'] ||
+          !_typoMergeMap[_tckBase + '/tracking']) {
+        _typoNeedsMerge = true;
+        break;
+      }
+    }
+  }
 
-  if (_typoRes.existed) {
+  if (_typoRes.existed && !_typoNeedsMerge) {
     skipped.push(typoName + ' (already exists — skipped)');
   } else {
-    // Add remaining breakpoint modes
-    var typoModeMap = {};
-    typoModeMap[modes3[0]] = typoColl.modes[0].modeId;
-    for (var tmi = 1; tmi < modes3.length; tmi++) {
-      typoModeMap[modes3[tmi]] = typoColl.addMode(modes3[tmi]);
-    }
+    // Merge mode: skip vars that already exist.
+    var typoModeMap = buildModeMap(typoColl, modes3);
 
     var primVarMapForTypo = await buildVarMap(primColl.id);
 
@@ -4026,10 +4200,10 @@ async function _applyDsSetup(DS) {
 
     function sizeTokenName(px) {
       var sizeMap = { 10:'2xs', 12:'xs', 14:'sm', 16:'md', 18:'lg', 20:'xl', 24:'2xl', 30:'3xl', 36:'4xl', 48:'5xl', 60:'6xl', 72:'7xl' };
-      return sizeMap[px] ? (_tp + '/size/' + sizeMap[px]) : (_tp + '/size/' + px);
+      return sizeMap[px] ? (_typePrefixSetup + '/size/' + sizeMap[px]) : (_typePrefixSetup + '/size/' + px);
     }
 
-    var _tp3 = (DS.naming && DS.naming.typePrefix) ? DS.naming.typePrefix : 'type';
+    var _tp3 = _typePrefixSetup;
     var scale = (DS.typography && DS.typography.scale) ? DS.typography.scale : {};
     var weightMap = { 400: 'regular', 500: 'medium', 600: 'semibold', 700: 'bold' };
     var trackingMap = { '-0.02': 'tight', '-0.01': 'snug', '0': 'normal', '0.01': 'open', '0.02': 'wide', '0.05': 'wider', '0.1': 'widest' };
@@ -4047,48 +4221,56 @@ async function _applyDsSetup(DS) {
       var tokenBase = typoPrefix + '/' + role;
 
       // size variable
-      var sizeVar = figma.variables.createVariable(tokenBase + '/size', typoColl, 'FLOAT');
-      for (var mi = 0; mi < modes3.length; mi++) {
-        var modeName = modes3[mi];
-        var modeId3 = typoModeMap[modeName];
-        var sizePx = sizes[mi] != null ? sizes[mi] : sizes[sizes.length - 1];
-        var sizeAlias = typoAlias(sizeTokenName(sizePx));
-        if (sizeAlias) sizeVar.setValueForMode(modeId3, sizeAlias);
-        else sizeVar.setValueForMode(modeId3, sizePx);
+      if (!_typoMergeMap[tokenBase + '/size']) {
+        var sizeVar = figma.variables.createVariable(tokenBase + '/size', typoColl, 'FLOAT');
+        for (var mi = 0; mi < modes3.length; mi++) {
+          var modeName = modes3[mi];
+          var modeId3 = typoModeMap[modeName];
+          var sizePx = sizes[mi] != null ? sizes[mi] : sizes[sizes.length - 1];
+          var sizeAlias = typoAlias(sizeTokenName(sizePx));
+          if (sizeAlias) sizeVar.setValueForMode(modeId3, sizeAlias);
+          else sizeVar.setValueForMode(modeId3, sizePx);
+        }
       }
 
       // line-height variable (px, not ratio — raw computed value)
-      var lhVar = figma.variables.createVariable(tokenBase + '/line-height', typoColl, 'FLOAT');
-      for (var lhi = 0; lhi < modes3.length; lhi++) {
-        var lhModeId = typoModeMap[modes3[lhi]];
-        var lhPx = lineHeights[lhi] != null ? lineHeights[lhi] : lineHeights[lineHeights.length - 1];
-        lhVar.setValueForMode(lhModeId, lhPx);
+      if (!_typoMergeMap[tokenBase + '/line-height']) {
+        var lhVar = figma.variables.createVariable(tokenBase + '/line-height', typoColl, 'FLOAT');
+        for (var lhi = 0; lhi < modes3.length; lhi++) {
+          var lhModeId = typoModeMap[modes3[lhi]];
+          var lhPx = lineHeights[lhi] != null ? lineHeights[lhi] : lineHeights[lineHeights.length - 1];
+          lhVar.setValueForMode(lhModeId, lhPx);
+        }
       }
 
       // weight variable (alias to primitive)
-      var weightVar = figma.variables.createVariable(tokenBase + '/weight', typoColl, 'FLOAT');
-      var weightPrimName = _tp3 + '/weight/' + (weightMap[weight] || 'regular');
-      var weightAlias = typoAlias(weightPrimName);
-      for (var wi = 0; wi < modes3.length; wi++) {
-        var wModeId = typoModeMap[modes3[wi]];
-        if (weightAlias) weightVar.setValueForMode(wModeId, weightAlias);
-        else weightVar.setValueForMode(wModeId, weight);
+      if (!_typoMergeMap[tokenBase + '/weight']) {
+        var weightVar = figma.variables.createVariable(tokenBase + '/weight', typoColl, 'FLOAT');
+        var weightPrimName = _tp3 + '/weight/' + (weightMap[weight] || 'regular');
+        var weightAlias = typoAlias(weightPrimName);
+        for (var wi = 0; wi < modes3.length; wi++) {
+          var wModeId = typoModeMap[modes3[wi]];
+          if (weightAlias) weightVar.setValueForMode(wModeId, weightAlias);
+          else weightVar.setValueForMode(wModeId, weight);
+        }
       }
 
       // tracking variable (alias to primitive)
-      var trackingVar = figma.variables.createVariable(tokenBase + '/tracking', typoColl, 'FLOAT');
-      var trackingKey = String(tracking);
-      var trackingPrimName = _tp3 + '/tracking/' + (trackingMap[trackingKey] || trackingKey);
-      var trackingAlias = typoAlias(trackingPrimName);
-      for (var tri = 0; tri < modes3.length; tri++) {
-        var trModeId = typoModeMap[modes3[tri]];
-        if (trackingAlias) trackingVar.setValueForMode(trModeId, trackingAlias);
-        else trackingVar.setValueForMode(trModeId, tracking);
+      if (!_typoMergeMap[tokenBase + '/tracking']) {
+        var trackingVar = figma.variables.createVariable(tokenBase + '/tracking', typoColl, 'FLOAT');
+        var trackingKey = String(tracking);
+        var trackingPrimName = _tp3 + '/tracking/' + (trackingMap[trackingKey] || trackingKey);
+        var trackingAlias = typoAlias(trackingPrimName);
+        for (var tri = 0; tri < modes3.length; tri++) {
+          var trModeId = typoModeMap[modes3[tri]];
+          if (trackingAlias) trackingVar.setValueForMode(trModeId, trackingAlias);
+          else trackingVar.setValueForMode(trModeId, tracking);
+        }
       }
 
       // family variable (alias to font/sans)
-      var famAlias3 = typoAlias('font/sans');
-      if (famAlias3) {
+      var famAlias3 = typoAlias(_fontFamilyPatternSetup.replace('{variant}', 'sans'));
+      if (famAlias3 && !_typoMergeMap[tokenBase + '/family']) {
         var famVar3 = figma.variables.createVariable(tokenBase + '/family', typoColl, 'STRING');
         for (var fmi = 0; fmi < modes3.length; fmi++) {
           famVar3.setValueForMode(typoModeMap[modes3[fmi]], famAlias3);
@@ -4096,7 +4278,7 @@ async function _applyDsSetup(DS) {
       }
     }
 
-    built.push(typoName);
+    built.push(_typoRes.existed ? typoName + ' (missing vars merged)' : typoName);
   }
 
   // ── Collection 4 — Spacing ────────────────────────────────────────────────
@@ -4104,15 +4286,35 @@ async function _applyDsSetup(DS) {
   var spacingName = (DS.collections && DS.collections.spacing) ? DS.collections.spacing : '4. Spacing';
   var _spacingRes = await getOrCreateCollection(spacingName, modes3[0]);
   var spacingColl = _spacingRes.collection;
+  var _spaceMergeMap = await buildVarMap(spacingColl.id);
+  var _spacingNeedsMerge = false;
+  if (_spacingRes.existed && DS.spacing) {
+    var _semCheck = DS.spacing.semantic || {};
+    for (var _sk in _semCheck) {
+      if (!_semCheck.hasOwnProperty(_sk)) continue;
+      if (!_spaceMergeMap['space/' + _sk]) { _spacingNeedsMerge = true; break; }
+    }
+    if (!_spacingNeedsMerge) {
+      var _radCheck = DS.spacing.radius || {};
+      for (var _rk in _radCheck) {
+        if (!_radCheck.hasOwnProperty(_rk)) continue;
+        if (!_spaceMergeMap['space/radius/' + _rk]) { _spacingNeedsMerge = true; break; }
+      }
+    }
+    if (!_spacingNeedsMerge) {
+      var _borderCheck = DS.spacing.border || {};
+      for (var _bk in _borderCheck) {
+        if (!_borderCheck.hasOwnProperty(_bk)) continue;
+        if (!_spaceMergeMap['space/border/' + _bk]) { _spacingNeedsMerge = true; break; }
+      }
+    }
+  }
 
-  if (_spacingRes.existed) {
+  if (_spacingRes.existed && !_spacingNeedsMerge) {
     skipped.push(spacingName + ' (already exists — skipped)');
   } else {
-    var spaceModeMap = {};
-    spaceModeMap[modes3[0]] = spacingColl.modes[0].modeId;
-    for (var smi = 1; smi < modes3.length; smi++) {
-      spaceModeMap[modes3[smi]] = spacingColl.addMode(modes3[smi]);
-    }
+    // Merge mode: skip vars that already exist.
+    var spaceModeMap = buildModeMap(spacingColl, modes3);
 
     var primVarMapForSpacing = await buildVarMap(primColl.id);
 
@@ -4127,8 +4329,10 @@ async function _applyDsSetup(DS) {
       var semantic = DS.spacing.semantic || {};
       for (var semKey in semantic) {
         if (!semantic.hasOwnProperty(semKey)) continue;
+        var spSemName = 'space/' + semKey;
+        if (_spaceMergeMap[spSemName]) continue;
         var vals = semantic[semKey];
-        var semVar = figma.variables.createVariable('space/' + semKey, spacingColl, 'FLOAT');
+        var semVar = figma.variables.createVariable(spSemName, spacingColl, 'FLOAT');
         for (var seMi = 0; seMi < modes3.length; seMi++) {
           var seModeId = spaceModeMap[modes3[seMi]];
           var seVal = vals[seMi] != null ? vals[seMi] : vals[vals.length - 1];
@@ -4142,7 +4346,9 @@ async function _applyDsSetup(DS) {
       var radius = DS.spacing.radius || {};
       for (var radKey in radius) {
         if (!radius.hasOwnProperty(radKey)) continue;
-        var radVar = figma.variables.createVariable('space/radius/' + radKey, spacingColl, 'FLOAT');
+        var radVarName = 'space/radius/' + radKey;
+        if (_spaceMergeMap[radVarName]) continue;
+        var radVar = figma.variables.createVariable(radVarName, spacingColl, 'FLOAT');
         for (var rmi = 0; rmi < modes3.length; rmi++) {
           radVar.setValueForMode(spaceModeMap[modes3[rmi]], radius[radKey]);
         }
@@ -4152,14 +4358,16 @@ async function _applyDsSetup(DS) {
       var border = DS.spacing.border || {};
       for (var bKey in border) {
         if (!border.hasOwnProperty(bKey)) continue;
-        var bVar = figma.variables.createVariable('space/border/' + bKey, spacingColl, 'FLOAT');
+        var bVarName = 'space/border/' + bKey;
+        if (_spaceMergeMap[bVarName]) continue;
+        var bVar = figma.variables.createVariable(bVarName, spacingColl, 'FLOAT');
         for (var bmi = 0; bmi < modes3.length; bmi++) {
           bVar.setValueForMode(spaceModeMap[modes3[bmi]], border[bKey]);
         }
       }
     }
 
-    built.push(spacingName);
+    built.push(_spacingRes.existed ? spacingName + ' (missing vars merged)' : spacingName);
   }
 
   // ── Collection 5 — Elevation (Effect Styles) ─────────────────────────────

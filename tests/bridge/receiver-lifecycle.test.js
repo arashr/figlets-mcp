@@ -73,6 +73,10 @@ module.exports = (async () => {
     const syncAck = await request(port, "POST", "/sync", JSON.stringify({ ok: true }));
     assert.strictEqual(syncAck.statusCode, 200);
     assert.strictEqual(JSON.parse(syncAck.body).success, true);
+    assert.deepStrictEqual(
+      JSON.parse(fs.readFileSync(path.join(TEMP_DIR, "active-file.json"), "utf8")).fileKey,
+      null
+    );
 
     const syncResult = await syncPromise;
     assert.strictEqual(syncResult.statusCode, 200);

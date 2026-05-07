@@ -1,10 +1,16 @@
 const assert = require("assert");
 const http = require("http");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 // ── Test: build_ds_showcase tool talks to the receiver correctly ──────────────
 // Uses a mock receiver — no real Figma plugin needed.
 
 async function runTests() {
+  const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-showcase-tool-"));
+  process.env.FIGLETS_LOCAL_DIR = localDir;
+
   // Test 1: 200 → compact sections response
   await (async () => {
     const mockServer = http.createServer((req, res) => {
@@ -76,6 +82,54 @@ async function runTests() {
     }
   })();
 
+  // Test 1c: active file config forwards semantic pair relationships, not just collection names.
+  await (async () => {
+    const fileKey = "file_semantics";
+    const scopedDir = path.join(localDir, fileKey);
+    fs.mkdirSync(scopedDir, { recursive: true });
+    fs.writeFileSync(path.join(localDir, "active-file.json"), JSON.stringify({ fileKey, updatedAt: "now" }));
+    fs.writeFileSync(path.join(scopedDir, "design-system.config.js"), [
+      "const DS = {",
+      "  collections: { primitives: '1. Primitives', color: '2. Color' },",
+      "  color: { semantics: { pairs: [",
+      "    { bg: 'color/bg/default', text: 'color/text/default', Light: { bg: 'color/neutral/50', text: 'color/neutral/950' }, Dark: { bg: 'color/neutral/950', text: 'color/neutral/50' } }",
+      "  ] } }",
+      "};"
+    ].join("\n"));
+
+    const mockServer = http.createServer((req, res) => {
+      if (req.method === "POST" && req.url === "/request-showcase") {
+        let body = "";
+        req.on("data", chunk => { body += chunk.toString(); });
+        req.on("end", () => {
+          const parsed = JSON.parse(body);
+          assert.strictEqual(parsed.DS.collections.color, "2. Color");
+          assert.strictEqual(parsed.DS.color.semantics.pairs[0].bg, "color/bg/default");
+          assert.strictEqual(parsed.DS.color.semantics.pairs[0].text, "color/text/default");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, result: { sections: ["Colors"] } }));
+        });
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    await new Promise(resolve => mockServer.listen(0, resolve));
+    const { port } = mockServer.address();
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+
+    try {
+      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/tools/build-showcase.js")];
+      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/utils/paths.js")];
+      const { handleBuildShowcase } = require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+      const result = await handleBuildShowcase();
+      assert.ok(!result.isError, "should succeed");
+    } finally {
+      await new Promise(resolve => mockServer.close(resolve));
+    }
+  })();
+
   // Test 2: 503 → plugin not connected error
   await (async () => {
     const mockServer = http.createServer((req, res) => {
@@ -112,10 +166,15 @@ async function runTests() {
   })();
 
   delete process.env.FIGLETS_RECEIVER_URL;
+  delete process.env.FIGLETS_LOCAL_DIR;
   console.log("build-showcase-tool tests passed");
 }
 
-runTests().catch(err => {
-  console.error("FAIL:", err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  runTests().catch(err => {
+    console.error("FAIL:", err.message);
+    process.exit(1);
+  });
+} else {
+  module.exports = runTests();
+}

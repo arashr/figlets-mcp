@@ -14,6 +14,7 @@ let pendingDsSetupRequest = null;
 let pendingDocBuildRequest = null;
 let pendingQaAuditRequest = null;
 let pendingUpdatePrimitivesRequest = null;
+let pendingResetRequest = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
 let lastPluginSeenAt = 0;
@@ -31,6 +32,15 @@ function _filePaths(fileKey) {
     data:      path.join(dir, 'figma-data.json'),
     selection: path.join(dir, 'figma-selection.json'),
   };
+}
+
+function _writeActiveFile(fileKey) {
+  try {
+    fs.writeFileSync(
+      path.join(DEST_DIR, 'active-file.json'),
+      JSON.stringify({ fileKey: fileKey || null, updatedAt: new Date().toISOString() })
+    );
+  } catch (_) {}
 }
 
 function _getSessionId(req) {
@@ -413,6 +423,55 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 6e. MCP Agent calls this to reset local Figlets-created file content.
+  if (req.method === 'POST' && pathname === '/request-reset-figlets-file') {
+    if (pendingPollResponse) {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'reset-figlets-file', data: payload }));
+        _clearPendingPoll();
+
+        pendingResetRequest = res;
+
+        setTimeout(() => {
+          if (pendingResetRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Reset timed out.' }));
+            pendingResetRequest = null;
+          }
+        }, 60000);
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-reset-figlets-file') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingResetRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingResetRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingResetRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingResetRequest = null;
+      }
+    });
+    return;
+  }
+
   // 6d. Figma Plugin posts the primitive update result here
   if (req.method === 'POST' && pathname === '/sync-update-primitives') {
     let body = '';
@@ -446,12 +505,7 @@ const server = http.createServer((req, res) => {
         fs.writeFileSync(fp.data, body);
         console.log('[success] Wrote payload to ' + fp.data);
 
-        try {
-          fs.writeFileSync(
-            path.join(DEST_DIR, 'active-file.json'),
-            JSON.stringify({ fileKey: _getFileKey(req), updatedAt: new Date().toISOString() })
-          );
-        } catch (_) {}
+        _writeActiveFile(_getFileKey(req));
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));

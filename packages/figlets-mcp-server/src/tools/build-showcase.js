@@ -39,8 +39,10 @@ function handleBuildShowcase(args = {}) {
       if (ctx.DS) {
         dsPayload = {};
         if (ctx.DS.collections) dsPayload.collections = ctx.DS.collections;
-        if (ctx.DS.color && ctx.DS.color.semantics) {
-          dsPayload.color = { semantics: ctx.DS.color.semantics };
+        if (ctx.DS.color) {
+          dsPayload.color = {};
+          if (ctx.DS.color.contrastAlgorithm) dsPayload.color.contrastAlgorithm = ctx.DS.color.contrastAlgorithm;
+          if (ctx.DS.color.semantics) dsPayload.color.semantics = ctx.DS.color.semantics;
         }
       }
     }

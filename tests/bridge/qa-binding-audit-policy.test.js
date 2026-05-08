@@ -140,20 +140,27 @@ assert.ok(
 
 assert.ok(
   code.includes("function _buildPrimitiveContrastSwatch(swatchRGB, stepLabel, hexLabel, swatchVar)") &&
-    code.includes("const topText = _tDS(_lcLabel(top.lc, 75), 9, top.fg, true, top.varRef);") &&
-    code.includes("const bottomText = _tDS(_lcLabel(bottom.lc, 75), 9, swatchRGB, true, swatchVar);") &&
+    code.includes("const topText = _tDS(_contrastLabel(top.lc, top.ratio, 75, 4.5), 9, top.fg, true, top.varRef);") &&
+    code.includes("const bottomText = _tDS(_contrastLabel(bottom.lc, bottom.ratio, 75, 4.5), 9, swatchRGB, true, swatchVar);") &&
     code.includes("swatch.layoutGrow = 1;") &&
     code.includes("_setMinWidth(swatch, 56);"),
-  "Showcase primitive swatches must bind split APCA labels to variables and flex within the row"
+  "Showcase primitive swatches must bind split contrast labels to variables and flex within the row"
 );
 
 assert.ok(
   code.includes("function _lcLabel(lc, threshold)") &&
     code.includes("return (lc >= threshold ? '✓ ' : '✗ ') + 'Lc ' + lc;") &&
+    code.includes("function _wcagLabel(ratio, threshold)") &&
+    code.includes("if (ratio >= 7) return '✓ AAA';") &&
+    code.includes("if (ratio >= 4.5) return '✓ AA';") &&
+    code.includes("if (ratio >= 3) return threshold <= 3 ? '✓ 3:1' : '~ Large';") &&
+    code.includes("function _contrastLabel(lc, ratio, lcThreshold, ratioThreshold)") &&
+    code.includes("if (_showcaseContrastAlgorithm === 'wcag')") &&
     code.includes("var lcAbs = Math.abs(_apcaLc(fgRGB, bgRGB));") &&
     code.includes("var lcThreshold = opts.isIcon ? 60 : 75;") &&
-    code.includes("const swatch = _buildSwatch(bgRGB, fgRGB, _lcLabel(lcAbs, lcThreshold), {"),
-  "Showcase semantic pair swatches must show APCA pass/fail labels at text/icon thresholds"
+    code.includes("var ratioThreshold = opts.isIcon ? 3 : 4.5;") &&
+    code.includes("const swatch = _buildSwatch(bgRGB, fgRGB, _contrastLabel(lcAbs, ratio, lcThreshold, ratioThreshold), {"),
+  "Showcase semantic pair swatches must show APCA or WCAG pass/fail labels at text/icon thresholds"
 );
 
 assert.ok(

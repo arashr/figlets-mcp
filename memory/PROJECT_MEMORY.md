@@ -731,6 +731,14 @@ Fixes shipped:
 - Full test suite passed with bundled modern Node: `37/37`.
 - `git diff --check` clean.
 
-**TODO / follow-up:**
+**Follow-up completed on 2026-05-08:**
 
-- WCAG parity for the new swatch treatment is not implemented. The visual structure can work, but labels must be ratio-based (`✓ AAA`, `✓ AA`, `~ Large`, `✗ Fail`, or ratio text) instead of APCA `Lc`. If the project needs WCAG-mode showcase parity, update primitive and semantic swatch labels to branch on `DS.color.contrastAlgorithm`.
+- WCAG parity for the new swatch treatment is implemented.
+- Primitive and semantic swatch labels now branch on `DS.color.contrastAlgorithm`.
+  - APCA mode keeps `✓ Lc NN` / `✗ Lc NN`.
+  - WCAG mode uses compact status labels: `✓ AAA`, `✓ AA`, `~ Large`, `✓ 3:1`, `✗ Fail`.
+- `build_ds_showcase` now forwards `DS.color.contrastAlgorithm` from the active file-scoped config to the bridge plugin; previously it only forwarded collections and semantic pairs, which would have made live WCAG showcase builds silently fall back to APCA labels.
+- Live verification after reloading the Figlets Bridge plugin:
+  - Sent a one-off WCAG showcase request for active file `local_movbxur3_6gow4h4j` without changing the saved APCA config.
+  - Rendered `Colors`, `Typography`, `Spacing`, `Elevation`, `Scrims`.
+  - Only existing numeric fallback warnings remained; no color/contrast-specific errors.

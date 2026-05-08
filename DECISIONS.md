@@ -812,6 +812,19 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-08] Showcase contrast labels follow the configured contrast algorithm
+
+**Decision:** Primitive and semantic color swatch labels in the Figma showcase branch on `DS.color.contrastAlgorithm`. APCA mode shows Lc labels (`✓ Lc NN` / `✗ Lc NN`). WCAG mode keeps the same visual treatment but shows ratio-status labels (`✓ AAA`, `✓ AA`, `~ Large`, `✓ 3:1`, `✗ Fail`).
+
+**Why:**
+- The split primitive swatches and semantic pair swatches are useful in both APCA and WCAG workflows, but APCA `Lc` labels are misleading when the configured validator is WCAG.
+- Text-like rows need the body-text threshold (`Lc 75` or `4.5:1`), while icon-like rows need the graphical threshold (`Lc 60` or `3:1`).
+- The MCP `build_ds_showcase` handoff must forward `DS.color.contrastAlgorithm`; otherwise a WCAG config reaches the bridge plugin without the mode signal and silently renders APCA labels.
+
+**Consequence:** Showcase labels now match the same contrast algorithm used by config validation. WCAG live builds can be verified with a one-off request that passes `contrastAlgorithm: "wcag"` without mutating the active saved config.
+
+---
+
 ## [2026-04-29] Spec sheet containers must FILL width and HUG height — no custom row builders
 
 **Decision:** Every container in `_buildComponentDoc` that holds variable-height content must set `layoutSizingHorizontal = 'FILL'` (fills the doc frame width) and either `counterAxisSizingMode = 'AUTO'` or `primaryAxisSizingMode = 'AUTO'` to hug content height. Text nodes inside containers must use `layoutSizingHorizontal = 'FILL'` + `textAutoResize = 'HEIGHT'` — never `WIDTH_AND_HEIGHT`. Custom row/cell builders are prohibited: always use the proven `_mkTable/_mkRow/_mkCell` helpers for tabular data.

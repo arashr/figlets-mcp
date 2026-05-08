@@ -91,7 +91,7 @@ async function runTests() {
     fs.writeFileSync(path.join(scopedDir, "design-system.config.js"), [
       "const DS = {",
       "  collections: { primitives: '1. Primitives', color: '2. Color' },",
-      "  color: { semantics: { pairs: [",
+      "  color: { contrastAlgorithm: 'wcag', semantics: { pairs: [",
       "    { bg: 'color/bg/default', text: 'color/text/default', Light: { bg: 'color/neutral/50', text: 'color/neutral/950' }, Dark: { bg: 'color/neutral/950', text: 'color/neutral/50' } }",
       "  ] } }",
       "};"
@@ -104,6 +104,7 @@ async function runTests() {
         req.on("end", () => {
           const parsed = JSON.parse(body);
           assert.strictEqual(parsed.DS.collections.color, "2. Color");
+          assert.strictEqual(parsed.DS.color.contrastAlgorithm, "wcag");
           assert.strictEqual(parsed.DS.color.semantics.pairs[0].bg, "color/bg/default");
           assert.strictEqual(parsed.DS.color.semantics.pairs[0].text, "color/text/default");
           res.writeHead(200, { "Content-Type": "application/json" });

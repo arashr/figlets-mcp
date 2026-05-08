@@ -1262,6 +1262,11 @@ async function _runQaBindingAudit(opts) {
 async function _buildShowcase(opts) {
   opts = opts || {};
   const _numericFallback = opts.numericFallback || {};
+  const _showcaseContrastAlgorithm = (
+    opts.DS &&
+    opts.DS.color &&
+    opts.DS.color.contrastAlgorithm === 'wcag'
+  ) ? 'wcag' : 'apca';
 
   // ── detect-ds-structure ────────────────────────────────────────────────────
 
@@ -1428,6 +1433,19 @@ async function _buildShowcase(opts) {
   function _lcLabel(lc, threshold) {
     threshold = threshold || 75;
     return (lc >= threshold ? '✓ ' : '✗ ') + 'Lc ' + lc;
+  }
+  function _wcagLabel(ratio, threshold) {
+    threshold = threshold || 4.5;
+    if (ratio >= 7) return '✓ AAA';
+    if (ratio >= 4.5) return '✓ AA';
+    if (ratio >= 3) return threshold <= 3 ? '✓ 3:1' : '~ Large';
+    return '✗ Fail';
+  }
+  function _contrastLabel(lc, ratio, lcThreshold, ratioThreshold) {
+    if (_showcaseContrastAlgorithm === 'wcag') {
+      return _wcagLabel(ratio, ratioThreshold);
+    }
+    return _lcLabel(lc, lcThreshold);
   }
   function _setMinWidth(node, width) {
     try { node.minWidth = width; } catch (_) {}
@@ -2318,14 +2336,17 @@ async function _buildShowcase(opts) {
     var black = { r: 0, g: 0, b: 0 };
     var whiteLc = Math.abs(_apcaLc(white, swatchRGB));
     var blackLc = Math.abs(_apcaLc(black, swatchRGB));
+    var whiteRatio = _contrastRatio(white, swatchRGB);
+    var blackRatio = _contrastRatio(black, swatchRGB);
     var picked = whiteLc > blackLc
-      ? { fg: white, lc: whiteLc, varRef: null }
-      : { fg: black, lc: blackLc, varRef: null };
+      ? { fg: white, lc: whiteLc, ratio: whiteRatio, varRef: null }
+      : { fg: black, lc: blackLc, ratio: blackRatio, varRef: null };
     var neutral = _pickReadableNeutralExtreme(swatchRGB);
     if (neutral) {
       var neutralLc = Math.abs(_apcaLc(neutral.fg, swatchRGB));
+      var neutralRatio = _contrastRatio(neutral.fg, swatchRGB);
       if (neutralLc >= picked.lc - 3) {
-        picked = { fg: neutral.fg, lc: neutralLc, varRef: neutral.varRef };
+        picked = { fg: neutral.fg, lc: neutralLc, ratio: neutralRatio, varRef: neutral.varRef };
       }
     }
     return picked;
@@ -2336,10 +2357,13 @@ async function _buildShowcase(opts) {
     var black = { r: 0, g: 0, b: 0 };
     var whiteLc = Math.abs(_apcaLc(swatchRGB, white));
     var blackLc = Math.abs(_apcaLc(swatchRGB, black));
+    var whiteRatio = _contrastRatio(swatchRGB, white);
+    var blackRatio = _contrastRatio(swatchRGB, black);
     var targetDarkBg = blackLc >= whiteLc;
     var best = {
       bg: targetDarkBg ? black : white,
       lc: targetDarkBg ? blackLc : whiteLc,
+      ratio: targetDarkBg ? blackRatio : whiteRatio,
       varRef: null
     };
     var bestDistance = Infinity;
@@ -2352,10 +2376,11 @@ async function _buildShowcase(opts) {
       if (targetDarkBg && lum > 0.2) continue;
       if (!targetDarkBg && lum < 0.8) continue;
       var lcAbs = Math.abs(_apcaLc(swatchRGB, s.rgb));
+      var ratio = _contrastRatio(swatchRGB, s.rgb);
       if (lcAbs < 45) continue;
       var distance = targetDarkBg ? lum : (1 - lum);
       if (lcAbs > best.lc || (Math.abs(lcAbs - best.lc) <= 3 && distance < bestDistance)) {
-        best = { bg: s.rgb, lc: lcAbs, varRef: s.v };
+        best = { bg: s.rgb, lc: lcAbs, ratio: ratio, varRef: s.v };
         bestDistance = distance;
       }
     }
@@ -2464,7 +2489,7 @@ async function _buildShowcase(opts) {
     topHalf.counterAxisAlignItems = 'CENTER';
     topHalf.resize(56, 32);
     topHalf.fills = [_paint(swatchRGB, swatchVar)];
-    const topText = _tDS(_lcLabel(top.lc, 75), 9, top.fg, true, top.varRef);
+    const topText = _tDS(_contrastLabel(top.lc, top.ratio, 75, 4.5), 9, top.fg, true, top.varRef);
     topHalf.appendChild(topText);
     container.appendChild(topHalf);
     topHalf.layoutSizingHorizontal = 'FILL';
@@ -2475,7 +2500,7 @@ async function _buildShowcase(opts) {
     bottomHalf.counterAxisAlignItems = 'CENTER';
     bottomHalf.resize(56, 32);
     bottomHalf.fills = [_paint(bottom.bg, bottom.varRef)];
-    const bottomText = _tDS(_lcLabel(bottom.lc, 75), 9, swatchRGB, true, swatchVar);
+    const bottomText = _tDS(_contrastLabel(bottom.lc, bottom.ratio, 75, 4.5), 9, swatchRGB, true, swatchVar);
     bottomHalf.appendChild(bottomText);
     container.appendChild(bottomHalf);
     bottomHalf.layoutSizingHorizontal = 'FILL';
@@ -2588,6 +2613,7 @@ async function _buildShowcase(opts) {
     const ratio = _contrastRatio(bgRGB, fgRGB);
     var lcAbs = Math.abs(_apcaLc(fgRGB, bgRGB));
     var lcThreshold = opts.isIcon ? 60 : 75;
+    var ratioThreshold = opts.isIcon ? 3 : 4.5;
     const row = _f('Table / Row / Semantic Color Pairs 1.0.0', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
     row.paddingTop  = 16; row.paddingBottom = 16;
@@ -2613,7 +2639,7 @@ async function _buildShowcase(opts) {
     const swatchCell = _f('SwatchCell', 'VERTICAL');
     swatchCell.primaryAxisAlignItems = 'CENTER';
     swatchCell.counterAxisAlignItems = 'CENTER';
-    const swatch = _buildSwatch(bgRGB, fgRGB, _lcLabel(lcAbs, lcThreshold), {
+    const swatch = _buildSwatch(bgRGB, fgRGB, _contrastLabel(lcAbs, ratio, lcThreshold, ratioThreshold), {
       swatchVar: bgVar,
       fgVar: fgVar,
       sampleFontSize: 11,

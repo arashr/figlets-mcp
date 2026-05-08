@@ -226,6 +226,37 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("async function _ensureTypographyTextStyles(DS, typoColl, modes)") &&
+    code.includes("figma.createTextStyle()") &&
+    code.includes("textStyle.name = styleName;") &&
+    code.includes("textStyle.setBoundVariable('fontSize'") &&
+    code.includes("textStyle.setBoundVariable('lineHeight'") &&
+    code.includes("var _textStyleResult = await _ensureTypographyTextStyles(DS, typoColl, modes3);") &&
+    code.includes("built.push('Text styles (' + _textStyleResult.created + ' created)');"),
+  "DS setup must create and bind typography text styles, not only typography variables"
+);
+
+assert.ok(
+  code.includes("if (/(^|\\/)(?:elevation|shadow)(?:\\/|$)/i.test(groupPath) || /elevation/i.test(coll.name)) continue;") &&
+    code.includes("const _elevationStyles = effectStyles") &&
+    code.includes("_placeShowcaseSection('Elevation', _elevFrame, _myElevationX);"),
+  "Showcase spacing must exclude elevation/shadow numeric variables so elevation renders only in its own section"
+);
+
+assert.ok(
+  code.includes("const displayPx = Math.min(Math.max(Math.round(px / 4), 4), 26);") &&
+    code.includes("const innerSize = 32;") &&
+    code.includes("outer.resize(innerSize + displayPx * 2, innerSize + displayPx * 2);") &&
+    code.includes("inner.resize(innerSize, innerSize);"),
+  "Showcase inset visuals must keep the inner content size fixed and grow the outer padding box so inset values read differently"
+);
+
+assert.ok(
+  code.includes("visualCell.resize(visualType === 'inset' ? 96 : 64, 1);"),
+  "Showcase inset visual cells must be wide enough to show the larger padding box without clipping"
+);
+
+assert.ok(
   code.includes("figma.currentPage.selection = _showcaseNodes;") &&
     code.includes("_qaPass = await _runQaBindingAudit({ fix: true });") &&
     code.includes("figma.currentPage.selection = _prevSelection;"),

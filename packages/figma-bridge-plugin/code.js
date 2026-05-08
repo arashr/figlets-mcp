@@ -2837,11 +2837,12 @@ async function _buildShowcase(opts) {
     }
 
     if (type === 'inset') {
-      const displayPx = Math.min(Math.max(px, 2), 32);
+      const displayPx = Math.min(Math.max(Math.round(px / 4), 4), 26);
+      const innerSize = 32;
       const outer = figma.createFrame();
       outer.name = 'Inset Visual';
       outer.layoutMode = 'NONE';
-      outer.resize(40 + displayPx * 2, 40 + displayPx * 2);
+      outer.resize(innerSize + displayPx * 2, innerSize + displayPx * 2);
       outer.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
       outer.strokes = [_paint(_accColor, _V.outlineBrand)];
       outer.strokeWeight = 1;
@@ -2849,7 +2850,7 @@ async function _buildShowcase(opts) {
       outer.cornerRadius = 4;
       outer.clipsContent = true;
       const inner = figma.createRectangle();
-      inner.resize(40, 40);
+      inner.resize(innerSize, innerSize);
       inner.x = displayPx;
       inner.y = displayPx;
       inner.fills = [_paint(_RC.surfaceBrand, _V.surfaceBrand)];
@@ -2923,7 +2924,7 @@ async function _buildShowcase(opts) {
     visualCell.appendChild(visual);
     row.appendChild(visualCell);
     visualCell.layoutSizingHorizontal = 'FIXED';
-    visualCell.resize(64, 1);
+    visualCell.resize(visualType === 'inset' ? 96 : 64, 1);
     visualCell.layoutSizingVertical   = 'HUG';
 
     const valueCell = _f('Text', 'HORIZONTAL');
@@ -3585,6 +3586,7 @@ async function _buildShowcase(opts) {
 
       for (const [groupPath, vars] of Object.entries(_groups)) {
         if (/^(?:type|typo|typography|font|text(?:[\/-]|$)|label|body|heading|display|caption|letter|tracking|leading|line[-_]?height|font[-_]?size|font[-_]?weight)/i.test(groupPath)) continue;
+        if (/(^|\/)(?:elevation|shadow)(?:\/|$)/i.test(groupPath) || /elevation/i.test(coll.name)) continue;
         const _resolved  = vars.map(v => { const n = resolveVarValue(v); return typeof n === 'number' ? n : null; });
         const _sorted    = vars.map((v, i) => ({ v, val: _resolved[i] }))
                                .sort((a, b) => (a.val != null ? a.val : Infinity) - (b.val != null ? b.val : Infinity));
@@ -3985,6 +3987,94 @@ async function _applyDsSetup(DS) {
       }
     }
     return map;
+  }
+
+  async function _loadFontForTextStyle(family, style) {
+    try {
+      await figma.loadFontAsync({ family: family, style: style });
+      return { family: family, style: style };
+    } catch (_) {}
+    try {
+      await figma.loadFontAsync({ family: family, style: 'Regular' });
+      return { family: family, style: 'Regular' };
+    } catch (_) {}
+    return null;
+  }
+
+  function _typeStyleName(pattern, role) {
+    pattern = pattern || 'type/{role}/{size}';
+    var parts = String(role).split('/');
+    var size = parts.length > 1 ? parts[parts.length - 1] : role;
+    var roleName = pattern.indexOf('{size}') >= 0 && parts.length > 1
+      ? parts.slice(0, -1).join('/')
+      : role;
+    return pattern
+      .replace('{role}', roleName)
+      .replace('{size}', size);
+  }
+
+  async function _ensureTypographyTextStyles(DS, typoColl, modes) {
+    var scale = (DS.typography && DS.typography.scale) ? DS.typography.scale : {};
+    var roles = Object.keys(scale);
+    if (!roles.length) return { created: 0, updated: 0 };
+
+    var textStylePattern = (DS.naming && DS.naming.textStyle) ? DS.naming.textStyle : 'type/{role}/{size}';
+    var families = (DS.typography && DS.typography.families) ? DS.typography.families : {};
+    var family = families.sans || 'Inter';
+    var weightStyleMap = { 400: 'Regular', 500: 'Medium', 600: 'Semi Bold', 700: 'Bold' };
+    var modeIndex = modes && modes.length ? modes.length - 1 : 0;
+
+    var styleList = await figma.getLocalTextStylesAsync();
+    var styleByName = {};
+    for (var tsi = 0; tsi < styleList.length; tsi++) styleByName[styleList[tsi].name] = styleList[tsi];
+
+    var typoVars = await figma.variables.getLocalVariablesAsync();
+    var typoVarByName = {};
+    for (var tvi = 0; tvi < typoVars.length; tvi++) {
+      if (typoVars[tvi].variableCollectionId === typoColl.id) typoVarByName[typoVars[tvi].name] = typoVars[tvi];
+    }
+
+    var created = 0;
+    var updated = 0;
+    for (var ri = 0; ri < roles.length; ri++) {
+      var role = roles[ri];
+      var roleDef = scale[role] || {};
+      var styleName = _typeStyleName(textStylePattern, role);
+      var textStyle = styleByName[styleName] || null;
+      if (!textStyle) {
+        textStyle = figma.createTextStyle();
+        textStyle.name = styleName;
+        styleByName[styleName] = textStyle;
+        created++;
+      } else {
+        updated++;
+      }
+
+      var sizes = roleDef.sizes || [];
+      var lineHeights = roleDef.lineHeights || [];
+      var fontSize = sizes[modeIndex] != null ? sizes[modeIndex] : sizes[sizes.length - 1];
+      var lineHeight = lineHeights[modeIndex] != null ? lineHeights[modeIndex] : lineHeights[lineHeights.length - 1];
+      var weight = roleDef.weight || 400;
+      var tracking = roleDef.tracking != null ? roleDef.tracking : 0;
+      var fontStyle = weightStyleMap[weight] || 'Regular';
+      var loadedFont = await _loadFontForTextStyle(family, fontStyle);
+
+      if (loadedFont) {
+        try { textStyle.fontName = loadedFont; } catch (_) {}
+      }
+      if (typeof fontSize === 'number') textStyle.fontSize = fontSize;
+      if (typeof lineHeight === 'number') textStyle.lineHeight = { value: lineHeight, unit: 'PIXELS' };
+      textStyle.letterSpacing = { value: tracking, unit: 'PIXELS' };
+
+      var tokenBase = _typePrefixSetup + '/' + role;
+      try { if (typoVarByName[tokenBase + '/size']) textStyle.setBoundVariable('fontSize', typoVarByName[tokenBase + '/size']); } catch (_) {}
+      try { if (typoVarByName[tokenBase + '/line-height']) textStyle.setBoundVariable('lineHeight', typoVarByName[tokenBase + '/line-height']); } catch (_) {}
+      try { if (typoVarByName[tokenBase + '/tracking']) textStyle.setBoundVariable('letterSpacing', typoVarByName[tokenBase + '/tracking']); } catch (_) {}
+      try { if (typoVarByName[tokenBase + '/family']) textStyle.setBoundVariable('fontFamily', typoVarByName[tokenBase + '/family']); } catch (_) {}
+      try { if (typoVarByName[tokenBase + '/weight']) textStyle.setBoundVariable('fontWeight', typoVarByName[tokenBase + '/weight']); } catch (_) {}
+    }
+
+    return { created: created, updated: updated };
   }
 
   var _typePrefixSetup = (DS.naming && DS.naming.typePrefix) ? DS.naming.typePrefix : 'type';
@@ -4438,6 +4528,13 @@ async function _applyDsSetup(DS) {
     }
 
     built.push(_typoRes.existed ? typoName + ' (missing vars merged)' : typoName);
+  }
+
+  var _textStyleResult = await _ensureTypographyTextStyles(DS, typoColl, modes3);
+  if (_textStyleResult.created > 0) {
+    built.push('Text styles (' + _textStyleResult.created + ' created)');
+  } else if (_textStyleResult.updated > 0) {
+    skipped.push('Text styles (already exist — refreshed)');
   }
 
   // ── Collection 4 — Spacing ────────────────────────────────────────────────

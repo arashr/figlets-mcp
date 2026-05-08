@@ -678,6 +678,41 @@ Fixes shipped:
 
 ---
 
+### [2026-05-08 — DESIGN.md intake/export + neutral setup naming]
+
+**Objective completed:** Added Google-style `DESIGN.md` support as a setup intake shortcut and portable export artifact.
+
+**What changed:**
+
+- `packages/figlets-core/src/ds-config/design-md-intake.js`
+  - Parses DESIGN.md YAML front matter with no external dependency.
+  - Maps project name, brand colors, typography roles, and spacing base into a starter Figlets `DS`.
+  - Exports prepared Figlets configs back to DESIGN.md for agent/code-repo portability.
+- `packages/figlets-mcp-server/src/tools/design-md-intake.js`
+  - Adds `create_ds_config_from_design_md`, which writes a starter `design-system.config.js` from an existing DESIGN.md.
+- `prepare_ds_config` and `apply_ds_setup`
+  - Write `DESIGN.md` next to the active file-scoped config and return `designMdExport.path`.
+  - This makes the export available after setup/prepare without another expensive Figma operation.
+- `compute-ds-config`
+  - Renamed legacy `needsClaude` to `needsDesignerInput`.
+  - Imported custom DESIGN.md typography now counts as answered intake when the scale is present.
+- Adapter docs
+  - Setup starts by asking if the designer already has DESIGN.md.
+  - DESIGN.md lint/diff are optional designer-approved follow-ups, not automatic gates.
+
+**Tests and checks:**
+
+- Added tests:
+  - `tests/core/design-md-intake.test.js`
+  - `tests/server/design-md-intake-tool.test.js`
+  - `tests/server/apply-ds-setup-export.test.js`
+  - updated `tests/server/prepare-ds-config-tool.test.js`
+- Full suite passed: `40/40`.
+- `git diff --check` clean.
+- Commit: `46b48a0 Add DESIGN.md intake and export`.
+
+---
+
 ### [2026-05-07 — contrast-harmonized OKLCh ramps + APCA swatch showcase]
 
 **Objective completed:** Added an opt-in OKLCh `DS.color.rampStrategy = "contrast-harmonized"` and updated the Colors showcase to make primitive and semantic contrast behavior visible.

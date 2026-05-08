@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-08] DESIGN.md is an intake/export bridge, not the source of truth
+
+**Decision:** Figlets supports Google-style `DESIGN.md` as a portable interchange layer. `create_ds_config_from_design_md` imports DESIGN.md front matter into a starter `design-system.config.js`, so setup can skip answers the designer already provided. `prepare_ds_config` and `apply_ds_setup` write a `DESIGN.md` export next to the file-scoped config for download/share after setup.
+
+**Why:** DESIGN.md is useful agent context: machine-readable tokens plus human-readable rationale. Figlets, however, has richer Figma-specific semantics: APCA/WCAG validation, mode-aware aliases, semantic pairs, icon thresholds, scrims, elevation styles, and local file isolation. Replacing the prepared config with DESIGN.md would lose product-critical structure.
+
+**Consequence:** The prepared Figlets config and Figma variables remain authoritative. DESIGN.md import is an intake shortcut; DESIGN.md export is a portable artifact for coding agents and downstream tools. External lint/diff commands for DESIGN.md are optional designer-approved steps, not automatic setup gates. The old `needsClaude` field was renamed to `needsDesignerInput` because missing setup details are product/design decisions, not agent-specific work.
+
+---
+
 ## [2026-05-07] Showcase semantic colors use prepared pair relationships when available
 
 **Decision:** When `build_ds_showcase` can read the active file-scoped config, it forwards `DS.color.semantics.pairs` to the bridge plugin. The Colors showcase renders the Semantic Colors table directly from those pair relationships instead of rediscovering background/foreground pairings from variable names. Showcase chrome also prefers explicit generic/brand-subtle tokens (`color/text/subtle`, `color/text/muted`, `color/bg/brand-subtle`, `color/text/brand`) before broad role scoring.

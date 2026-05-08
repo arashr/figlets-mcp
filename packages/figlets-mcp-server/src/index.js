@@ -13,6 +13,7 @@ const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
 const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require("./tools/update-ds-primitives.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
+const { designMdIntakeTool, handleCreateDsConfigFromDesignMd } = require("./tools/design-md-intake.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
@@ -109,6 +110,33 @@ server.tool(
   async (args) => {
     try {
       return await handleBuildShowcase(args || {});
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- create_ds_config_from_design_md ---
+server.tool(
+  designMdIntakeTool.name,
+  designMdIntakeTool.description,
+  {
+    design_md_path: z.string().describe("Absolute path to DESIGN.md."),
+    config_path: z.string().describe("Absolute path where design-system.config.js should be written.")
+  },
+  async (args) => {
+    try {
+      const result = handleCreateDsConfigFromDesignMd(args);
+      if (result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

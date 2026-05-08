@@ -136,6 +136,7 @@ Once connected, the agent will have access to:
 | `audit_tokens` | Audits the snapshot for unaliased values, duplicate values, and naming inconsistencies. |
 | `qa_binding_audit` | Audits selected Figma layers for raw/unbound design-system properties and can apply safe high-confidence fixes. |
 | `build_ds_showcase` | Builds the visual token showcase in Figma. |
+| `create_ds_config_from_design_md` | Creates a starter design-system config from an existing Google DESIGN.md file. |
 | `prepare_ds_config` | Previews and validates a design-system config before building variables. |
 | `apply_ds_setup` | Builds Figma variable collections from a prepared config. |
 | `generate_component_doc` | Builds a component spec sheet in Figma and returns local markdown for developer handoff. |

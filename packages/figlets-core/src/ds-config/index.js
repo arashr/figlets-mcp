@@ -4,6 +4,7 @@ const { computeDsConfig }        = require('./compute-ds-config');
 const { generateColorRamps }     = require('./generate-color-ramps');
 const { validateSemanticPairs }  = require('./validate-semantic-pairs');
 const { generatePrimitivesData } = require('./generate-primitives-data');
+const designMdIntake             = require('./design-md-intake');
 
 /**
  * readDsConfig(configPath) — reads and evaluates a design-system.config.js file.
@@ -110,7 +111,7 @@ function runDsPipeline(configPath) {
     ds,
     spacingPreview:       step1.preview,
     computed:             step1.computed,
-    needsClaude:          step1.needsClaude,
+    needsDesignerInput:   step1.needsDesignerInput,
     colorRampsTable:      step2.markdownTable,
     colorRampsSummary:    step2.summary,
     contrastAnnotations:  step2.contrastAnnotations,
@@ -133,4 +134,5 @@ module.exports = {
   readDsConfig,
   writeDsConfig,
   runDsPipeline,
+  designMdIntake,
 };

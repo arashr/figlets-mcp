@@ -15,6 +15,21 @@ const http = require('http');
 const path = require('path');
 const { getConfigPathGuardError } = require('../utils/paths.js');
 
+function _writeDesignMdExport(configPath) {
+  try {
+    let designMdIntake;
+    try {
+      designMdIntake = require('@figlets/core').dsConfig.designMdIntake;
+    } catch (_) {
+      designMdIntake = require('../../../figlets-core/src/ds-config/index.js').designMdIntake;
+    }
+    if (designMdIntake && designMdIntake.writeDesignMdFromDsConfig) {
+      return designMdIntake.writeDesignMdFromDsConfig(configPath);
+    }
+  } catch (_) {}
+  return null;
+}
+
 function handleApplyDsSetup({ config_path }) {
   const resolvedPath = path.resolve(config_path);
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || 'http://localhost:1337';
@@ -67,10 +82,12 @@ function handleApplyDsSetup({ config_path }) {
           let parsed = {};
           try { parsed = JSON.parse(data); } catch {}
           const result = parsed.result || {};
+          const designMdPath = _writeDesignMdExport(resolvedPath);
           resolve({
             collections: result.collections || [],
             skipped:     result.skipped || [],
             message:     result.message || 'DS setup complete.',
+            designMdExport: designMdPath ? { path: designMdPath } : null,
             configPath:  resolvedPath,
           });
         } else if (res.statusCode === 503) {

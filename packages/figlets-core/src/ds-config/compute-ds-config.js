@@ -6,7 +6,7 @@
  * Pure function — no file I/O. Takes a DS object, returns updated DS + metadata.
  *
  * @param {object} ds - The DS config object (from design-system.config.js)
- * @returns {{ ds, computed, needsClaude, preview }}
+ * @returns {{ ds, computed, needsDesignerInput, preview }}
  */
 function computeDsConfig(ds) {
   const DS     = Object.assign({}, ds);
@@ -16,7 +16,7 @@ function computeDsConfig(ds) {
   const preset = DS.typography?.scalePreset || 'material3';
 
   const computed    = [];
-  const needsClaude = [];
+  const needsDesignerInput = [];
   const preview     = [];
 
   // ── Spacing primitives (Collection 1) ──────────────────────────────────────
@@ -158,13 +158,18 @@ function computeDsConfig(ds) {
   };
 
   if (preset === 'custom') {
-    needsClaude.push('DS.typography.scale');
-    preview.push(`  DS.typography.scale — ⚠ custom preset, needs Claude`);
+    if (DS.typography && DS.typography.scale) {
+      computed.push('DS.typography.scale');
+      preview.push(`  DS.typography.scale — ${Object.keys(DS.typography.scale).length} custom roles`);
+    } else {
+      needsDesignerInput.push('DS.typography.scale');
+      preview.push(`  DS.typography.scale — ⚠ custom preset, needs designer input`);
+    }
   } else {
     const scale = PRESETS[preset];
     if (!scale) {
-      needsClaude.push('DS.typography.scale');
-      preview.push(`  DS.typography.scale — ⚠ unknown preset "${preset}", needs Claude`);
+      needsDesignerInput.push('DS.typography.scale');
+      preview.push(`  DS.typography.scale — ⚠ unknown preset "${preset}", needs designer input`);
     } else {
       if (!DS.typography) DS.typography = {};
       DS.typography.scale = scale;
@@ -181,7 +186,7 @@ function computeDsConfig(ds) {
   return {
     ds: DS,
     computed,
-    needsClaude,
+    needsDesignerInput,
     preview: [header, ...preview].join('\n'),
   };
 }

@@ -35,5 +35,8 @@ assert.ok(!result.error, "prepare_ds_config should succeed");
 assert.ok(result.setupPreview && result.setupPreview.svgPath, "prepare_ds_config should return setup preview path");
 assert.ok(fs.existsSync(result.setupPreview.svgPath), "setup preview SVG should be written next to the config");
 assert.ok(fs.readFileSync(result.setupPreview.svgPath, "utf8").includes("Semantic pairs"), "preview should include semantic pairs");
+assert.ok(result.designMdExport && result.designMdExport.path, "prepare_ds_config should return DESIGN.md export path");
+assert.ok(fs.existsSync(result.designMdExport.path), "DESIGN.md should be written next to the config");
+assert.ok(fs.readFileSync(result.designMdExport.path, "utf8").includes("## Overview"), "DESIGN.md export should include portable agent context");
 
 fs.rmSync(tmp, { recursive: true, force: true });

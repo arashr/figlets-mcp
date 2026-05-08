@@ -112,11 +112,12 @@ function handlePrepareDsConfig({ config_path }) {
   if (guardError) return guardError;
 
   let runDsPipeline;
+  let designMdIntake;
   try {
-    ({ runDsPipeline } = require('@figlets/core').dsConfig);
+    ({ runDsPipeline, designMdIntake } = require('@figlets/core').dsConfig);
   } catch (e) {
     // Fallback: direct path for development environments
-    ({ runDsPipeline } = require('../../../figlets-core/src/ds-config/index.js'));
+    ({ runDsPipeline, designMdIntake } = require('../../../figlets-core/src/ds-config/index.js'));
   }
 
   let result;
@@ -134,7 +135,7 @@ function handlePrepareDsConfig({ config_path }) {
   }
 
   const {
-    spacingPreview, computed, needsClaude,
+    spacingPreview, computed, needsDesignerInput,
     colorRampsSummary, colorRampsTable, contrastAnnotations, derivedColors,
     semanticSummary, semanticPairsTable, iconTable, failCount, apcaFailCount,
     staleSemantics,
@@ -142,6 +143,12 @@ function handlePrepareDsConfig({ config_path }) {
     ds,
   } = result;
   const previewPath = _writeSetupPreview(resolvedPath, ds);
+  let designMdPath = null;
+  try {
+    if (designMdIntake && designMdIntake.writeDesignMdFromDsConfig) {
+      designMdPath = designMdIntake.writeDesignMdFromDsConfig(resolvedPath);
+    }
+  } catch (_) {}
 
   const staleWarning = staleSemantics && staleSemantics.length > 0
     ? `⚠️  ${staleSemantics.length} semantic token(s) reference ramp(s) not in the current brand config. ` +
@@ -151,7 +158,7 @@ function handlePrepareDsConfig({ config_path }) {
   return {
     spacingPreview,
     computed,
-    needsClaude,
+    needsDesignerInput,
     colorRamps: {
       summary:     colorRampsSummary,
       table:       colorRampsTable,
@@ -178,14 +185,15 @@ function handlePrepareDsConfig({ config_path }) {
       },
     },
     setupPreview: previewPath ? { svgPath: previewPath } : null,
+    designMdExport: designMdPath ? { path: designMdPath } : null,
     configPath: resolvedPath,
-    readyToBuild: failCount === 0 && needsClaude.length === 0 && (!staleSemantics || staleSemantics.length === 0),
+    readyToBuild: failCount === 0 && needsDesignerInput.length === 0 && (!staleSemantics || staleSemantics.length === 0),
     message: staleWarning
       ? staleWarning
       : failCount > 0
       ? `Config computed but ${failCount} semantic pair(s) fail contrast. Fix before building.`
-      : needsClaude.length > 0
-      ? `Config computed but ${needsClaude.join(', ')} need manual input before building.`
+      : needsDesignerInput.length > 0
+      ? `Config computed but ${needsDesignerInput.join(', ')} need designer input before building.`
       : 'Config ready. Call apply_ds_setup to build all collections in Figma.',
   };
 }

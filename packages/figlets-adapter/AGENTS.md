@@ -22,6 +22,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `audit_tokens` | Reports unaliased values, duplicate tokens, and naming violations in the snapshot | When the user wants a token health check |
 | `qa_binding_audit` | Audits the current Figma selection/page for raw unbound layer properties and optional safe binding fixes | When the user wants QA on designed frames/components, especially before documentation |
 | `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
+| `create_ds_config_from_design_md` | Creates a starter `design-system.config.js` from an existing Google DESIGN.md file | At the start of setup when the designer already has DESIGN.md and wants to skip answered intake questions |
 | `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, contrast validation (APCA or WCAG), spacing scale | After intake and before building collections — validates everything before touching Figma |
 | `apply_ds_setup` | Creates all 5 variable collections in Figma from the prepared config (Primitives, Color, Typography, Spacing, Elevation) | After `prepare_ds_config` confirms `readyToBuild === true` |
 | `update_ds_primitives` | Updates values of EXISTING primitive variables in place (variable IDs preserved, aliases stay intact). Supported categories today: `color`, `spacing`. Use after re-running `prepare_ds_config` to push only changed values into Figma without recreating collections. | After tweaking the config (e.g. switching color algorithm, adjusting spacing scale) when the Primitives collection already exists in Figma. |
@@ -82,19 +83,24 @@ Keep the designer-facing language non-technical. Say "I'll check what's availabl
 6. Tell the user to look at the "00 · Tokens" page in their Figma file
 
 ### Set up a new design system (bootstrap collections)
-1. Run intake: project name, platform, grid base (4px/8px), breakpoints (3-tier/4-tier), naming convention (role-based/surface-based), **contrast standard (APCA default / WCAG 2.2)**, color scale, brand colors (name + hex), typeface, typography preset.
+1. Ask whether the designer already has a Google `DESIGN.md`. If yes, call `create_ds_config_from_design_md` to create the starter config, then only ask for missing or intentionally overridden answers. Treat DESIGN.md as imported intake answers, not as the final source of truth.
+2. Run any remaining intake: project name, platform, grid base (4px/8px), breakpoints (3-tier/4-tier), naming convention (role-based/surface-based), **contrast standard (APCA default / WCAG 2.2)**, color scale, brand colors (name + hex), typeface, typography preset.
    When asking about contrast standard, give the short pros/cons:
    - **APCA (default)** — perceptually accurate, designed for WCAG 3, more lenient on yellows and accurate on dark mode where WCAG is overly strict; *not yet a legal standard*.
    - **WCAG 2.2** — current legal standard for ADA / Section 508 / EN 301 549; well understood; can over-fail dark themes and under-fail bright yellows.
-2. Write `design-system.config.js` with all intake answers: `DS.grid`, `DS.breakpoints`, `DS.typography.families`, `DS.typography.scalePreset`, `DS.color.brand`, `DS.color.scale`, `DS.color.convention`, `DS.color.contrastAlgorithm` (`'apca'` default, `'wcag'` if the user picked it), `DS.collections.*`, `DS.naming.*`
-3. Call `prepare_ds_config` with the config path
-4. Show the user: spacing preview, color ramps table, semantic pairs table (both APCA Lc and WCAG ratios are visible side-by-side; the gated `failCount` reflects whichever standard the designer chose)
-5. If `failCount > 0`: show which pairs fail under the chosen standard, suggest the nearest passing step, update `DS.color.semantics.pairs` in the config, re-run `prepare_ds_config` until `failCount === 0`
-6. If `needsClaude` contains `DS.typography.scale`: generate the custom scale, write it to the config, re-run `prepare_ds_config`
-7. Ask: "Does this all look right? Ready to build in Figma?"
-8. Once confirmed and `readyToBuild === true`: ask the user to keep the Figlets Bridge plugin open
-9. Call `apply_ds_setup` with the config path
-10. Report: collections created, any skipped (already existed), config path for reference
+3. Write or update `design-system.config.js` with all intake answers: `DS.grid`, `DS.breakpoints`, `DS.typography.families`, `DS.typography.scalePreset`, `DS.color.brand`, `DS.color.scale`, `DS.color.convention`, `DS.color.contrastAlgorithm` (`'apca'` default, `'wcag'` if the user picked it), `DS.collections.*`, `DS.naming.*`
+4. Call `prepare_ds_config` with the config path
+5. Show the user: spacing preview, color ramps table, semantic pairs table (both APCA Lc and WCAG ratios are visible side-by-side; the gated `failCount` reflects whichever standard the designer chose), and the generated `DESIGN.md` export path if present.
+6. If `failCount > 0`: show which pairs fail under the chosen standard, suggest nearest passing step, update config, re-run
+7. If `needsDesignerInput` contains `DS.typography.scale`: ask the designer for the missing type scale, write it to the config, re-run `prepare_ds_config`
+8. Ask: "Does this all look right? Ready to build in Figma?"
+9. Once confirmed and `readyToBuild === true`: ask the user to keep the Figlets Bridge plugin open
+10. Call `apply_ds_setup` with the config path
+11. Report: collections created, any skipped (already existed), config path, and `DESIGN.md` export path for reference
+
+Optional DESIGN.md follow-ups:
+- Suggest `npx @google/design.md lint DESIGN.md` only when the designer wants external spec validation or plans to share the file with coding agents.
+- Suggest DESIGN.md diff/drift checks only with designer permission. Do not run network-dependent lint/diff automatically.
 
 ### Update primitive values in place
 Use this when only some primitive values changed — for example, the designer switched `DS.color.algorithm` from HSL to OKLCh, switched `DS.color.contrastAlgorithm` between APCA and WCAG, or adjusted the spacing scale — and the Primitives collection already exists in Figma. This avoids the destructive delete-and-rebuild path and keeps every alias from Color/Typography/Spacing/Elevation collections intact.

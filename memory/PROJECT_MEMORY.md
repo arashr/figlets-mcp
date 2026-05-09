@@ -4,6 +4,53 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-09 — semantic colors showcase redesign (in progress)]
+
+**Active branch:** `semantics-showcase-redesign` (off `main` at commit `634730a`).
+
+**Status:** Direction decided; implementation not started yet. Logs and decision recorded; next agent should pick up from the handover.
+
+**Context:**
+
+1. **Source design**: Claude Design handoff `kxkMQhWCvpr-62R4Tm72Yw`, primary file `Semantic Colors Riffs.html`. The bundle was downloaded to `/tmp/design-pkg/figlets/` for this session. It contains three layout riffs (A / B / C) over the same 14-pairing token set; only **Option A** was iterated in the source chat (`figlets/chats/chat1.md`) — extras (`bd`, `ic`) added to the data model and toolbar removed. User confirmed Option A is the chosen layout.
+
+2. **In scope**: the semantic-colors table inside `_buildShowcase` Colors section. Specifically:
+   - `_buildSemColorRow` (`packages/figma-bridge-plugin/code.js:2616`)
+   - The surrounding semantic table assembly (`code.js:3212–3244` for the config-pairs path, plus the heading row and group header construction feeding `_semTable`).
+
+3. **Out of scope**: outline rows, surface/icon/fill bottom tables, primitive ramps, typography, spacing, elevation, and the Colors section frame chrome. Do not touch them.
+
+4. **Styling rule**: bind every fill / stroke / text color in the new node tree to the existing showcase variable refs (`_V.*` resolved via `_findVar`) and color values (`_textColor`, `_subColor`, `_bgColor`, `_RC.surfaceDefault`, `_RC.outlineSubtle`). The Option A.jsx hex values (`#fafaf7`, `#c5e866`, `#dcdcd6`, `#1a1d1f`, etc.) are layout references only and must not appear in the Figma node tree.
+
+5. **Schema extension**: `DS.color.semantics.pairs[*]` gains optional `border`, `icon`, and `fill` keys alongside `{ bg, text }`. Missing keys mean the row omits that line in the pair box and the corresponding treatment in the preview swatch. Border has a default-border fallback for outlined surfaces; icon and fill have no fallback. The config preparer (`prepare_ds_config` and the pair generation it drives) is the place to populate these — reuse existing pair generation, append missing keys, do not refactor the resolution logic.
+
+6. **Per-row layout to build (Option A):**
+   - **Pair box** (left column): vertical stack of role lines. Each line is a 14×14 rounded swatch dot + 2-letter uppercase role tag (`bg`, `fg`, `bd`, `ic`, `fl`) + full token name (e.g. `bg/brand`, `text/on-brand`, `border/brand`, `icon/on-brand`). Role count is data-driven: 2 lines for a minimal pair, up to 5 when the kit is full.
+   - **Preview swatch** (middle column): rectangle filled with the bg color. Sample text "The quick brown fox" rendered in the fg color. If `icon` is defined, render a small check-circle glyph in the icon color to the left of the sample. If `border` is defined, draw an inset 1.5px stroke in the border color around the swatch. Bottom-right of the swatch overlays Lc and `ratio:1` in the fg color.
+   - **WCAG pill** (right column): existing `_buildBadge` already covers ✓ AAA / ✓ AA / ~ AA*; reuse.
+   - **Group header**: small lime-equivalent dot (use `_V.brandVariant` / `_RC.surfaceBrand`-equivalent — confirm against the active palette before binding) + uppercase group label + count.
+
+7. **Tests already passing on this branch**: 40/40 on `npm test`. No new tests yet for the redesign.
+
+**Verification done:**
+- Branch `semantics-showcase-redesign` created off `main`.
+- Design package fetched, README read, chat read, all three Option files and `tokens.js` reviewed.
+- Source row builder and table assembly located and understood.
+
+**Verification pending (for the implementing agent):**
+- Run `npm test` after each step. Confirm 40/40.
+- `node --check packages/figma-bridge-plugin/code.js`.
+- Forbidden executable-operator scan for `??`, `?.`, `**` in `code.js`.
+- Visual check by reloading the bridge plugin in Figma Desktop and rebuilding the showcase against the active `local_movbxur3_6gow4h4j` config; eyeball Brand and Danger rows since those exercise the most extras.
+
+**Reference paths (kept in /tmp, not the repo):**
+- `/tmp/design-pkg/figlets/README.md`
+- `/tmp/design-pkg/figlets/chats/chat1.md`
+- `/tmp/design-pkg/figlets/project/Option A.jsx` — the canonical layout to mirror
+- `/tmp/design-pkg/figlets/project/tokens.js` — example pair shape with extras
+
+---
+
 ### [2026-05-09 — APCA offset corrected to 0.0.98G]
 
 **Shipped this session:**

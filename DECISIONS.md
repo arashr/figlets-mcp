@@ -4,6 +4,20 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-09] Semantic Colors showcase table adopts Option A layout, bound to DS tokens
+
+**Decision:** The semantic-colors table inside `_buildShowcase` Colors section is being redesigned to match Option A from the Claude Design handoff `kxkMQhWCvpr-62R4Tm72Yw` (file `Semantic Colors Riffs.html`, component `Option A.jsx`). Per row: a left **pair box** stacks one line per role (bg, fg, plus bd / ic / fill when present) where each line is `swatch dot + 2-letter role tag + full token name`; a middle **preview swatch** renders the bg color, applies the border token as an outline if defined, renders the icon token as a glyph if defined, and overlays the Lc + ratio diagnostics inside the swatch in the fg color; a right **WCAG pill**. Groups (Brand, Danger, etc.) get a header row with a small dot + label + count. Option A is the only riff that was iterated in the source chat (extras + toolbar removal) and the only one that surfaces every role of a multi-token pair plus its grouping in one row.
+
+**Why:** The current `_buildSemColorRow` shows a single diagnostic swatch and treats the row as `bg + text` only. Designers cannot see the rest of the role kit (border, icon, fill) for a semantic family in the same row, and the relationship between roles is implicit. Option A keeps every role visible and shows them composed on the actual surface so the kit reads as a whole.
+
+**Consequence:**
+- Visual styling stays bound to existing showcase variables (`_V.*` / `_RC.*` resolved via `_findVar`): the pair-box text, role tags, swatch border, group header, WCAG pill, and Lc/ratio overlay must use the showcase's `_textColor`/`_subColor`/`_bgColor`/`_RC.surfaceDefault`/`_RC.outlineSubtle` palette and their `_V.*` variable refs. Do **not** copy the Option A.jsx hex values (`#fafaf7`, `#c5e866`, `#dcdcd6`, etc.) into the Figma node tree — those exist in the prototype only because it has no design system to reach for. The riff is a layout reference, not a color reference.
+- The pair shape extends to carry optional roles. `DS.color.semantics.pairs[*]` gains optional `border`, `icon`, and `fill` keys alongside the existing `{ bg, text }`. When a key is missing, the row omits that line in the pair box and the corresponding visual treatment in the preview swatch. Examples: a default surface row may have an icon and border but no fill; a toast `bg/danger + text/danger` may have a border but no icon. Border falls back to a default border token if absent on a pair that needs an outline; icon and fill have no fallback and are simply omitted.
+- Only the semantic-colors table render is in scope: `_buildSemColorRow` (`code.js:2616`) and the surrounding semantic table assembly (`code.js:3212–3244` for the config-pairs path, plus the group header / heading row construction that feeds into `_semTable`). Outline rows, surface/icon/fill bottom tables, primitive ramps, typography, spacing, elevation, and the Colors section frame stay untouched.
+- Config preparation (`prepare_ds_config` and the pair generation it calls) learns to populate the optional role keys when the source DS has those tokens. Reuse the existing pair generation and append missing keys; do not refactor the surrounding pair-resolution logic.
+
+---
+
 ## [2026-05-09] APCA uses the published 0.0.98G low-output offset
 
 **Decision:** Figlets' APCA implementation uses the published APCA 0.0.98G low-output offset `0.027`, represented as `2.7` after the score is scaled by 100. The old `12.5` scaled offset was removed from the core validator, ramp analysis, and bridge showcase renderer. WCAG contrast math remains unchanged and is pinned to the WCAG 2.2 relative-luminance formula.

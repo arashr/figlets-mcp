@@ -78,7 +78,7 @@ function validateSemanticPairs(ds) {
     if (Yb2 >= Yt2) lc = (Math.pow(Yb2, 0.56) - Math.pow(Yt2, 0.57)) * 1.14;
     else             lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14;
     if (Math.abs(lc) < 0.1) return 0;
-    return Math.round(lc > 0 ? lc * 100 - 12.5 : lc * 100 + 12.5);
+    return Math.round(lc > 0 ? lc * 100 - 2.7 : lc * 100 + 2.7);
   }
 
   // Score helpers — same signature `(txtRgb, bgRgb) => number`, higher is more legible.

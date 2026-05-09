@@ -4,6 +4,22 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-09 — APCA offset corrected to 0.0.98G]
+
+**Shipped this session:**
+
+1. **APCA low-output offset fixed** (`code.js`, `validate-semantic-pairs.js`, `generate-color-ramps.js`): Replaced the scaled `12.5` offset with `2.7`, matching APCA 0.0.98G's `loBoWoffset/loWoBoffset = 0.027` after multiplying Lc by 100. The old value under-reported high-contrast pairs by about 10 Lc.
+
+2. **Screenshot discrepancy explained and pinned**: `#FFFFFF` on `#38312e` now computes as `Lc 102`, matching the external Figma accessibility plugin result. Black text on white is pinned at `Lc 106`.
+
+3. **WCAG formula checked and pinned**: WCAG contrast already matched WCAG 2.2 relative luminance: sRGB cutoff `0.04045`, coefficients `0.2126/0.7152/0.0722`, ratio `(lighter + 0.05) / (darker + 0.05)`. Added a boundary test for `#777777` on white: displayed as `4.5:1` after one-decimal rounding but still fails the unrounded `4.5` AA body gate.
+
+**Decision context:** The previous project memory said Figlets used APCA 0.0.98G and that the validator and plugin were byte-identical. There was no recorded product reason to use `12.5`; it was an implementation artifact. The correction may reduce APCA fail counts because the old math was stricter than intended.
+
+**Verification:** User reloaded the Figlets Bridge plugin in Figma Desktop, then `build_ds_showcase` rebuilt Colors, Typography, Spacing, Elevation, and Scrims on `00 · Tokens`. Only existing generated-showcase chrome warnings remained (radius `16`, spacing `6`). Full `npm test` passed 40/40 after the live remake.
+
+---
+
 ### [2026-05-09 — bridge plugin UI rebuild against FigWords (final)]
 
 **Shipped this session (supersedes the earlier 2026-05-09 compact-refresh attempt):**

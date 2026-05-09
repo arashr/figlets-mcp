@@ -424,6 +424,50 @@ function makeDs(overrides) {
   assert.strictEqual(result.failCount, 0, 'High-contrast anchor pair must pass APCA with failCount 0');
 }
 
+// APCA and WCAG anchors should match current reference formulas. The screenshot
+// pair catches APCA offset drift; #777/#fff catches the WCAG AA boundary.
+{
+  const ds = {
+    color: {
+      brand: [{ name: 'neutral', role: 'primary' }],
+      convention: 'role-based',
+      contrastAlgorithm: 'apca',
+      ramps: [{
+        folder: 'color/neutral',
+        steps: [
+          [0, 0, 0, 0],
+          [100, 1, 1, 1],
+          [700, 0x77 / 255, 0x77 / 255, 0x77 / 255],
+          [800, 0x38 / 255, 0x31 / 255, 0x2e / 255],
+        ],
+      }],
+      semantics: {
+        pairs: [{
+          bg: 'color/test/screenshot',
+          text: 'color/test/text',
+          Light: { bg: 'color/neutral/800', text: 'color/neutral/100' },
+          Dark: { bg: 'color/neutral/100', text: 'color/neutral/0' },
+        }],
+      },
+    },
+  };
+  const result = validateSemanticPairs(ds);
+  assert.ok(
+    result.markdownTable.includes('| 12.8:1 | Lc 102 | ✓ APCA (Lc 102) | 21.0:1 | Lc 106 | ✓ APCA (Lc 106) |'),
+    'APCA/WCAG anchors should include #fff on #38312e = Lc 102 / 12.8 and #000 on #fff = Lc 106 / 21'
+  );
+
+  const wcagDs = JSON.parse(JSON.stringify(ds));
+  wcagDs.color.contrastAlgorithm = 'wcag';
+  wcagDs.color.semantics.pairs[0].Light = { bg: 'color/neutral/100', text: 'color/neutral/700' };
+  const wcagResult = validateSemanticPairs(wcagDs);
+  assert.ok(
+    wcagResult.markdownTable.includes('| 4.5:1 | Lc 71 | ✗ FAIL |'),
+    'WCAG #777 on #fff should round to 4.5 ratio while remaining below AA body text'
+  );
+  assert.strictEqual(wcagResult.failCount, 1, 'WCAG #777 on #fff should fail the 4.5 unrounded AA gate');
+}
+
 // ── handlePrepareDsConfig — missing config returns error ─────────────────────
 {
   const { handlePrepareDsConfig } = require('../../packages/figlets-mcp-server/src/tools/prepare-ds-config.js');

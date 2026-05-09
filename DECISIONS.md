@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-09] APCA uses the published 0.0.98G low-output offset
+
+**Decision:** Figlets' APCA implementation uses the published APCA 0.0.98G low-output offset `0.027`, represented as `2.7` after the score is scaled by 100. The old `12.5` scaled offset was removed from the core validator, ramp analysis, and bridge showcase renderer. WCAG contrast math remains unchanged and is pinned to the WCAG 2.2 relative-luminance formula.
+
+**Why:** A Figma accessibility plugin reported `Lc 102` for `#FFFFFF` on `#38312e`, while the Figlets showcase reported `Lc 92`. The difference came from Figlets subtracting/adding `12.5` instead of the APCA 0.0.98G `2.7` scaled offset. The decision log and memory already stated the intended formula was APCA 0.0.98G; no prior product rationale justified the larger offset.
+
+**Consequence:** APCA values rise by about 10 Lc for many non-low-contrast pairs and now match reference APCA tools for the screenshot case. Existing APCA pass/fail gates may clear some previously reported failures; this is expected correction, not a threshold relaxation. Tests now pin `#FFFFFF` on `#38312e` to `Lc 102`, black on white to `Lc 106`, and WCAG `#777777` on white to the unrounded AA-boundary behavior.
+
+---
+
 ## [2026-05-09] Bridge plugin UI is rebuilt against FigWords reference, not the prior approximation
 
 **Decision:** The bridge plugin UI now follows the FigWords Figma reference (`98:40172`) with three explicit layouts: Collapsed (296×348, left column only), Expanded (576×348, left column + right log box), Expanded+QA (576×348, log box shrinks to 148px tall and a QA Scope summary box appears beneath it). Visual tokens come directly from the FigWords variables: bg `#121212`, brand `#c9fb8c`, text-brand `#e7ffcd`, text-warning `#ffe5ad`, border-brand `#5d8227`, border-subtle `#212121`, with Sora loaded from Google Fonts in weights 400 and 500. The QA report rendered inline under the QA buttons in the previous attempt has been moved into the right column; running QA auto-expands the log so the summary is visible in its intended location.

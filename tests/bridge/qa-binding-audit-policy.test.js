@@ -204,6 +204,14 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("lc * 100 - 2.7") &&
+    code.includes("lc * 100 + 2.7") &&
+    !code.includes("lc * 100 - 12.5") &&
+    !code.includes("lc * 100 + 12.5"),
+  "Bridge APCA formula must use 0.0.98G low-output offset 0.027 (2.7 after scaling)"
+);
+
+assert.ok(
   code.includes("function _pickReadableNeutralExtreme(swatchRGB)") &&
     code.includes("if (!/^color\\/neutral\\//i.test(s.name)) continue;") &&
     code.includes("scrim|overlay|surface|foreground|text|on[-_]surface|shadow|elevation") &&

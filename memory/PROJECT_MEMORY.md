@@ -4,6 +4,59 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-09 — bridge plugin UI rebuild against FigWords (final)]
+
+**Shipped this session (supersedes the earlier 2026-05-09 compact-refresh attempt):**
+
+1. **UI rebuilt to FigWords parity** (`ui.html`): Pulled design context, screenshots, and variables from `FigWords` node `98:40172` via the Figma MCP and rebuilt the layout from scratch. Three explicit layouts now match the reference: Collapsed 296×348 (left column only); Expanded 576×348 (left column + right-hand log box at full height); Expanded+QA 576×348 (log box shrinks to 148px and a QA Scope summary box renders below it). All paddings (16px outer, 16px inter-column gap), strides (selection lines 20px, button row 42px), and font sizes (title-md 16/24/500, label-lg 14/20/500, body-sm 12/16/400, label-sm 11/16/500) come from the FigWords design tokens.
+
+2. **Visual tokens swapped to FigWords variables** (`ui.html`): bg `#121212`, brand `#c9fb8c`, brand-subtle `#253a00`, text default `#f5f5f5`, text subtle `#dfdfdf`, text brand `#e7ffcd`, text warning `#ffe5ad`, border brand `#5d8227`, border subtle `#212121`. Removed the outer `border-radius: 18px` because the rounded card in the design canvas is a mock — the host plugin window cannot render rounded outer corners, and the body now fills the window.
+
+3. **Sora typography via Google Fonts** (`ui.html`): Loads only weights 400 and 500 with `display=swap`. Browser-cached after first open; offline silently falls back to Inter. Plugin file size is unaffected.
+
+4. **QA report relocated to the right column** (`ui.html`): Local QA results now render as a bordered summary box (`QA Scope`, `Violations`, `Fixed`, `Needs review`, `Color`, `Spacing`, `Type`) under the log box, matching the third FigWords layout. Running QA auto-expands the log so the summary is always visible.
+
+5. **Single-tooltip policy** (`ui.html`): Removed the custom `#ui-tooltip` element and all hover/focus handlers. Documentability spans, both QA buttons, and the Show Log toggle now use the browser's native `title` attribute. The QA buttons gained explanatory tooltips describing what each action does (read-only scan vs. high-confidence binding).
+
+6. **Animated expand/collapse** (`ui.html`): `_setLogOpen` coordinates `figma.ui.resize` with a CSS opacity+translateX transition on the log column (160ms ease). Expand posts the resize first, then fades content in on the next frame; collapse fades content out first, then shrinks the host. The window edge still snaps (Figma's resize is synchronous), but content motion masks most of the abruptness.
+
+7. **Tests updated** (`tests/bridge/qa-binding-audit-policy.test.js`): Replaced the old hex-value assertions (`#111111`, `#c5ff73`, `#dcffc0`, `#639d13`, `border-radius: 18px`) with the FigWords tokens (`#121212`, `#c9fb8c`, `#e7ffcd`, `#5d8227`, `border-radius: 9999px` for pills). Replaced the custom-tooltip assertions with native-`title` assertions on the doc-status spans and the QA buttons; explicitly asserted that `id="ui-tooltip"` no longer exists in the UI.
+
+**Verification:**
+- Figma MCP design context fetched from `FigWords` node `98:40172` (screenshot + metadata + variables).
+- `node tests/bridge/qa-binding-audit-policy.test.js`
+- `npm test` passed: 40/40 after each iteration.
+- User confirmed visual parity in Figma Desktop after reload, including the tooltip fix, animation, and Sora font load.
+
+**Follow-up:**
+- Reload the Figlets Bridge plugin in Figma Desktop is no longer pending — user has reloaded and confirmed.
+- The animation timing is 160ms; if it feels too slow/fast in practice, that's a one-line tweak in the CSS transition + setTimeout.
+- Sora is fetched from Google Fonts at runtime. If a future requirement bans network dependencies in the plugin iframe, switch to base64-embedded woff2 (cost: ~30KB per weight, parsed every plugin open).
+
+---
+
+### [2026-05-09 — Figma variable picker scopes]
+
+**Shipped this session:**
+
+1. **Variable scope helper** (`code.js`): Added `_scopeForVariableName`, `_setVariableScopesForName`, and `_applyVariableScopesToCollection`. The bridge now hides Primitives variables from Figma pickers with empty scopes, while mapping semantic token paths to picker scopes: radius → `CORNER_RADIUS`, border widths → `STROKE_FLOAT`, spacing → `GAP`, touch/size → `WIDTH_HEIGHT`, typography → font size/line-height/letter-spacing/weight/family, text/icon colors → `TEXT_FILL`, outline/border colors → `STROKE_COLOR`, fill/surface/background colors → `ALL_FILLS`, and shadow/elevation tokens → effect scopes.
+
+2. **Setup + update coverage** (`code.js`): `apply_ds_setup` scopes variables as it creates them and runs collection-level repair passes even when existing collections are skipped. `update_ds_primitives` keeps primitive variables hidden and scopes refreshed/newly-created semantic variables without changing IDs, values, or aliases.
+
+3. **Policy tests** (`tests/bridge/qa-binding-audit-policy.test.js`): Added guards for the scope mapping helper, setup repair calls, and update-path scope preservation.
+
+**Verification:**
+- `node --check packages/figma-bridge-plugin/code.js`
+- `node tests/bridge/qa-binding-audit-policy.test.js`
+- Forbidden executable `??`, `?.`, `**` scan clean; only existing comments/markdown strings match.
+- `npm test` passed: 40/40.
+- Live repair after the first plugin reload: started the local receiver, ran `apply_ds_setup` against `.local/local_movbxur3_6gow4h4j/design-system.config.js`; all five collections were skipped as existing and scope repair passes completed. Synced the Figma data snapshot afterward (`338` variables). This was before the follow-up change that hides Primitives from pickers, so reload the plugin and rerun `apply_ds_setup` once more to apply the final primitive-hiding behavior. The current snapshot exporter does not serialize `variable.scopes`, so live scope verification is visual in Figma's variable picker unless the exporter is extended.
+
+**Live application:**
+- After the final primitive-hiding change, the plugin was reloaded and `apply_ds_setup` was rerun against `.local/local_movbxur3_6gow4h4j/design-system.config.js`. All five collections skipped as existing, text styles refreshed, and the scope repair pass completed with the final behavior. A follow-up sync showed `Figlets DS` with 5 collections, 338 variables, 15 text styles, and 6 effect styles.
+
+---
+
 ### [2026-05-06 — fresh DS setup for new file + merge-populate fix]
 
 **Shipped this session:**

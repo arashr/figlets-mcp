@@ -34,6 +34,46 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("figma.showUI(__html__, { width: 296, height: 348, themeColors: true });") &&
+    code.includes("if (msg.type === 'ui-resize')") &&
+    code.includes("figma.ui.resize(msg.expanded ? 576 : 296, 348);") &&
+    ui.includes("id=\"log-toggle\"") &&
+    ui.includes("class=\"log-column\"") &&
+    ui.includes("function _setLogOpen(open)") &&
+    ui.includes("parent.postMessage({ pluginMessage: { type: 'ui-resize', expanded: _isLogOpen } }, '*');") &&
+    !ui.includes("<div id=\"session-meta\">Session: pending</div>"),
+  "Plugin UI must default to the compact Figma design and reveal the log in an expanded panel"
+);
+
+assert.ok(
+  ui.includes("id=\"session-meta\" class=\"log-session\"") &&
+    ui.includes("title=\"") &&
+    ui.includes(">Documentable</span>") &&
+    ui.includes(">Undocumentable</span>") &&
+    ui.includes("id=\"qa-check\"") &&
+    ui.includes("id=\"qa-fix\"") &&
+    !ui.includes("id=\"ui-tooltip\""),
+  "Plugin UI must keep session ID in the log panel and use native title tooltips on documentability spans and QA buttons (no custom floating tooltip)"
+);
+
+assert.ok(
+  ui.includes("background: #121212;") &&
+    ui.includes("background: #c9fb8c;") &&
+    ui.includes("color: #e7ffcd;") &&
+    ui.includes("border: 1px solid #5d8227;") &&
+    ui.includes("border-radius: 9999px;"),
+  "Plugin UI must use the FigWords design tokens (bg #121212, brand #c9fb8c, text-brand #e7ffcd, border-brand #5d8227, pill radius)"
+);
+
+assert.ok(
+  ui.includes("#qa-report.has-report") &&
+    ui.includes("display: block;") &&
+    ui.includes("el.className = 'has-report';") &&
+    ui.includes("_renderQaReport(msg.data);"),
+  "Plugin UI must show local QA results in the QA panel, not only the session log"
+);
+
+assert.ok(
   code.includes("const _ds = await _createDsBindingContext();"),
   "QA and documentation flows must use the shared live binding resolver"
 );
@@ -254,6 +294,43 @@ assert.ok(
 assert.ok(
   code.includes("visualCell.resize(visualType === 'inset' ? 96 : 64, 1);"),
   "Showcase inset visual cells must be wide enough to show the larger padding box without clipping"
+);
+
+assert.ok(
+  code.includes("function _scopeForVariableName(name, type)") &&
+    code.includes("function _setVariableScopesForName(variable, name, type)") &&
+    code.includes("async function _applyVariableScopesToCollection(collectionId, opts)") &&
+    code.includes("if (opts.hideFromPickers)") &&
+    code.includes("if (_setVariableScopes(allVars[i], [])) scoped += 1;") &&
+    code.includes("if (second === 'radius') return ['CORNER_RADIUS'];") &&
+    code.includes("if (second === 'border' || second === 'stroke') return ['STROKE_FLOAT'];") &&
+    code.includes("return ['GAP'];") &&
+    code.includes("return ['WIDTH_HEIGHT'];") &&
+    code.includes("return ['FONT_SIZE'];") &&
+    code.includes("return ['LINE_HEIGHT'];") &&
+    code.includes("return ['LETTER_SPACING'];") &&
+    code.includes("return ['FONT_WEIGHT'];") &&
+    code.includes("return ['FONT_FAMILY'];") &&
+    code.includes("return ['TEXT_FILL'];") &&
+    code.includes("return ['STROKE_COLOR'];") &&
+    code.includes("return ['EFFECT_COLOR'];") &&
+    code.includes("return ['EFFECT_FLOAT'];"),
+  "DS setup must scope variables to matching Figma picker fields so designers see less noise"
+);
+
+assert.ok(
+  code.includes("await _applyVariableScopesToCollection(primColl.id, { hideFromPickers: true });") &&
+    code.includes("await _applyVariableScopesToCollection(semColl.id);") &&
+    code.includes("await _applyVariableScopesToCollection(typoColl.id);") &&
+    code.includes("await _applyVariableScopesToCollection(spacingColl.id);") &&
+    code.includes("await _applyVariableScopesToCollection(elevColl.id);"),
+  "DS setup must repair variable scopes even when existing collections are skipped"
+);
+
+assert.ok(
+  code.includes("_setVariableScopesForName(semVar, semEntry.name, 'COLOR');") &&
+    code.includes("_setVariableScopes(existing, []);"),
+  "Primitive update flow must hide primitive variables from pickers while preserving semantic variable scopes"
 );
 
 assert.ok(

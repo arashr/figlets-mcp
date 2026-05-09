@@ -1,65 +1,182 @@
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500&display=swap">
+
 <style>
+  :root {
+    --bg-default: #121212;
+    --bg-brand: #c9fb8c;
+    --bg-brand-subtle: #253a00;
+    --text-default: #f5f5f5;
+    --text-subtle: #dfdfdf;
+    --text-brand: #e7ffcd;
+    --text-warning: #ffe5ad;
+    --text-success: #b5fcc2;
+    --text-muted: #8c8c8c;
+    --border-brand: #5d8227;
+    --border-subtle: #212121;
+    --button-fg: #121212;
+    --button-bg: #c9fb8c;
+    --button-stroke: #5d8227;
+    --radius-md: 8px;
+    --radius-full: 9999px;
+  }
   html, body {
     height: 100%;
     overflow: hidden;
   }
   body {
-    font-family: Inter, sans-serif;
+    font-family: 'Sora', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     margin: 0;
-    background-color: #222;
-    color: white;
+    background: #121212;
+    color: #f5f5f5;
+    -webkit-font-smoothing: antialiased;
   }
   .app {
     box-sizing: border-box;
     height: 100%;
     padding: 16px;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: stretch;
-    gap: 12px;
+    gap: 16px;
     overflow: hidden;
+    background: #121212;
+  }
+  .main-column {
+    width: 264px;
+    flex: 0 0 264px;
+    display: flex;
+    flex-direction: column;
+  }
+  .log-column {
+    width: 264px;
+    flex: 0 0 264px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    opacity: 0;
+    transform: translateX(-12px);
+    pointer-events: none;
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+  .app.log-open .log-column {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    flex: 0 0 40px;
+  }
+  .pulse-wrap {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 36px;
   }
   .pulse {
-    width: 12px;
-    height: 12px;
-    background-color: #18A0FB;
+    width: 20px;
+    height: 20px;
+    background: #c9fb8c;
     border-radius: 50%;
-    margin: 0 auto 12px auto;
     animation: pulse 2s infinite;
   }
   @keyframes pulse {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(24, 160, 251, 0.7); }
-    70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(24, 160, 251, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(24, 160, 251, 0); }
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(93, 130, 39, 0.55); }
+    70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(93, 130, 39, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(93, 130, 39, 0); }
   }
-  #status {
-    font-size: 13px;
-    font-weight: 500;
-    color: #eee;
-    text-align: center;
-  }
-  #substatus {
-    font-size: 11px;
-    color: #aaa;
-    text-align: center;
-  }
-  #session-meta {
-    font-size: 11px;
-    color: #8d9aa7;
-    text-align: center;
-  }
-  .panel {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 10px;
-    box-sizing: border-box;
-  }
-  .log-panel {
-    flex: 1;
-    min-height: 0;
+  .status-text {
     display: flex;
     flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+  }
+  #status {
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: #e7ffcd;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #substatus {
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: #dfdfdf;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .panel {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  .selection-panel {
+    margin-top: 16px;
+  }
+  .qa-panel {
+    margin-top: 16px;
+  }
+  .panel-title {
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: #f5f5f5;
+    margin: 0 0 16px 0;
+  }
+  #selection-state {
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 400;
+    color: #f5f5f5;
+  }
+  .selection-lines {
+    display: flex;
+    flex-direction: column;
+  }
+  .selection-line {
+    height: 16px;
+    margin-bottom: 4px;
+    color: #f5f5f5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .selection-line:last-child {
+    margin-bottom: 0;
+  }
+  .doc-status {
+    position: relative;
+    display: inline-flex;
+    width: fit-content;
+    max-width: 100%;
+    color: #e7ffcd;
+    cursor: help;
+    outline: none;
+  }
+  .doc-status.warning {
+    color: #ffe5ad;
+  }
+  .doc-status:focus-visible {
+    text-decoration: underline;
   }
   .actions {
     display: grid;
@@ -67,112 +184,222 @@
     gap: 8px;
   }
   .action-button {
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.08);
-    color: #f5f8fb;
-    border-radius: 7px;
-    padding: 8px 10px;
-    font: inherit;
-    font-size: 12px;
+    height: 42px;
+    padding: 0 12px;
+    border-radius: 9999px;
+    border: 1px solid #5d8227;
+    background: transparent;
+    color: #e7ffcd;
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
     cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
   }
   .action-button:hover {
-    background: rgba(255, 255, 255, 0.13);
+    background: rgba(201, 251, 140, 0.12);
+  }
+  .action-button.primary {
+    background: #c9fb8c;
+    color: #121212;
+  }
+  .action-button.primary:hover {
+    background: #d8ffa4;
   }
   .action-button:disabled {
-    color: #7f8a96;
+    color: #5d5d5d;
+    border-color: #2a2a2a;
+    background: #1b1b1b;
     cursor: default;
-    background: rgba(255, 255, 255, 0.04);
+  }
+  .action-button.primary:disabled {
+    background: #2a2a2a;
+    color: #5d5d5d;
+  }
+  .log-toggle-row {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 18px;
+    flex: 0 0 18px;
+    padding-top: 16px;
+  }
+  .log-toggle {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    flex: 0 0 32px;
+    border: 1px solid #5d8227;
+    border-radius: 9999px;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+  .log-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #c9fb8c;
+    transition: transform 120ms ease;
+  }
+  .log-toggle[aria-pressed="true"] {
+    background: #253a00;
+  }
+  .log-toggle[aria-pressed="true"]::after {
+    transform: translateX(14px);
+  }
+  .log-toggle-label {
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: #f5f5f5;
+  }
+  .log-box {
+    flex: 1 1 auto;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 8px;
+    border: 1px solid #5d8227;
+    border-radius: 8px;
+    background: transparent;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .log-box.has-qa {
+    flex: 0 0 148px;
+  }
+  #session-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 400;
+    color: #f5f5f5;
+  }
+  .log-entry {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .log-entry:last-child {
+    margin-bottom: 0;
+  }
+  .log-time {
+    color: #8c8c8c;
+    flex: 0 0 auto;
+  }
+  .log-entry-msg {
+    color: #f5f5f5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .log-session {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #212121;
+    color: #8c8c8c;
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
   #qa-report {
-    max-height: 96px;
-    overflow-y: auto;
-    font-size: 11px;
-    color: #d5dde5;
-    line-height: 1.45;
+    display: none;
+    flex: 0 0 152px;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    border: 1px solid #5d8227;
+    border-radius: 8px;
+    background: transparent;
+    font-family: 'Sora', Inter, sans-serif;
+    font-size: 12px;
+    line-height: 16px;
+    color: #f5f5f5;
+    overflow: hidden;
+  }
+  #qa-report.has-report {
+    display: block;
   }
   .qa-stat {
     display: flex;
     justify-content: space-between;
-    gap: 8px;
+    align-items: center;
+    height: 20px;
+    padding: 4px 0;
   }
-  .qa-empty {
-    color: #8d9aa7;
+  .qa-stat + .qa-stat {
+    border-top: 1px solid #212121;
   }
-  .panel-title {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #8fc7ff;
-    margin-bottom: 8px;
+  .qa-stat-label {
+    color: #f5f5f5;
+    font-weight: 500;
   }
-  #selection-state {
-    font-size: 12px;
-    color: #f0f4f8;
-    line-height: 1.5;
+  .qa-stat-value {
+    color: #f5f5f5;
+    font-weight: 400;
   }
-  #selection-state.warning {
-    color: #ffd38a;
-  }
-  .selection-warning {
-    border: 1px solid rgba(255, 179, 71, 0.35);
-    background: rgba(255, 179, 71, 0.12);
-    border-radius: 8px;
-    padding: 8px;
-  }
-  .selection-warning strong {
-    color: #ffe0a3;
-  }
-  .selection-meta {
-    margin-top: 6px;
-    color: #cbd5df;
-  }
-  .selection-ok {
-    color: #c7f7d4;
-  }
-  #session-log {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    font-size: 11px;
-    line-height: 1.45;
-    color: #d5dde5;
-  }
-  .log-entry + .log-entry {
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-  }
-  .log-time {
-    color: #8d9aa7;
-    margin-right: 6px;
+  .qa-stat.is-error .qa-stat-value {
+    color: #ffe5ad;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60%;
   }
   .empty {
-    color: #8d9aa7;
+    color: #8c8c8c;
   }
 </style>
 
-<div class="app">
-  <div class="pulse"></div>
-  <div id="status">Listening for Agent</div>
-  <div id="substatus">Keep this plugin open...</div>
-  <div id="session-meta">Session: pending</div>
-  <div class="panel">
-    <div class="panel-title">Current Selection</div>
-    <div id="selection-state" class="empty">No selection yet.</div>
+<div id="app" class="app">
+  <div class="main-column">
+    <div class="status-row">
+      <div class="pulse-wrap"><div class="pulse"></div></div>
+      <div class="status-text">
+        <div id="status">Listening for Agent</div>
+        <div id="substatus">Waiting...</div>
+      </div>
+    </div>
+    <div class="panel selection-panel">
+      <div class="panel-title">Current Selection</div>
+      <div id="selection-state" class="empty">No selection yet.</div>
+    </div>
+    <div class="panel qa-panel">
+      <div class="panel-title">QA</div>
+      <div class="actions">
+        <button id="qa-check" class="action-button primary" type="button" title="Scan the current selection (or page if nothing is selected) for color, spacing, type, and border values that don't match design system tokens. Read-only — nothing in the file changes.">Check</button>
+        <button id="qa-fix" class="action-button" type="button" title="Run the same scan as Check, then bind only high-confidence matches to the right tokens. Lower-confidence violations are listed under Needs review for you to handle manually.">Bind Safe</button>
+      </div>
+    </div>
+    <div class="log-toggle-row">
+      <button id="log-toggle" class="log-toggle" type="button" aria-label="Show Log" aria-pressed="false" title="Expand the panel to show the session log and the most recent QA summary."></button>
+      <span class="log-toggle-label">Show Log</span>
+    </div>
   </div>
-  <div class="panel">
-    <div class="panel-title">QA</div>
-    <div class="actions">
-      <button id="qa-check" class="action-button" type="button">Check</button>
-      <button id="qa-fix" class="action-button" type="button">Bind Safe</button>
+  <div class="log-column">
+    <div id="log-box" class="log-box">
+      <div id="session-log" class="empty">No actions yet.</div>
+      <div id="session-meta" class="log-session">Session: pending</div>
     </div>
     <div id="qa-report" class="qa-empty">No QA run yet.</div>
-  </div>
-  <div class="panel log-panel">
-    <div class="panel-title">Session Log</div>
-    <div id="session-log" class="empty">No actions yet.</div>
   </div>
 </div>
 
@@ -181,6 +408,8 @@
   let _watchdog = null;
   let _sessionLog = [];
   let _sessionId = '';
+  let _isLogOpen = false;
+  let _hasQaReport = false;
   var _currentFileKey = '';
   const _capabilities = [
     'extract-all',
@@ -213,14 +442,35 @@
     el.innerHTML = _sessionLog.map(function(entry) {
       return '<div class="log-entry"><span class="log-time">' +
         _fmtTime(entry.ts) +
-        '</span><span>' +
-        entry.message
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;') +
+        '</span><span class="log-entry-msg">' +
+        _escapeHtml(entry.message) +
         '</span></div>';
     }).join('');
     el.scrollTop = el.scrollHeight;
+  }
+
+  function _setLogOpen(open) {
+    const next = !!open;
+    if (next === _isLogOpen) return;
+    _isLogOpen = next;
+    const app = document.getElementById('app');
+    const toggle = document.getElementById('log-toggle');
+    toggle.setAttribute('aria-pressed', _isLogOpen ? 'true' : 'false');
+
+    if (_isLogOpen) {
+      parent.postMessage({ pluginMessage: { type: 'ui-resize', expanded: _isLogOpen } }, '*');
+      requestAnimationFrame(function() {
+        app.className = 'app log-open';
+        _renderSessionLog();
+      });
+    } else {
+      app.className = 'app';
+      setTimeout(function() {
+        if (!_isLogOpen) {
+          parent.postMessage({ pluginMessage: { type: 'ui-resize', expanded: _isLogOpen } }, '*');
+        }
+      }, 160);
+    }
   }
 
   function _appendLog(message) {
@@ -238,36 +488,45 @@
 
   function _renderQaReport(data) {
     const el = document.getElementById('qa-report');
+    const logBox = document.getElementById('log-box');
     if (!data) {
       el.className = 'qa-empty';
       el.innerText = 'No QA run yet.';
+      _hasQaReport = false;
+      logBox.className = 'log-box';
       return;
     }
     if (data.error) {
-      el.className = '';
-      el.innerText = 'QA failed: ' + data.error;
+      el.className = 'has-report';
+      el.innerHTML = '<div class="qa-stat is-error"><span class="qa-stat-label">QA failed</span><span class="qa-stat-value">' +
+        _escapeHtml(data.error) + '</span></div>';
+      _hasQaReport = true;
+      logBox.className = 'log-box has-qa';
+      if (!_isLogOpen) _setLogOpen(true);
       return;
     }
 
     const byType = data.byType || {};
     const parts = [
-      ['Scope', data.scope || 'selection'],
+      ['QA Scope', data.scope || 'Selection'],
       ['Violations', data.violationCount || 0],
       ['Fixed', data.fixedCount || 0],
       ['Needs review', data.failedCount || 0],
       ['Color', byType.color || 0],
       ['Spacing', byType.spacing || 0],
-      ['Type', byType.typography || 0],
-      ['Border', byType.border || 0]
+      ['Type', byType.typography || 0]
     ];
-    el.className = '';
+    el.className = 'has-report';
     el.innerHTML = parts.map(function(row) {
-      return '<div class="qa-stat"><span>' +
+      return '<div class="qa-stat"><span class="qa-stat-label">' +
         _escapeHtml(row[0]) +
-        '</span><strong>' +
+        '</span><span class="qa-stat-value">' +
         _escapeHtml(row[1]) +
-        '</strong></div>';
+        '</span></div>';
     }).join('');
+    _hasQaReport = true;
+    logBox.className = 'log-box has-qa';
+    if (!_isLogOpen) _setLogOpen(true);
   }
 
   function _runLocalQa(fix) {
@@ -294,15 +553,20 @@
 
   function _setSelectionState(data) {
     const el = document.getElementById('selection-state');
+    const fileName = data && data.fileName ? data.fileName : 'Unknown';
+    const pageName = data && data.pageName ? data.pageName : 'Unknown';
     if (!data || !data.count) {
-      el.className = 'warning';
+      el.className = '';
       el.innerHTML =
-        '<div class="selection-warning">' +
-          '<strong>No component selected.</strong><br>' +
-          'Select a component or component set in Figma, then confirm in chat to continue.' +
-        '</div>' +
-        '<div class="selection-meta">File: ' + _escapeHtml(data && data.fileName ? data.fileName : 'Unknown') + '</div>' +
-        '<div class="selection-meta">Page: ' + _escapeHtml(data && data.pageName ? data.pageName : 'Unknown') + '</div>';
+        '<div class="selection-lines">' +
+          '<div class="selection-line">File: ' + _escapeHtml(fileName) + '</div>' +
+          '<div class="selection-line">Page: ' + _escapeHtml(pageName) + '</div>' +
+          '<div class="selection-line">Selected: None</div>' +
+          '<div class="selection-line">Type: None</div>' +
+          '<div class="selection-line"><span class="doc-status warning" tabindex="0" title="' +
+            _escapeHtml('Select one component or component set in Figma, then confirm in chat to document it.') +
+            '">Undocumentable</span></div>' +
+        '</div>';
       return;
     }
 
@@ -310,27 +574,31 @@
     const names = Array.isArray(data.names) ? data.names : [];
     const hasDocumentableSelection = data.count === 1 && (types[0] === 'COMPONENT' || types[0] === 'COMPONENT_SET');
     if (!hasDocumentableSelection) {
-      el.className = 'warning';
+      el.className = '';
       el.innerHTML =
-        '<div class="selection-warning">' +
-          '<strong>Selection is not documentable.</strong><br>' +
-          'Select one component or component set, then confirm in chat to continue.' +
-        '</div>' +
-        '<div class="selection-meta">File: ' + _escapeHtml(data.fileName || 'Unknown') + '</div>' +
-        '<div class="selection-meta">Page: ' + _escapeHtml(data.pageName || 'Unknown') + '</div>' +
-        '<div class="selection-meta">Selected: ' + _escapeHtml(names.join(', ') || 'Unknown') + '</div>' +
-        '<div class="selection-meta">Type: ' + _escapeHtml(types.join(', ') || 'Unknown') + '</div>';
+        '<div class="selection-lines">' +
+          '<div class="selection-line">File: ' + _escapeHtml(fileName) + '</div>' +
+          '<div class="selection-line">Page: ' + _escapeHtml(pageName) + '</div>' +
+          '<div class="selection-line">Selected: ' + _escapeHtml(names.join(', ') || 'Unknown') + '</div>' +
+          '<div class="selection-line">Type: ' + _escapeHtml(types.join(', ') || 'Unknown') + '</div>' +
+          '<div class="selection-line"><span class="doc-status warning" tabindex="0" title="' +
+            _escapeHtml('Only a single component or component set can be documented. Select one documentable node, then confirm in chat.') +
+            '">Undocumentable</span></div>' +
+        '</div>';
       return;
     }
 
-    el.className = 'selection-ok';
+    el.className = '';
     el.innerHTML =
-      '<div><strong>' + data.count + '</strong> documentable node selected</div>' +
-      '<div>File: ' + _escapeHtml(data.fileName || 'Unknown') + '</div>' +
-      '<div>Page: ' + _escapeHtml(data.pageName || 'Unknown') + '</div>' +
-      '<div>Source: ' + _escapeHtml(data.source || 'Unknown') + '</div>' +
-      '<div>Item: ' + _escapeHtml(names[0] || 'Unknown') + '</div>' +
-      '<div>Type: ' + _escapeHtml(types[0] || 'Unknown') + '</div>';
+      '<div class="selection-lines">' +
+        '<div class="selection-line">File: ' + _escapeHtml(fileName) + '</div>' +
+        '<div class="selection-line">Page: ' + _escapeHtml(pageName) + '</div>' +
+        '<div class="selection-line">Selected: ' + _escapeHtml(names[0] || 'Unknown') + '</div>' +
+        '<div class="selection-line">Type: ' + _escapeHtml(types[0] || 'Unknown') + '</div>' +
+        '<div class="selection-line"><span class="doc-status" tabindex="0" title="' +
+          _escapeHtml('This selection can be documented because it is one component or component set.') +
+          '">Documentable</span></div>' +
+      '</div>';
   }
 
   function _armWatchdog(label, ms) {
@@ -621,7 +889,7 @@
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
         });
-        
+
         if (response.ok) {
           document.getElementById('status').innerText = 'Listening for Agent';
           document.getElementById('substatus').innerText = 'Last sync successful.';
@@ -637,15 +905,15 @@
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
         _appendLog('Failed to send payload to receiver.');
       }
-      
+
       isExtracting = false;
-      poll(); // Resume polling
+      poll();
     }
   }
 
-  // Start polling immediately
   document.getElementById('qa-check').onclick = function() { _runLocalQa(false); };
   document.getElementById('qa-fix').onclick = function() { _runLocalQa(true); };
+  document.getElementById('log-toggle').onclick = function() { _setLogOpen(!_isLogOpen); };
   parent.postMessage({ pluginMessage: { type: 'ui-ready' } }, '*');
   _appendLog('Plugin UI ready.');
   poll();

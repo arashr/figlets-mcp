@@ -4,6 +4,46 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-09] Bridge plugin UI is rebuilt against FigWords reference, not the prior approximation
+
+**Decision:** The bridge plugin UI now follows the FigWords Figma reference (`98:40172`) with three explicit layouts: Collapsed (296×348, left column only), Expanded (576×348, left column + right log box), Expanded+QA (576×348, log box shrinks to 148px tall and a QA Scope summary box appears beneath it). Visual tokens come directly from the FigWords variables: bg `#121212`, brand `#c9fb8c`, text-brand `#e7ffcd`, text-warning `#ffe5ad`, border-brand `#5d8227`, border-subtle `#212121`, with Sora loaded from Google Fonts in weights 400 and 500. The QA report rendered inline under the QA buttons in the previous attempt has been moved into the right column; running QA auto-expands the log so the summary is visible in its intended location.
+
+**Why:** The earlier UI was built from sparse Figma metadata before screenshots were available and missed the actual layout, color tokens, and information architecture. The user explicitly flagged the result as unsatisfactory and provided the FigWords frame for parity work.
+
+**Consequence:** Designers see one coherent dark/lime panel that matches the reference instead of an approximation. The QA summary table is the primary surface for local QA results; the log remains an event trail. Tests that previously locked the old hex values (`#111111`, `#c5ff73`, `#dcffc0`, `#639d13`, `border-radius: 18px`) were updated to assert the FigWords tokens. Sora is loaded from Google Fonts at runtime; offline use silently falls back to Inter without breaking the plugin.
+
+---
+
+## [2026-05-09] Plugin uses native `title` tooltips, not a custom floating element
+
+**Decision:** Removed the custom `#ui-tooltip` floating element and its `_showTooltip`/`_hideTooltip`/`mouseover`/`focusin` handlers. Documentability spans, the QA buttons (`Check`, `Bind Safe`), and the `Show Log` toggle all use the browser's native `title` attribute. The QA buttons gained explanatory tooltips that describe what each action does and what to expect (read-only scan vs. high-confidence binding).
+
+**Why:** The custom floating tooltip overlapped the native browser tooltip in some cases, producing a duplicated tooltip. The user preferred a single tooltip and accepted that the system tooltip is sufficient.
+
+**Consequence:** Less UI code, no manual positioning logic, and no overlap. The tradeoff is that the system tooltip's appearance is OS-controlled and slightly less stylable, which is acceptable in a plugin context.
+
+---
+
+## [2026-05-09] Plugin expand/collapse animates content only; host resize is a hard snap
+
+**Decision:** `_setLogOpen` coordinates the host window resize and the inner content transition so the user sees a smooth fade/slide on the log column even though `figma.ui.resize` is synchronous. Expanding posts the resize message first and starts the CSS transition on the next frame; collapsing reverses the order — fade out first, then resize after 160ms. The log column stays mounted in the DOM at all times so the CSS transition can play during collapse.
+
+**Why:** Figma plugin UIs cannot animate the host window edge — `figma.ui.resize` is host-controlled and instant. The user asked for a smooth transition; animating the inner content around the snap masks most of the abruptness without misleading the user about what's actually happening.
+
+**Consequence:** The window edge still snaps, but content motion (160ms ease, opacity + 12px translateX) makes the transition feel intentional. If a future Figma plugin API allows animated resizes, this can be simplified.
+
+---
+
+## [2026-05-09] Generated variables use Figma picker scopes
+
+**Decision:** `apply_ds_setup` assigns `variable.scopes` based on token intent and repairs scopes on existing collections when setup is rerun. Primitives are intentionally hidden from variable pickers with an empty scope list; semantic variables remain designer-facing and scoped by purpose. `update_ds_primitives` preserves that split when it creates or refreshes variables. Examples: `space/radius/*` in the semantic Spacing collection only appears for corner radius, `space/border/*` for stroke width, typography variables for matching type fields, text/icon colors for text fill, outline colors for stroke color, surface/background colors for fills, and shadow/elevation variables for effects.
+
+**Why:** Variable collections are large enough that showing every variable in every compatible Figma picker adds noise for designers. Figma scopes are explicitly a UI picker filter and do not prevent the plugin API from binding a variable elsewhere when Figlets has a deliberate semantic reason.
+
+**Consequence:** Designers get cleaner pickers without changing token names, values, IDs, aliases, or Figlets' variable-first binding policy. Raw primitives remain available to Figlets and to aliases through the plugin API, but they stop competing with semantic choices in normal Figma UI. Existing files can be repaired by reloading the bridge plugin and rerunning `apply_ds_setup`; collections are not recreated.
+
+---
+
 ## [2026-05-08] DESIGN.md is an intake/export bridge, not the source of truth
 
 **Decision:** Figlets supports Google-style `DESIGN.md` as a portable interchange layer. `create_ds_config_from_design_md` imports DESIGN.md front matter into a starter `design-system.config.js`, so setup can skip answers the designer already provided. `prepare_ds_config` and `apply_ds_setup` write a `DESIGN.md` export next to the file-scoped config for download/share after setup.

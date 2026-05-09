@@ -2162,14 +2162,34 @@ async function _buildShowcase(opts) {
     return badge;
   }
 
-  function _buildGroupHeader(label) {
+  function _buildGroupHeader(label, count) {
     const row = _f('Group Header', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
     row.paddingTop  = 12; row.paddingBottom = 12;
+    row.itemSpacing = 8;
+    row.counterAxisAlignItems = 'CENTER';
     row.fills = [_paint(_RC.surfaceVariant, _V.surfaceVariant)];
+
+    if (typeof count === 'number') {
+      const dot = figma.createFrame();
+      dot.name = 'Group Dot';
+      dot.layoutMode = 'NONE';
+      dot.resize(6, 6);
+      dot.cornerRadius = 9999;
+      dot.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
+      row.appendChild(dot);
+    }
+
     const t = _tDS((label || 'Other').toUpperCase(), 11, _subColor, true, _V.textSub);
     row.appendChild(t);
     t.layoutSizingHorizontal = 'FILL';
+
+    if (typeof count === 'number') {
+      const c = _tDS('· ' + count, 11, _subColor, false, _V.textSub);
+      c.name = 'Group Count';
+      row.appendChild(c);
+    }
+
     return row;
   }
 
@@ -2613,14 +2633,24 @@ async function _buildShowcase(opts) {
     return row;
   }
 
+  // Option A row: pair box (left) | preview swatch (middle) | WCAG pill (right).
+  // Pair box stacks one line per role (bg, fg, plus optional bd/ic/fl) so the
+  // full token kit reads as a single block. Lc + ratio overlay inside the
+  // preview swatch in the foreground color so the eye stays in one place.
   function _buildSemColorRow(token, description, bgRGB, fgRGB, bgVar, opts) {
     opts = opts || {};
-    var fgVar    = opts.fgVar    !== undefined ? opts.fgVar    : null;
+    var fgVar = opts.fgVar !== undefined ? opts.fgVar : null;
     var hasPairing = opts.hasPairing !== undefined ? opts.hasPairing : true;
+    var borderRGB = opts.borderRGB || null;
+    var borderVar = opts.borderVar || null;
+    var iconRGB   = opts.iconRGB   || null;
+    var iconVar   = opts.iconVar   || null;
+    var fillRGB   = opts.fillRGB   || null;
+    var fillVar   = opts.fillVar   || null;
+    var roleNames = opts.roleNames || _splitTokenLabel(token);
     const ratio = _contrastRatio(bgRGB, fgRGB);
     var lcAbs = Math.abs(_apcaLc(fgRGB, bgRGB));
-    var lcThreshold = opts.isIcon ? 60 : 75;
-    var ratioThreshold = opts.isIcon ? 3 : 4.5;
+
     const row = _f('Table / Row / Semantic Color Pairs 1.0.0', 'HORIZONTAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
     row.paddingTop  = 16; row.paddingBottom = 16;
@@ -2628,57 +2658,180 @@ async function _buildShowcase(opts) {
     row.counterAxisAlignItems = 'CENTER';
     row.fills = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
 
-    const tokenCell = _f('TokenCell', 'VERTICAL');
-    tokenCell.itemSpacing = 8;
-    tokenCell.counterAxisAlignItems = 'MIN';
-    tokenCell.primaryAxisAlignItems = 'CENTER';
-    const _semTag = _buildTag(token);
-    tokenCell.appendChild(_semTag);
-    _semTag.layoutSizingHorizontal = 'HUG';
-    const _semRowDesc = _tDS(description || 'Semantic color token for role-based UI surfaces and states.', 12, _subColor, false, _V.textSub);
-    _semRowDesc.name = 'DS Description';
-    tokenCell.appendChild(_semRowDesc);
-    _semRowDesc.layoutSizingHorizontal = 'FILL';
-    row.appendChild(tokenCell);
-    tokenCell.layoutSizingHorizontal = 'FILL';
-    tokenCell.layoutSizingVertical   = 'HUG';
+    // ── LEFT: Pair box ──────────────────────────────────────────────────────
+    const pairBox = _f('PairBox', 'VERTICAL');
+    pairBox.itemSpacing = 6;
+    pairBox.counterAxisAlignItems = 'MIN';
+    pairBox.primaryAxisAlignItems = 'CENTER';
 
-    const swatchCell = _f('SwatchCell', 'VERTICAL');
-    swatchCell.primaryAxisAlignItems = 'CENTER';
-    swatchCell.counterAxisAlignItems = 'CENTER';
-    const swatch = _buildSwatch(bgRGB, fgRGB, _contrastLabel(lcAbs, ratio, lcThreshold, ratioThreshold), {
-      swatchVar: bgVar,
-      fgVar: fgVar,
-      sampleFontSize: 11,
-      forceIndicator: true,
+    const pairLines = [
+      { role: 'bg', name: roleNames.bg, rgb: bgRGB, varRef: bgVar }
+    ];
+    if (fgRGB) pairLines.push({ role: opts.isIcon ? 'ic' : 'fg', name: roleNames.fg, rgb: fgRGB, varRef: fgVar });
+    if (borderRGB) pairLines.push({ role: 'bd', name: roleNames.border || '', rgb: borderRGB, varRef: borderVar });
+    if (!opts.isIcon && iconRGB) pairLines.push({ role: 'ic', name: roleNames.icon || '', rgb: iconRGB, varRef: iconVar });
+    if (fillRGB) pairLines.push({ role: 'fl', name: roleNames.fill || '', rgb: fillRGB, varRef: fillVar });
+
+    for (var ri = 0; ri < pairLines.length; ri++) {
+      const line = _buildSemPairLine(pairLines[ri]);
+      pairBox.appendChild(line);
+      line.layoutSizingHorizontal = 'FILL';
+    }
+    if (description) {
+      const _semRowDesc = _tDS(description, 11, _subColor, false, _V.textSub);
+      _semRowDesc.name = 'DS Description';
+      pairBox.appendChild(_semRowDesc);
+      _semRowDesc.layoutSizingHorizontal = 'FILL';
+    }
+
+    row.appendChild(pairBox);
+    pairBox.layoutSizingHorizontal = 'FILL';
+    pairBox.layoutSizingVertical   = 'HUG';
+
+    // ── MIDDLE: Preview swatch ──────────────────────────────────────────────
+    const swatch = _buildSemPreviewSwatch({
+      bgRGB: bgRGB, bgVar: bgVar,
+      fgRGB: fgRGB, fgVar: fgVar,
+      borderRGB: borderRGB, borderVar: borderVar,
+      iconRGB: iconRGB, iconVar: iconVar,
+      lc: lcAbs, ratio: ratio
     });
-    swatchCell.appendChild(swatch);
+    row.appendChild(swatch);
     swatch.layoutSizingHorizontal = 'FILL';
-    row.appendChild(swatchCell);
-    swatchCell.layoutSizingHorizontal = 'FILL';
-    swatchCell.layoutSizingVertical   = 'FILL';
+    swatch.layoutSizingVertical   = 'FIXED';
 
+    // ── RIGHT: WCAG pill ────────────────────────────────────────────────────
     if (hasPairing) {
-      const metricCell = _f('MetricCell', 'HORIZONTAL');
-      metricCell.primaryAxisAlignItems = 'CENTER';
-      metricCell.counterAxisAlignItems = 'CENTER';
-      metricCell.appendChild(_tDS(`${ratio.toFixed(2)}:1`, 14, _textColor, false, _V.text));
-      row.appendChild(metricCell);
-      metricCell.layoutSizingHorizontal = 'FIXED';
-      metricCell.resize(128, 1);
-      metricCell.layoutSizingVertical   = 'FILL';
-
-      const badgeCell = _f('BadgeCell', 'HORIZONTAL');
-      badgeCell.primaryAxisAlignItems = 'CENTER';
-      badgeCell.counterAxisAlignItems = 'CENTER';
-      badgeCell.appendChild(_buildBadge(ratio));
-      row.appendChild(badgeCell);
-      badgeCell.layoutSizingHorizontal = 'FIXED';
-      badgeCell.resize(128, 1);
-      badgeCell.layoutSizingVertical   = 'FILL';
+      const wcagCell = _f('WcagCell', 'HORIZONTAL');
+      wcagCell.primaryAxisAlignItems = 'CENTER';
+      wcagCell.counterAxisAlignItems = 'CENTER';
+      wcagCell.paddingLeft = 8; wcagCell.paddingRight = 8;
+      const badge = _buildBadge(ratio);
+      wcagCell.appendChild(badge);
+      row.appendChild(wcagCell);
+      wcagCell.layoutSizingHorizontal = 'FIXED';
+      wcagCell.resize(96, 1);
+      wcagCell.layoutSizingVertical   = 'FILL';
     }
 
     return row;
+  }
+
+  // Split a "bgLabel + fgLabel" token string into structured role names.
+  // Falls back to a single bg name when no ' + ' separator is present
+  // (the legacy non-config branch passes a single label).
+  function _splitTokenLabel(token) {
+    var parts = String(token || '').split(' + ');
+    if (parts.length >= 2) return { bg: parts[0], fg: parts.slice(1).join(' + ') };
+    return { bg: parts[0] || '', fg: '' };
+  }
+
+  function _buildSemPairLine(role) {
+    const line = _f('PairLine', 'HORIZONTAL');
+    line.itemSpacing = 8;
+    line.counterAxisAlignItems = 'CENTER';
+
+    const dot = figma.createFrame();
+    dot.name = 'Role Dot';
+    dot.layoutMode = 'NONE';
+    dot.resize(14, 14);
+    dot.cornerRadius = 4;
+    dot.fills   = [_paint(role.rgb, role.varRef)];
+    dot.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
+    dot.strokeWeight = 0.5;
+    dot.strokeAlign  = 'INSIDE';
+    line.appendChild(dot);
+
+    const tagText = _tDS(String(role.role || '').toUpperCase(), 9, _subColor, true, _V.textSub);
+    tagText.name = 'Role Tag';
+    line.appendChild(tagText);
+
+    const name = _tDS(role.name || '—', 12, _textColor, false, _V.text);
+    name.name = 'Token Name';
+    line.appendChild(name);
+    name.layoutSizingHorizontal = 'FILL';
+
+    return line;
+  }
+
+  // Preview swatch — bg fill + fg sample text + optional icon glyph + Lc/ratio
+  // diagnostics overlaid in the fg color. Border (when defined) becomes the
+  // swatch outline so the kit reads as a real surface, not an abstract block.
+  function _buildSemPreviewSwatch(o) {
+    const frame = figma.createFrame();
+    frame.name = 'Preview Swatch';
+    frame.layoutMode = 'HORIZONTAL';
+    frame.primaryAxisAlignItems = 'SPACE_BETWEEN';
+    frame.counterAxisAlignItems = 'CENTER';
+    frame.paddingTop = 12; frame.paddingBottom = 12;
+    frame.paddingLeft = 16; frame.paddingRight = 16;
+    frame.itemSpacing = 12;
+    frame.cornerRadius = 8;
+    frame.fills = [_paint(o.bgRGB, o.bgVar)];
+    if (o.borderRGB) {
+      frame.strokes = [_paint(o.borderRGB, o.borderVar)];
+      frame.strokeWeight = 1.5;
+    } else {
+      frame.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
+      frame.strokeWeight = 0.5;
+    }
+    frame.strokeAlign = 'INSIDE';
+    frame.primaryAxisSizingMode = 'FIXED';
+    frame.counterAxisSizingMode = 'FIXED';
+    frame.resize(64, 64);
+
+    const left = _f('SampleSide', 'HORIZONTAL');
+    left.itemSpacing = 8;
+    left.counterAxisAlignItems = 'CENTER';
+    if (o.iconRGB) {
+      const glyph = _buildSemIconGlyph(o.iconRGB, o.iconVar);
+      if (glyph) left.appendChild(glyph);
+    }
+    const sample = _tDS('The quick brown fox', 13, o.fgRGB, true, o.fgVar);
+    sample.name = 'Sample';
+    left.appendChild(sample);
+
+    const right = _f('DiagSide', 'HORIZONTAL');
+    right.itemSpacing = 12;
+    right.counterAxisAlignItems = 'CENTER';
+    var lcLabel = 'Lc ' + Math.round(o.lc);
+    var ratioLabel = (Math.round(o.ratio * 100) / 100).toFixed(2) + ':1';
+    const lcText = _tDS(lcLabel, 11, o.fgRGB, false, o.fgVar);
+    const rtText = _tDS(ratioLabel, 11, o.fgRGB, false, o.fgVar);
+    lcText.opacity = 0.78;
+    rtText.opacity = 0.78;
+    right.appendChild(lcText);
+    right.appendChild(rtText);
+
+    frame.appendChild(left);
+    frame.appendChild(right);
+    return frame;
+  }
+
+  // Small check-circle glyph (16×16). createNodeFromSvg gives us geometry; we
+  // recolor strokes to the icon variable so the binding survives reapply passes.
+  function _buildSemIconGlyph(rgb, varRef) {
+    if (typeof figma.createNodeFromSvg !== 'function') return null;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">' +
+      '<circle cx="8" cy="8" r="6" fill="none" stroke="#000000" stroke-width="1.5"/>' +
+      '<path d="M5 8.5 L7.2 10.5 L11 6.5" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '</svg>';
+    var node;
+    try { node = figma.createNodeFromSvg(svg); }
+    catch (_e) { return null; }
+    node.name = 'Icon';
+    function _recolor(n) {
+      if (n.strokes && Array.isArray(n.strokes) && n.strokes.length) {
+        var paints = [];
+        for (var i = 0; i < n.strokes.length; i++) paints.push(_paint(rgb, varRef));
+        n.strokes = paints;
+      }
+      if (n.children) {
+        for (var j = 0; j < n.children.length; j++) _recolor(n.children[j]);
+      }
+    }
+    _recolor(node);
+    return node;
   }
 
   function _buildTypoRow(style) {
@@ -3210,37 +3363,95 @@ async function _buildShowcase(opts) {
       ) ? opts.DS.color.semantics.pairs : [];
 
       if (_configSemanticPairs.length) {
+        // Resolve a config token reference to { rgb, varRef }. Supports the
+        // optional `border` / `icon` / `fill` keys on a pair entry.
+        function _resolveSemRef(ref) {
+          if (!ref) return null;
+          var v = varByName[ref] || null;
+          if (!v) return null;
+          var raw = resolveVarValue(v);
+          if (!raw || !('r' in raw)) return null;
+          return { rgb: { r: raw.r, g: raw.g, b: raw.b }, varRef: v };
+        }
+
+        // Group label heuristic — strip subtle/variant/strong suffix and
+        // collapse default/subtle/muted into "Neutral".
+        function _semGroupLabel(bgRef) {
+          var leaf = String(bgRef || '').split('/').pop() || '';
+          var stem = leaf.replace(/-(?:subtle|variant|strong)$/, '');
+          if (!stem) return 'Other';
+          if (stem === 'default' || stem === 'subtle' || stem === 'muted') return 'Neutral';
+          return stem.charAt(0).toUpperCase() + stem.slice(1);
+        }
+
+        // Order pairs by group while preserving in-group source order.
+        const _groupOrder = [];
+        const _grouped = {};
+        for (const pair of _configSemanticPairs) {
+          var label = _semGroupLabel(pair.bg);
+          if (!_grouped[label]) { _grouped[label] = []; _groupOrder.push(label); }
+          _grouped[label].push(pair);
+        }
+
         const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
         const _semHeading = _buildTableHeading([
-          { text: 'Token',    flex: true },
-          { text: 'Example',  flex: true },
-          { text: 'Contrast', width: 128, center: true },
-          { text: 'WCAG',     width: 128, center: true },
+          { text: 'Pair',    flex: true },
+          { text: 'Preview', flex: true },
+          { text: 'WCAG',    width: 96, center: true },
         ], 16);
         _semTable.appendChild(_semHeading);
         _semHeading.layoutSizingHorizontal = 'FILL';
         _addTableDivider(_semTable);
 
-        for (const pair of _configSemanticPairs) {
-          const bgVar = varByName[pair.bg] || null;
-          const fgVar = varByName[pair.text] || null;
-          const bgRaw = bgVar ? resolveVarValue(bgVar) : null;
-          const fgRaw = fgVar ? resolveVarValue(fgVar) : null;
-          if (!bgRaw || !fgRaw || !('r' in bgRaw) || !('r' in fgRaw)) continue;
-          const bgRGB = { r: bgRaw.r, g: bgRaw.g, b: bgRaw.b };
-          const fgRGB = { r: fgRaw.r, g: fgRaw.g, b: fgRaw.b };
-          const bgLabel = _tokenLabel(pair.bg);
-          const fgLabel = _tokenLabel(pair.text);
-          const leaf = String(pair.bg || '').split('/').pop();
-          const desc = 'Paired with ' + fgLabel + '.';
-          const row = _buildSemColorRow(bgLabel + ' + ' + fgLabel, desc, bgRGB, fgRGB, bgVar, {
-            fgVar: fgVar,
-            hasPairing: true,
-            previewText: leaf
-          });
-          _semTable.appendChild(row);
-          row.layoutSizingHorizontal = 'FILL';
+        for (const _gLabel of _groupOrder) {
+          const _items = _grouped[_gLabel];
+          if (!_items || !_items.length) continue;
+
+          const groupHeader = _buildGroupHeader(_gLabel, _items.length);
+          _semTable.appendChild(groupHeader);
+          groupHeader.layoutSizingHorizontal = 'FILL';
           _addTableDivider(_semTable);
+
+          for (const pair of _items) {
+            const bgVar = varByName[pair.bg] || null;
+            const fgVar = varByName[pair.text] || null;
+            const bgRaw = bgVar ? resolveVarValue(bgVar) : null;
+            const fgRaw = fgVar ? resolveVarValue(fgVar) : null;
+            if (!bgRaw || !fgRaw || !('r' in bgRaw) || !('r' in fgRaw)) continue;
+            const bgRGB = { r: bgRaw.r, g: bgRaw.g, b: bgRaw.b };
+            const fgRGB = { r: fgRaw.r, g: fgRaw.g, b: fgRaw.b };
+            const bdInfo = _resolveSemRef(pair.border);
+            const icInfo = _resolveSemRef(pair.icon);
+            const flInfo = _resolveSemRef(pair.fill);
+
+            const bgLabel = _tokenLabel(pair.bg);
+            const fgLabel = _tokenLabel(pair.text);
+            const row = _buildSemColorRow(
+              bgLabel + ' + ' + fgLabel,
+              null,
+              bgRGB, fgRGB, bgVar,
+              {
+                fgVar:     fgVar,
+                hasPairing: true,
+                roleNames: {
+                  bg:     bgLabel,
+                  fg:     fgLabel,
+                  border: pair.border ? _tokenLabel(pair.border) : '',
+                  icon:   pair.icon   ? _tokenLabel(pair.icon)   : '',
+                  fill:   pair.fill   ? _tokenLabel(pair.fill)   : ''
+                },
+                borderRGB: bdInfo ? bdInfo.rgb    : null,
+                borderVar: bdInfo ? bdInfo.varRef : null,
+                iconRGB:   icInfo ? icInfo.rgb    : null,
+                iconVar:   icInfo ? icInfo.varRef : null,
+                fillRGB:   flInfo ? flInfo.rgb    : null,
+                fillVar:   flInfo ? flInfo.varRef : null
+              }
+            );
+            _semTable.appendChild(row);
+            row.layoutSizingHorizontal = 'FILL';
+            _addTableDivider(_semTable);
+          }
         }
 
         _appendFill(_semTable, _colorsFrame);
@@ -3346,7 +3557,10 @@ async function _buildShowcase(opts) {
             fgRows.push(_buildSemColorRow(
               tokenLabel, iconDesc || null,
               iconSurfaceRGB, iconRGB,
-              iconSurfaceVar, { isIcon: true, fgVar: v, hasPairing: true, previewText: tokenLeaf }
+              iconSurfaceVar, {
+                isIcon: true, fgVar: v, hasPairing: true, previewText: tokenLeaf,
+                roleNames: { bg: iconSurfaceLabel || '', fg: tokenLabel }
+              }
             ));
           } else {
             const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
@@ -3395,7 +3609,10 @@ async function _buildShowcase(opts) {
             })();
             var pairingNote = fgPairName ? ('Paired with ' + _tokenLabel(fgPairName) + '.') : null;
             var rowDesc = (desc && pairingNote) ? (desc + ' ' + pairingNote) : (pairingNote || desc);
-            const row = _buildSemColorRow(tokenLabel, rowDesc, bgRGB, effectiveFg, v, { fgVar: fgVar, hasPairing: hasPairing, previewText: tokenLeaf });
+            const row = _buildSemColorRow(tokenLabel, rowDesc, bgRGB, effectiveFg, v, {
+              fgVar: fgVar, hasPairing: hasPairing, previewText: tokenLeaf,
+              roleNames: { bg: tokenLabel, fg: fgPairName ? _tokenLabel(fgPairName) : '' }
+            });
             if (hasPairing) bgPairedRows.push(row);
             else bgUnpairedRows.push(row);
           }

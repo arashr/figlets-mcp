@@ -197,10 +197,9 @@ assert.ok(
     code.includes("function _contrastLabel(lc, ratio, lcThreshold, ratioThreshold)") &&
     code.includes("if (_showcaseContrastAlgorithm === 'wcag')") &&
     code.includes("var lcAbs = Math.abs(_apcaLc(fgRGB, bgRGB));") &&
-    code.includes("var lcThreshold = opts.isIcon ? 60 : 75;") &&
-    code.includes("var ratioThreshold = opts.isIcon ? 3 : 4.5;") &&
-    code.includes("const swatch = _buildSwatch(bgRGB, fgRGB, _contrastLabel(lcAbs, ratio, lcThreshold, ratioThreshold), {"),
-  "Showcase semantic pair swatches must show APCA or WCAG pass/fail labels at text/icon thresholds"
+    code.includes("const ratio = _contrastRatio(bgRGB, fgRGB);") &&
+    code.includes("_buildBadge(ratio)"),
+  "Showcase semantic pair rows must compute APCA Lc and WCAG ratio and surface pass/fail via _buildBadge (Option A: pill in the right column, raw Lc/ratio overlay inside the swatch)"
 );
 
 assert.ok(

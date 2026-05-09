@@ -4,11 +4,42 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
-### [2026-05-09 — semantic colors showcase redesign (in progress)]
+### [2026-05-09 — semantic colors showcase redesign (shipped on branch)]
 
-**Active branch:** `semantics-showcase-redesign` (off `main` at commit `634730a`).
+**Active branch:** `semantics-showcase-redesign` (off `main` at commit `634730a`). Not yet merged.
 
-**Status:** Direction decided; implementation not started yet. Logs and decision recorded; next agent should pick up from the handover.
+**Status:** Implementation shipped and verified locally. 40/40 tests pass. Visual check pending — user should reload the bridge plugin in Figma Desktop and rebuild the showcase against the active config to confirm Brand and Danger rows render with extras.
+
+**Shipped this session:**
+
+1. **`_buildSemColorRow` rewritten to Option A layout** (`packages/figma-bridge-plugin/code.js:2616`). Three columns: pair box (left, FILL) | preview swatch (middle, FILL, height 64) | WCAG pill (right, fixed 96). Pair box stacks one line per role (`bg`, `fg`, plus optional `bd` / `ic` / `fl`); each line is a 14×14 swatch dot + uppercase 2-letter role tag + token name. Preview swatch fills the bg color, sample text "The quick brown fox" renders in the fg color, optional check-circle glyph in the icon color appears to the left of the sample, optional 1.5px inset border in the border color wraps the swatch (falls back to the existing 0.5px subtle outline when no border is supplied), and Lc / ratio diagnostics overlay on the right side of the swatch in the fg color at 0.78 opacity. WCAG pill on the right reuses `_buildBadge`. All fills, strokes, and text colors bound to existing showcase variables (`_V.*` / `_RC.*`); no prototype hex values copied in.
+
+2. **New helpers** (`code.js`): `_splitTokenLabel`, `_buildSemPairLine`, `_buildSemPreviewSwatch`, `_buildSemIconGlyph` (uses `figma.createNodeFromSvg`, falls back to no glyph if the API is missing).
+
+3. **`_buildGroupHeader` extended** (`code.js:2165`) with optional `count` argument. When count is passed, the header gets a 6×6 brand-variant dot prefix and a "· N" suffix. Existing single-arg call at `code.js:3804` is unchanged.
+
+4. **Config-pairs assembly extended** (`code.js:3365`). Pairs are now grouped by family using `_semGroupLabel(pair.bg)` (heuristic: strip `-subtle` / `-variant` / `-strong` suffix; collapse `default` / `subtle` / `muted` into "Neutral"; capitalize the rest). Each group emits a `_buildGroupHeader(label, count)` row, then its pair rows. Every pair resolves optional `border`, `icon`, `fill` token references via a local `_resolveSemRef` helper and passes their RGB + variable refs into `_buildSemColorRow`.
+
+5. **Schema extension**: `DS.color.semantics.pairs[*]` may now optionally include `border`, `icon`, `fill` keys alongside the existing `{ bg, text }`. Border falls back visually to the subtle outline when omitted; icon and fill have no fallback. The user's existing config does not have these keys yet — they remain optional and the existing pairs render without them. To populate them, add token paths (e.g. `"border": "color/border/brand"`) to a pair entry in `design-system.config.js`.
+
+6. **Heading row updated** to match the new 3-column layout: `Pair (flex) | Preview (flex) | WCAG (96, center)`.
+
+7. **Legacy non-config branch updated** (`code.js:3557` icon callsite, `code.js:3609` bg+fg callsite): both pass `roleNames` so the pair box renders correct names even without a config. Icon row uses `{ bg: iconSurfaceLabel, fg: tokenLabel }`. bg+fg row uses `{ bg: tokenLabel, fg: fgPairName ? _tokenLabel(fgPairName) : '' }`.
+
+8. **Test updates** (`tests/bridge/qa-binding-audit-policy.test.js`): replaced the assertion that locked the old `_buildSwatch(... _contrastLabel(...))` inline-label call with a new contract that checks the row computes APCA Lc + WCAG ratio and surfaces pass/fail through `_buildBadge` (the right-column pill). Underlying helpers (`_lcLabel`, `_wcagLabel`, `_contrastLabel`, `_apcaLc`, threshold consts) are still required because primitive contrast swatches still use them.
+
+**Verification:**
+- `node --check packages/figma-bridge-plugin/code.js`
+- Forbidden executable `??`, `?.`, `**` scan clean (only the two ES6-reminder comments match).
+- `npm test` passed: 40/40.
+
+**Follow-up:**
+- User should reload the bridge plugin in Figma Desktop and rebuild the showcase against `.local/local_movbxur3_6gow4h4j/design-system.config.js`. Without `border`/`icon`/`fill` keys in that config, rows render with `bg + fg` only — that is expected. Add extras to a pair to see the full kit.
+- Branch is `semantics-showcase-redesign`. Not merged. Merge when the user signs off on the visual.
+
+---
+
+### [2026-05-09 — APCA offset corrected to 0.0.98G]
 
 **Context:**
 

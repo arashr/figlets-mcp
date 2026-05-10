@@ -4,6 +4,38 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-10 — Variant surface foreground guardrail + diagnostic showcase behavior]
+
+**Active branch:** `main`.
+
+**Status:** Implemented and live-tested. Ready to commit.
+
+**Issue discovered via showcase:** In the Portfolio DS file (`local_mozwkg5o_ufp0x3jo`), the showcase exposed a suspicious row like `surface/info-variant` paired with `on-surface/info`. This may be human-authored file state, and the showcase should keep revealing that kind of problem rather than mutating or hiding it.
+
+**Setup-flow guardrail implemented:**
+- `packages/figlets-core/src/ds-config/validate-semantic-pairs.js` now generates matching foreground tokens whenever setup generates surface variant tokens:
+  - `color/surface/variant` -> `color/on-surface/variant`
+  - `color/surface/{brand|danger|success|warning|info}-variant` -> `color/on-surface/{role}-variant`
+- Contrast-harmonized overrides include the matching variant foreground pairs as well.
+- This prevents Figlets' own setup flow from producing half-paired variant surfaces. Existing designer-authored variables are not changed.
+
+**Showcase behavior corrected:**
+- The attempted server-side `build_ds_showcase` auto-bootstrap was removed. Showcase should not manufacture a config or hide file-state issues.
+- Config-driven Semantic Colors rendering now also surfaces extra semantic `surface/bg/fill` variables that are not in `DS.color.semantics.pairs` as unpaired BG-only rows.
+- `on-*`, text, icon, outline, border, and stroke tokens stay excluded from those extra rows, so the Outlines table does not come back just because config-pairs mode is active.
+- This means missing variant foregrounds remain visible as unpaired surfaces instead of disappearing.
+
+**Verification:**
+- `node tests/core/ds-config.test.js` passed.
+- `node tests/bridge/qa-binding-audit-policy.test.js` passed.
+- `node --check packages/figlets-core/src/ds-config/validate-semantic-pairs.js` passed.
+- `node --check packages/figma-bridge-plugin/code.js` passed.
+- Forbidden operator scan for plugin code matched only ES6 reminder comments and markdown bold strings.
+- `npm test` -> 42/42 passed.
+- After reloading the Figlets Bridge plugin, `build_ds_showcase` completed on `local_mozwkg5o_ufp0x3jo` with the expected five sections and only known numeric fallback warnings (`spacing 6`, `border 1.5`).
+
+---
+
 ### [2026-05-10 — Semantic Colors post-merge hardening + live showcase E2E]
 
 **Active branch:** `main`.

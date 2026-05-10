@@ -276,6 +276,28 @@ function makeDs(overrides) {
   assert.strictEqual(pair.Dark.bg, 'color/neutral-variant/900', 'surface variant Dark should backfill to neutral-variant');
 }
 
+// generated surface variants must get matching on-surface variant foregrounds.
+// This prevents setup-created showcases like surface/info-variant + on-surface/info.
+{
+  let ds = computeDsConfig(makeDs({ color: {
+    scale: '50-950',
+    convention: 'surface-based',
+    brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }],
+  }})).ds;
+  ds = generateColorRamps(ds).ds;
+  ds = validateSemanticPairs(ds).ds;
+  for (const role of ['brand', 'danger', 'success', 'warning', 'info']) {
+    const bg = `color/surface/${role}-variant`;
+    const pair = ds.color.semantics.pairs.find(p => p.bg === bg);
+    assert.ok(pair, `${bg} should be generated`);
+    assert.strictEqual(
+      pair.text,
+      `color/on-surface/${role}-variant`,
+      `${bg} must pair with its matching on-surface variant foreground`
+    );
+  }
+}
+
 // generated surface success foreground backfills to a passing contrast value.
 // Pinned to WCAG mode because the backfill is specifically about clearing a WCAG
 // shortfall (neutral/50 absent → text clamps to neutral/100 → green/600 fails AA).

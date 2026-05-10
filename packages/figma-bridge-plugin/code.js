@@ -3454,10 +3454,12 @@ async function _buildShowcase(opts) {
         // Order pairs by group while preserving in-group source order.
         const _groupOrder = [];
         const _grouped = {};
+        const _seenConfigBgRefs = {};
         for (const pair of _configSemanticPairs) {
           var label = _semGroupLabel(pair.bg);
           if (!_grouped[label]) { _grouped[label] = []; _groupOrder.push(label); }
           _grouped[label].push(pair);
+          if (pair.bg) _seenConfigBgRefs[pair.bg] = true;
         }
 
         const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
@@ -3524,6 +3526,48 @@ async function _buildShowcase(opts) {
                 fillVar:   flInfo ? flInfo.varRef : null
               }
             );
+            _semTable.appendChild(row);
+            row.layoutSizingHorizontal = 'FILL';
+            _addTableDivider(_semTable);
+          }
+        }
+
+        const _extraBgGroups = {};
+        const _extraBgOrder = [];
+        for (const coll of _semanticColls) {
+          for (const v of coll.vars.filter(v => v.resolvedType === 'COLOR')) {
+            if (_seenConfigBgRefs[v.name]) continue;
+            if (/(?:^|\/)on[-_]/i.test(v.name)) continue;
+            if (!/(?:^|\/)(?:surface|bg|background|base|page|fill)(?:\/|$)/i.test(v.name)) continue;
+            const raw = resolveVarValue(v);
+            if (!raw || !('r' in raw)) continue;
+            if (raw.a !== undefined && raw.a < 0.95) continue;
+            var extraLabel = _semGroupLabel(v.name);
+            if (!_extraBgGroups[extraLabel]) { _extraBgGroups[extraLabel] = []; _extraBgOrder.push(extraLabel); }
+            _extraBgGroups[extraLabel].push(v);
+          }
+        }
+
+        for (const _extraLabel of _extraBgOrder) {
+          const _extraItems = _extraBgGroups[_extraLabel];
+          if (!_extraItems || !_extraItems.length) continue;
+          const groupHeader = _buildGroupHeader(_extraLabel, _extraItems.length);
+          _semTable.appendChild(groupHeader);
+          groupHeader.layoutSizingHorizontal = 'FILL';
+          _addTableDivider(_semTable);
+          for (const v of _extraItems) {
+            const raw = resolveVarValue(v);
+            if (!raw || !('r' in raw)) continue;
+            const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
+            const effectiveFg = (function() {
+              var ind = _swatchIndicator(bgRGB);
+              return ind.show ? ind.fg : _textColor;
+            })();
+            const row = _buildSemColorRow(_tokenLabel(v.name), _tokenDesc(v.name), bgRGB, effectiveFg, v, {
+              fgVar: null,
+              hasPairing: false,
+              roleNames: { bg: _tokenLabel(v.name), fg: '' }
+            });
             _semTable.appendChild(row);
             row.layoutSizingHorizontal = 'FILL';
             _addTableDivider(_semTable);

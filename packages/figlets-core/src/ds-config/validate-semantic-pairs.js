@@ -143,16 +143,20 @@ function validateSemanticPairs(ds) {
   const SURFACE_PAIRS = [
     { bg: 'color/surface/default',       text: 'color/on-surface/default',  L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
     { bg: 'color/surface/default',       text: 'color/on-surface/variant',  L: { bg: 'neutral/50',  text: 'neutral/700' }, D: { bg: 'neutral/950', text: 'neutral/300' }, min: 4.5, minLc: 75 },
-    { bg: 'color/surface/variant',       text: 'color/on-surface/default',  L: { bg: `${NEUTRAL_VARIANT}/100`, text: 'neutral/950' }, D: { bg: `${NEUTRAL_VARIANT}/900`, text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/variant',       text: 'color/on-surface/variant',  L: { bg: `${NEUTRAL_VARIANT}/100`, text: 'neutral/950' }, D: { bg: `${NEUTRAL_VARIANT}/900`, text: 'neutral/50'  }, min: 4.5, minLc: 75 },
     { bg: 'color/surface/brand',         text: 'color/on-surface/brand',    L: { bg: 'primary/500', text: 'neutral/900' }, D: { bg: 'primary/500', text: 'neutral/950' }, min: 4.5, minLc: 75 },
-    { bg: 'color/surface/brand-variant', text: 'color/on-surface/default',  L: { bg: 'primary/50',  text: 'neutral/950' }, D: { bg: 'primary/950', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/brand-variant', text: 'color/on-surface/brand-variant', L: { bg: 'primary/50', text: 'primary/900' }, D: { bg: 'primary/950', text: 'primary/50' }, min: 4.5, minLc: 75 },
     { bg: 'color/surface/danger',         text: 'color/on-surface/danger',   L: { bg: 'red/50',      text: 'red/800'     }, D: { bg: 'red/950',     text: 'red/100'     }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/danger-variant', text: 'color/on-surface/danger-variant', L: { bg: 'red/50', text: 'red/800' }, D: { bg: 'red/950', text: 'red/100' }, min: 4.5, minLc: 75 },
     { bg: 'color/fill/danger',            text: 'color/on-fill/danger',      L: { bg: 'red/700',     text: 'neutral/50'  }, D: { bg: 'red/100',     text: 'neutral/950' }, min: 4.5, minLc: 75 },
     { bg: 'color/surface/success',        text: 'color/on-surface/success',  L: { bg: 'green/50',    text: 'green/800'   }, D: { bg: 'green/950',   text: 'green/200'   }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/success-variant', text: 'color/on-surface/success-variant', L: { bg: 'green/50', text: 'green/800' }, D: { bg: 'green/950', text: 'green/200' }, min: 4.5, minLc: 75 },
     { bg: 'color/fill/success',           text: 'color/on-fill/success',     L: { bg: 'green/800',   text: 'neutral/50'  }, D: { bg: 'green/200',   text: 'neutral/950' }, min: 4.5, minLc: 75 },
     { bg: 'color/surface/warning',        text: 'color/on-surface/warning',  L: { bg: 'yellow/50',   text: 'yellow/800'  }, D: { bg: 'yellow/950',  text: 'yellow/200'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/warning-variant', text: 'color/on-surface/warning-variant', L: { bg: 'yellow/50', text: 'yellow/800' }, D: { bg: 'yellow/950', text: 'yellow/200' }, min: 4.5, minLc: 75 },
     { bg: 'color/fill/warning',           text: 'color/on-fill/warning',     L: { bg: 'yellow/200',  text: 'neutral/950' }, D: { bg: 'yellow/200',  text: 'neutral/950' }, min: 4.5, minLc: 75, note: '⚠ yellow filled surfaces use dark text in both modes' },
     { bg: 'color/surface/info',           text: 'color/on-surface/info',     L: { bg: 'blue/50',     text: 'blue/800'    }, D: { bg: 'blue/950',    text: 'blue/100'    }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/info-variant',   text: 'color/on-surface/info-variant', L: { bg: 'blue/50', text: 'blue/800' }, D: { bg: 'blue/950', text: 'blue/100' }, min: 4.5, minLc: 75 },
     { bg: 'color/fill/info',              text: 'color/on-fill/info',        L: { bg: 'blue/700',    text: 'neutral/50'  }, D: { bg: 'blue/100',    text: 'neutral/950' }, min: 4.5, minLc: 75 },
   ];
 
@@ -258,6 +262,26 @@ function validateSemanticPairs(ds) {
       'color/fill/info|color/text/on-info': {
         L: { bg: 'blue/900', text: 'neutral/50' },
         D: { bg: 'blue/100', text: 'neutral/950' },
+      },
+      'color/surface/brand-variant|color/on-surface/brand-variant': {
+        L: { bg: 'primary/50', text: 'primary/900' },
+        D: { bg: 'primary/950', text: 'primary/50' },
+      },
+      'color/surface/danger-variant|color/on-surface/danger-variant': {
+        L: { bg: 'red/50', text: 'red/900' },
+        D: { bg: 'red/950', text: 'red/100' },
+      },
+      'color/surface/success-variant|color/on-surface/success-variant': {
+        L: { bg: 'green/50', text: 'green/900' },
+        D: { bg: 'green/950', text: 'green/100' },
+      },
+      'color/surface/warning-variant|color/on-surface/warning-variant': {
+        L: { bg: 'yellow/50', text: 'yellow/900' },
+        D: { bg: 'yellow/950', text: 'yellow/100' },
+      },
+      'color/surface/info-variant|color/on-surface/info-variant': {
+        L: { bg: 'blue/50', text: 'blue/900' },
+        D: { bg: 'blue/950', text: 'blue/100' },
       },
     };
     const override = map[row.bg + '|' + row.text];

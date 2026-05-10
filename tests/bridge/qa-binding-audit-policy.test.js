@@ -131,8 +131,11 @@ assert.ok(
     code.includes("Array.isArray(opts.DS.color.semantics.pairs)") &&
     code.includes("for (const pair of _configSemanticPairs)") &&
     code.includes("varByName[pair.bg]") &&
-    code.includes("varByName[pair.text]"),
-  "Showcase semantic color rows must use prepared DS.color.semantics.pairs when a config is present"
+    code.includes("varByName[pair.text]") &&
+    code.includes("const _extraBgGroups = {};") &&
+    code.includes("if (_seenConfigBgRefs[v.name]) continue;") &&
+    code.includes("hasPairing: false"),
+  "Showcase semantic color rows must use prepared DS.color.semantics.pairs and still surface unpaired bg/surface/fill variables when a config is present"
 );
 
 assert.ok(

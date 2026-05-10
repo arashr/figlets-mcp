@@ -57,7 +57,7 @@ function assertResult(actual, expected, label) {
   assert.deepStrictEqual(actual, expected, label + ' — got ' + JSON.stringify(actual));
 }
 
-// ── Cases 1-20 ───────────────────────────────────────────────────────────────
+// ── Cases 1-22 ───────────────────────────────────────────────────────────────
 
 // 1. Material 3 naming: surface → outline / icon resolve. Fill never inferred.
 assertResult(
@@ -297,6 +297,18 @@ assertResult(
   '21. fillRef is always empty even when color/fill/<leaf> exists'
 );
 
+// 22. Target-side casing fallback: exact source match can still resolve
+// target namespaces with consumer-specific capitalization.
+assertResult(
+  _inferSemPairExtras(
+    'color/Bg/Danger',
+    'color/Text/Danger',
+    makeVbn(['color/Border/Danger', 'color/Icon/Danger'])
+  ),
+  { borderRef: 'color/Border/Danger', iconRef: 'color/Icon/Danger', fillRef: '' },
+  '22. Case-insensitive lookup returns the actual target variable name'
+);
+
 // ── Integration assertions on the assembly source ────────────────────────────
 
 // Pin that the config-pairs branch uses the explicit-wins pattern for border
@@ -340,4 +352,4 @@ assert.strictEqual(
   'Helper must not call any substitution targeting "fill" as a destination role'
 );
 
-console.log('semantic-pair-extras-inference: 21 cases + 5 integration assertions passed.');
+console.log('semantic-pair-extras-inference: 22 cases + 5 integration assertions passed.');

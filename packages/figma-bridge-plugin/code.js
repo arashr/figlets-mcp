@@ -3378,6 +3378,21 @@ async function _buildShowcase(opts) {
       function _inferSemPairExtras(bgName, fgName, vbn) {
         var FAMILY_RE    = /^(?:bg|surface|background|base|page|fill)$/i;
         var FG_FAMILY_RE = /^(?:text|fg|foreground)$/i;
+        var nameLookup = null;
+
+        function _lookupName(name) {
+          if (vbn[name]) return name;
+          if (!nameLookup) {
+            nameLookup = {};
+            var keys = Object.keys(vbn || {});
+            for (var ki = 0; ki < keys.length; ki++) {
+              var key = keys[ki];
+              var lower = String(key).toLowerCase();
+              if (!nameLookup[lower]) nameLookup[lower] = key;
+            }
+          }
+          return nameLookup[String(name).toLowerCase()] || '';
+        }
 
         function _trySubstitute(srcName, fromRe, toName) {
           if (!srcName) return '';
@@ -3387,7 +3402,8 @@ async function _buildShowcase(opts) {
             var cand = parts.slice();
             cand[i] = toName;
             var nm = cand.join('/');
-            if (vbn[nm]) return nm;
+            var resolved = _lookupName(nm);
+            if (resolved) return resolved;
           }
           return '';
         }

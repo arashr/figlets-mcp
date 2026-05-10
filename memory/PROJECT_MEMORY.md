@@ -4,6 +4,40 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-10 — Semantic Colors post-merge hardening + live showcase E2E]
+
+**Active branch:** `main`.
+
+**Status:** The `semantics-showcase-redesign` branch was merged into `main`. Post-review hardening has been implemented locally and is ready to commit.
+
+**What changed after merge:**
+
+1. **Target-side casing fallback in `_inferSemPairExtras`** ([code.js](packages/figma-bridge-plugin/code.js)): exact `varByName` matches still win, but the helper now builds a lazy lower-case lookup fallback and returns the actual variable name from the map. This keeps the helper DS-agnostic for consumers that use paths like `color/Bg/Danger` with target tokens named `color/Border/Danger` / `color/Icon/Danger`.
+
+2. **Inference test coverage expanded** (`tests/bridge/semantic-pair-extras-inference.test.js`): added case 22 for target-side capitalization. The helper suite now reports 22 cases + 5 integration assertions. Fill remains pinned to `fillRef: ''`.
+
+3. **New row-builder render-shape test** (`tests/bridge/semantic-color-row-render-shape.test.js`): evaluates the Semantic Colors Option A row helpers with a Figma-like node stub. This closes the source-only testing blind spot by proving resolved extras become actual pair-box lines (`BG`, `FG`, `BD`, `IC`, `FL`), the preview swatch uses the resolved border variable as its stroke, the icon glyph is appended, missing extras are not invented, and the existing subtle-outline visual fallback remains.
+
+**Verification:**
+- `node tests/bridge/semantic-pair-extras-inference.test.js` -> 22 cases + 5 integration assertions passed.
+- `node tests/bridge/semantic-color-row-render-shape.test.js` passed.
+- `node --check packages/figma-bridge-plugin/code.js` passed.
+- `grep -nE '\\?\\?|\\?\\.|\\*\\*' packages/figma-bridge-plugin/code.js` still matches only ES6 reminder comments and markdown bold strings.
+- Mutation API hash remains `bd48acf72529bc6caf11e9a41404ec67`.
+- `git diff --check` clean.
+- `npm test` -> 42/42 passed.
+
+**Live E2E already run on previous active file:**
+- Plugin was reloaded and connected to `local_movbxur3_6gow4h4j`.
+- `build_ds_showcase` completed successfully and rendered `Colors`, `Typography`, `Spacing`, `Elevation`, and `Scrims`.
+- Only known raw numeric-token warnings remained: radius `16`, spacing `6`, and border weight `1.5`.
+- Final bridge health check still showed the plugin connected.
+
+**Current live target for the next showcase run:**
+- Bridge health now reports active file `local_mozwkg5o_ufp0x3jo` with `build-showcase` capability.
+
+---
+
 ### [2026-05-10 — DS-agnostic pairing inference for Semantic Colors (border + icon; fill explicitly excluded)]
 
 **Active branch:** `semantics-showcase-redesign` (continues the redesign branch from 2026-05-09; not yet merged). Builds on commit `490df63`.

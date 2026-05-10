@@ -4,6 +4,52 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-10 — DS-agnostic pairing inference for Semantic Colors (border + icon; fill explicitly excluded)]
+
+**Active branch:** `semantics-showcase-redesign` (continues the redesign branch from 2026-05-09; not yet merged). Builds on commit `490df63`.
+
+**Status:** Implementation shipped and verified locally. 41/41 tests pass (40 existing + 1 new file with 21 cases + 5 integration assertions). Plugin reload + showcase rebuild verification still pending on the user's side.
+
+**Shipped this session:**
+
+1. **New helper `_inferSemPairExtras(bgName, fgName, varByName)`** in [code.js](packages/figma-bridge-plugin/code.js) (inserted after the lifted `_resolveSemRef`). Pure, DS-agnostic, ES6-only. Mirrors the `_findFgPair` segment-substitution pattern but generalized for `border` (targets: `border`, `outline`, `stroke`) and `icon` (targets: `icon`, `graphic`, `symbol` — bg-side first, then fg-side fallback). Suffix-strip fallback for `-subtle|-variant|-strong` mirrors the existing fg-pair fallback at [code.js:3592](packages/figma-bridge-plugin/code.js). Existence-guarded against `varByName`; never invents a path that won't resolve. Tolerates `null`/`undefined`/empty inputs.
+
+2. **Fill is intentionally NOT inferred.** First iteration auto-rendered fill alongside bg+fg, which the user found visually noisy. Helper now returns `fillRef: ''` unconditionally. Explicit `pair.fill` from the user's config still flows through the unchanged `_resolveSemRef(pair.fill)` path and renders. Only the auto-inference of fill is suppressed. Test 21 pins `fillRef === ''` even when `color/fill/<leaf>` exists in `varByName`.
+
+3. **`_resolveSemRef` lifted to outer scope** so both inner branches share it without duplication.
+
+4. **Config-pairs branch** ([code.js:3412–3447](packages/figma-bridge-plugin/code.js)) computes `_extras` and applies the explicit-wins pattern `pair.border || _extras.borderRef` and `pair.icon || _extras.iconRef`. `pair.fill` continues to be resolved directly via `_resolveSemRef(pair.fill)` (no inference layer).
+
+5. **Legacy non-config bg-row branch** ([code.js:3562–3614](packages/figma-bridge-plugin/code.js)) calls the same helper for symmetry — DSes without a config-side `pairs` list also surface bd/ic lines when companion tokens exist by naming convention. Fill is not surfaced in the legacy branch (helper does not infer it). The legacy icon-row and outline-row paths are unchanged.
+
+6. **New test file** `tests/bridge/semantic-pair-extras-inference.test.js`. Source-loads `code.js`, extracts the helper via brace-balanced slicing, evaluates it in a sandbox with stub `varByName` maps. 21 cases cover Material 3, role-based, stroke-only, suffix-strip variants, direct-vs-stripped precedence, fg-side icon fallback, empty/null/undefined inputs, no-family-segment defense, mixed capitalization, deep namespacing, no-leading-namespace, input non-mutation, AND case 21 specifically pinning `fillRef` is always `''`. Plus 5 integration assertions: explicit-wins on border/icon, `pair.fill` directly resolved, helper called from legacy branch, no Figma-mutation API in helper region, and a regex assertion that NO substitution targets `'fill'` as a destination role.
+
+**No-Figma-mutation contract verified:**
+- Pre-change line content of `createVariable|setBoundVariable|setVariableScopes|figma.root.setPluginData|getOrCreateCollection`: 75 sites, hash `bd48acf72529bc6caf11e9a41404ec67`.
+- Post-change line content (line numbers ignored): 75 sites, identical hash `bd48acf72529bc6caf11e9a41404ec67`. Byte-for-byte identical mutation surface.
+
+**Verification commands:**
+- `node --check packages/figma-bridge-plugin/code.js` ✓
+- `npm test` → 41/41 ✓
+- `grep -nE '\\?\\?|\\?\\.|\\*\\*' packages/figma-bridge-plugin/code.js` → only existing markdown bold and ES6-reminder comments ✓
+- `grep -E 'createVariable|setBoundVariable|setVariableScopes|figma\\.root\\.setPluginData|getOrCreateCollection' packages/figma-bridge-plugin/code.js | md5sum` → hash unchanged ✓
+
+**Process note (preserve as feedback for future sessions):** an earlier iteration of this session auto-inferred fill as well; the user reviewed the rendered output, said "revert it back", and the assistant interpreted that as discarding the entire inference work. The user clarified afterwards that only the fill-inference part should have been removed; border + icon inference was wanted to stay. The work was reconstructed from conversation history and the fill role specifically excluded. Lesson: when a user says "revert it back" after a partial-success demo, ask which part — don't assume full revert.
+
+7. **Group header trimmed** ([code.js:2165–2179](packages/figma-bridge-plugin/code.js)): per user feedback after the rebuild, `_buildGroupHeader` no longer renders the leading dot or the trailing count chip. Only the uppercase label remains. The `count` parameter is kept on the signature for back-compat but ignored (`void count`), so the spacing showcase callsite that still passes a single argument is unaffected.
+
+**Visual verification (user-confirmed):**
+- Bridge plugin reloaded in Figma Desktop, showcase rebuilt against the active file.
+- Group headers render as plain uppercase labels (no dot, no count).
+- Bg+fg+bd+ic rows visible where the DS naming supports them; bare bg+fg rows where it doesn't.
+- No `fl` lines appear (no pair has explicit `pair.fill` in the active config).
+- Pre-existing radius-16 / spacing-6 binding warnings unchanged. New informational `1.5px` border-weight warnings are from the explicit-border swatch path on rows that gained an inferred border; cosmetic, not blocking.
+
+**Follow-up:**
+- Branch is ready to merge after external code review. Reviewer prompt has been provided to the user.
+
+---
+
 ### [2026-05-09 — semantic colors showcase redesign (shipped on branch)]
 
 **Active branch:** `semantics-showcase-redesign` (off `main` at commit `634730a`). Not yet merged.

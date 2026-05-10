@@ -2170,25 +2170,12 @@ async function _buildShowcase(opts) {
     row.counterAxisAlignItems = 'CENTER';
     row.fills = [_paint(_RC.surfaceVariant, _V.surfaceVariant)];
 
-    if (typeof count === 'number') {
-      const dot = figma.createFrame();
-      dot.name = 'Group Dot';
-      dot.layoutMode = 'NONE';
-      dot.resize(6, 6);
-      dot.cornerRadius = 9999;
-      dot.fills = [_paint(_RC.brandVariant, _V.brandVariant)];
-      row.appendChild(dot);
-    }
-
     const t = _tDS((label || 'Other').toUpperCase(), 11, _subColor, true, _V.textSub);
     row.appendChild(t);
     t.layoutSizingHorizontal = 'FILL';
 
-    if (typeof count === 'number') {
-      const c = _tDS('· ' + count, 11, _subColor, false, _V.textSub);
-      c.name = 'Group Count';
-      row.appendChild(c);
-    }
+    // count arg accepted for back-compat; neither dot nor count is rendered.
+    void count;
 
     return row;
   }
@@ -3362,18 +3349,82 @@ async function _buildShowcase(opts) {
         Array.isArray(opts.DS.color.semantics.pairs)
       ) ? opts.DS.color.semantics.pairs : [];
 
-      if (_configSemanticPairs.length) {
-        // Resolve a config token reference to { rgb, varRef }. Supports the
-        // optional `border` / `icon` / `fill` keys on a pair entry.
-        function _resolveSemRef(ref) {
-          if (!ref) return null;
-          var v = varByName[ref] || null;
-          if (!v) return null;
-          var raw = resolveVarValue(v);
-          if (!raw || !('r' in raw)) return null;
-          return { rgb: { r: raw.r, g: raw.g, b: raw.b }, varRef: v };
+      // Resolve a token reference to { rgb, varRef }. Supports the optional
+      // border / icon / fill keys on a pair entry, or any path the inference
+      // helper proposes. Returns null when the ref is empty or unresolvable.
+      function _resolveSemRef(ref) {
+        if (!ref) return null;
+        var v = varByName[ref] || null;
+        if (!v) return null;
+        var raw = resolveVarValue(v);
+        if (!raw || !('r' in raw)) return null;
+        return { rgb: { r: raw.r, g: raw.g, b: raw.b }, varRef: v };
+      }
+
+      // ── DS-agnostic pairing inference (border + icon only) ────────────────
+      // Mirrors the segment-substitution pattern used by _findFgPair (which
+      // discovers the fg companion for a bg by trying `on-<seg>` variants).
+      // Generalized here for border / icon companions, with multiple
+      // naming-convention targets per role and optional suffix-strip fallback.
+      //
+      // Fill is intentionally NOT inferred — auto-rendering a strong fill
+      // companion alongside the bg+fg pair was visually noisy and conflated
+      // the surface preview with a separate role. Explicit pair.fill in the
+      // user's config is still honored downstream; this helper just doesn't
+      // synthesize one when missing.
+      //
+      // Pure: reads varByName, returns string paths or ''. Never throws,
+      // never mutates inputs, never touches Figma state. Showcase-only.
+      function _inferSemPairExtras(bgName, fgName, vbn) {
+        var FAMILY_RE    = /^(?:bg|surface|background|base|page|fill)$/i;
+        var FG_FAMILY_RE = /^(?:text|fg|foreground)$/i;
+
+        function _trySubstitute(srcName, fromRe, toName) {
+          if (!srcName) return '';
+          var parts = String(srcName).split('/');
+          for (var i = parts.length - 1; i >= 0; i--) {
+            if (!fromRe.test(parts[i])) continue;
+            var cand = parts.slice();
+            cand[i] = toName;
+            var nm = cand.join('/');
+            if (vbn[nm]) return nm;
+          }
+          return '';
+        }
+        function _tryWithSuffixStrip(srcName, fromRe, toName) {
+          var direct = _trySubstitute(srcName, fromRe, toName);
+          if (direct) return direct;
+          if (!srcName) return '';
+          var parts = String(srcName).split('/');
+          var leaf = parts[parts.length - 1] || '';
+          var base = leaf.replace(/-(?:subtle|variant|strong)$/, '');
+          if (!base || base === leaf) return '';
+          var stripped = parts.slice(0, -1).concat([base]).join('/');
+          return _trySubstitute(stripped, fromRe, toName);
         }
 
+        var borderRef = '';
+        var borderTargets = ['border', 'outline', 'stroke'];
+        for (var bt = 0; bt < borderTargets.length && !borderRef; bt++) {
+          borderRef = _tryWithSuffixStrip(bgName, FAMILY_RE, borderTargets[bt]);
+        }
+
+        var iconRef = '';
+        var iconTargets = ['icon', 'graphic', 'symbol'];
+        for (var it = 0; it < iconTargets.length && !iconRef; it++) {
+          iconRef = _tryWithSuffixStrip(bgName, FAMILY_RE, iconTargets[it]);
+        }
+        if (!iconRef && fgName) {
+          for (var it2 = 0; it2 < iconTargets.length && !iconRef; it2++) {
+            iconRef = _tryWithSuffixStrip(fgName, FG_FAMILY_RE, iconTargets[it2]);
+          }
+        }
+
+        // fillRef is intentionally always empty — see comment above.
+        return { borderRef: borderRef, iconRef: iconRef, fillRef: '' };
+      }
+
+      if (_configSemanticPairs.length) {
         // Group label heuristic — strip subtle/variant/strong suffix and
         // collapse default/subtle/muted into "Neutral".
         function _semGroupLabel(bgRef) {
@@ -3420,8 +3471,17 @@ async function _buildShowcase(opts) {
             if (!bgRaw || !fgRaw || !('r' in bgRaw) || !('r' in fgRaw)) continue;
             const bgRGB = { r: bgRaw.r, g: bgRaw.g, b: bgRaw.b };
             const fgRGB = { r: fgRaw.r, g: fgRaw.g, b: fgRaw.b };
-            const bdInfo = _resolveSemRef(pair.border);
-            const icInfo = _resolveSemRef(pair.icon);
+
+            // Explicit-wins for border/icon: a user-set pair.border/pair.icon
+            // short-circuits inference. Empty/missing keys fall through to
+            // the DS-agnostic helper. pair.fill is honored as-is — this
+            // helper does not infer fill (visual-noise rationale in helper).
+            const _extras    = _inferSemPairExtras(pair.bg, pair.text, varByName);
+            const _borderRef = pair.border || _extras.borderRef;
+            const _iconRef   = pair.icon   || _extras.iconRef;
+
+            const bdInfo = _resolveSemRef(_borderRef);
+            const icInfo = _resolveSemRef(_iconRef);
             const flInfo = _resolveSemRef(pair.fill);
 
             const bgLabel = _tokenLabel(pair.bg);
@@ -3436,9 +3496,9 @@ async function _buildShowcase(opts) {
                 roleNames: {
                   bg:     bgLabel,
                   fg:     fgLabel,
-                  border: pair.border ? _tokenLabel(pair.border) : '',
-                  icon:   pair.icon   ? _tokenLabel(pair.icon)   : '',
-                  fill:   pair.fill   ? _tokenLabel(pair.fill)   : ''
+                  border: _borderRef ? _tokenLabel(_borderRef) : '',
+                  icon:   _iconRef   ? _tokenLabel(_iconRef)   : '',
+                  fill:   pair.fill  ? _tokenLabel(pair.fill)  : ''
                 },
                 borderRGB: bdInfo ? bdInfo.rgb    : null,
                 borderVar: bdInfo ? bdInfo.varRef : null,
@@ -3609,9 +3669,26 @@ async function _buildShowcase(opts) {
             })();
             var pairingNote = fgPairName ? ('Paired with ' + _tokenLabel(fgPairName) + '.') : null;
             var rowDesc = (desc && pairingNote) ? (desc + ' ' + pairingNote) : (pairingNote || desc);
+
+            // Symmetric inference for the legacy branch: a DS without a
+            // config-side pairs list still gets bd/ic lines when the
+            // companion tokens exist by naming convention. No fill inferred.
+            var _legacyExtras = _inferSemPairExtras(v.name, fgPairName || '', varByName);
+            var _bdLeg = _resolveSemRef(_legacyExtras.borderRef);
+            var _icLeg = _resolveSemRef(_legacyExtras.iconRef);
+
             const row = _buildSemColorRow(tokenLabel, rowDesc, bgRGB, effectiveFg, v, {
               fgVar: fgVar, hasPairing: hasPairing, previewText: tokenLeaf,
-              roleNames: { bg: tokenLabel, fg: fgPairName ? _tokenLabel(fgPairName) : '' }
+              roleNames: {
+                bg:     tokenLabel,
+                fg:     fgPairName ? _tokenLabel(fgPairName) : '',
+                border: _legacyExtras.borderRef ? _tokenLabel(_legacyExtras.borderRef) : '',
+                icon:   _legacyExtras.iconRef   ? _tokenLabel(_legacyExtras.iconRef)   : ''
+              },
+              borderRGB: _bdLeg ? _bdLeg.rgb    : null,
+              borderVar: _bdLeg ? _bdLeg.varRef : null,
+              iconRGB:   _icLeg ? _icLeg.rgb    : null,
+              iconVar:   _icLeg ? _icLeg.varRef : null
             });
             if (hasPairing) bgPairedRows.push(row);
             else bgUnpairedRows.push(row);

@@ -4,6 +4,31 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-10] Semantic Colors showcase infers border + icon companions DS-agnostically; fill is NOT inferred
+
+**Decision:** When the showcase renders a Semantic Colors row, it computes the **border** and **icon** companions for each surface by walking the DS's variable namespace with the same kind of segment-substitution pattern that `_findFgPair` ([code.js:3456](packages/figma-bridge-plugin/code.js)) already uses to discover the foreground companion. A new helper `_inferSemPairExtras(bgName, fgName, varByName)` inside `_buildShowcase` tries each role's plausible naming targets in order — `border|outline|stroke` for borders, `icon|graphic|symbol` for icons — and falls back through `-subtle|-variant|-strong` suffix stripping the same way the existing fg lookup does. The first candidate that resolves in `varByName` wins; nothing is invented. Both the config-pairs branch and the legacy non-config bg-row branch call the helper.
+
+**Fill is intentionally NOT inferred.** A first iteration auto-rendered a strong-fill companion alongside the bg+fg pair (e.g. showing both `bg/danger` and `fill/danger` in the same row), which proved visually noisy and conflated the surface preview with a separate role. The helper now returns `fillRef: ''` unconditionally. Explicit `pair.fill` set in a user's config still flows through the existing `_resolveSemRef(pair.fill)` path and renders downstream — only the auto-inference of fill is suppressed.
+
+**Why:** Figlets MCP is open source. Different consumers ship different design systems with different naming conventions (Material 3, role-based, custom). Hardcoding a specific token mapping would only serve one DS shape. The plugin already had the right machinery for fg discovery; generalizing it to border + icon lets the showcase show those companions bundled together for any DS that follows reasonable naming, without asking the user to enumerate the kit in their config. Fill stayed out because in practice fill duplicates information already shown when bg is itself a fill, and feels redundant alongside a `bg/<role>` surface.
+
+**Contracts (enforced by code review):**
+- **Explicit-wins for border/icon**: a pair entry that already specifies `border` / `icon` short-circuits inference for that key (`pair.border || _extras.borderRef`).
+- **Fill never inferred**: helper returns `fillRef: ''` unconditionally. Explicit `pair.fill` is honored elsewhere via the unchanged `_resolveSemRef(pair.fill)` resolution.
+- **No Figma mutation**: the helper is read-only against `varByName` and returns string paths. No `figma.variables.create*`, `setBoundVariable`, `setVariableScopes` are introduced. Pre/post mutation-line hash is identical (`bd48acf72529bc6caf11e9a41404ec67`).
+- **No DS config mutation, no new MCP tool, no server change**.
+- **Helper is private to `_buildShowcase`**: not exported, not on `window`/`figma`, not in the bridge polling protocol.
+- **No effect outside the Semantic Colors render**: QA audit, doc build, scope helpers, primitives update, reset, and apply-DS-setup are untouched.
+- **No contrast thresholding**: inference returns whatever the DS names produce. The DS's own tokens are the design contract; the existing WCAG/APCA badge on the bg+fg pair is the readability signal.
+
+**Consequence:**
+- Designers who follow common naming conventions see border + icon lines in the pair box and matching visual treatment in the preview swatch with zero config edits. DSes that don't expose those tokens degrade gracefully to `bg + fg` only.
+- The `fl` line and fill swatch treatment only appear when the user explicitly authored `pair.fill` in their config, which is the documented opt-in for that role.
+- The previous "Border has a default-border fallback" note refers to the visual swatch outline (still falls back to `_RC.outlineSubtle`), not to the pair-box `bd` line. The `bd` line only appears when something actually resolves.
+- Re-enabling fill inference later is a one-line change to add `'fill'` as a target.
+
+---
+
 ## [2026-05-09] Semantic Colors showcase table adopts Option A layout, bound to DS tokens
 
 **Decision:** The semantic-colors table inside `_buildShowcase` Colors section is being redesigned to match Option A from the Claude Design handoff `kxkMQhWCvpr-62R4Tm72Yw` (file `Semantic Colors Riffs.html`, component `Option A.jsx`). Per row: a left **pair box** stacks one line per role (bg, fg, plus bd / ic / fill when present) where each line is `swatch dot + 2-letter role tag + full token name`; a middle **preview swatch** renders the bg color, applies the border token as an outline if defined, renders the icon token as a glyph if defined, and overlays the Lc + ratio diagnostics inside the swatch in the fg color; a right **WCAG pill**. Groups (Brand, Danger, etc.) get a header row with a small dot + label + count. Option A is the only riff that was iterated in the source chat (extras + toolbar removal) and the only one that surfaces every role of a multi-token pair plus its grouping in one row.

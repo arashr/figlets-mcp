@@ -10,7 +10,8 @@
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev -w @figlets/mcp-server",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "node tests/run-tests.js"
+    "test": "node tests/run-tests.js",
+    "figlets:check-setup-gaps": "node packages/figlets-mcp-server/src/cli/check-setup-gaps.js"
   },
   "engines": {
     "node": ">=10"

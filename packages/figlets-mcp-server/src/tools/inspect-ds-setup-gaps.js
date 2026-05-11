@@ -1,7 +1,8 @@
 const fs = require("fs");
 const path = require("path");
-const { getActiveFileKey, getActiveFilePaths } = require("../utils/paths.js");
+const { getActiveFileKey, getActiveFileConfigPath, getActiveFilePaths } = require("../utils/paths.js");
 const { loadFigmaDataSource } = require("../bridges/figma-data-source.js");
+const { computePlannedAliases, loadDsConfigSafe } = require("../utils/accessible-repair-aliases.js");
 
 const inspectDsSetupGapsTool = {
   name: "inspect_ds_setup_gaps",
@@ -170,6 +171,27 @@ function handleInspectDsSetupGaps(input = {}) {
   }
 
   const result = inspectDsSetupGapsFromFigmaData(dataSource.figmaData);
+
+  // Compute the per-mode primitive aliases the designer would actually get if
+  // they approved the proposed repair. This is what `apply_ds_setup_repairs`
+  // will use verbatim, so what the designer sees here matches what gets
+  // written to Figma. Falls back silently when the snapshot or config don't
+  // support the picker (apply will recompute or copy-values).
+  const configPath = input.config_path ? path.resolve(input.config_path) : getActiveFileConfigPath();
+  const existingDs = loadDsConfigSafe(configPath);
+  const answers = (input.answers && typeof input.answers === "object") ? input.answers : {};
+  const algoOpt = { algorithm: answers.algorithm === "apca" ? "apca" : "wcag" };
+
+  for (const gap of result.semanticGaps) {
+    if (gap.status !== "proposed" || !gap.source) continue;
+    const repair = { bg: gap.bg, name: gap.recommended, source: gap.source };
+    const planned = computePlannedAliases(repair, dataSource.figmaData, existingDs, algoOpt);
+    if (!planned) continue;
+    gap.plannedAliases = planned.aliases;
+    gap.plannedAlgorithm = planned.algorithm;
+    gap.plannedUpgrades = planned.upgraded;
+  }
+
   return {
     ...result,
     source: {
@@ -178,7 +200,7 @@ function handleInspectDsSetupGaps(input = {}) {
       path: dataSource.meta && dataSource.meta.path ? dataSource.meta.path : null,
     },
     message: result.summary.semanticGapCount
-      ? "Setup gaps found. Review with the designer before applying repairs."
+      ? "Setup gaps found. Review with the designer; pass each gap's plannedAliases through to apply_ds_setup_repairs to keep approve-then-apply consistent."
       : "No setup repair gaps found in the synced Figma snapshot.",
   };
 }

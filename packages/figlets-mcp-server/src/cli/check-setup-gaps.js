@@ -103,10 +103,19 @@ function _formatRefreshChange(change) {
 }
 
 function _formatGap(gap) {
-  if (gap.status === "proposed") {
-    return `Missing foreground for "${gap.bg}" → would add "${gap.recommended}" (source: ${gap.source})`;
+  if (gap.status !== "proposed") {
+    return [`Missing foreground for "${gap.bg}" → unresolved (no matching source token found)`];
   }
-  return `Missing foreground for "${gap.bg}" → unresolved (no matching source token found)`;
+  const lines = [`Missing foreground for "${gap.bg}" → would add "${gap.recommended}"`];
+  if (gap.plannedAliases) {
+    const parts = [];
+    const upgraded = gap.plannedUpgrades || {};
+    if (gap.plannedAliases.Light) parts.push(`Light → ${gap.plannedAliases.Light}${upgraded.Light ? " (upgraded for contrast)" : ""}`);
+    if (gap.plannedAliases.Dark)  parts.push(`Dark → ${gap.plannedAliases.Dark}${upgraded.Dark ? " (upgraded for contrast)" : ""}`);
+    if (parts.length) lines.push(`    aliases: ${parts.join(", ")}`);
+  }
+  lines.push(`    source: ${gap.source}`);
+  return lines;
 }
 
 function formatCheckReport(state) {
@@ -187,7 +196,11 @@ function formatCheckReport(state) {
       const unresolved = gaps.summary ? gaps.summary.unresolvedCount : 0;
       lines.push(`Step 3/3 Setup gaps: ${total} found (${proposed} ready to repair, ${unresolved} need a designer decision)`);
       const preview = gaps.semanticGaps.slice(0, 8);
-      for (const gap of preview) lines.push(`  - ${_formatGap(gap)}`);
+      for (const gap of preview) {
+        const gapLines = _formatGap(gap);
+        lines.push(`  - ${gapLines[0]}`);
+        for (let i = 1; i < gapLines.length; i++) lines.push(`  ${gapLines[i]}`);
+      }
       if (gaps.semanticGaps.length > preview.length) {
         lines.push(`  ...and ${gaps.semanticGaps.length - preview.length} more.`);
       }

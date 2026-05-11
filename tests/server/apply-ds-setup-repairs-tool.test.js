@@ -23,6 +23,36 @@ module.exports = (async () => {
     [{ bg: "color/surface/info-variant", name: "color/on-surface/info-variant", source: "color/on-surface/info" }]
   );
 
+  // Regression — a repair missing `bg` must be dropped by the normalizer.
+  // Otherwise an agent could approve `{ name, source }` and Figma would still
+  // create an orphan semantic with no paired background.
+  assert.deepStrictEqual(
+    _normalizeRepairs([
+      { recommended: "color/on-surface/danger-variant", source: "color/on-surface/danger" },
+      { bg: "", name: "color/on-surface/x", source: "color/on-surface/y" },
+    ]),
+    []
+  );
+
+  // Designer-approved aliases must round-trip through the normalizer so the
+  // bridge sees exactly what was previewed.
+  assert.deepStrictEqual(
+    _normalizeRepairs([
+      {
+        bg: "color/surface/info-variant",
+        recommended: "color/on-surface/info-variant",
+        source: "color/on-surface/info",
+        aliases: { Light: "color/blue/700", Dark: "color/blue/200", Empty: "" },
+      },
+    ]),
+    [{
+      bg: "color/surface/info-variant",
+      name: "color/on-surface/info-variant",
+      source: "color/on-surface/info",
+      aliases: { Light: "color/blue/700", Dark: "color/blue/200" },
+    }]
+  );
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-setup-repairs-"));
   const configPath = path.join(tmp, "design-system.config.js");
   fs.writeFileSync(configPath, `const DS = {

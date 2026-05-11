@@ -5762,26 +5762,32 @@ async function _applyDsSetupRepairs(payload) {
     var repair = repairs[ri] || {};
     var name = repair.name || repair.recommended || '';
     var sourceName = repair.source || '';
-    if (!name || !sourceName) {
-      unresolved.push({ name: name, source: sourceName, reason: 'Repair must include name/recommended and source.' });
+    var bgName = repair.bg || '';
+    if (!name || !sourceName || !bgName) {
+      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Repair must include bg, name/recommended, and source.' });
       continue;
     }
     if (byName[name]) {
       skipped.push({ name: name, reason: 'Variable already exists.' });
       continue;
     }
+    var bgVarLookup = byName[bgName];
+    if (!bgVarLookup) {
+      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'BG variable not found in current Figma file.' });
+      continue;
+    }
     var source = byName[sourceName];
     if (!source) {
-      unresolved.push({ name: name, source: sourceName, reason: 'Source variable not found.' });
+      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source variable not found.' });
       continue;
     }
     if (source.resolvedType !== 'COLOR') {
-      unresolved.push({ name: name, source: sourceName, reason: 'Source variable is not COLOR.' });
+      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source variable is not COLOR.' });
       continue;
     }
     var coll = collByVarId[source.id];
     if (!coll) {
-      unresolved.push({ name: name, source: sourceName, reason: 'Source collection not found.' });
+      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source collection not found.' });
       continue;
     }
 

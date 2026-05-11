@@ -4,6 +4,21 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-11] Repair apply trusts designer-approved plannedAliases; refresh refuses to guess brand step
+
+**Decision (review follow-up):** Four hardening changes to the setup-repair flow, all addressing review feedback on commit 73a195f.
+
+1. **Approve-then-apply consistency.** `inspect_ds_setup_gaps` now computes `plannedAliases` for each proposed gap by calling the same picker as apply (extracted to `packages/figlets-mcp-server/src/utils/accessible-repair-aliases.js`). The CLI report renders the per-mode aliases the designer would actually get, with an "(upgraded for contrast)" flag when the picker walked the ramp. `apply_ds_setup_repairs` forwards the caller-supplied `repair.aliases` verbatim and only falls back to recomputing when no preview was passed. The designer sees exactly what gets written; the picker has a single owner.
+2. **No orphan repairs.** `apply_ds_setup_repairs.inputSchema` now requires `bg` alongside `source`, `_normalizeRepairs` drops repairs without a `bg`, and the bridge handler verifies `bg` still exists in Figma before creating the FG companion. Previously an agent could send `{ name, source }` and the plugin would create a semantic variable with no paired background; config-update silently skipped it.
+3. **Mode-aware alias resolution in refresh.** `refresh-ds-config-from-figma.js`'s `_resolveValue` now propagates the source mode name across `VARIABLE_ALIAS` hops and selects the target's matching mode by name, instead of `Object.keys(values)[0]`. Without this, a primitive aliasing a multi-mode variable would sync the wrong RGB whenever JSON key order differed from collection order.
+4. **No implicit brand step.** `refresh-ds-config-from-figma.js` no longer defaults to `step=500` when `brand.step` is missing. It skips the entry with a "no explicit anchor step" reason. This aligns with the existing auto-anchor decision (a brand's natural step is OKLab-L-derived, not a scale midpoint) and avoids the wrong-hex hazard on 400/600 anchors or 0–1000 scales.
+
+**Why:** The previous flow had a confirmation-vs-mutation drift (designers approved "copy from source X", apply might pick a different step), accepted incomplete repair specs, and used JSON-order- or midpoint-based shortcuts that were correct in the test fixture but unsafe in the wild.
+
+**Consequence:** Existing flows continue to work — bridge fallback to copy-values, the normalizer still accepts legacy `{ recommended, source }` shape augmented with the now-required `bg`. New regression tests in `tests/server/refresh-ds-config-from-figma-tool.test.js` (no-step skip + multi-mode alias safety), `tests/server/inspect-ds-setup-gaps-planned-aliases.test.js` (planned-aliases surfacing), and `tests/server/apply-ds-setup-repairs-tool.test.js` (orphan-bg guard, approved-aliases round-trip).
+
+---
+
 ## [2026-05-11] Repair apply reuses validateSemanticPairs to pick accessible per-mode aliases
 
 **Decision:** `apply_ds_setup_repairs` no longer hands raw `source.valuesByMode` to the bridge plugin. The MCP server now precomputes per-mode primitive aliases for each approved repair by feeding a one-row pair into the existing `validateSemanticPairs` (the same code path the setup flow uses), and forwards `aliases: { Light: 'color/<ramp>/<step>', Dark: ... }` on each repair. The plugin sets each mode's value to a `VARIABLE_ALIAS` pointing at the named primitive. When the snapshot or DS config is missing/insufficient (no ramps, source not aliased to a primitive, etc.), the server omits `aliases` and the plugin falls back to its prior copy-values behavior — preserving the older repair flow exactly.

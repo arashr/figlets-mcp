@@ -4,6 +4,41 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-11 — Setup-repair hardening from review feedback]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** Code review on commit 73a195f flagged four issues. All are addressed in this change set without changing the existing approve-then-apply intent.
+
+**Changes:**
+
+1. **Shared picker.** Picker logic moved to `packages/figlets-mcp-server/src/utils/accessible-repair-aliases.js` (`computePlannedAliases`, `resolveRepairRefs`, `loadActiveSnapshot`, `loadDsConfigSafe`). `apply-ds-setup-repairs.js` and `inspect-ds-setup-gaps.js` both call it — one owner.
+2. **`plannedAliases` on inspector output.** Each proposed gap now carries `plannedAliases: { Light, Dark }`, `plannedAlgorithm`, and `plannedUpgrades: { Light: bool, Dark: bool }`. CLI report renders them with an "(upgraded for contrast)" flag where applicable. Failure is silent (no plannedAliases key) so the apply tool can still fall back.
+3. **Apply trusts approved aliases.** `apply_ds_setup_repairs` now forwards `repair.aliases` verbatim when provided. Recomputation runs only when aliases were not passed. The schema documents the round-trip contract.
+4. **Orphan-bg guard.** `bg` is required in the schema, the normalizer drops repairs without it, and the bridge handler errors with `BG variable not found in current Figma file.` if the snapshot/poll is stale.
+5. **Mode propagation in refresh.** `_resolveValue` now carries the source mode name across alias hops and resolves the target's matching mode by name. Falls back to the only mode when target is single-mode.
+6. **No implicit brand step.** Brand entries without an explicit `step` are skipped with a clear `reason`. Aligns with the existing auto-anchor rule (memory: "Auto-anchor brand hex to its natural step").
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/utils/accessible-repair-aliases.js` (new — shared picker)
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js` (schema requires `bg`; normalizer drops bg-less; forwards `repair.aliases`; uses shared picker)
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js` (surfaces `plannedAliases`)
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (renders `plannedAliases`)
+- `packages/figlets-mcp-server/src/tools/refresh-ds-config-from-figma.js` (mode-aware resolve; explicit step required)
+- `packages/figma-bridge-plugin/code.js` (require `bg`, verify it exists pre-create)
+- `tests/server/refresh-ds-config-from-figma-tool.test.js` (added brand fixture step; new no-step + multi-mode regression tests)
+- `tests/server/apply-ds-setup-repairs-tool.test.js` (orphan-bg + approved-aliases round-trip)
+- `tests/server/inspect-ds-setup-gaps-planned-aliases.test.js` (new)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 51/51 passed.
+- `node --check packages/figma-bridge-plugin/code.js`: passed.
+
+---
+
 ### [2026-05-11 — Repair apply picks accessible aliases via validateSemanticPairs]
 
 **Active branch:** `codex/designer-safe-setup-repair-cli` (off `main` at `20cc5fd`).

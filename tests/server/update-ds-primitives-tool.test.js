@@ -30,7 +30,9 @@ module.exports = (async () => {
   assert.strictEqual(updateDsPrimitivesTool.name, "update_ds_primitives");
   assert.ok(updateDsPrimitivesTool.description.length > 0);
   assert.ok(updateDsPrimitivesTool.description.includes("semantic aliases"), "tool description should mention semantic alias updates");
+  assert.ok(updateDsPrimitivesTool.description.includes("dry_run"), "tool description should mention dry-run confirmation");
   assert.ok(updateDsPrimitivesTool.inputSchema.properties.create_missing, "tool schema should expose create_missing");
+  assert.ok(updateDsPrimitivesTool.inputSchema.properties.dry_run, "tool schema should expose dry_run");
 
   // Missing config_path → clear error
   {
@@ -54,8 +56,9 @@ module.exports = (async () => {
               collection: "1. Primitives",
               categories: ["color"],
               unknownCategories: [],
-              report: { color: { entries: 1, updated: 1, unchanged: 0, unmatched: [], typeMismatch: [] } },
-              message: "color: 1 updated, 0 unchanged"
+              report: { color: { dryRun: true, entries: 1, updated: 0, wouldUpdate: 1, unchanged: 0, unmatched: [], typeMismatch: [] } },
+              dryRun: true,
+              message: "color: 0 updated, 0 unchanged, 1 would update"
             }
           }));
         });
@@ -70,16 +73,19 @@ module.exports = (async () => {
     process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
 
     try {
-      const result = await handleUpdateDsPrimitives({ config_path: configPath, categories: ["color"], create_missing: true });
+      const result = await handleUpdateDsPrimitives({ config_path: configPath, categories: ["color"], create_missing: true, dry_run: true });
       assert.ok(!result.error, "should succeed");
+      assert.strictEqual(result.dryRun, true, "should expose dry-run result flag");
       assert.deepStrictEqual(result.categories, ["color"]);
       assert.strictEqual(result.collection, "1. Primitives");
-      assert.strictEqual(result.report.color.updated, 1);
+      assert.strictEqual(result.report.color.updated, 0);
+      assert.strictEqual(result.report.color.wouldUpdate, 1);
 
       // Verify what the tool actually sent to the bridge
       assert.ok(receivedBody && receivedBody.DS, "should send DS object");
       assert.deepStrictEqual(receivedBody.categories, ["color"], "should forward categories list");
       assert.strictEqual(receivedBody.createMissing, true, "should forward create_missing as createMissing");
+      assert.strictEqual(receivedBody.dryRun, true, "should forward dry_run as dryRun");
       assert.ok(receivedBody.DS.color && Array.isArray(receivedBody.DS.color.ramps), "DS should include color.ramps");
     } finally {
       await new Promise(resolve => mockServer.close(resolve));

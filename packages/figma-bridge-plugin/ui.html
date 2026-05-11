@@ -419,6 +419,7 @@
     'build-doc',
     'qa-audit',
     'update-primitives',
+    'setup-repairs',
     'reset-figlets-file'
   ];
 
@@ -685,6 +686,13 @@
           document.getElementById('substatus').innerText = 'Overwriting primitive values in Figma.';
           _appendLog('Received command: update_ds_primitives.');
           parent.postMessage({ pluginMessage: { type: 'update-primitives', data: data.data } }, '*');
+        } else if (data.command === 'apply-setup-repairs') {
+          isExtracting = true;
+          _armWatchdog('Setup repairs', 60000);
+          document.getElementById('status').innerText = 'Applying setup repairs...';
+          document.getElementById('substatus').innerText = 'Creating approved semantic variables.';
+          _appendLog('Received command: apply_ds_setup_repairs.');
+          parent.postMessage({ pluginMessage: { type: 'apply-setup-repairs', data: data.data } }, '*');
         } else if (data.command === 'reset-figlets-file') {
           isExtracting = true;
           _armWatchdog('Reset', 60000);
@@ -817,6 +825,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
         _appendLog('Failed to send primitives update result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'setup-repairs-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch('http://localhost:1337/sync-setup-repairs?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Repair failed.' : 'Setup repairs applied.';
+        _appendLog(msg.data.error ? 'Setup repair failed in plugin.' : 'Setup repair result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send setup repair result to receiver.');
       }
       isExtracting = false;
       poll();

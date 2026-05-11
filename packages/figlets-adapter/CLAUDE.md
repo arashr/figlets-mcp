@@ -22,6 +22,9 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `audit_tokens` | Reports unaliased values, duplicate tokens, and naming violations in the snapshot | When the user wants a token health check |
 | `qa_binding_audit` | Audits the current Figma selection/page for raw unbound layer properties and optional safe binding fixes | When the user wants QA on designed frames/components, especially before documentation |
 | `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
+| `refresh_ds_config_from_figma` | Refreshes existing config entries from the synced Figma snapshot without creating new config tokens or mutating Figma | Before config-backed setup/update/showcase work when Figma may have changed since the config was written |
+| `inspect_ds_setup_gaps` | Reports setup repair gaps from the synced Figma snapshot without mutating Figma or config | Before asking the designer to approve additive setup repairs, such as missing semantic foreground companions |
+| `apply_ds_setup_repairs` | Applies only designer-approved setup repairs by creating explicit missing semantic variables and updating the file-scoped config | After `inspect_ds_setup_gaps` and explicit designer confirmation |
 | `create_ds_config_from_design_md` | Creates a starter `design-system.config.js` from an existing Google DESIGN.md file | At the start of setup when the designer already has DESIGN.md and wants to skip answered intake questions |
 | `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, contrast validation (APCA or WCAG), spacing scale | After intake and before building collections — validates everything before touching Figma |
 | `apply_ds_setup` | Creates all 5 variable collections in Figma from the prepared config (Primitives, Color, Typography, Spacing, Elevation) | After `prepare_ds_config` confirms `readyToBuild === true` |
@@ -107,12 +110,15 @@ Use this when only some primitive values changed — for example, the designer s
 
 When the designer flips `DS.color.contrastAlgorithm`, expect `failCount` to change — APCA and WCAG do not always agree on which pairs pass. Surface the difference plainly: "switching to APCA cleared 2 previously failing pairs" or "switching to WCAG flagged 3 pairs that passed APCA". The choice itself is not a code change in Figma; only the readiness verdict and the showcase render reflect it.
 
-1. Confirm the user has already run `prepare_ds_config` on the updated config (so `DS.color.ramps` reflects the new values).
+1. Run `sync_figma_data`, then `refresh_ds_config_from_figma` to update existing config entries from current Figma values without creating new config tokens or mutating Figma.
 2. Ask the user to keep the Figlets Bridge plugin open in Figma Desktop.
-3. Ask which categories they want updated. Today: `color`, `spacing`. If they don't say, default to all supported categories.
-4. Call `update_ds_primitives` with `config_path` and optional `categories`.
-5. Report per-category counts: updated, unchanged, missing (variables in the config that don't exist in Figma — usually means the scale grew and a fresh `apply_ds_setup` is needed for those).
-6. Do not call this for first-time creation — use `apply_ds_setup` for that. Do not call this to add new categories of primitives that don't exist in Figma yet.
+3. Run `inspect_ds_setup_gaps` to report additive repair candidates from current Figma state without mutating Figma or config.
+4. Ask which categories they want updated. Today: `color`, `spacing`, `color-semantics`. If they don't say, default to all supported categories.
+5. For setup repair gaps, ask the designer which proposed repairs to apply, then call `apply_ds_setup_repairs` with only those approved repairs.
+6. For config-backed value updates, run `prepare_ds_config` and call `update_ds_primitives` first with `dry_run: true` and the intended `create_missing` setting. Report `wouldCreateNames`, `wouldCreate`, `wouldUpdate`, `unmatched`, and substitutions, then ask the designer what to apply.
+7. Only after confirmation, call `update_ds_primitives` again with `dry_run: false` and the designer-approved categories/options.
+8. Report per-category counts: updated, unchanged, created, missing, substituted.
+9. Do not call this for first-time creation — use `apply_ds_setup` for that. Do not call this to add new categories of primitives that don't exist in Figma yet without a confirmed repair step.
 
 ### Document a component
 The Figma spec sheet is for **humans**; the markdown handover is for **agents**. The plugin renders structure and tangible data (variants, sizing, anatomy, token names). The agent must supply the human-readable content — never rely on generic defaults.

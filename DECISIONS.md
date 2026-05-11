@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-11] Setup repairs use inspect-then-approved-apply
+
+**Decision:** Existing-file setup repairs are split into an explicit config refresh, read-only inspection step, and designer-approved apply step. `refresh_ds_config_from_figma` updates already-existing config entries from the synced Figma snapshot without creating new config tokens and without mutating Figma. `inspect_ds_setup_gaps` reads the synced current Figma snapshot and reports additive semantic repair candidates without requiring a prepared config and without mutating Figma or config. `apply_ds_setup_repairs` accepts only the designer-approved repairs, creates those missing semantic variables by copying aliases from the approved source token, and updates the file-scoped config only for approved pairs that do not conflict with an existing pair for the same background.
+
+**Why:** Designers may add, rename, or intentionally alter variables after the first setup. Figlets should respect current Figma state instead of pushing stale local config back over a living file. The earlier `update_ds_primitives dry_run` boundary is still useful for prepared config-backed value updates, but it cannot inspect a living file whose scoped config is incomplete. A snapshot-based inspector lets Figlets show the exact gaps first, while the apply tool prevents broad "create everything" behavior.
+
+**Consequence:** Showcase remains read-only and diagnostic. It can reveal suspicious pairs or missing companions, but it must not create, update, delete, or hide variables. Setup repair flow is now: `sync_figma_data`, `refresh_ds_config_from_figma`, `inspect_ds_setup_gaps`, designer confirmation, `apply_ds_setup_repairs`, then optionally rebuild showcase as verification. Existing config values stay fresh when Figma is manually edited, but missing/new tokens still require explicit designer approval before they become config or Figma state. Existing config pairs are not rewritten; conflicting proposed pairs are reported instead of silently replacing designer-authored decisions.
+
+**Integrity guardrails:** `refresh_ds_config_from_figma` is intentionally non-creative: it only updates existing config rows/fields with current Figma values, never creates new config tokens, never deletes missing config tokens, and never mutates Figma. `inspect_ds_setup_gaps` is also read-only. `apply_ds_setup_repairs` is the only new mutation path and requires explicit approved repairs; tests cover that inspection leaves config untouched and config is updated only after a successful approved repair response.
+
+---
+
 ## [2026-05-10] Semantic Colors showcase infers border + icon companions DS-agnostically; fill is NOT inferred
 
 **Decision:** When the showcase renders a Semantic Colors row, it computes the **border** and **icon** companions for each surface by walking the DS's variable namespace with the same kind of segment-substitution pattern that `_findFgPair` ([code.js:3456](packages/figma-bridge-plugin/code.js)) already uses to discover the foreground companion. A new helper `_inferSemPairExtras(bgName, fgName, varByName)` inside `_buildShowcase` tries each role's plausible naming targets in order — `border|outline|stroke` for borders, `icon|graphic|symbol` for icons — and falls back through `-subtle|-variant|-strong` suffix stripping the same way the existing fg lookup does. The first candidate that resolves in `varByName` wins; nothing is invented. Both the config-pairs branch and the legacy non-config bg-row branch call the helper.

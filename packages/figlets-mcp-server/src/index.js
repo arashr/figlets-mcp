@@ -11,6 +11,9 @@ const { buildShowcaseTool, handleBuildShowcase } = require("./tools/build-showca
 const { handlePrepareDsConfig } = require("./tools/prepare-ds-config.js");
 const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
 const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require("./tools/update-ds-primitives.js");
+const { inspectDsSetupGapsTool, handleInspectDsSetupGaps } = require("./tools/inspect-ds-setup-gaps.js");
+const { applyDsSetupRepairsTool, handleApplyDsSetupRepairs } = require("./tools/apply-ds-setup-repairs.js");
+const { refreshDsConfigFromFigmaTool, handleRefreshDsConfigFromFigma } = require("./tools/refresh-ds-config-from-figma.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
 const { designMdIntakeTool, handleCreateDsConfigFromDesignMd } = require("./tools/design-md-intake.js");
@@ -204,12 +207,102 @@ server.tool(
   updateDsPrimitivesTool.description,
   {
     config_path: z.string().describe("Absolute path to design-system.config.js (must have been prepared by prepare_ds_config)."),
-    categories: z.array(z.string()).optional().describe('Optional list of primitive categories to update. Supported today: "color", "spacing". Defaults to all supported categories.'),
-    create_missing: z.boolean().optional().describe("When true, create missing primitive variables inside the existing Primitives collection before setting values. Existing variable IDs are preserved.")
+    categories: z.array(z.string()).optional().describe('Optional list of primitive categories to update. Supported today: "color", "spacing", "color-semantics". Defaults to all supported categories.'),
+    create_missing: z.boolean().optional().describe("When true, create missing primitive or semantic variables inside existing collections before setting values. Existing variable IDs are preserved."),
+    dry_run: z.boolean().optional().describe("When true, report variables that would be created or updated but do not mutate Figma. Use before create_missing repairs for designer confirmation."),
+    prune_off_scale: z.boolean().optional().describe("When true, delete primitive color variables whose step number is not in the configured scale."),
+    prune_unused_ramps: z.boolean().optional().describe("When true, delete primitive color variables that belong to ramp folders not present in the current config.")
   },
   async (args) => {
     try {
       const result = await handleUpdateDsPrimitives(args);
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- refresh_ds_config_from_figma ---
+server.tool(
+  refreshDsConfigFromFigmaTool.name,
+  refreshDsConfigFromFigmaTool.description,
+  {
+    config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path. Defaults to the active file config."),
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
+    dry_run: z.boolean().optional().describe("When true, report changes without writing design-system.config.js.")
+  },
+  async (args) => {
+    try {
+      const result = handleRefreshDsConfigFromFigma(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- inspect_ds_setup_gaps ---
+server.tool(
+  inspectDsSetupGapsTool.name,
+  inspectDsSetupGapsTool.description,
+  {
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
+  },
+  async (args) => {
+    try {
+      const result = handleInspectDsSetupGaps(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- apply_ds_setup_repairs ---
+server.tool(
+  applyDsSetupRepairsTool.name,
+  applyDsSetupRepairsTool.description,
+  {
+    repairs: z.array(z.object({
+      bg: z.string().optional(),
+      recommended: z.string().optional(),
+      name: z.string().optional(),
+      source: z.string()
+    })).describe("Designer-approved repairs, usually copied from inspect_ds_setup_gaps semanticGaps."),
+    config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path to update after Figma succeeds. Defaults to the active file config."),
+    update_config: z.boolean().optional().describe("When false, do not update design-system.config.js after applying repairs. Defaults to true.")
+  },
+  async (args) => {
+    try {
+      const result = await handleApplyDsSetupRepairs(args || {});
       if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

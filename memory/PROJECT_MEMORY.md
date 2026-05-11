@@ -4,6 +4,90 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-11 — Setup-gap inspector + approved repair apply path]
+
+**Active branch:** `main`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Decision:** Existing-file semantic repairs now use a true inspect-then-approved-apply flow. `inspect_ds_setup_gaps` reads the synced current Figma snapshot and reports additive setup repair candidates without requiring a prepared config and without mutating Figma or config. `apply_ds_setup_repairs` applies only designer-approved repairs.
+
+**Implementation notes:**
+- `refresh_ds_config_from_figma` refreshes already-existing config entries from the synced Figma snapshot before config-backed work. It updates existing `DS.color.brand[*].hex` from the matching anchor variable, existing `DS.color.ramps[*].steps` rows from matching Figma variables, and existing semantic `Light`/`Dark` alias fields from matching Figma aliases. It does not create config tokens, delete config tokens, invent pairs, or mutate Figma.
+- `update_ds_primitives` still accepts `dry_run` for prepared config-backed updates and reports `wouldCreate`, `wouldCreateNames`, and `wouldUpdate` without calling mutation APIs.
+- `inspect_ds_setup_gaps` detects missing foreground companions for variant-like background tokens from current Figma data. It handles `surface/bg/background` families, preserves common target naming style (`on-surface`, `text`, `fg`, etc.), never infers `fill`, and reports the source token + Light/Dark alias targets that would be copied.
+- `apply_ds_setup_repairs` sends explicit approved repairs to the bridge plugin. The plugin creates only those variables and copies `valuesByMode` from the approved source token in the same Color collection.
+- After Figma succeeds, `apply_ds_setup_repairs` updates the active file-scoped config with approved new pairs when safe. If a config already has a pair for the same `bg` with different `text`, it reports a conflict instead of rewriting or adding a duplicate.
+- Showcase remains read-only and should never be used to repair variables.
+
+**Files changed in this local work:**
+- `packages/figma-bridge-plugin/code.js`
+- `packages/figma-bridge-plugin/src/receiver.js`
+- `packages/figma-bridge-plugin/ui.html`
+- `packages/figlets-mcp-server/src/tools/refresh-ds-config-from-figma.js`
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js`
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js`
+- `packages/figlets-mcp-server/src/tools/update-ds-primitives.js`
+- `packages/figlets-mcp-server/src/index.js`
+- `tests/server/inspect-ds-setup-gaps-tool.test.js`
+- `tests/server/apply-ds-setup-repairs-tool.test.js`
+- `tests/server/update-ds-primitives-tool.test.js`
+- `tests/bridge/update-primitives-dry-run.test.js`
+- `packages/figlets-adapter/AGENTS.md`
+- `packages/figlets-adapter/CLAUDE.md`
+- `DECISIONS.md`
+- `memory/PROJECT_MEMORY.md`
+
+**Verification already run:**
+- `node --check packages/figma-bridge-plugin/code.js` passed.
+- `node --check packages/figma-bridge-plugin/src/receiver.js` passed.
+- `node --check packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js` passed.
+- `node --check packages/figlets-mcp-server/src/tools/update-ds-primitives.js` passed.
+- `node tests/bridge/update-primitives-dry-run.test.js` passed.
+- `node tests/server/inspect-ds-setup-gaps-tool.test.js` passed.
+- `node tests/server/apply-ds-setup-repairs-tool.test.js` passed when allowed to bind its local mock HTTP server.
+- `node tests/server/refresh-ds-config-from-figma-tool.test.js` passed.
+- `node tests/server/update-ds-primitives-tool.test.js` passed when allowed to bind its local mock HTTP server.
+- Added extra integrity tests after designer concern:
+  - `tests/server/refresh-ds-config-from-figma-tool.test.js` now asserts refresh does not create semantic `Light`/`Dark` fields, does not add Figma-only ramp rows, does not add Figma-only semantic pairs, and does not delete configured ramp rows missing from Figma.
+  - `tests/bridge/receiver-lifecycle.test.js` checks `setupRepairsLive` capability reporting.
+  - `tests/integration/setup-repair-flow.test.js` simulates the receiver/plugin apply flow and proves inspect does not update config, then approved apply updates config only after plugin success.
+- Receiver command timeout timers were changed to `unref()` so completed tests/CLI calls do not stay alive waiting for safety timers.
+- `npm test` passed: `47/47`.
+- Plugin forbidden-operator scan still only matched ES6 reminder comments and markdown bold strings.
+
+**Live dry-run attempt on current Figma file:**
+- Ran `sync_figma_data` successfully against active file `local_mozwkg5o_ufp0x3jo`.
+- Tried `update_ds_primitives` with `{ categories: ["color-semantics"], create_missing: true, dry_run: true }`.
+- The dry-run tool refused because `.local/local_mozwkg5o_ufp0x3jo/design-system.config.js` is not a prepared config: `Config is missing DS.color.ramps. Run prepare_ds_config first.`
+- `prepare_ds_config` also refused because that file-scoped config has no `DS.color.brand`.
+- Conclusion: the dry-run mutation boundary is implemented, but the feature is incomplete without a preceding "refresh/regenerate config from current Figma" or read-only setup-gap inspection step.
+
+**Current Figma semantic gaps found from the freshly synced snapshot:**
+- `color/surface/danger-variant` exists; `color/on-surface/danger-variant` is missing.
+- `color/surface/info-variant` exists; `color/on-surface/info-variant` is missing.
+- `color/surface/success-variant` exists; `color/on-surface/success-variant` is missing.
+- `color/surface/warning-variant` exists; `color/on-surface/warning-variant` is missing.
+- `color/surface/brand-variant` already has `color/on-surface/brand-variant`.
+- The local scoped config currently includes the `brand-variant` pair only; it does not include `danger/info/success/warning-variant` pairs.
+
+**Live inspector result on active snapshot:**
+- `inspect_ds_setup_gaps` reports exactly 4 proposed repairs for `local_mozwkg5o_ufp0x3jo`:
+  - `color/surface/danger-variant` -> `color/on-surface/danger-variant`, source `color/on-surface/danger`, aliases Light/Dark -> `color/neutral/0`.
+  - `color/surface/info-variant` -> `color/on-surface/info-variant`, source `color/on-surface/info`, aliases Light/Dark -> `color/neutral/0`.
+  - `color/surface/success-variant` -> `color/on-surface/success-variant`, source `color/on-surface/success`, aliases Light/Dark -> `color/neutral/0`.
+  - `color/surface/warning-variant` -> `color/on-surface/warning-variant`, source `color/on-surface/warning`, aliases Light/Dark -> `color/neutral/1000`.
+- The `brand-variant` companion already exists and is not reported.
+
+**Next live step:**
+Ask the designer which of the 4 proposed repairs to apply. If approved, reload the plugin so the UI advertises the new `setup-repairs` capability, then run `apply_ds_setup_repairs` with only the approved repairs. Afterward run `sync_figma_data`, `inspect_ds_setup_gaps`, and finally showcase only as verification.
+
+**2026-05-11 live note:** After implementation, `sync_figma_data` was rerun and the active file changed to `local_moy7g0m2_i5kzy3kp`. `inspect_ds_setup_gaps` reported `0` gaps for that currently open file. `refresh_ds_config_from_figma` correctly refused to invent a config for that file because `.local/local_moy7g0m2_i5kzy3kp/design-system.config.js` does not exist. The 4-gap list above belongs to the earlier active file `local_mozwkg5o_ufp0x3jo`.
+
+**2026-05-11 post-reload live note:** Designer reloaded the plugin. `/health` showed active file `local_mozwkg5o_ufp0x3jo` and plugin capabilities included `setup-repairs`. Ran read-only `sync_figma_data`, then `refresh_ds_config_from_figma({ dry_run: true })`, which reported `changedCount: 0`, `skippedCount: 0`, and wrote nothing. Ran `inspect_ds_setup_gaps`, which again reported the same 4 proposed repairs for danger/info/success/warning variant foreground companions. No Figma mutation was performed.
+
+---
+
 ### [2026-05-10 — Variant surface foreground guardrail + diagnostic showcase behavior]
 
 **Active branch:** `main`.

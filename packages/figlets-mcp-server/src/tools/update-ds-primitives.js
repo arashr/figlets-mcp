@@ -7,8 +7,10 @@
  * Reads a prepared design-system.config.js and asks the bridge plugin to
  * overwrite values of EXISTING variables in the Primitives collection that
  * match the requested categories (e.g. color, spacing). It can also refresh
- * Color collection semantic aliases that point at those primitives. Variable
- * IDs are preserved, so existing component bindings keep resolving.
+ * Color collection semantic aliases that point at those primitives. Pass
+ * dry_run first when the designer needs to review missing-variable repairs
+ * before any Figma variables are created or changed. Variable IDs are
+ * preserved, so existing component bindings keep resolving.
  *
  * Use this when ramps or other primitive values change but the rest of the
  * design system has not. For first-time creation, use apply_ds_setup.
@@ -25,7 +27,7 @@ const { getConfigPathGuardError } = require('../utils/paths.js');
 const updateDsPrimitivesTool = {
   name: 'update_ds_primitives',
   description:
-    'Update existing variable values and semantic aliases in place, without recreating collections or breaking bindings. Pass a prepared design-system.config.js path and an optional list of categories (e.g. ["color"], ["spacing"], ["color-semantics"]). Use after re-running prepare_ds_config to push changed primitive values and Color collection aliases into Figma.',
+    'Update existing variable values and semantic aliases in place, without recreating collections or breaking bindings. Pass dry_run=true first to report proposed updates and missing variables for designer confirmation. Pass a prepared design-system.config.js path and an optional list of categories (e.g. ["color"], ["spacing"], ["color-semantics"]). Use after re-running prepare_ds_config to push changed primitive values and Color collection aliases into Figma.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -41,6 +43,10 @@ const updateDsPrimitivesTool = {
       create_missing: {
         type: 'boolean',
         description: 'When true, add missing primitive variables in the existing Primitives collection before setting their values. Existing variable IDs are preserved.',
+      },
+      dry_run: {
+        type: 'boolean',
+        description: 'When true, report variables that would be created or updated but do not mutate Figma. Use this for designer confirmation before create_missing repairs.',
       },
       prune_off_scale: {
         type: 'boolean',
@@ -59,6 +65,7 @@ function handleUpdateDsPrimitives(args) {
   const configPath = args && args.config_path;
   const categories = args && Array.isArray(args.categories) ? args.categories : undefined;
   const createMissing    = !!(args && args.create_missing);
+  const dryRun           = !!(args && args.dry_run);
   const pruneOffScale    = !!(args && args.prune_off_scale);
   const pruneUnusedRamps = !!(args && args.prune_unused_ramps);
 
@@ -96,7 +103,7 @@ function handleUpdateDsPrimitives(args) {
     return Promise.resolve({ error: 'Config is missing DS.primitives. Run prepare_ds_config first.' });
   }
 
-  const body = JSON.stringify({ DS: ds, categories: categories, createMissing: createMissing, pruneOffScale: pruneOffScale, pruneUnusedRamps: pruneUnusedRamps });
+  const body = JSON.stringify({ DS: ds, categories: categories, createMissing: createMissing, dryRun: dryRun, pruneOffScale: pruneOffScale, pruneUnusedRamps: pruneUnusedRamps });
 
   return new Promise((resolve) => {
     const req = http.request(`${receiverUrl}/request-update-primitives`, {
@@ -115,9 +122,12 @@ function handleUpdateDsPrimitives(args) {
           const result = parsed.result || {};
           resolve({
             collection: result.collection,
+            dryRun: !!result.dryRun,
             categories: result.categories || [],
             unknownCategories: result.unknownCategories || [],
             report: result.report || {},
+            pruned: result.pruned || 0,
+            wouldPrune: result.wouldPrune || 0,
             message: result.message || 'Primitives update complete.',
             configPath: resolvedPath,
             error: result.error,

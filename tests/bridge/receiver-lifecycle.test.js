@@ -51,6 +51,7 @@ module.exports = (async () => {
     assert.strictEqual(connected.activeSessionId, "figlets-live");
     assert.deepStrictEqual(connected.pluginCapabilities, ["qa-audit", "update-primitives"]);
     assert.strictEqual(connected.updatePrimitivesLive, true);
+    assert.strictEqual(connected.setupRepairsLive, false);
 
     const syncPromise = request(port, "POST", "/request-sync", "{}");
     const pollResult = await pollPromise;
@@ -63,6 +64,7 @@ module.exports = (async () => {
     assert.strictEqual(busy.activeSessionId, "figlets-live");
     assert.deepStrictEqual(busy.pluginCapabilities, ["qa-audit", "update-primitives"]);
     assert.strictEqual(busy.updatePrimitivesLive, true);
+    assert.strictEqual(busy.setupRepairsLive, false);
 
     const busyQa = await request(port, "POST", "/request-qa-audit", "{}");
     const busyQaBody = JSON.parse(busyQa.body);

@@ -14,6 +14,7 @@ let pendingDsSetupRequest = null;
 let pendingDocBuildRequest = null;
 let pendingQaAuditRequest = null;
 let pendingUpdatePrimitivesRequest = null;
+let pendingSetupRepairsRequest = null;
 let pendingResetRequest = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
@@ -103,6 +104,7 @@ const server = http.createServer((req, res) => {
       activeFileKey: lastFileKey,
       pluginCapabilities: pluginCapabilities,
       updatePrimitivesLive: pluginCapabilities.indexOf('update-primitives') !== -1,
+      setupRepairsLive: pluginCapabilities.indexOf('setup-repairs') !== -1,
       dataPath: healthPaths.data,
       selectionPath: healthPaths.selection
     }));
@@ -122,13 +124,14 @@ const server = http.createServer((req, res) => {
     console.log('[poll] Plugin connected' + (pendingPollSessionId ? ' (' + pendingPollSessionId + ')' : '') + (pollFileKey ? ' file=' + pollFileKey : ''));
     
     // Keep connection alive: if no sync requested within 30 seconds, send ping
-    setTimeout(() => {
+    const pollKeepaliveTimer = setTimeout(() => {
       if (pendingPollResponse === res) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ command: 'ping' }));
         _clearPendingPoll();
       }
     }, 30000);
+    if (pollKeepaliveTimer.unref) pollKeepaliveTimer.unref();
     return;
   }
 
@@ -144,13 +147,14 @@ const server = http.createServer((req, res) => {
       pendingSyncRequest = res;
       
       // Timeout after 60 seconds if Figma doesn't respond
-      setTimeout(() => {
+      const syncTimer = setTimeout(() => {
         if (pendingSyncRequest === res) {
           res.writeHead(504, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Sync timed out' }));
           pendingSyncRequest = null;
         }
       }, 60000);
+      if (syncTimer.unref) syncTimer.unref();
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(_notConnectedPayload()));
@@ -167,13 +171,14 @@ const server = http.createServer((req, res) => {
       
       pendingSelectionRequest = res;
       
-      setTimeout(() => {
+      const selectionTimer = setTimeout(() => {
         if (pendingSelectionRequest === res) {
           res.writeHead(504, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Selection sync timed out' }));
           pendingSelectionRequest = null;
         }
       }, 15000); // Selection is usually very fast
+      if (selectionTimer.unref) selectionTimer.unref();
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(_notConnectedPayload()));
@@ -196,13 +201,14 @@ const server = http.createServer((req, res) => {
 
         pendingShowcaseRequest = res;
 
-        setTimeout(() => {
+        const showcaseTimer = setTimeout(() => {
           if (pendingShowcaseRequest === res) {
             res.writeHead(504, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Showcase build timed out' }));
             pendingShowcaseRequest = null;
           }
         }, 120000); // Showcase can take a while
+        if (showcaseTimer.unref) showcaseTimer.unref();
       } else {
         res.writeHead(503, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(_notConnectedPayload()));
@@ -246,13 +252,14 @@ const server = http.createServer((req, res) => {
 
         pendingDocBuildRequest = res;
 
-        setTimeout(() => {
+        const docTimer = setTimeout(() => {
           if (pendingDocBuildRequest === res) {
             res.writeHead(504, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Doc build timed out' }));
             pendingDocBuildRequest = null;
           }
         }, 120000);
+        if (docTimer.unref) docTimer.unref();
       });
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
@@ -292,13 +299,14 @@ const server = http.createServer((req, res) => {
 
         pendingQaAuditRequest = res;
 
-        setTimeout(() => {
+        const qaTimer = setTimeout(() => {
           if (pendingQaAuditRequest === res) {
             res.writeHead(504, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'QA audit timed out' }));
             pendingQaAuditRequest = null;
           }
         }, 120000);
+        if (qaTimer.unref) qaTimer.unref();
 
         pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
         pendingPollResponse.end(JSON.stringify({ command: 'qa-audit', data: qaPayload }));
@@ -346,13 +354,14 @@ const server = http.createServer((req, res) => {
 
         pendingDsSetupRequest = res;
 
-        setTimeout(() => {
+        const dsSetupTimer = setTimeout(() => {
           if (pendingDsSetupRequest === res) {
             res.writeHead(504, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'DS setup timed out — building variables can take up to 3 minutes for large systems.' }));
             pendingDsSetupRequest = null;
           }
         }, 180000); // 3 minutes for large systems
+        if (dsSetupTimer.unref) dsSetupTimer.unref();
       });
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
@@ -408,13 +417,14 @@ const server = http.createServer((req, res) => {
 
         pendingUpdatePrimitivesRequest = res;
 
-        setTimeout(() => {
+        const updatePrimitivesTimer = setTimeout(() => {
           if (pendingUpdatePrimitivesRequest === res) {
             res.writeHead(504, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Primitive update timed out.' }));
             pendingUpdatePrimitivesRequest = null;
           }
         }, 60000);
+        if (updatePrimitivesTimer.unref) updatePrimitivesTimer.unref();
       });
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
@@ -423,7 +433,67 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 6e. MCP Agent calls this to reset local Figlets-created file content.
+  // 6e. MCP Agent calls this to apply designer-approved setup repairs.
+  if (req.method === 'POST' && pathname === '/request-setup-repairs') {
+    if (pendingPollResponse) {
+      if (!_pluginHasCapability('setup-repairs')) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'The Figlets Bridge plugin is connected but does not advertise the setup-repairs command. Reload the plugin in Figma Desktop so it loads the latest local code.',
+          activeSessionId: pendingPollSessionId || null,
+          pluginCapabilities: activePluginCapabilities
+        }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'apply-setup-repairs', data: payload }));
+        _clearPendingPoll();
+
+        pendingSetupRepairsRequest = res;
+
+        const setupRepairTimer = setTimeout(() => {
+          if (pendingSetupRepairsRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Setup repair timed out.' }));
+            pendingSetupRepairsRequest = null;
+          }
+        }, 60000);
+        if (setupRepairTimer.unref) setupRepairTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-setup-repairs') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingSetupRepairsRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingSetupRepairsRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingSetupRepairsRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingSetupRepairsRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 6g. MCP Agent calls this to reset local Figlets-created file content.
   if (req.method === 'POST' && pathname === '/request-reset-figlets-file') {
     if (pendingPollResponse) {
       let body = '';
@@ -438,13 +508,14 @@ const server = http.createServer((req, res) => {
 
         pendingResetRequest = res;
 
-        setTimeout(() => {
+        const resetTimer = setTimeout(() => {
           if (pendingResetRequest === res) {
             res.writeHead(504, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Reset timed out.' }));
             pendingResetRequest = null;
           }
         }, 60000);
+        if (resetTimer.unref) resetTimer.unref();
       });
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });

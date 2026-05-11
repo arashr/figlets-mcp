@@ -357,6 +357,23 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'apply-setup-repairs') {
+    try {
+      _appendSessionLog('Executing apply_ds_setup_repairs.');
+      const result = await _applyDsSetupRepairs(msg.data || {});
+      figma.ui.postMessage({ type: 'setup-repairs-done', fileKey: _getFigletsFileKey(), data: result });
+      if (result && result.error) {
+        _appendSessionLog('apply_ds_setup_repairs failed: ' + result.error);
+      } else {
+        _appendSessionLog('Completed apply_ds_setup_repairs.');
+        figma.notify('Setup repairs applied.');
+      }
+    } catch (err) {
+      _appendSessionLog('apply_ds_setup_repairs failed: ' + err.message);
+      figma.ui.postMessage({ type: 'setup-repairs-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // build-doc — generates a component spec sheet inside Figma and returns
   // markdown for the agent to write to component-specs/[Name].md.
@@ -5362,6 +5379,7 @@ function _semanticColorEntries(DS) {
 async function _updateDsPrimitives(payload) {
   var DS = (payload && payload.DS) || {};
   var createMissing = !!(payload && payload.createMissing);
+  var dryRun = !!(payload && payload.dryRun);
   var pruneOffScale    = !!(payload && payload.pruneOffScale);
   var pruneUnusedRamps = !!(payload && payload.pruneUnusedRamps);
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
@@ -5413,6 +5431,9 @@ async function _updateDsPrimitives(payload) {
       var semUpdated = 0;
       var semUnchanged = 0;
       var semCreated = 0;
+      var semWouldUpdate = 0;
+      var semWouldCreate = 0;
+      var semWouldCreateNames = [];
       var semUnmatched = [];
       var semSubstituted = [];
       var semTypeMismatch = [];
@@ -5438,6 +5459,37 @@ async function _updateDsPrimitives(payload) {
         var semVar = colorByName[semEntry.name];
         if (!semVar) {
           if (createMissing) {
+            if (dryRun) {
+              semWouldCreate += 1;
+              semWouldCreateNames.push(semEntry.name);
+              if (semEntry.Light && lightModeId) {
+                var dryLightLookup = _resolveSemanticTarget(byName, semEntry.Light);
+                if (!dryLightLookup) {
+                  semUnmatched.push(semEntry.name + ' Light -> ' + semEntry.Light);
+                } else if (dryLightLookup.substituted) {
+                  semSubstituted.push({
+                    token: semEntry.name,
+                    mode: 'Light',
+                    requested: dryLightLookup.originalName,
+                    used: dryLightLookup.fallbackName,
+                  });
+                }
+              }
+              if (semEntry.Dark && darkModeId) {
+                var dryDarkLookup = _resolveSemanticTarget(byName, semEntry.Dark);
+                if (!dryDarkLookup) {
+                  semUnmatched.push(semEntry.name + ' Dark -> ' + semEntry.Dark);
+                } else if (dryDarkLookup.substituted) {
+                  semSubstituted.push({
+                    token: semEntry.name,
+                    mode: 'Dark',
+                    requested: dryDarkLookup.originalName,
+                    used: dryDarkLookup.fallbackName,
+                  });
+                }
+              }
+              continue;
+            }
             try {
               semVar = figma.variables.createVariable(semEntry.name, colorColl, 'COLOR');
               _setVariableScopesForName(semVar, semEntry.name, 'COLOR');
@@ -5457,9 +5509,10 @@ async function _updateDsPrimitives(payload) {
           semTypeMismatch.push({ name: semEntry.name, expected: 'COLOR', actual: semVar.resolvedType });
           continue;
         }
-        _setVariableScopesForName(semVar, semEntry.name, 'COLOR');
+        if (!dryRun) _setVariableScopesForName(semVar, semEntry.name, 'COLOR');
 
         var changed = false;
+        var wouldChange = false;
         var missingAlias = false;
         if (semEntry.Light && lightModeId) {
           var lightLookup = _resolveSemanticTarget(byName, semEntry.Light);
@@ -5477,8 +5530,12 @@ async function _updateDsPrimitives(payload) {
             }
             var lightAlias = { type: 'VARIABLE_ALIAS', id: lightLookup.variable.id };
             if (!_aliasEqual(semVar.valuesByMode[lightModeId], lightAlias)) {
-              semVar.setValueForMode(lightModeId, lightAlias);
-              changed = true;
+              if (dryRun) {
+                wouldChange = true;
+              } else {
+                semVar.setValueForMode(lightModeId, lightAlias);
+                changed = true;
+              }
             }
           }
         }
@@ -5498,19 +5555,28 @@ async function _updateDsPrimitives(payload) {
             }
             var darkAlias = { type: 'VARIABLE_ALIAS', id: darkLookup.variable.id };
             if (!_aliasEqual(semVar.valuesByMode[darkModeId], darkAlias)) {
-              semVar.setValueForMode(darkModeId, darkAlias);
-              changed = true;
+              if (dryRun) {
+                wouldChange = true;
+              } else {
+                semVar.setValueForMode(darkModeId, darkAlias);
+                changed = true;
+              }
             }
           }
         }
-        if (changed) semUpdated += 1;
+        if (wouldChange) semWouldUpdate += 1;
+        else if (changed) semUpdated += 1;
         else if (!missingAlias) semUnchanged += 1;
       }
 
       report[cat] = {
+        dryRun: dryRun,
         entries: semEntries.length,
         created: semCreated,
         updated: semUpdated,
+        wouldCreate: semWouldCreate,
+        wouldCreateNames: semWouldCreateNames,
+        wouldUpdate: semWouldUpdate,
         unchanged: semUnchanged,
         unmatched: semUnmatched,
         substituted: semSubstituted,
@@ -5523,6 +5589,9 @@ async function _updateDsPrimitives(payload) {
     var updated = 0;
     var unchanged = 0;
     var created = 0;
+    var wouldUpdate = 0;
+    var wouldCreate = 0;
+    var wouldCreateNames = [];
     var unmatched = [];
     var typeMismatch = [];
 
@@ -5531,6 +5600,11 @@ async function _updateDsPrimitives(payload) {
       var existing = byName[entry.name];
       if (!existing) {
         if (createMissing) {
+          if (dryRun) {
+            wouldCreate += 1;
+            wouldCreateNames.push(entry.name);
+            continue;
+          }
           try {
             existing = figma.variables.createVariable(entry.name, primColl, entry.type);
             _setVariableScopes(existing, []);
@@ -5549,20 +5623,25 @@ async function _updateDsPrimitives(payload) {
         typeMismatch.push({ name: entry.name, expected: entry.type, actual: existing.resolvedType });
         continue;
       }
-      _setVariableScopes(existing, []);
+      if (!dryRun) _setVariableScopes(existing, []);
       var current = existing.valuesByMode[primModeId];
       var same = entry.type === 'COLOR'
         ? _colorEqual(current, entry.value)
         : current === entry.value;
       if (same) { unchanged += 1; continue; }
+      if (dryRun) { wouldUpdate += 1; continue; }
       existing.setValueForMode(primModeId, entry.value);
       updated += 1;
     }
 
     report[cat] = {
+      dryRun: dryRun,
       entries: entries.length,
       created: created,
+      wouldCreate: wouldCreate,
+      wouldCreateNames: wouldCreateNames,
       updated: updated,
+      wouldUpdate: wouldUpdate,
       unchanged: unchanged,
       unmatched: unmatched,
       typeMismatch: typeMismatch,
@@ -5592,7 +5671,11 @@ async function _updateDsPrimitives(payload) {
       var leafStep = bkName.slice(matchedFolder.length);
       if (!/^\d+$/.test(leafStep)) continue;
       if (!validStepsByFolder[matchedFolder][leafStep]) {
-        try { byName[bkName].remove(); pruneCount++; } catch (e) {}
+        if (dryRun) {
+          pruneCount++;
+        } else {
+          try { byName[bkName].remove(); pruneCount++; } catch (e) {}
+        }
       }
     }
   }
@@ -5601,13 +5684,17 @@ async function _updateDsPrimitives(payload) {
   for (var k in report) {
     if (Object.prototype.hasOwnProperty.call(report, k)) {
       var subCount = report[k].substituted ? report[k].substituted.length : 0;
+      var wouldCreateCount = report[k].wouldCreate || 0;
+      var wouldUpdateCount = report[k].wouldUpdate || 0;
       msgParts.push(k + ': ' + report[k].updated + ' updated, ' + report[k].unchanged + ' unchanged' +
         (report[k].created ? ', ' + report[k].created + ' created' : '') +
+        (wouldUpdateCount ? ', ' + wouldUpdateCount + ' would update' : '') +
+        (wouldCreateCount ? ', ' + wouldCreateCount + ' would create' : '') +
         (subCount ? ', ' + subCount + ' substituted' : '') +
         (report[k].unmatched.length ? ', ' + report[k].unmatched.length + ' missing' : ''));
     }
   }
-  if (pruneCount) msgParts.push('pruned ' + pruneCount + ' off-scale steps');
+  if (pruneCount) msgParts.push((dryRun ? 'would prune ' : 'pruned ') + pruneCount + ' off-scale steps');
 
   var pruneRampCount = 0;
   if (pruneUnusedRamps && DS.color && Array.isArray(DS.color.ramps) && DS.color.ramps.length > 0) {
@@ -5625,21 +5712,98 @@ async function _updateDsPrimitives(payload) {
       if (!/^\d+$/.test(ukParts[2])) continue;
       var rampFolder = 'color/' + ukParts[1];
       if (configuredFolders[rampFolder]) continue;
-      try { byName[ukName].remove(); pruneRampCount++; } catch (e) {}
+      if (dryRun) {
+        pruneRampCount++;
+      } else {
+        try { byName[ukName].remove(); pruneRampCount++; } catch (e) {}
+      }
     }
     if (pruneRampCount && report['color']) {
       report['color'].prunedRamps = pruneRampCount;
     }
   }
-  if (pruneRampCount) msgParts.push('pruned ' + pruneRampCount + ' variables from unused ramps');
+  if (pruneRampCount) msgParts.push((dryRun ? 'would prune ' : 'pruned ') + pruneRampCount + ' variables from unused ramps');
 
   return {
+    dryRun: dryRun,
     collection: primName,
     categories: requested,
     unknownCategories: unknown,
     report: report,
-    pruned: pruneCount + pruneRampCount,
+    pruned: dryRun ? 0 : pruneCount + pruneRampCount,
+    wouldPrune: dryRun ? pruneCount + pruneRampCount : 0,
     message: msgParts.length ? msgParts.join('; ') : 'No categories processed.',
+  };
+}
+
+async function _applyDsSetupRepairs(payload) {
+  var repairs = (payload && Array.isArray(payload.repairs)) ? payload.repairs : [];
+  if (!repairs.length) return { error: 'No approved repairs provided.' };
+
+  var allColls = await figma.variables.getLocalVariableCollectionsAsync();
+  var allVars = await figma.variables.getLocalVariablesAsync();
+  var byName = {};
+  var collByVarId = {};
+  for (var ci = 0; ci < allColls.length; ci++) {
+    var c = allColls[ci];
+    for (var vi = 0; vi < c.variableIds.length; vi++) {
+      collByVarId[c.variableIds[vi]] = c;
+    }
+  }
+  for (var ai = 0; ai < allVars.length; ai++) {
+    byName[allVars[ai].name] = allVars[ai];
+  }
+
+  var created = [];
+  var skipped = [];
+  var unresolved = [];
+
+  for (var ri = 0; ri < repairs.length; ri++) {
+    var repair = repairs[ri] || {};
+    var name = repair.name || repair.recommended || '';
+    var sourceName = repair.source || '';
+    if (!name || !sourceName) {
+      unresolved.push({ name: name, source: sourceName, reason: 'Repair must include name/recommended and source.' });
+      continue;
+    }
+    if (byName[name]) {
+      skipped.push({ name: name, reason: 'Variable already exists.' });
+      continue;
+    }
+    var source = byName[sourceName];
+    if (!source) {
+      unresolved.push({ name: name, source: sourceName, reason: 'Source variable not found.' });
+      continue;
+    }
+    if (source.resolvedType !== 'COLOR') {
+      unresolved.push({ name: name, source: sourceName, reason: 'Source variable is not COLOR.' });
+      continue;
+    }
+    var coll = collByVarId[source.id];
+    if (!coll) {
+      unresolved.push({ name: name, source: sourceName, reason: 'Source collection not found.' });
+      continue;
+    }
+
+    try {
+      var createdVar = figma.variables.createVariable(name, coll, 'COLOR');
+      _setVariableScopesForName(createdVar, name, 'COLOR');
+      var modeIds = Object.keys(source.valuesByMode || {});
+      for (var mi = 0; mi < modeIds.length; mi++) {
+        createdVar.setValueForMode(modeIds[mi], source.valuesByMode[modeIds[mi]]);
+      }
+      byName[name] = createdVar;
+      created.push({ name: name, source: sourceName, collection: coll.name });
+    } catch (err) {
+      unresolved.push({ name: name, source: sourceName, reason: err.message || 'Create failed.' });
+    }
+  }
+
+  return {
+    created: created,
+    skipped: skipped,
+    unresolved: unresolved,
+    message: created.length + ' created, ' + skipped.length + ' skipped, ' + unresolved.length + ' unresolved.',
   };
 }
 

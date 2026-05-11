@@ -4,6 +4,86 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-11 — Repair apply picks accessible aliases via validateSemanticPairs]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli` (off `main` at `20cc5fd`).
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** `apply_ds_setup_repairs` was cloning `source.valuesByMode` as-is. When the BG variant resolves to a different primitive than the source's natural BG, the cloned alias may fail contrast against the variant. The fix routes per-mode alias selection through the existing setup-flow validator instead of duplicating the contrast math.
+
+**How it works:**
+1. MCP server loads the active Figma snapshot (env-first via `FIGLETS_FIGMA_DATA_PATH`, then `FIGLETS_LOCAL_DIR`/active-file lookup, then cached `paths.js`).
+2. For each approved repair, derive Light/Dark primitive ref names from the BG variant and the source FG (one alias hop; both must resolve to a `color/<ramp>/<step>` primitive).
+3. Build a working DS: bootstrap ramps + brand from the snapshot, then overlay any existing config values (`contrastAlgorithm`, `brand`, `ramps`, `rampStrategy`, `convention`).
+4. Set `DS.color.semantics.pairs` to a single in-memory pair `{ bg, text, Light, Dark }` and call `validateSemanticPairs`.
+5. Read the new additive `pairSuggestions` field from the validator's return. For each mode: `aliases[mode] = suggestion.path ?? input text path`.
+6. Forward the precomputed `aliases` on each repair in the bridge wire payload.
+
+**Bridge plugin:** `_applyDsSetupRepairs` checks `repair.aliases`. If present, it looks up Light/Dark mode IDs in the source's collection and the named primitive variables, and `setValueForMode(modeId, { type:'VARIABLE_ALIAS', id })` per mode. If `aliases` is absent or every mode fails to resolve, it falls back to the legacy `valuesByMode` copy.
+
+**Why minimal change:**
+- `validate-semantic-pairs.js`: only addition is a `pairSuggestions` map on the return. Existing consumers untouched. Existing core test suite passes.
+- `apply-ds-setup-repairs.js`: adds the picker pipeline; preserves the legacy copy-values path through fallback.
+- New helper `bootstrap-ds-from-figma.js` builds a minimal DS from snapshot — never persisted.
+- Plugin code change is one branch in `_applyDsSetupRepairs`; legacy path preserved as fallback.
+
+**Files changed:**
+- `packages/figlets-core/src/ds-config/validate-semantic-pairs.js` (additive return field)
+- `packages/figlets-mcp-server/src/utils/bootstrap-ds-from-figma.js` (new)
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js` (alias precomputation pipeline)
+- `packages/figma-bridge-plugin/code.js` (consume `aliases` when present)
+- `tests/server/bootstrap-ds-from-figma.test.js` (new — ramps/brand extraction)
+- `tests/server/apply-ds-setup-repairs-accessible-aliases.test.js` (new — handler precomputes accessible aliases against a snapshot)
+- `tests/server/apply-ds-setup-repairs-tool.test.js` (added `FIGLETS_LOCAL_DIR` isolation so the dev's `.local` snapshot doesn't bleed into the assertion)
+- `tests/integration/setup-repair-flow.test.js` (updated wire-payload assertion to acknowledge new `aliases` field)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 50/50 passed.
+- `node --check packages/figma-bridge-plugin/code.js`: passed; no `??`/`?.`/`**` in changes.
+
+**Open follow-ups (not in this change):**
+- `args.answers = { algorithm }` is plumbed but no `needsInput` round-trip yet — defaults to WCAG when not supplied. If designers want APCA, the agent must pass `answers.algorithm: 'apca'` (or the existing config sets `contrastAlgorithm`).
+- Persisting a bootstrapped config is not implemented yet; the MCP-side `_updateConfigPairs` only edits an existing config.
+
+---
+
+### [2026-05-11 — Designer-safe setup gap check CLI]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli` (off `main` at `20cc5fd`).
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** A clean agent session may not have the Figlets MCP server connected. Designers must still be able to point any agent at a single shell command for a safe, plain-language preview. The command never mutates Figma and never writes config.
+
+**Command:** `npm run figlets:check-setup-gaps`
+
+**Flow (all read-only):**
+1. Probe bridge `/health` (also reads `pluginConnected`, `activeFileKey`).
+2. If bridge or plugin is unavailable, print plain-language next steps and stop.
+3. `handleSyncFigmaData()` — refresh the local snapshot.
+4. `handleRefreshDsConfigFromFigma({ dry_run: true })` — never writes.
+5. `handleInspectDsSetupGaps({})`.
+6. Print a designer-friendly report. Always ends with `No changes were made to Figma.`
+
+**Files added/changed:**
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (new)
+- `tests/server/check-setup-gaps-cli.test.js` (new — exercises `formatCheckReport` for: bridge down, plugin disconnected, sync failure, clean state, no-config state, changes-and-gaps state)
+- `package.json` (added `figlets:check-setup-gaps` script)
+- `DECISIONS.md` (new entry: Designer-safe setup gap check)
+
+**Constraints preserved:**
+- Refresh is always dry-run from the CLI. The MCP `refresh_ds_config_from_figma` tool can still write when called with `dry_run: false` from a connected agent.
+- Apply is intentionally not in this CLI. A future apply CLI must accept an explicit approved-repairs input (file or flag), not infer approval.
+- `.mcp.json` at repo root is untracked, contains an absolute path, and must not be committed.
+
+**Verification already run:**
+- `npm test`: 48/48 passed (47 prior + 1 new CLI test).
+- `git diff --check`: clean.
+
+---
+
 ### [2026-05-11 — Setup-gap inspector + approved repair apply path]
 
 **Active branch:** `main`.

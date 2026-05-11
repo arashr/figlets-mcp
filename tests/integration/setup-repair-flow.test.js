@@ -90,10 +90,15 @@ function simulatePluginApply(baseUrl) {
         try { command = JSON.parse(body); } catch (err) { reject(err); return; }
         try {
           assert.strictEqual(command.command, "apply-setup-repairs");
+          // The MCP server now precomputes per-mode primitive aliases against
+          // the BG variant using validateSemanticPairs. Source FG values that
+          // already pass the contrast threshold are kept as-is; failing ones
+          // are upgraded to the nearest accessible step on the same ramp.
           assert.deepStrictEqual(command.data.repairs, [{
             bg: "color/surface/info-variant",
             name: "color/on-surface/info-variant",
             source: "color/on-surface/info",
+            aliases: { Light: "color/blue/800", Dark: "color/blue/100" },
           }]);
         } catch (err) {
           reject(err);

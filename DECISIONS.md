@@ -4,6 +4,30 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-11] Repair apply reuses validateSemanticPairs to pick accessible per-mode aliases
+
+**Decision:** `apply_ds_setup_repairs` no longer hands raw `source.valuesByMode` to the bridge plugin. The MCP server now precomputes per-mode primitive aliases for each approved repair by feeding a one-row pair into the existing `validateSemanticPairs` (the same code path the setup flow uses), and forwards `aliases: { Light: 'color/<ramp>/<step>', Dark: ... }` on each repair. The plugin sets each mode's value to a `VARIABLE_ALIAS` pointing at the named primitive. When the snapshot or DS config is missing/insufficient (no ramps, source not aliased to a primitive, etc.), the server omits `aliases` and the plugin falls back to its prior copy-values behavior — preserving the older repair flow exactly.
+
+**Why:** The old flow cloned the source FG token's aliases verbatim. If the BG variant resolved to a different primitive than the source's intended BG, contrast checks were never re-run and the variant could ship at a sub-AA ratio. The setup flow's `validateSemanticPairs` already walks ramps and picks the nearest accessible step per mode (WCAG ratio / APCA Lc, gated by `DS.color.contrastAlgorithm`); routing repairs through it removes the duplication and keeps the picker consistent across `apply_ds_setup`, `update_ds_primitives`, and `apply_ds_setup_repairs`.
+
+**Bootstrap rule:** When no `design-system.config.js` exists for the active file, the server builds an in-memory DS from the Figma snapshot — `color.ramps` extracted from `color/<ramp>/<step>` primitives, `color.brand` heuristically detected (`primary` → `brand` → first ramp; anchor step closest to 500), `contrastAlgorithm` defaulting to WCAG. The bootstrap is never persisted unless a future flow explicitly opts in. Existing partial configs (e.g. only `color.semantics.pairs` filled in) are merged with the bootstrap so validation always has ramps + brand without forcing a full DS rewrite.
+
+**Wire-format change:** `command.data.repairs[*]` may now include `aliases: { Light, Dark }` keyed by mode name. The bridge handler in `code.js` consumes the field when present and falls back to the legacy copy-values path when absent. This is forward+backward compatible — older MCP servers that don't send `aliases` keep working with the new plugin, and the new MCP server with no snapshot reachable behaves like the old one.
+
+**Consequence:** No new contrast math was added — `validateSemanticPairs` is the single authority. The only additive core change is a `pairSuggestions` field on its return value (existing consumers ignore it). Failure modes are best-effort: if alias computation can't be done, the repair still applies via the legacy path so existing flows keep working.
+
+---
+
+## [2026-05-11] Designer-safe setup gap check runs without MCP tools loaded
+
+**Decision:** Add a local CLI entry point `npm run figlets:check-setup-gaps` (file: `packages/figlets-mcp-server/src/cli/check-setup-gaps.js`) that runs the read-only setup-repair preview by calling the existing handlers directly: bridge `/health`, `handleSyncFigmaData`, `handleRefreshDsConfigFromFigma({ dry_run: true })`, `handleInspectDsSetupGaps({})`. It prints a plain-language report and always ends with "No changes were made to Figma." Config refresh is always dry-run; repairs are never applied.
+
+**Why:** A clean agent session may not have the Figlets MCP server connected, so it cannot call `sync_figma_data` or `inspect_ds_setup_gaps`. Designers should still be able to point any agent at a single boring shell command and get a safe, plain-language preview of what would change. The check command is a fallback for the no-MCP-tools case and works as a one-liner for sanity checks.
+
+**Consequence:** The check command is read-only and stops before any approval step. Applying repairs still requires the explicit MCP path (`apply_ds_setup_repairs` with approved repairs). A future apply CLI, if added, must accept an explicit approved-repairs input (file or flag), not infer approval. The `.mcp.json` at the repo root is a local convenience file with an absolute path; it is not committed and is not portable.
+
+---
+
 ## [2026-05-11] Setup repairs use inspect-then-approved-apply
 
 **Decision:** Existing-file setup repairs are split into an explicit config refresh, read-only inspection step, and designer-approved apply step. `refresh_ds_config_from_figma` updates already-existing config entries from the synced Figma snapshot without creating new config tokens and without mutating Figma. `inspect_ds_setup_gaps` reads the synced current Figma snapshot and reports additive semantic repair candidates without requiring a prepared config and without mutating Figma or config. `apply_ds_setup_repairs` accepts only the designer-approved repairs, creates those missing semantic variables by copying aliases from the approved source token, and updates the file-scoped config only for approved pairs that do not conflict with an existing pair for the same background.

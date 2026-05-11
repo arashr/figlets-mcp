@@ -564,7 +564,18 @@ function validateSemanticPairs(ds) {
     failBlock + clampBlock +
     '\nDS.color.semantics written to config.';
 
-  return { ds: DS, markdownTable, iconTable, failCount, summary };
+  // Suggestions keyed by `${bg}|${text}` so callers can read the upgraded
+  // accessible step for either mode without re-walking the ramp. Additive —
+  // existing consumers ignore this field.
+  const pairSuggestions = {};
+  for (const row of resolvedPairs) {
+    pairSuggestions[`${row.bg}|${row.text}`] = {
+      Light: row.Light && row.Light.suggestion ? row.Light.suggestion.path : null,
+      Dark:  row.Dark  && row.Dark.suggestion  ? row.Dark.suggestion.path  : null,
+    };
+  }
+
+  return { ds: DS, markdownTable, iconTable, failCount, summary, pairSuggestions };
 }
 
 module.exports = { validateSemanticPairs };

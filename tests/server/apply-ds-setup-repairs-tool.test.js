@@ -67,6 +67,11 @@ module.exports = (async () => {
   await new Promise(resolve => mockServer.listen(0, resolve));
   const { port } = mockServer.address();
   process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+  // Isolate from the developer's `.local/` snapshot so the bridge payload is
+  // deterministic. With no snapshot reachable, the handler can't compute
+  // accessible aliases and emits the legacy `{bg,name,source}` payload.
+  const prevLocalDir = process.env.FIGLETS_LOCAL_DIR;
+  process.env.FIGLETS_LOCAL_DIR = tmp;
   try {
     const result = await handleApplyDsSetupRepairs({
       config_path: configPath,
@@ -80,6 +85,8 @@ module.exports = (async () => {
     assert.deepStrictEqual(result.configUpdate, { updated: true, added: 1, conflicts: [] });
   } finally {
     delete process.env.FIGLETS_RECEIVER_URL;
+    if (prevLocalDir !== undefined) process.env.FIGLETS_LOCAL_DIR = prevLocalDir;
+    else delete process.env.FIGLETS_LOCAL_DIR;
     await new Promise(resolve => mockServer.close(resolve));
     fs.rmSync(tmp, { recursive: true, force: true });
   }

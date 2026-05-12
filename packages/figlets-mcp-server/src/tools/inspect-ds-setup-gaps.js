@@ -521,6 +521,42 @@ function handleInspectDsSetupGaps(input = {}) {
     gap.plannedUpgrades = planned.upgraded;
   }
 
+  // Compute the upgrade for each contrast failure so the agent can offer it
+  // as a one-tap fix. We reuse the same picker the setup flow uses by passing
+  // the existing fg as both `name` and `source` of a synthetic repair — the
+  // picker walks the fg's ramp and returns the nearest step that passes the
+  // active contrast threshold. Falls back silently if either side doesn't
+  // alias directly to a primitive (multi-hop chains aren't supported by the
+  // picker, by design).
+  const failuresByPair = new Map();
+  for (const f of result.contrastFailures) {
+    const key = f.bg + "|" + f.fg;
+    if (!failuresByPair.has(key)) failuresByPair.set(key, []);
+    failuresByPair.get(key).push(f);
+  }
+  for (const [key, fails] of failuresByPair) {
+    const [bgName, fgName] = key.split("|");
+    const planned = computePlannedAliases(
+      { bg: bgName, name: fgName, source: fgName },
+      dataSource.figmaData,
+      existingDs,
+      algoOpt
+    );
+    if (!planned || !planned.aliases) continue;
+    for (const f of fails) {
+      const upgrade = planned.aliases[f.mode];
+      if (!upgrade) continue;
+      if (!planned.upgraded || !planned.upgraded[f.mode]) continue;
+      if (f.fgPrimitive && upgrade === f.fgPrimitive.name) continue;
+      f.plannedReAlias = {
+        token: fgName,
+        mode: f.mode,
+        from: f.fgPrimitive ? f.fgPrimitive.name : null,
+        to: upgrade,
+      };
+    }
+  }
+
   const sourcePath = dataSource.meta && dataSource.meta.path ? dataSource.meta.path : null;
   let syncedAt = null;
   if (sourcePath) {

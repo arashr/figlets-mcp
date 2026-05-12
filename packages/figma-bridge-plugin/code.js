@@ -5835,11 +5835,77 @@ async function _applyDsSetupRepairs(payload) {
     }
   }
 
+  // ── aliasUpdates: re-alias an existing semantic var in a specific mode ───
+  // Used to fix contrast failures by pointing the fg at a different primitive
+  // step on the same ramp. The MCP server picked the new step using the same
+  // ramp walker the setup flow uses; the plugin just writes it.
+  var updates = (payload && Array.isArray(payload.aliasUpdates)) ? payload.aliasUpdates : [];
+  var updated = [];
+  var updateSkipped = [];
+  var updateUnresolved = [];
+  for (var ui = 0; ui < updates.length; ui++) {
+    var u = updates[ui] || {};
+    var tokenName = u.token || '';
+    var modeName = u.mode || '';
+    var targetName = u.newAliasTarget || '';
+    if (!tokenName || !modeName || !targetName) {
+      updateUnresolved.push({ token: tokenName, mode: modeName, reason: 'aliasUpdate requires token, mode, and newAliasTarget.' });
+      continue;
+    }
+    var tokenVar = byName[tokenName];
+    if (!tokenVar) {
+      updateUnresolved.push({ token: tokenName, mode: modeName, reason: 'Token variable not found in current Figma file.' });
+      continue;
+    }
+    var targetVar = byName[targetName];
+    if (!targetVar) {
+      updateUnresolved.push({ token: tokenName, mode: modeName, reason: 'Target primitive "' + targetName + '" not found.' });
+      continue;
+    }
+    var tokenColl = collByVarId[tokenVar.id];
+    if (!tokenColl) {
+      updateUnresolved.push({ token: tokenName, mode: modeName, reason: 'Token collection not found.' });
+      continue;
+    }
+    var modeMatch = (tokenColl.modes || []).find(function (m) {
+      return String(m.name || '').toLowerCase() === String(modeName).toLowerCase();
+    });
+    if (!modeMatch) {
+      updateUnresolved.push({ token: tokenName, mode: modeName, reason: 'Mode "' + modeName + '" not found on token collection.' });
+      continue;
+    }
+    // Skip when current value is already an alias to the target — idempotent.
+    var currentVal = tokenVar.valuesByMode ? tokenVar.valuesByMode[modeMatch.modeId] : null;
+    if (currentVal && currentVal.type === 'VARIABLE_ALIAS' && currentVal.id === targetVar.id) {
+      updateSkipped.push({ token: tokenName, mode: modeName, reason: 'Already aliased to target.' });
+      continue;
+    }
+    try {
+      tokenVar.setValueForMode(modeMatch.modeId, { type: 'VARIABLE_ALIAS', id: targetVar.id });
+      updated.push({ token: tokenName, mode: modeName, to: targetName });
+    } catch (err) {
+      updateUnresolved.push({ token: tokenName, mode: modeName, reason: err.message || 'setValueForMode failed.' });
+    }
+  }
+
+  var msgParts = [];
+  msgParts.push(created.length + ' created');
+  msgParts.push(skipped.length + ' skipped');
+  msgParts.push(unresolved.length + ' unresolved');
+  if (updates.length) {
+    msgParts.push(updated.length + ' re-aliased');
+    if (updateSkipped.length) msgParts.push(updateSkipped.length + ' re-alias skipped');
+    if (updateUnresolved.length) msgParts.push(updateUnresolved.length + ' re-alias unresolved');
+  }
+
   return {
     created: created,
     skipped: skipped,
     unresolved: unresolved,
-    message: created.length + ' created, ' + skipped.length + ' skipped, ' + unresolved.length + ' unresolved.',
+    updated: updated,
+    updateSkipped: updateSkipped,
+    updateUnresolved: updateUnresolved,
+    message: msgParts.join(', ') + '.',
   };
 }
 

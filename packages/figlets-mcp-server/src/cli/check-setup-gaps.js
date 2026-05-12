@@ -137,6 +137,9 @@ function _formatContrastFailure(item) {
   ];
   if (item.bgPrimitive) lines.push(`    bg → ${item.bgPrimitive.name} ${_formatHex(item.bgPrimitive.rgb)}`);
   if (item.fgPrimitive) lines.push(`    fg → ${item.fgPrimitive.name} ${_formatHex(item.fgPrimitive.rgb)}`);
+  if (item.plannedReAlias) {
+    lines.push(`    suggested fix: re-alias "${item.plannedReAlias.token}" (${item.plannedReAlias.mode}) → ${item.plannedReAlias.to}`);
+  }
   return lines;
 }
 

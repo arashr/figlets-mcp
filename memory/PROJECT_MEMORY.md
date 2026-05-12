@@ -4,6 +4,50 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-12 — QA → Fix: contrast re-alias plumbed end-to-end via the existing apply tool]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** A test conversation ("fix the contrast issues and add the missing foregrounds") revealed a capability gap: the QA report was readable but the agent had no way to apply contrast fixes — `apply_ds_setup_repairs` only created new fg companions. Designer's call: don't build a parallel contrast-fix script; reuse the setup flow's contrast picker (already in `validateSemanticPairs` / `accessible-repair-aliases`); MCP is part of the product so requiring it for the apply step is fine.
+
+**What changed (one tool, one bridge channel, two repair kinds):**
+
+1. **Inspector → `plannedReAlias` per failing mode.** Reuses `computePlannedAliases({ bg, name: fg, source: fg }, ...)` — passing the existing fg as both `name` and `source` makes the picker walk the fg's ramp and return the nearest passing step. No new contrast math. Falls back silently when the picker can't (multi-hop alias chains, missing primitives) — that's intentional, not a bug. Each contrast failure now carries `plannedReAlias: { token, mode, from, to }` when the picker found an upgrade.
+
+2. **CLI renders the suggestion.** `suggested fix: re-alias "<token>" (<mode>) → <new primitive>` line under the bg/fg lines on each contrast failure. Designer + agent see the answer in plain text.
+
+3. **`apply_ds_setup_repairs` accepts a second repair kind.** New top-level field `aliasUpdates: [{ token, mode, newAliasTarget }]`. Either or both arrays can be provided; the schema's `required: ["repairs"]` was dropped (now requires at least one of repairs or aliasUpdates). Wire payload to the bridge carries both arrays in one round-trip.
+
+4. **Bridge plugin processes both kinds in `_applyDsSetupRepairs`.** After the existing create-fg loop, an alias-update loop finds each `token` by name, finds the matching mode, finds the target primitive, and calls `setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id })`. Idempotent — skips when already aliased to target. Returns `updated`, `updateSkipped`, `updateUnresolved` arrays alongside the existing create-side ones.
+
+5. **Receiver is unchanged.** It already passes the entire payload as `data` — `aliasUpdates` flows through with no router changes.
+
+**Why this shape:** One tool means one approval contract for the designer ("approve these fixes" → one apply call → one bridge round-trip). The picker has a single owner — `validateSemanticPairs` via `computePlannedAliases`. No duplicated contrast math. The `plannedReAlias` shape is exactly what `aliasUpdates` consumes, so the agent's job is "copy the suggestion, ask the designer, send it."
+
+**What's intentionally NOT done:**
+- No config update for re-aliases. Designer can run `refresh_ds_config_from_figma` if they want config to follow. Avoids a config-mutation surface that's hard to test.
+- No CLI for apply. Apply is an MCP tool; agent calls it. The QA CLI stays as the read-only entry point.
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js` (plannedReAlias computation per failing pair)
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (suggested-fix render)
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js` (aliasUpdates schema + normalization + wire forwarding)
+- `packages/figma-bridge-plugin/code.js` (aliasUpdates loop in `_applyDsSetupRepairs`)
+- `tests/server/inspect-ds-setup-gaps-qa.test.js` (plannedReAlias assertion via handler with snapshot isolation)
+- `tests/server/apply-ds-setup-repairs-tool.test.js` (`_normalizeAliasUpdates` + alias-only round-trip + empty-input error path)
+- `docs/designer-fix-flow-prompt.md` (new — paste-ready prompt for the agent)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 52/52.
+- `node --check` clean on the touched files.
+- Plugin ES6 guard clean (only existing markdown bold matches `**`).
+- Live QA re-run on the now-active file (`local_moy7g0m2_i5kzy3kp`) reports clean — no contrast failures available to exercise the live re-alias path. Test coverage handles the mechanism.
+
+---
+
 ### [2026-05-12 — QA report polish: agent-ready output, severity ordering, advisory collapse]
 
 **Active branch:** `codex/designer-safe-setup-repair-cli`.

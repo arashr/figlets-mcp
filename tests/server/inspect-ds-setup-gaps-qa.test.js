@@ -6,8 +6,12 @@
  */
 
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const {
   inspectDsSetupGapsFromFigmaData,
+  handleInspectDsSetupGaps,
 } = require("../../packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js");
 
 function prim(id, name, r, g, b) {
@@ -141,6 +145,41 @@ module.exports = (() => {
   const suppressedRoles = universal.suppressedAdvisoryRoles.map(s => s.role).sort();
   assert.deepStrictEqual(suppressedRoles, ["border", "icon"], "DS-wide absence should suppress both roles");
   assert.strictEqual(universal.companionAdvisories.length, 0, "no per-pair advisories survive when both roles are suppressed");
+
+  // ── plannedReAlias: contrast failures should carry the picker's upgrade ──
+  // The handler-level path is the one that attaches plannedReAlias, since the
+  // picker requires the snapshot. Use a temp dir + FIGLETS_LOCAL_DIR isolation
+  // mirroring the planned-aliases test.
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-realias-"));
+    const snapPath = path.join(tmp, "figma-data.json");
+    fs.writeFileSync(snapPath, JSON.stringify(figmaData), "utf8");
+    const prevLocal = process.env.FIGLETS_LOCAL_DIR;
+    const prevFig = process.env.FIGLETS_FIGMA_DATA_PATH;
+    process.env.FIGLETS_LOCAL_DIR = tmp;
+    process.env.FIGLETS_FIGMA_DATA_PATH = snapPath;
+    try {
+      const handlerResult = handleInspectDsSetupGaps({ figmaDataPath: snapPath });
+      assert.ok(!handlerResult.error, "handler should succeed");
+      const dangerLight = handlerResult.contrastFailures.find(
+        f => f.bg === "color/surface/danger" && f.mode === "Light"
+      );
+      assert.ok(dangerLight, "danger Light should be a contrast failure");
+      assert.ok(dangerLight.plannedReAlias, "failing pair must carry a re-alias suggestion");
+      assert.strictEqual(dangerLight.plannedReAlias.token, "color/on-surface/danger");
+      assert.strictEqual(dangerLight.plannedReAlias.mode, "Light");
+      assert.strictEqual(dangerLight.plannedReAlias.from, "color/neutral/300");
+      // The picker walks the same ramp; with only n950 left as a darker step,
+      // that's the upgrade target.
+      assert.strictEqual(dangerLight.plannedReAlias.to, "color/neutral/950");
+    } finally {
+      if (prevLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevLocal;
+      else delete process.env.FIGLETS_LOCAL_DIR;
+      if (prevFig !== undefined) process.env.FIGLETS_FIGMA_DATA_PATH = prevFig;
+      else delete process.env.FIGLETS_FIGMA_DATA_PATH;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
 
   // ── Threshold guard: with only 2 complete pairs, suppression must NOT fire
   const tinyPairs = [

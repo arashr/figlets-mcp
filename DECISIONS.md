@@ -4,6 +4,31 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-12] Contrast fixes go through the existing apply tool — no parallel script
+
+**Decision:** `apply_ds_setup_repairs` accepts two repair kinds in one call:
+- `repairs[]` — create missing semantic foreground vars (existing).
+- `aliasUpdates[]` — re-alias an existing semantic var in a specific mode (new).
+
+The contrast picker stays inside `validateSemanticPairs` / `accessible-repair-aliases.computePlannedAliases`. The QA inspector reuses it by passing the failing fg as both `name` and `source` of a synthetic repair — the picker walks the fg's ramp and returns the nearest passing step. Each contrast failure carries `plannedReAlias: { token, mode, from, to }` when the picker can find an upgrade (returns null for multi-hop alias chains).
+
+**Why:** Building a separate contrast-fix script would duplicate the contrast math and double the approval surface the designer (and agent) have to reason about. MCP is part of the product runtime, so requiring it for the apply step isn't friction — it's the assumed environment. Writing to Figma always goes through the bridge anyway. One tool, one bridge channel, one approval contract.
+
+**Wire format:** Both arrays travel in one `request-setup-repairs` body. The bridge plugin processes `repairs` first (create), then `aliasUpdates` (re-alias). Receiver is unchanged — it forwards the full payload.
+
+**Out of scope (intentional):**
+- Config update for re-aliases. The new path doesn't touch `design-system.config.js`. If the designer wants config to follow Figma after a re-alias, they run `refresh_ds_config_from_figma`. Keeps the new mutation surface minimal.
+- CLI for apply. Apply remains MCP-only; the agent calls it. The QA CLI is read-only and unchanged.
+
+**Consequence:** The agent can now resolve every fixable QA finding in one tool call. The schema's `required: ["repairs"]` was dropped — the handler errors when neither array has entries. Tests cover `_normalizeAliasUpdates`, the wire-format shape, an alias-only round-trip, and the empty-input guard. Plugin ES6 constraint preserved (no `??`/`?.`/`**` introduced; `**` in matches are markdown strings).
+
+**Failure modes:**
+- Picker can't find a passing step on the ramp → no `plannedReAlias` → CLI just shows the failure with bg/fg primitives + hex; designer decides manually in Figma.
+- Re-alias target primitive doesn't exist in Figma → bridge returns it under `updateUnresolved` with reason; nothing is written.
+- Token already aliased to target → bridge returns it under `updateSkipped` (idempotent).
+
+---
+
 ## [2026-05-12] QA report is shaped for the next agent step, not for direct apply
 
 **Decision:** `check-setup-gaps` is the **first half** of a two-step flow: QA report → designer-led conversation → optionally `apply_ds_setup_repairs`. The report's job is to surface findings + enough context for the agent to ask the right question, not to preview what apply would do. Concretely:

@@ -11,7 +11,7 @@ const {
 const applyDsSetupRepairsTool = {
   name: "apply_ds_setup_repairs",
   description:
-    "Apply designer-approved setup repairs to Figma. Creates only the explicitly approved missing semantic variables, aliasing each mode to the primitive the designer already saw in inspect_ds_setup_gaps' plannedAliases. Updates the file-scoped config only after Figma succeeds.",
+    "Apply designer-approved setup changes to Figma. Two repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode (used to fix contrast failures via the same picker the setup flow uses). Updates the file-scoped config only after Figma succeeds.",
   inputSchema: {
     type: "object",
     properties: {
@@ -36,7 +36,20 @@ const applyDsSetupRepairsTool = {
           },
           required: ["bg", "source"]
         },
-        description: "Designer-approved repairs, usually copied from inspect_ds_setup_gaps.semanticGaps. Pass each gap's plannedAliases through to keep approve-then-apply consistent."
+        description: "Designer-approved missing-foreground repairs, usually copied from inspect_ds_setup_gaps.semanticGaps."
+      },
+      aliasUpdates: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            token: { type: "string", description: "Existing semantic variable name to re-alias (e.g. \"color/on-surface/variant\")." },
+            mode: { type: "string", description: "Mode name to update (e.g. \"Dark\")." },
+            newAliasTarget: { type: "string", description: "Primitive variable name the token should alias in this mode (e.g. \"color/neutral/200\")." }
+          },
+          required: ["token", "mode", "newAliasTarget"]
+        },
+        description: "Designer-approved re-alias updates for existing semantic variables, usually copied from inspect_ds_setup_gaps.contrastFailures[*].plannedReAlias. Each entry replaces one mode's alias on one existing var."
       },
       config_path: {
         type: "string",
@@ -46,8 +59,7 @@ const applyDsSetupRepairsTool = {
         type: "boolean",
         description: "When false, do not update design-system.config.js after applying repairs. Defaults to true."
       }
-    },
-    required: ["repairs"]
+    }
   }
 };
 
@@ -69,6 +81,14 @@ function _normalizeRepairs(repairs) {
     }
     return out;
   }).filter(repair => repair.bg && repair.name && repair.source);
+}
+
+function _normalizeAliasUpdates(updates) {
+  return (Array.isArray(updates) ? updates : []).map(u => ({
+    token: u && u.token ? String(u.token) : "",
+    mode: u && u.mode ? String(u.mode) : "",
+    newAliasTarget: u && u.newAliasTarget ? String(u.newAliasTarget) : "",
+  })).filter(u => u.token && u.mode && u.newAliasTarget);
 }
 
 function _updateConfigPairs(configPath, repairs) {
@@ -118,7 +138,10 @@ function _updateConfigPairs(configPath, repairs) {
 
 function handleApplyDsSetupRepairs(args = {}) {
   const repairs = _normalizeRepairs(args.repairs);
-  if (!repairs.length) return Promise.resolve({ error: "At least one approved repair with recommended/name and source is required." });
+  const aliasUpdates = _normalizeAliasUpdates(args.aliasUpdates);
+  if (!repairs.length && !aliasUpdates.length) {
+    return Promise.resolve({ error: "Provide at least one approved repair (with recommended/name and source) or one aliasUpdate (token + mode + newAliasTarget)." });
+  }
 
   const updateConfig = args.update_config !== false;
   const configPath = args.config_path ? path.resolve(args.config_path) : getActiveFileConfigPath();
@@ -150,7 +173,9 @@ function handleApplyDsSetupRepairs(args = {}) {
   });
 
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
-  const body = JSON.stringify({ repairs: wirePayload });
+  const requestBody = { repairs: wirePayload };
+  if (aliasUpdates.length) requestBody.aliasUpdates = aliasUpdates;
+  const body = JSON.stringify(requestBody);
 
   return new Promise((resolve) => {
     const req = http.request(`${receiverUrl}/request-setup-repairs`, {
@@ -174,6 +199,9 @@ function handleApplyDsSetupRepairs(args = {}) {
             created: result.created || [],
             skipped: result.skipped || [],
             unresolved: result.unresolved || [],
+            updated: result.updated || [],
+            updateSkipped: result.updateSkipped || [],
+            updateUnresolved: result.updateUnresolved || [],
             configUpdate,
             message: result.message || "Setup repairs complete.",
             error: result.error,
@@ -218,5 +246,6 @@ module.exports = {
   applyDsSetupRepairsTool,
   handleApplyDsSetupRepairs,
   _normalizeRepairs,
+  _normalizeAliasUpdates,
   _updateConfigPairs,
 };

@@ -4,6 +4,91 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-12 — QA report polish: agent-ready output, severity ordering, advisory collapse]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** A live run on `local_mozwkg5o_ufp0x3jo` surfaced six output-quality issues. The findings themselves were correct; the *presentation* biased the agent toward applying repairs before asking the designer anything, made hairline contrast fails look identical to gross fails, and exploded into per-pair advisories when the DS just doesn't use a role at all.
+
+**Changes (all in `inspect-ds-setup-gaps.js` and `check-setup-gaps.js`):**
+
+1. **Strip the apply preview from CLI rendering.** `plannedAliases` / `plannedUpgrades` / `plannedAlgorithm` stay on the JSON (apply path consumes them) but the human-readable report no longer says "would add", "ready to repair", or "(upgraded for contrast)". The new framing: `convention would suggest: "<recommended>"` + `closest existing token: "<source>" (currently aliases Light → ..., Dark → ...)`. Tells the agent what the source's *real-world* alias is so it can ask the designer the right question (e.g. "your on-surface/danger aliases white in both modes — does that intent carry to the variant?").
+
+2. **Advisory collapse.** When ≥3 complete bg+fg pairs all miss the same companion role (border or icon), the inspector emits `suppressedAdvisoryRoles: [{ role, suppressedCount }]` once instead of N per-pair advisories. CLI prints `This DS doesn't use per-role icon tokens — suppressing 10 icon advisories.` Threshold (`_ADVISORY_SUPPRESS_MIN_PAIRS = 3`) prevents 1- or 2-pair files from over-suppressing.
+
+3. **Resolved primitives on contrast failures.** Each `contrastFailure` now carries `bgPrimitive: { name, rgb }` and `fgPrimitive: { name, rgb }` from a name-aware `_resolveTerminalByModeName`. CLI renders `bg → color/yellow/400 #FBBF24` / `fg → color/neutral/1000 #09090B` underneath each failure. Designer can debug without opening Figma.
+
+4. **Near-miss tagging.** `nearMiss: true` + `gap: <distance>` set when a failure is within `_WCAG_NEARMISS = 0.3` (or `_APCA_NEARMISS = 5`). CLI shows `(near-miss, off by 1Lc)`. Section header reports `(N near-miss)`. "What this means" splits as `(X gross, Y near-miss)` so triage starts with the gross misses.
+
+5. **Snapshot freshness header.** Handler returns `snapshot: { path, syncedAt, variableCount, collectionCount }`. CLI renders `Snapshot: 301 variables, 4 collections (synced at HH:MM:SS)` so designer + agent can trust the report isn't stale.
+
+6. **Severity ordering** — both the section render and the "What this means" footer. Order: broken aliases → contrast failures → missing fg → missing bg → incomplete modes → advisories. Footer prefixes urgent items: `URGENT: ...`, `A11Y: ...`. Subject-verb agreement fixed for singular/plural.
+
+**JSON shape additions (additive — all old fields preserved):**
+- `snapshot: { path, syncedAt, variableCount, collectionCount }`
+- `counts: { semanticVariables, completePairs }`
+- `suppressedAdvisoryRoles: [{ role, suppressedCount }]`
+- `summary.contrastNearMissCount`
+- `summary.suppressedAdvisoryRoleCount`
+- `contrastFailures[*].nearMiss`, `gap`, `bgPrimitive`, `fgPrimitive`
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js`
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js`
+- `tests/server/check-setup-gaps-cli.test.js` (severity-order assertion, near-miss + hex render, advisory-suppression note)
+- `tests/server/inspect-ds-setup-gaps-qa.test.js` (resolved-primitive fields, suppression with ≥3 pairs, threshold guard with 2 pairs)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Live run after the change** (`local_mozwkg5o_ufp0x3jo`): 13 findings down from 18 (10 icon advisories collapsed into 1 suppression line; 5 border advisories remain). Contrast section now shows yellow/400 vs neutral/1000 hex per failure with `(near-miss, off by 1Lc)` on the warning pair. Missing-fg lines reveal that on-surface/danger/info/success all alias to neutral/0 today — the agent can flag that to the designer instead of silently propagating it.
+
+**Verification:** `npm test` 52/52. `node --check` clean.
+
+---
+
+### [2026-05-12 — `check-setup-gaps` rewritten as a semantic-layer QA pass]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** The previous session's broken-alias + setup-vs-component scope work (commit `1504b5d`) was the wrong direction — the inspector was too narrow (variant-only) AND simultaneously too broad (component-scope wasn't in this project's scope). When the designer deleted some semantic vars in a live test, the report didn't catch them. Per direction: revert that commit and rebuild `check-setup-gaps` as a pure read-only QA layer over the semantic color layer in Figma.
+
+**What changed (surgical):**
+1. **Reverted** `1504b5d` (`Detect broken aliases and bucket by setup vs component scope`). HEAD now sits on `781f03f`.
+2. **`inspect_ds_setup_gaps` rewritten** to a six-finding QA pass:
+   - `semanticGaps` (missing fg companions) — broadened from variant-only to **any** background-family leaf. Still emits `plannedAliases` for the apply flow (apply path is unchanged).
+   - `missingBackgrounds` — orphan `on-*` foregrounds. Restricted to the explicit on-* prefix to avoid over-reporting generic `text/*` tokens.
+   - `incompleteModes` — semantic var has values in some modes but not others. Skipped when the var has zero values everywhere.
+   - `contrastFailures` — for each resolvable bg+fg pair, walks aliases by mode name to literal RGB and computes WCAG ratio (default) or APCA Lc (when config opts in). Thresholds match the setup flow: 4.5 / 75.
+   - `brokenAliases` — semantic-layer only. No setup-vs-component classification (out of scope per direction).
+   - `companionAdvisories` — pair has bg+fg but no border/icon companion. Advisory only.
+3. **`check-setup-gaps` CLI updated** to render every finding category with plain language and the configured contrast algorithm. Dropped all "broken DS aliases / broken component aliases" wording.
+4. **`apply_ds_setup_repairs` untouched** — still consumes `semanticGaps[*].plannedAliases` verbatim. Because the broadening allows non-variant gaps (which usually have no source token in the file), most non-variant entries arrive as `status: "unresolved"` and apply correctly skips them.
+
+**Source-of-truth rule (now consistent):** Figma is the source of truth for QA. The optional `design-system.config.js` is consulted only for `contrastAlgorithm`. The setup flow that creates configs from a Figma read is unchanged.
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js` (full rewrite of the analysis function)
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (renders six finding sections + new "What this means")
+- `tests/server/inspect-ds-setup-gaps-tool.test.js` (updated for broadened detection + new categories)
+- `tests/server/check-setup-gaps-cli.test.js` (renders for every QA category + APCA label propagation)
+- `tests/server/inspect-ds-setup-gaps-qa.test.js` (new — covers contrast, broken-alias, incomplete-modes, missing-bg, advisory)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 52/52 passed.
+- `node --check` clean on the touched files.
+- Existing setup-repair flow tests (`apply-ds-setup-repairs-*`, `setup-repair-flow.test.js`) still pass — the inspector's `semanticGaps` shape is preserved.
+
+**Out of scope (intentionally not done this session):**
+- Non-color semantic categories (typography roles, spacing semantics, radius semantics).
+- Setup vs component scope classification of broken aliases (component-scope detection was the wrong direction; downstream component breakage stays out of this script's scope).
+- Live run on the active Figma file (designer should re-run `npm run figlets:check-setup-gaps` against their test file to confirm the deleted vars now show up as missing-bg / missing-fg / broken-alias as appropriate).
+
+---
+
 ### [2026-05-11 — Setup-repair hardening from review feedback]
 
 **Active branch:** `codex/designer-safe-setup-repair-cli`.

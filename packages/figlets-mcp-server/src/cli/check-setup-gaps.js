@@ -102,20 +102,62 @@ function _formatRefreshChange(change) {
   return `${change.kind}: ${change.name || change.token || ""}`;
 }
 
-function _formatGap(gap) {
-  if (gap.status !== "proposed") {
-    return [`Missing foreground for "${gap.bg}" → unresolved (no matching source token found)`];
+function _formatMissingFgGap(gap) {
+  // Pure QA framing: report the gap and the closest existing token in the
+  // file so the agent can ask the designer what to do. The picker's
+  // plannedAliases stay on the JSON for apply_ds_setup_repairs but are
+  // intentionally not rendered here — they bias the conversation toward
+  // "ready to repair" before the designer has decided anything.
+  const lines = [`Missing foreground for "${gap.bg}"`];
+  lines.push(`    convention would suggest: "${gap.recommended}"`);
+  if (gap.source) {
+    const aliasParts = [];
+    const sa = gap.sourceAliases || {};
+    if (sa.Light) aliasParts.push(`Light → ${sa.Light}`);
+    if (sa.Dark)  aliasParts.push(`Dark → ${sa.Dark}`);
+    const aliasText = aliasParts.length ? ` (currently aliases ${aliasParts.join(", ")})` : "";
+    lines.push(`    closest existing token: "${gap.source}"${aliasText}`);
+  } else {
+    lines.push(`    no nearest token in Figma — designer decides what to alias`);
   }
-  const lines = [`Missing foreground for "${gap.bg}" → would add "${gap.recommended}"`];
-  if (gap.plannedAliases) {
-    const parts = [];
-    const upgraded = gap.plannedUpgrades || {};
-    if (gap.plannedAliases.Light) parts.push(`Light → ${gap.plannedAliases.Light}${upgraded.Light ? " (upgraded for contrast)" : ""}`);
-    if (gap.plannedAliases.Dark)  parts.push(`Dark → ${gap.plannedAliases.Dark}${upgraded.Dark ? " (upgraded for contrast)" : ""}`);
-    if (parts.length) lines.push(`    aliases: ${parts.join(", ")}`);
-  }
-  lines.push(`    source: ${gap.source}`);
   return lines;
+}
+
+function _formatHex(rgb) {
+  if (!rgb || typeof rgb !== "object") return "";
+  const c = (n) => Math.round(Math.max(0, Math.min(1, Number(n) || 0)) * 255).toString(16).padStart(2, "0").toUpperCase();
+  return "#" + c(rgb.r) + c(rgb.g) + c(rgb.b);
+}
+
+function _formatContrastFailure(item) {
+  const unit = item.algorithm === "apca" ? "Lc" : ":1";
+  const nearMissTag = item.nearMiss ? ` (near-miss, off by ${item.gap}${unit === ":1" ? "" : unit})` : "";
+  const lines = [
+    `"${item.bg}" + "${item.fg}" (${item.mode}) → ${item.score}${unit} (needs ≥ ${item.threshold}${unit})${nearMissTag}`
+  ];
+  if (item.bgPrimitive) lines.push(`    bg → ${item.bgPrimitive.name} ${_formatHex(item.bgPrimitive.rgb)}`);
+  if (item.fgPrimitive) lines.push(`    fg → ${item.fgPrimitive.name} ${_formatHex(item.fgPrimitive.rgb)}`);
+  return lines;
+}
+
+function _renderSection(lines, items, header, formatter, max) {
+  if (!Array.isArray(items) || !items.length) return;
+  lines.push("");
+  lines.push(header);
+  const limit = Math.max(1, max || 8);
+  const preview = items.slice(0, limit);
+  for (const item of preview) {
+    const out = formatter(item);
+    if (Array.isArray(out)) {
+      lines.push(`  - ${out[0]}`);
+      for (let i = 1; i < out.length; i++) lines.push(`  ${out[i]}`);
+    } else {
+      lines.push(`  - ${out}`);
+    }
+  }
+  if (items.length > preview.length) {
+    lines.push(`  ...and ${items.length - preview.length} more.`);
+  }
 }
 
 function formatCheckReport(state) {
@@ -185,38 +227,126 @@ function formatCheckReport(state) {
 
   const gaps = state.gaps || {};
   if (gaps.error) {
-    lines.push(`Step 3/3 Setup gaps: could not inspect (${gaps.error})`);
+    lines.push(`Step 3/3 Semantic-layer QA: could not inspect (${gaps.error})`);
     if (gaps.hint) lines.push(`  Hint: ${gaps.hint}`);
   } else {
-    const total = gaps.summary ? gaps.summary.semanticGapCount : (gaps.semanticGaps ? gaps.semanticGaps.length : 0);
-    if (!total) {
-      lines.push("Step 3/3 Setup gaps: none found");
+    const summary = gaps.summary || {};
+    const totals = (summary.semanticGapCount || 0)
+      + (summary.missingBackgroundCount || 0)
+      + (summary.incompleteModeCount || 0)
+      + (summary.contrastFailureCount || 0)
+      + (summary.brokenAliasCount || 0)
+      + (summary.companionAdvisoryCount || 0);
+
+    if (!totals) {
+      lines.push("Step 3/3 Semantic-layer QA: clean — no findings");
     } else {
-      const proposed = gaps.summary ? gaps.summary.proposedCount : 0;
-      const unresolved = gaps.summary ? gaps.summary.unresolvedCount : 0;
-      lines.push(`Step 3/3 Setup gaps: ${total} found (${proposed} ready to repair, ${unresolved} need a designer decision)`);
-      const preview = gaps.semanticGaps.slice(0, 8);
-      for (const gap of preview) {
-        const gapLines = _formatGap(gap);
-        lines.push(`  - ${gapLines[0]}`);
-        for (let i = 1; i < gapLines.length; i++) lines.push(`  ${gapLines[i]}`);
-      }
-      if (gaps.semanticGaps.length > preview.length) {
-        lines.push(`  ...and ${gaps.semanticGaps.length - preview.length} more.`);
+      const algoLabel = gaps.contrastAlgorithm === "apca" ? "APCA Lc" : "WCAG ratio";
+      lines.push(`Step 3/3 Semantic-layer QA: ${totals} finding${totals === 1 ? "" : "s"} (contrast checked with ${algoLabel})`);
+    }
+
+    // Snapshot freshness: helps the designer trust the report and gives the
+    // agent a way to verify the snapshot isn't stale.
+    if (gaps.snapshot) {
+      const snap = gaps.snapshot;
+      const synced = snap.syncedAt ? new Date(snap.syncedAt).toLocaleTimeString() : "unknown";
+      lines.push(`  Snapshot: ${snap.variableCount} variables, ${snap.collectionCount} collections (synced at ${synced})`);
+    }
+
+    // Render sections in severity order so the agent walks the designer
+    // through the urgent stuff first and only reaches advisories at the end.
+
+    // 1. Broken aliases (Figma is in a broken state)
+    _renderSection(
+      lines,
+      gaps.brokenAliases || [],
+      `Broken aliases in the semantic layer: ${summary.brokenAliasCount || 0}`,
+      (item) => `"${item.holder}" (${item.mode}) → points at a deleted variable`
+    );
+
+    // 2. Contrast failures (a11y problem)
+    _renderSection(
+      lines,
+      gaps.contrastFailures || [],
+      `Contrast failures: ${summary.contrastFailureCount || 0}${summary.contrastNearMissCount ? ` (${summary.contrastNearMissCount} near-miss)` : ""}`,
+      _formatContrastFailure
+    );
+
+    // 3. Missing foregrounds
+    _renderSection(
+      lines,
+      gaps.semanticGaps || [],
+      `Missing foregrounds: ${summary.semanticGapCount || 0}`,
+      _formatMissingFgGap
+    );
+
+    // 4. Missing backgrounds
+    _renderSection(
+      lines,
+      gaps.missingBackgrounds || [],
+      `Foregrounds without a background: ${summary.missingBackgroundCount || 0}`,
+      (item) => `"${item.fg}" expects "${item.expectedBg}" — missing in Figma`
+    );
+
+    // 5. Incomplete modes
+    _renderSection(
+      lines,
+      gaps.incompleteModes || [],
+      `Tokens with incomplete modes: ${summary.incompleteModeCount || 0}`,
+      (item) => `"${item.token}" missing value in: ${item.missingModes.join(", ")}`
+    );
+
+    // 6. Companion advisories (and any DS-wide role suppression)
+    if (Array.isArray(gaps.suppressedAdvisoryRoles) && gaps.suppressedAdvisoryRoles.length) {
+      lines.push("");
+      for (const s of gaps.suppressedAdvisoryRoles) {
+        lines.push(`This DS doesn't use per-role ${s.role} tokens — suppressing ${s.suppressedCount} ${s.role} advisor${s.suppressedCount === 1 ? "y" : "ies"}.`);
       }
     }
+    _renderSection(
+      lines,
+      gaps.companionAdvisories || [],
+      `Pairs missing border/icon companions (advisory): ${summary.companionAdvisoryCount || 0}`,
+      (item) => {
+        const roles = item.missing.map(m => m.role).join(", ");
+        return `"${item.bg}" + "${item.fg}" — no ${roles}`;
+      }
+    );
   }
 
   lines.push("");
-  lines.push("What this means:");
+  lines.push("What this means (most urgent first):");
   const refreshCount = refresh.summary ? refresh.summary.changedCount : 0;
-  const gapCount = gaps.summary ? gaps.summary.semanticGapCount : 0;
-  if (!refreshCount && !gapCount && !refresh.error && !gaps.error) {
-    lines.push("- Your Figma file's setup looks clean. Nothing to repair right now.");
+  const summary = (gaps && gaps.summary) || {};
+  const findingCount = (summary.semanticGapCount || 0)
+    + (summary.missingBackgroundCount || 0)
+    + (summary.incompleteModeCount || 0)
+    + (summary.contrastFailureCount || 0)
+    + (summary.brokenAliasCount || 0)
+    + (summary.companionAdvisoryCount || 0);
+  const isCleanQa = !findingCount && !gaps.error;
+  if (isCleanQa && !refreshCount && !refresh.error) {
+    lines.push("- Your Figma file's semantic color layer looks clean. Nothing to fix right now.");
+  } else if (isCleanQa && refresh.error) {
+    lines.push("- Your Figma file's semantic color layer looks clean. Create a design-system.config.js when you're ready to lock these tokens in.");
   } else {
-    if (refreshCount) lines.push(`- Your local config is out of date in ${refreshCount} place${refreshCount === 1 ? "" : "s"} compared to Figma.`);
-    if (gapCount) lines.push(`- Figma has ${gapCount} semantic token${gapCount === 1 ? "" : "s"} that could use a foreground companion.`);
-    lines.push("- Review the list above with your designer/agent before applying any repairs.");
+    if (summary.brokenAliasCount) {
+      const verb = summary.brokenAliasCount === 1 ? "references" : "reference";
+      lines.push(`- URGENT: ${summary.brokenAliasCount} semantic token${summary.brokenAliasCount === 1 ? "" : "s"} ${verb} variables that were deleted — Figma is in a broken state.`);
+    }
+    if (summary.contrastFailureCount) {
+      const realFails = summary.contrastFailureCount - (summary.contrastNearMissCount || 0);
+      const nearFails = summary.contrastNearMissCount || 0;
+      const detail = nearFails && realFails ? ` (${realFails} gross, ${nearFails} near-miss)` : nearFails ? " (all near-miss)" : "";
+      const verb = summary.contrastFailureCount === 1 ? "fails" : "fail";
+      lines.push(`- A11Y: ${summary.contrastFailureCount} pair${summary.contrastFailureCount === 1 ? "" : "s"} ${verb} the contrast threshold${detail}.`);
+    }
+    if (summary.semanticGapCount) lines.push(`- ${summary.semanticGapCount} background${summary.semanticGapCount === 1 ? "" : "s"} missing a foreground companion.`);
+    if (summary.missingBackgroundCount) lines.push(`- ${summary.missingBackgroundCount} foreground${summary.missingBackgroundCount === 1 ? "" : "s"} (on-*) without a matching background.`);
+    if (summary.incompleteModeCount) lines.push(`- ${summary.incompleteModeCount} token${summary.incompleteModeCount === 1 ? "" : "s"} have a value in some modes but not others.`);
+    if (summary.companionAdvisoryCount) lines.push(`- Advisory: ${summary.companionAdvisoryCount} pair${summary.companionAdvisoryCount === 1 ? "" : "s"} could optionally add border or icon companions.`);
+    if (refreshCount) lines.push(`- Side note: your local config is out of date in ${refreshCount} place${refreshCount === 1 ? "" : "s"} compared to Figma.`);
+    lines.push("- Review the lists above with your designer/agent. This is a QA report — nothing was changed.");
   }
   lines.push("");
   lines.push(NO_CHANGES);

@@ -4,6 +4,52 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-12] QA report is shaped for the next agent step, not for direct apply
+
+**Decision:** `check-setup-gaps` is the **first half** of a two-step flow: QA report → designer-led conversation → optionally `apply_ds_setup_repairs`. The report's job is to surface findings + enough context for the agent to ask the right question, not to preview what apply would do. Concretely:
+
+1. `plannedAliases` / `plannedUpgrades` / `plannedAlgorithm` remain on the inspector's JSON output (so `apply_ds_setup_repairs` keeps its round-trip contract) but are **not rendered in the CLI**. The CLI shows the source token's *actual* current aliases instead — that's QA-relevant context (e.g. "your on-surface/danger aliases neutral/0 in both modes") and avoids the misleading "(upgraded for contrast)" framing that can bias an agent toward apply.
+2. **Severity ordering everywhere.** Section render order, "What this means" order, and the prefixes (`URGENT:` for broken aliases, `A11Y:` for contrast) all push the agent's attention to the urgent stuff first.
+3. **Resolved primitives + hex on every contrast failure** so designer + agent can debug from the report alone, not by switching to Figma to chase what `surface/warning Dark` actually points at.
+4. **Hairline tag.** Failures within `_WCAG_NEARMISS = 0.3` (or `_APCA_NEARMISS = 5`) are flagged `nearMiss: true` with `gap: <distance>` so triage prioritizes gross failures over off-by-one.
+5. **DS-wide advisory suppression.** When ≥3 complete pairs all miss the same companion role (`_ADVISORY_SUPPRESS_MIN_PAIRS`), the inspector emits one `suppressedAdvisoryRoles` entry instead of N per-pair advisories. Threshold guards against false suppression on small files.
+6. **Snapshot freshness header** (`Snapshot: N variables, M collections (synced at ...)`) so the report carries proof that it's reading current Figma state.
+
+**Why:** The previous CLI rendering said "Missing foregrounds: 4 (4 ready to repair)" with per-pair `aliases: Light → color/neutral/600 (upgraded for contrast)` lines. An agent reading that would reasonably advance to apply. But the picker had walked the **neutral** ramp because the source `on-surface/danger` was already aliased to grey — a likely *bug in the file* the designer should be told about, not an "upgrade" to silently propagate. The QA pass needs to expose the file's state, not pre-resolve it.
+
+**Out of scope (intentional):**
+- "Apply this finding" buttons / shortcuts in the CLI. The script stays read-only; apply lives behind `apply_ds_setup_repairs` with its own approval contract.
+- Cross-finding correlation ("missing-bg X is the reason missing-fg Y looks broken"). The agent does that during the conversation.
+
+**Consequence:** JSON contract is additive (every old field preserved); the apply flow is unchanged. Tests assert severity ordering, the absence of "ready to repair" / "would add" / "upgraded for contrast" wording, the hex render on failures, and the suppression threshold (≥3 pairs).
+
+---
+
+## [2026-05-12] `check-setup-gaps` is a read-only QA pass over the semantic color layer
+
+**Decision:** `inspect_ds_setup_gaps` is a pure QA inspector. It reads a synced Figma snapshot and reports six finding kinds against the **semantic color layer** in Figma:
+
+1. `semanticGaps` — backgrounds without a matching foreground (broadened from variant-only to **any** background-family leaf; still emits `plannedAliases` for the existing apply-repair path).
+2. `missingBackgrounds` — `on-*` foregrounds without a matching surface/bg/background. Restricted to the explicit `on-*` prefix; generic `text/*` tokens are deliberately not flagged.
+3. `incompleteModes` — semantic var has a value in some collection modes but not others (zero-value vars are skipped; that's a different problem).
+4. `contrastFailures` — bg+fg pairs whose resolved RGB fails WCAG 4.5:1 (default) or APCA Lc 75 (when config opts in). Aliases are walked **by mode name** so primitives in single-mode collections still resolve cleanly.
+5. `brokenAliases` — semantic-layer-only. A semantic var aliasing a target id that's not in the snapshot.
+6. `companionAdvisories` — complete pair with no border/icon companion. Advisory only.
+
+**Source of truth:** Figma. The optional `design-system.config.js` is consulted only for `contrastAlgorithm` selection. The setup flow that authors configs from a Figma read is unchanged.
+
+**Why:** The previous inspector iteration only fired on `-variant` leaves and treated raw fill names as out-of-scope, so a designer deleting an everyday semantic var (e.g. `color/on-surface/danger`) got a "0 gaps" report — the opposite of what a QA pass should do. A simultaneous broken-alias-with-setup-vs-component-scope classifier was added on top, but component-scope detection was never in this project's scope. The previous commit (`1504b5d`) was reverted; this decision narrows the contract back to the original intent (semantic-layer QA), broadens detection so the contract is actually met, and removes the scope classifier entirely.
+
+**Out of scope (explicitly):**
+- Component-collection breakage. If a `Button · Type` alias is broken, the QA does not classify or report it — that's a downstream rebinding problem outside the setup flow.
+- Non-color semantic categories (typography roles, spacing semantics, radius semantics) — color-only QA for now.
+
+**Apply-flow compatibility:** `apply_ds_setup_repairs` continues to consume `semanticGaps[*].plannedAliases` verbatim. Broadening means many non-variant gaps come back as `status: "unresolved"` (no source token in the file) and apply correctly skips them. No bridge or apply changes were needed.
+
+**Consequence:** The `check-setup-gaps` CLI now renders every finding category with plain-language headlines and labels the contrast algorithm in use. Existing tests updated; new `tests/server/inspect-ds-setup-gaps-qa.test.js` covers contrast, broken-alias, incomplete-modes, missing-bg, and advisory paths against literal RGB primitives. `npm test` 52/52.
+
+---
+
 ## [2026-05-11] Repair apply trusts designer-approved plannedAliases; refresh refuses to guess brand step
 
 **Decision (review follow-up):** Four hardening changes to the setup-repair flow, all addressing review feedback on commit 73a195f.

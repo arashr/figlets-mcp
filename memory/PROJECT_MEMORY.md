@@ -112,6 +112,250 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-12 — QA → Fix: contrast re-alias plumbed end-to-end via the existing apply tool]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** A test conversation ("fix the contrast issues and add the missing foregrounds") revealed a capability gap: the QA report was readable but the agent had no way to apply contrast fixes — `apply_ds_setup_repairs` only created new fg companions. Designer's call: don't build a parallel contrast-fix script; reuse the setup flow's contrast picker (already in `validateSemanticPairs` / `accessible-repair-aliases`); MCP is part of the product so requiring it for the apply step is fine.
+
+**What changed (one tool, one bridge channel, two repair kinds):**
+
+1. **Inspector → `plannedReAlias` per failing mode.** Reuses `computePlannedAliases({ bg, name: fg, source: fg }, ...)` — passing the existing fg as both `name` and `source` makes the picker walk the fg's ramp and return the nearest passing step. No new contrast math. Falls back silently when the picker can't (multi-hop alias chains, missing primitives) — that's intentional, not a bug. Each contrast failure now carries `plannedReAlias: { token, mode, from, to }` when the picker found an upgrade.
+
+2. **CLI renders the suggestion.** `suggested fix: re-alias "<token>" (<mode>) → <new primitive>` line under the bg/fg lines on each contrast failure. Designer + agent see the answer in plain text.
+
+3. **`apply_ds_setup_repairs` accepts a second repair kind.** New top-level field `aliasUpdates: [{ token, mode, newAliasTarget }]`. Either or both arrays can be provided; the schema's `required: ["repairs"]` was dropped (now requires at least one of repairs or aliasUpdates). Wire payload to the bridge carries both arrays in one round-trip.
+
+4. **Bridge plugin processes both kinds in `_applyDsSetupRepairs`.** After the existing create-fg loop, an alias-update loop finds each `token` by name, finds the matching mode, finds the target primitive, and calls `setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id })`. Idempotent — skips when already aliased to target. Returns `updated`, `updateSkipped`, `updateUnresolved` arrays alongside the existing create-side ones.
+
+5. **Receiver is unchanged.** It already passes the entire payload as `data` — `aliasUpdates` flows through with no router changes.
+
+**Why this shape:** One tool means one approval contract for the designer ("approve these fixes" → one apply call → one bridge round-trip). The picker has a single owner — `validateSemanticPairs` via `computePlannedAliases`. No duplicated contrast math. The `plannedReAlias` shape is exactly what `aliasUpdates` consumes, so the agent's job is "copy the suggestion, ask the designer, send it."
+
+**What's intentionally NOT done:**
+- No config update for re-aliases. Designer can run `refresh_ds_config_from_figma` if they want config to follow. Avoids a config-mutation surface that's hard to test.
+- No CLI for apply. Apply is an MCP tool; agent calls it. The QA CLI stays as the read-only entry point.
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js` (plannedReAlias computation per failing pair)
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (suggested-fix render)
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js` (aliasUpdates schema + normalization + wire forwarding)
+- `packages/figma-bridge-plugin/code.js` (aliasUpdates loop in `_applyDsSetupRepairs`)
+- `tests/server/inspect-ds-setup-gaps-qa.test.js` (plannedReAlias assertion via handler with snapshot isolation)
+- `tests/server/apply-ds-setup-repairs-tool.test.js` (`_normalizeAliasUpdates` + alias-only round-trip + empty-input error path)
+- `docs/designer-fix-flow-prompt.md` (new — paste-ready prompt for the agent)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 52/52.
+- `node --check` clean on the touched files.
+- Plugin ES6 guard clean (only existing markdown bold matches `**`).
+- Live QA re-run on the now-active file (`local_moy7g0m2_i5kzy3kp`) reports clean — no contrast failures available to exercise the live re-alias path. Test coverage handles the mechanism.
+
+---
+
+### [2026-05-12 — QA report polish: agent-ready output, severity ordering, advisory collapse]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** A live run on `local_mozwkg5o_ufp0x3jo` surfaced six output-quality issues. The findings themselves were correct; the *presentation* biased the agent toward applying repairs before asking the designer anything, made hairline contrast fails look identical to gross fails, and exploded into per-pair advisories when the DS just doesn't use a role at all.
+
+**Changes (all in `inspect-ds-setup-gaps.js` and `check-setup-gaps.js`):**
+
+1. **Strip the apply preview from CLI rendering.** `plannedAliases` / `plannedUpgrades` / `plannedAlgorithm` stay on the JSON (apply path consumes them) but the human-readable report no longer says "would add", "ready to repair", or "(upgraded for contrast)". The new framing: `convention would suggest: "<recommended>"` + `closest existing token: "<source>" (currently aliases Light → ..., Dark → ...)`. Tells the agent what the source's *real-world* alias is so it can ask the designer the right question (e.g. "your on-surface/danger aliases white in both modes — does that intent carry to the variant?").
+
+2. **Advisory collapse.** When ≥3 complete bg+fg pairs all miss the same companion role (border or icon), the inspector emits `suppressedAdvisoryRoles: [{ role, suppressedCount }]` once instead of N per-pair advisories. CLI prints `This DS doesn't use per-role icon tokens — suppressing 10 icon advisories.` Threshold (`_ADVISORY_SUPPRESS_MIN_PAIRS = 3`) prevents 1- or 2-pair files from over-suppressing.
+
+3. **Resolved primitives on contrast failures.** Each `contrastFailure` now carries `bgPrimitive: { name, rgb }` and `fgPrimitive: { name, rgb }` from a name-aware `_resolveTerminalByModeName`. CLI renders `bg → color/yellow/400 #FBBF24` / `fg → color/neutral/1000 #09090B` underneath each failure. Designer can debug without opening Figma.
+
+4. **Near-miss tagging.** `nearMiss: true` + `gap: <distance>` set when a failure is within `_WCAG_NEARMISS = 0.3` (or `_APCA_NEARMISS = 5`). CLI shows `(near-miss, off by 1Lc)`. Section header reports `(N near-miss)`. "What this means" splits as `(X gross, Y near-miss)` so triage starts with the gross misses.
+
+5. **Snapshot freshness header.** Handler returns `snapshot: { path, syncedAt, variableCount, collectionCount }`. CLI renders `Snapshot: 301 variables, 4 collections (synced at HH:MM:SS)` so designer + agent can trust the report isn't stale.
+
+6. **Severity ordering** — both the section render and the "What this means" footer. Order: broken aliases → contrast failures → missing fg → missing bg → incomplete modes → advisories. Footer prefixes urgent items: `URGENT: ...`, `A11Y: ...`. Subject-verb agreement fixed for singular/plural.
+
+**JSON shape additions (additive — all old fields preserved):**
+- `snapshot: { path, syncedAt, variableCount, collectionCount }`
+- `counts: { semanticVariables, completePairs }`
+- `suppressedAdvisoryRoles: [{ role, suppressedCount }]`
+- `summary.contrastNearMissCount`
+- `summary.suppressedAdvisoryRoleCount`
+- `contrastFailures[*].nearMiss`, `gap`, `bgPrimitive`, `fgPrimitive`
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js`
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js`
+- `tests/server/check-setup-gaps-cli.test.js` (severity-order assertion, near-miss + hex render, advisory-suppression note)
+- `tests/server/inspect-ds-setup-gaps-qa.test.js` (resolved-primitive fields, suppression with ≥3 pairs, threshold guard with 2 pairs)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Live run after the change** (`local_mozwkg5o_ufp0x3jo`): 13 findings down from 18 (10 icon advisories collapsed into 1 suppression line; 5 border advisories remain). Contrast section now shows yellow/400 vs neutral/1000 hex per failure with `(near-miss, off by 1Lc)` on the warning pair. Missing-fg lines reveal that on-surface/danger/info/success all alias to neutral/0 today — the agent can flag that to the designer instead of silently propagating it.
+
+**Verification:** `npm test` 52/52. `node --check` clean.
+
+---
+
+### [2026-05-12 — `check-setup-gaps` rewritten as a semantic-layer QA pass]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** The previous session's broken-alias + setup-vs-component scope work (commit `1504b5d`) was the wrong direction — the inspector was too narrow (variant-only) AND simultaneously too broad (component-scope wasn't in this project's scope). When the designer deleted some semantic vars in a live test, the report didn't catch them. Per direction: revert that commit and rebuild `check-setup-gaps` as a pure read-only QA layer over the semantic color layer in Figma.
+
+**What changed (surgical):**
+1. **Reverted** `1504b5d` (`Detect broken aliases and bucket by setup vs component scope`). HEAD now sits on `781f03f`.
+2. **`inspect_ds_setup_gaps` rewritten** to a six-finding QA pass:
+   - `semanticGaps` (missing fg companions) — broadened from variant-only to **any** background-family leaf. Still emits `plannedAliases` for the apply flow (apply path is unchanged).
+   - `missingBackgrounds` — orphan `on-*` foregrounds. Restricted to the explicit on-* prefix to avoid over-reporting generic `text/*` tokens.
+   - `incompleteModes` — semantic var has values in some modes but not others. Skipped when the var has zero values everywhere.
+   - `contrastFailures` — for each resolvable bg+fg pair, walks aliases by mode name to literal RGB and computes WCAG ratio (default) or APCA Lc (when config opts in). Thresholds match the setup flow: 4.5 / 75.
+   - `brokenAliases` — semantic-layer only. No setup-vs-component classification (out of scope per direction).
+   - `companionAdvisories` — pair has bg+fg but no border/icon companion. Advisory only.
+3. **`check-setup-gaps` CLI updated** to render every finding category with plain language and the configured contrast algorithm. Dropped all "broken DS aliases / broken component aliases" wording.
+4. **`apply_ds_setup_repairs` untouched** — still consumes `semanticGaps[*].plannedAliases` verbatim. Because the broadening allows non-variant gaps (which usually have no source token in the file), most non-variant entries arrive as `status: "unresolved"` and apply correctly skips them.
+
+**Source-of-truth rule (now consistent):** Figma is the source of truth for QA. The optional `design-system.config.js` is consulted only for `contrastAlgorithm`. The setup flow that creates configs from a Figma read is unchanged.
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js` (full rewrite of the analysis function)
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (renders six finding sections + new "What this means")
+- `tests/server/inspect-ds-setup-gaps-tool.test.js` (updated for broadened detection + new categories)
+- `tests/server/check-setup-gaps-cli.test.js` (renders for every QA category + APCA label propagation)
+- `tests/server/inspect-ds-setup-gaps-qa.test.js` (new — covers contrast, broken-alias, incomplete-modes, missing-bg, advisory)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 52/52 passed.
+- `node --check` clean on the touched files.
+- Existing setup-repair flow tests (`apply-ds-setup-repairs-*`, `setup-repair-flow.test.js`) still pass — the inspector's `semanticGaps` shape is preserved.
+
+**Out of scope (intentionally not done this session):**
+- Non-color semantic categories (typography roles, spacing semantics, radius semantics).
+- Setup vs component scope classification of broken aliases (component-scope detection was the wrong direction; downstream component breakage stays out of this script's scope).
+- Live run on the active Figma file (designer should re-run `npm run figlets:check-setup-gaps` against their test file to confirm the deleted vars now show up as missing-bg / missing-fg / broken-alias as appropriate).
+
+---
+
+### [2026-05-11 — Setup-repair hardening from review feedback]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** Code review on commit 73a195f flagged four issues. All are addressed in this change set without changing the existing approve-then-apply intent.
+
+**Changes:**
+
+1. **Shared picker.** Picker logic moved to `packages/figlets-mcp-server/src/utils/accessible-repair-aliases.js` (`computePlannedAliases`, `resolveRepairRefs`, `loadActiveSnapshot`, `loadDsConfigSafe`). `apply-ds-setup-repairs.js` and `inspect-ds-setup-gaps.js` both call it — one owner.
+2. **`plannedAliases` on inspector output.** Each proposed gap now carries `plannedAliases: { Light, Dark }`, `plannedAlgorithm`, and `plannedUpgrades: { Light: bool, Dark: bool }`. CLI report renders them with an "(upgraded for contrast)" flag where applicable. Failure is silent (no plannedAliases key) so the apply tool can still fall back.
+3. **Apply trusts approved aliases.** `apply_ds_setup_repairs` now forwards `repair.aliases` verbatim when provided. Recomputation runs only when aliases were not passed. The schema documents the round-trip contract.
+4. **Orphan-bg guard.** `bg` is required in the schema, the normalizer drops repairs without it, and the bridge handler errors with `BG variable not found in current Figma file.` if the snapshot/poll is stale.
+5. **Mode propagation in refresh.** `_resolveValue` now carries the source mode name across alias hops and resolves the target's matching mode by name. Falls back to the only mode when target is single-mode.
+6. **No implicit brand step.** Brand entries without an explicit `step` are skipped with a clear `reason`. Aligns with the existing auto-anchor rule (memory: "Auto-anchor brand hex to its natural step").
+
+**Files changed:**
+- `packages/figlets-mcp-server/src/utils/accessible-repair-aliases.js` (new — shared picker)
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js` (schema requires `bg`; normalizer drops bg-less; forwards `repair.aliases`; uses shared picker)
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js` (surfaces `plannedAliases`)
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (renders `plannedAliases`)
+- `packages/figlets-mcp-server/src/tools/refresh-ds-config-from-figma.js` (mode-aware resolve; explicit step required)
+- `packages/figma-bridge-plugin/code.js` (require `bg`, verify it exists pre-create)
+- `tests/server/refresh-ds-config-from-figma-tool.test.js` (added brand fixture step; new no-step + multi-mode regression tests)
+- `tests/server/apply-ds-setup-repairs-tool.test.js` (orphan-bg + approved-aliases round-trip)
+- `tests/server/inspect-ds-setup-gaps-planned-aliases.test.js` (new)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 51/51 passed.
+- `node --check packages/figma-bridge-plugin/code.js`: passed.
+
+---
+
+### [2026-05-11 — Repair apply picks accessible aliases via validateSemanticPairs]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli` (off `main` at `20cc5fd`).
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** `apply_ds_setup_repairs` was cloning `source.valuesByMode` as-is. When the BG variant resolves to a different primitive than the source's natural BG, the cloned alias may fail contrast against the variant. The fix routes per-mode alias selection through the existing setup-flow validator instead of duplicating the contrast math.
+
+**How it works:**
+1. MCP server loads the active Figma snapshot (env-first via `FIGLETS_FIGMA_DATA_PATH`, then `FIGLETS_LOCAL_DIR`/active-file lookup, then cached `paths.js`).
+2. For each approved repair, derive Light/Dark primitive ref names from the BG variant and the source FG (one alias hop; both must resolve to a `color/<ramp>/<step>` primitive).
+3. Build a working DS: bootstrap ramps + brand from the snapshot, then overlay any existing config values (`contrastAlgorithm`, `brand`, `ramps`, `rampStrategy`, `convention`).
+4. Set `DS.color.semantics.pairs` to a single in-memory pair `{ bg, text, Light, Dark }` and call `validateSemanticPairs`.
+5. Read the new additive `pairSuggestions` field from the validator's return. For each mode: `aliases[mode] = suggestion.path ?? input text path`.
+6. Forward the precomputed `aliases` on each repair in the bridge wire payload.
+
+**Bridge plugin:** `_applyDsSetupRepairs` checks `repair.aliases`. If present, it looks up Light/Dark mode IDs in the source's collection and the named primitive variables, and `setValueForMode(modeId, { type:'VARIABLE_ALIAS', id })` per mode. If `aliases` is absent or every mode fails to resolve, it falls back to the legacy `valuesByMode` copy.
+
+**Why minimal change:**
+- `validate-semantic-pairs.js`: only addition is a `pairSuggestions` map on the return. Existing consumers untouched. Existing core test suite passes.
+- `apply-ds-setup-repairs.js`: adds the picker pipeline; preserves the legacy copy-values path through fallback.
+- New helper `bootstrap-ds-from-figma.js` builds a minimal DS from snapshot — never persisted.
+- Plugin code change is one branch in `_applyDsSetupRepairs`; legacy path preserved as fallback.
+
+**Files changed:**
+- `packages/figlets-core/src/ds-config/validate-semantic-pairs.js` (additive return field)
+- `packages/figlets-mcp-server/src/utils/bootstrap-ds-from-figma.js` (new)
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js` (alias precomputation pipeline)
+- `packages/figma-bridge-plugin/code.js` (consume `aliases` when present)
+- `tests/server/bootstrap-ds-from-figma.test.js` (new — ramps/brand extraction)
+- `tests/server/apply-ds-setup-repairs-accessible-aliases.test.js` (new — handler precomputes accessible aliases against a snapshot)
+- `tests/server/apply-ds-setup-repairs-tool.test.js` (added `FIGLETS_LOCAL_DIR` isolation so the dev's `.local` snapshot doesn't bleed into the assertion)
+- `tests/integration/setup-repair-flow.test.js` (updated wire-payload assertion to acknowledge new `aliases` field)
+- `DECISIONS.md`, `memory/PROJECT_MEMORY.md`
+
+**Verification:**
+- `npm test`: 50/50 passed.
+- `node --check packages/figma-bridge-plugin/code.js`: passed; no `??`/`?.`/`**` in changes.
+
+**Open follow-ups (not in this change):**
+- `args.answers = { algorithm }` is plumbed but no `needsInput` round-trip yet — defaults to WCAG when not supplied. If designers want APCA, the agent must pass `answers.algorithm: 'apca'` (or the existing config sets `contrastAlgorithm`).
+- Persisting a bootstrapped config is not implemented yet; the MCP-side `_updateConfigPairs` only edits an existing config.
+
+---
+
+### [2026-05-11 — Designer-safe setup gap check CLI]
+
+**Active branch:** `codex/designer-safe-setup-repair-cli` (off `main` at `20cc5fd`).
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** A clean agent session may not have the Figlets MCP server connected. Designers must still be able to point any agent at a single shell command for a safe, plain-language preview. The command never mutates Figma and never writes config.
+
+**Command:** `npm run figlets:check-setup-gaps`
+
+**Flow (all read-only):**
+1. Probe bridge `/health` (also reads `pluginConnected`, `activeFileKey`).
+2. If bridge or plugin is unavailable, print plain-language next steps and stop.
+3. `handleSyncFigmaData()` — refresh the local snapshot.
+4. `handleRefreshDsConfigFromFigma({ dry_run: true })` — never writes.
+5. `handleInspectDsSetupGaps({})`.
+6. Print a designer-friendly report. Always ends with `No changes were made to Figma.`
+
+**Files added/changed:**
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js` (new)
+- `tests/server/check-setup-gaps-cli.test.js` (new — exercises `formatCheckReport` for: bridge down, plugin disconnected, sync failure, clean state, no-config state, changes-and-gaps state)
+- `package.json` (added `figlets:check-setup-gaps` script)
+- `DECISIONS.md` (new entry: Designer-safe setup gap check)
+
+**Constraints preserved:**
+- Refresh is always dry-run from the CLI. The MCP `refresh_ds_config_from_figma` tool can still write when called with `dry_run: false` from a connected agent.
+- Apply is intentionally not in this CLI. A future apply CLI must accept an explicit approved-repairs input (file or flag), not infer approval.
+- `.mcp.json` at repo root is untracked, contains an absolute path, and must not be committed.
+
+**Verification already run:**
+- `npm test`: 48/48 passed (47 prior + 1 new CLI test).
+- `git diff --check`: clean.
+
+---
+
 ### [2026-05-11 — Setup-gap inspector + approved repair apply path]
 
 **Active branch:** `main`.

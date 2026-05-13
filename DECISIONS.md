@@ -53,6 +53,116 @@ The exporter writes the full DS (minus environment-dependent fields like `source
 
 ---
 
+## [2026-05-12] Contrast fixes go through the existing apply tool — no parallel script
+
+**Decision:** `apply_ds_setup_repairs` accepts two repair kinds in one call:
+- `repairs[]` — create missing semantic foreground vars (existing).
+- `aliasUpdates[]` — re-alias an existing semantic var in a specific mode (new).
+
+The contrast picker stays inside `validateSemanticPairs` / `accessible-repair-aliases.computePlannedAliases`. The QA inspector reuses it by passing the failing fg as both `name` and `source` of a synthetic repair — the picker walks the fg's ramp and returns the nearest passing step. Each contrast failure carries `plannedReAlias: { token, mode, from, to }` when the picker can find an upgrade (returns null for multi-hop alias chains).
+
+**Why:** Building a separate contrast-fix script would duplicate the contrast math and double the approval surface the designer (and agent) have to reason about. MCP is part of the product runtime, so requiring it for the apply step isn't friction — it's the assumed environment. Writing to Figma always goes through the bridge anyway. One tool, one bridge channel, one approval contract.
+
+**Wire format:** Both arrays travel in one `request-setup-repairs` body. The bridge plugin processes `repairs` first (create), then `aliasUpdates` (re-alias). Receiver is unchanged — it forwards the full payload.
+
+**Out of scope (intentional):**
+- Config update for re-aliases. The new path doesn't touch `design-system.config.js`. If the designer wants config to follow Figma after a re-alias, they run `refresh_ds_config_from_figma`. Keeps the new mutation surface minimal.
+- CLI for apply. Apply remains MCP-only; the agent calls it. The QA CLI is read-only and unchanged.
+
+**Consequence:** The agent can now resolve every fixable QA finding in one tool call. The schema's `required: ["repairs"]` was dropped — the handler errors when neither array has entries. Tests cover `_normalizeAliasUpdates`, the wire-format shape, an alias-only round-trip, and the empty-input guard. Plugin ES6 constraint preserved (no `??`/`?.`/`**` introduced; `**` in matches are markdown strings).
+
+**Failure modes:**
+- Picker can't find a passing step on the ramp → no `plannedReAlias` → CLI just shows the failure with bg/fg primitives + hex; designer decides manually in Figma.
+- Re-alias target primitive doesn't exist in Figma → bridge returns it under `updateUnresolved` with reason; nothing is written.
+- Token already aliased to target → bridge returns it under `updateSkipped` (idempotent).
+
+---
+
+## [2026-05-12] QA report is shaped for the next agent step, not for direct apply
+
+**Decision:** `check-setup-gaps` is the **first half** of a two-step flow: QA report → designer-led conversation → optionally `apply_ds_setup_repairs`. The report's job is to surface findings + enough context for the agent to ask the right question, not to preview what apply would do. Concretely:
+
+1. `plannedAliases` / `plannedUpgrades` / `plannedAlgorithm` remain on the inspector's JSON output (so `apply_ds_setup_repairs` keeps its round-trip contract) but are **not rendered in the CLI**. The CLI shows the source token's *actual* current aliases instead — that's QA-relevant context (e.g. "your on-surface/danger aliases neutral/0 in both modes") and avoids the misleading "(upgraded for contrast)" framing that can bias an agent toward apply.
+2. **Severity ordering everywhere.** Section render order, "What this means" order, and the prefixes (`URGENT:` for broken aliases, `A11Y:` for contrast) all push the agent's attention to the urgent stuff first.
+3. **Resolved primitives + hex on every contrast failure** so designer + agent can debug from the report alone, not by switching to Figma to chase what `surface/warning Dark` actually points at.
+4. **Hairline tag.** Failures within `_WCAG_NEARMISS = 0.3` (or `_APCA_NEARMISS = 5`) are flagged `nearMiss: true` with `gap: <distance>` so triage prioritizes gross failures over off-by-one.
+5. **DS-wide advisory suppression.** When ≥3 complete pairs all miss the same companion role (`_ADVISORY_SUPPRESS_MIN_PAIRS`), the inspector emits one `suppressedAdvisoryRoles` entry instead of N per-pair advisories. Threshold guards against false suppression on small files.
+6. **Snapshot freshness header** (`Snapshot: N variables, M collections (synced at ...)`) so the report carries proof that it's reading current Figma state.
+
+**Why:** The previous CLI rendering said "Missing foregrounds: 4 (4 ready to repair)" with per-pair `aliases: Light → color/neutral/600 (upgraded for contrast)` lines. An agent reading that would reasonably advance to apply. But the picker had walked the **neutral** ramp because the source `on-surface/danger` was already aliased to grey — a likely *bug in the file* the designer should be told about, not an "upgrade" to silently propagate. The QA pass needs to expose the file's state, not pre-resolve it.
+
+**Out of scope (intentional):**
+- "Apply this finding" buttons / shortcuts in the CLI. The script stays read-only; apply lives behind `apply_ds_setup_repairs` with its own approval contract.
+- Cross-finding correlation ("missing-bg X is the reason missing-fg Y looks broken"). The agent does that during the conversation.
+
+**Consequence:** JSON contract is additive (every old field preserved); the apply flow is unchanged. Tests assert severity ordering, the absence of "ready to repair" / "would add" / "upgraded for contrast" wording, the hex render on failures, and the suppression threshold (≥3 pairs).
+
+---
+
+## [2026-05-12] `check-setup-gaps` is a read-only QA pass over the semantic color layer
+
+**Decision:** `inspect_ds_setup_gaps` is a pure QA inspector. It reads a synced Figma snapshot and reports six finding kinds against the **semantic color layer** in Figma:
+
+1. `semanticGaps` — backgrounds without a matching foreground (broadened from variant-only to **any** background-family leaf; still emits `plannedAliases` for the existing apply-repair path).
+2. `missingBackgrounds` — `on-*` foregrounds without a matching surface/bg/background. Restricted to the explicit `on-*` prefix; generic `text/*` tokens are deliberately not flagged.
+3. `incompleteModes` — semantic var has a value in some collection modes but not others (zero-value vars are skipped; that's a different problem).
+4. `contrastFailures` — bg+fg pairs whose resolved RGB fails WCAG 4.5:1 (default) or APCA Lc 75 (when config opts in). Aliases are walked **by mode name** so primitives in single-mode collections still resolve cleanly.
+5. `brokenAliases` — semantic-layer-only. A semantic var aliasing a target id that's not in the snapshot.
+6. `companionAdvisories` — complete pair with no border/icon companion. Advisory only.
+
+**Source of truth:** Figma. The optional `design-system.config.js` is consulted only for `contrastAlgorithm` selection. The setup flow that authors configs from a Figma read is unchanged.
+
+**Why:** The previous inspector iteration only fired on `-variant` leaves and treated raw fill names as out-of-scope, so a designer deleting an everyday semantic var (e.g. `color/on-surface/danger`) got a "0 gaps" report — the opposite of what a QA pass should do. A simultaneous broken-alias-with-setup-vs-component-scope classifier was added on top, but component-scope detection was never in this project's scope. The previous commit (`1504b5d`) was reverted; this decision narrows the contract back to the original intent (semantic-layer QA), broadens detection so the contract is actually met, and removes the scope classifier entirely.
+
+**Out of scope (explicitly):**
+- Component-collection breakage. If a `Button · Type` alias is broken, the QA does not classify or report it — that's a downstream rebinding problem outside the setup flow.
+- Non-color semantic categories (typography roles, spacing semantics, radius semantics) — color-only QA for now.
+
+**Apply-flow compatibility:** `apply_ds_setup_repairs` continues to consume `semanticGaps[*].plannedAliases` verbatim. Broadening means many non-variant gaps come back as `status: "unresolved"` (no source token in the file) and apply correctly skips them. No bridge or apply changes were needed.
+
+**Consequence:** The `check-setup-gaps` CLI now renders every finding category with plain-language headlines and labels the contrast algorithm in use. Existing tests updated; new `tests/server/inspect-ds-setup-gaps-qa.test.js` covers contrast, broken-alias, incomplete-modes, missing-bg, and advisory paths against literal RGB primitives. `npm test` 52/52.
+
+---
+
+## [2026-05-11] Repair apply trusts designer-approved plannedAliases; refresh refuses to guess brand step
+
+**Decision (review follow-up):** Four hardening changes to the setup-repair flow, all addressing review feedback on commit 73a195f.
+
+1. **Approve-then-apply consistency.** `inspect_ds_setup_gaps` now computes `plannedAliases` for each proposed gap by calling the same picker as apply (extracted to `packages/figlets-mcp-server/src/utils/accessible-repair-aliases.js`). The CLI report renders the per-mode aliases the designer would actually get, with an "(upgraded for contrast)" flag when the picker walked the ramp. `apply_ds_setup_repairs` forwards the caller-supplied `repair.aliases` verbatim and only falls back to recomputing when no preview was passed. The designer sees exactly what gets written; the picker has a single owner.
+2. **No orphan repairs.** `apply_ds_setup_repairs.inputSchema` now requires `bg` alongside `source`, `_normalizeRepairs` drops repairs without a `bg`, and the bridge handler verifies `bg` still exists in Figma before creating the FG companion. Previously an agent could send `{ name, source }` and the plugin would create a semantic variable with no paired background; config-update silently skipped it.
+3. **Mode-aware alias resolution in refresh.** `refresh-ds-config-from-figma.js`'s `_resolveValue` now propagates the source mode name across `VARIABLE_ALIAS` hops and selects the target's matching mode by name, instead of `Object.keys(values)[0]`. Without this, a primitive aliasing a multi-mode variable would sync the wrong RGB whenever JSON key order differed from collection order.
+4. **No implicit brand step.** `refresh-ds-config-from-figma.js` no longer defaults to `step=500` when `brand.step` is missing. It skips the entry with a "no explicit anchor step" reason. This aligns with the existing auto-anchor decision (a brand's natural step is OKLab-L-derived, not a scale midpoint) and avoids the wrong-hex hazard on 400/600 anchors or 0–1000 scales.
+
+**Why:** The previous flow had a confirmation-vs-mutation drift (designers approved "copy from source X", apply might pick a different step), accepted incomplete repair specs, and used JSON-order- or midpoint-based shortcuts that were correct in the test fixture but unsafe in the wild.
+
+**Consequence:** Existing flows continue to work — bridge fallback to copy-values, the normalizer still accepts legacy `{ recommended, source }` shape augmented with the now-required `bg`. New regression tests in `tests/server/refresh-ds-config-from-figma-tool.test.js` (no-step skip + multi-mode alias safety), `tests/server/inspect-ds-setup-gaps-planned-aliases.test.js` (planned-aliases surfacing), and `tests/server/apply-ds-setup-repairs-tool.test.js` (orphan-bg guard, approved-aliases round-trip).
+
+---
+
+## [2026-05-11] Repair apply reuses validateSemanticPairs to pick accessible per-mode aliases
+
+**Decision:** `apply_ds_setup_repairs` no longer hands raw `source.valuesByMode` to the bridge plugin. The MCP server now precomputes per-mode primitive aliases for each approved repair by feeding a one-row pair into the existing `validateSemanticPairs` (the same code path the setup flow uses), and forwards `aliases: { Light: 'color/<ramp>/<step>', Dark: ... }` on each repair. The plugin sets each mode's value to a `VARIABLE_ALIAS` pointing at the named primitive. When the snapshot or DS config is missing/insufficient (no ramps, source not aliased to a primitive, etc.), the server omits `aliases` and the plugin falls back to its prior copy-values behavior — preserving the older repair flow exactly.
+
+**Why:** The old flow cloned the source FG token's aliases verbatim. If the BG variant resolved to a different primitive than the source's intended BG, contrast checks were never re-run and the variant could ship at a sub-AA ratio. The setup flow's `validateSemanticPairs` already walks ramps and picks the nearest accessible step per mode (WCAG ratio / APCA Lc, gated by `DS.color.contrastAlgorithm`); routing repairs through it removes the duplication and keeps the picker consistent across `apply_ds_setup`, `update_ds_primitives`, and `apply_ds_setup_repairs`.
+
+**Bootstrap rule:** When no `design-system.config.js` exists for the active file, the server builds an in-memory DS from the Figma snapshot — `color.ramps` extracted from `color/<ramp>/<step>` primitives, `color.brand` heuristically detected (`primary` → `brand` → first ramp; anchor step closest to 500), `contrastAlgorithm` defaulting to WCAG. The bootstrap is never persisted unless a future flow explicitly opts in. Existing partial configs (e.g. only `color.semantics.pairs` filled in) are merged with the bootstrap so validation always has ramps + brand without forcing a full DS rewrite.
+
+**Wire-format change:** `command.data.repairs[*]` may now include `aliases: { Light, Dark }` keyed by mode name. The bridge handler in `code.js` consumes the field when present and falls back to the legacy copy-values path when absent. This is forward+backward compatible — older MCP servers that don't send `aliases` keep working with the new plugin, and the new MCP server with no snapshot reachable behaves like the old one.
+
+**Consequence:** No new contrast math was added — `validateSemanticPairs` is the single authority. The only additive core change is a `pairSuggestions` field on its return value (existing consumers ignore it). Failure modes are best-effort: if alias computation can't be done, the repair still applies via the legacy path so existing flows keep working.
+
+---
+
+## [2026-05-11] Designer-safe setup gap check runs without MCP tools loaded
+
+**Decision:** Add a local CLI entry point `npm run figlets:check-setup-gaps` (file: `packages/figlets-mcp-server/src/cli/check-setup-gaps.js`) that runs the read-only setup-repair preview by calling the existing handlers directly: bridge `/health`, `handleSyncFigmaData`, `handleRefreshDsConfigFromFigma({ dry_run: true })`, `handleInspectDsSetupGaps({})`. It prints a plain-language report and always ends with "No changes were made to Figma." Config refresh is always dry-run; repairs are never applied.
+
+**Why:** A clean agent session may not have the Figlets MCP server connected, so it cannot call `sync_figma_data` or `inspect_ds_setup_gaps`. Designers should still be able to point any agent at a single boring shell command and get a safe, plain-language preview of what would change. The check command is a fallback for the no-MCP-tools case and works as a one-liner for sanity checks.
+
+**Consequence:** The check command is read-only and stops before any approval step. Applying repairs still requires the explicit MCP path (`apply_ds_setup_repairs` with approved repairs). A future apply CLI, if added, must accept an explicit approved-repairs input (file or flag), not infer approval. The `.mcp.json` at the repo root is a local convenience file with an absolute path; it is not committed and is not portable.
+
+---
+
 ## [2026-05-11] Setup repairs use inspect-then-approved-apply
 
 **Decision:** Existing-file setup repairs are split into an explicit config refresh, read-only inspection step, and designer-approved apply step. `refresh_ds_config_from_figma` updates already-existing config entries from the synced Figma snapshot without creating new config tokens and without mutating Figma. `inspect_ds_setup_gaps` reads the synced current Figma snapshot and reports additive semantic repair candidates without requiring a prepared config and without mutating Figma or config. `apply_ds_setup_repairs` accepts only the designer-approved repairs, creates those missing semantic variables by copying aliases from the approved source token, and updates the file-scoped config only for approved pairs that do not conflict with an existing pair for the same background.

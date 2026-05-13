@@ -50,14 +50,46 @@ function _isRgbValue(value) {
   return value && typeof value === "object" && "r" in value && "g" in value && "b" in value;
 }
 
-function _resolveValue(variable, varsById, modeId, depth = 0) {
+function _modeOfId(collections, variable, modeId) {
+  if (!modeId) return null;
+  const coll = collections.find(c => Array.isArray(c.variableIds) && c.variableIds.includes(variable.id))
+    || collections.find(c => c.id === variable.variableCollectionId);
+  if (!coll || !Array.isArray(coll.modes)) return null;
+  const m = coll.modes.find(x => x.modeId === modeId);
+  return m ? m.name : null;
+}
+
+function _modeIdByNameForCollection(collections, variable, name) {
+  if (!name) return null;
+  const coll = collections.find(c => Array.isArray(c.variableIds) && c.variableIds.includes(variable.id))
+    || collections.find(c => c.id === variable.variableCollectionId);
+  if (!coll || !Array.isArray(coll.modes)) return null;
+  const wanted = String(name).toLowerCase();
+  const m = coll.modes.find(x => String(x.name || "").toLowerCase() === wanted);
+  return m ? m.modeId : null;
+}
+
+// When following a VARIABLE_ALIAS, the target uses its own collection's
+// modeIds, not the source's. Look up the target's mode by NAME so a Light
+// source resolves to the target's Light mode (not whichever mode happens to
+// be enumerated first). Falls back to the only mode when the target has a
+// single mode (the common primitives-collection case).
+function _resolveValue(variable, varsById, modeId, collections, depth = 0, modeName = null) {
   if (!variable || depth > 8) return null;
   const values = variable.valuesByMode || {};
-  const selectedModeId = modeId || Object.keys(values)[0];
-  const value = selectedModeId ? values[selectedModeId] : null;
+  const modes = Object.keys(values);
+  let selectedModeId = (modeId && values[modeId] !== undefined) ? modeId : null;
+  if (!selectedModeId && modeName) {
+    selectedModeId = _modeIdByNameForCollection(collections || [], variable, modeName);
+    if (selectedModeId && values[selectedModeId] === undefined) selectedModeId = null;
+  }
+  if (!selectedModeId && modes.length === 1) selectedModeId = modes[0];
+  if (!selectedModeId) return null;
+  const value = values[selectedModeId];
   if (!value) return null;
   if (typeof value === "object" && value.type === "VARIABLE_ALIAS") {
-    return _resolveValue(varsById.get(value.id), varsById, null, depth + 1);
+    const carriedName = modeName || _modeOfId(collections || [], variable, selectedModeId);
+    return _resolveValue(varsById.get(value.id), varsById, null, collections, depth + 1, carriedName);
   }
   return value;
 }
@@ -112,13 +144,20 @@ function refreshDsConfigFromFigmaData(ds, figmaData = {}) {
   if (ds.color && Array.isArray(ds.color.brand)) {
     for (const brand of ds.color.brand) {
       if (!brand || !brand.name) continue;
-      const step = brand.step != null ? String(brand.step) : "500";
+      // A brand's natural anchor step is encoded in the config (typically set
+      // by intake from OKLab L). Refusing to guess `step=500` keeps refresh
+      // honest for ramps anchored at 400/600 or on non-100-spaced scales.
+      if (brand.step == null) {
+        skipped.push({ kind: "brand", name: brand.name, reason: "Brand has no explicit anchor step; refusing to guess." });
+        continue;
+      }
+      const step = String(brand.step);
       const variable = byName.get("color/" + brand.name + "/" + step);
       if (!variable) {
         skipped.push({ kind: "brand", name: brand.name, reason: "Matching anchor variable not found." });
         continue;
       }
-      const raw = _resolveValue(variable, varsById);
+      const raw = _resolveValue(variable, varsById, null, collections);
       if (!_isRgbValue(raw)) {
         skipped.push({ kind: "brand", name: brand.name, reason: "Anchor variable has no RGB value." });
         continue;
@@ -141,7 +180,7 @@ function refreshDsConfigFromFigmaData(ds, figmaData = {}) {
           skipped.push({ kind: "ramp-step", name: ramp.folder + "/" + row[0], reason: "Variable not found." });
           continue;
         }
-        const raw = _resolveValue(variable, varsById);
+        const raw = _resolveValue(variable, varsById, null, collections);
         if (!_isRgbValue(raw)) {
           skipped.push({ kind: "ramp-step", name: ramp.folder + "/" + row[0], reason: "Variable has no RGB value." });
           continue;

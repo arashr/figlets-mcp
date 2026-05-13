@@ -1,12 +1,17 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/paths.js");
+const { getActiveFileConfigPath, getActiveFilePaths, getConfigPathGuardError } = require("../utils/paths.js");
+const {
+  computePlannedAliases,
+  loadActiveSnapshot,
+  loadDsConfigSafe,
+} = require("../utils/accessible-repair-aliases.js");
 
 const applyDsSetupRepairsTool = {
   name: "apply_ds_setup_repairs",
   description:
-    "Apply designer-approved setup repairs to Figma. This creates only the explicitly approved missing semantic variables by copying aliases from their approved source tokens, then updates the file-scoped config with approved pairs when possible.",
+    "Apply designer-approved setup changes to Figma. Two repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode (used to fix contrast failures via the same picker the setup flow uses). Updates the file-scoped config only after Figma succeeds.",
   inputSchema: {
     type: "object",
     properties: {
@@ -15,14 +20,39 @@ const applyDsSetupRepairsTool = {
         items: {
           type: "object",
           properties: {
-            bg: { type: "string" },
+            bg: { type: "string", description: "Background variable name the new FG companion is paired with. Must exist in Figma." },
             recommended: { type: "string" },
             name: { type: "string" },
-            source: { type: "string" }
+            source: { type: "string" },
+            aliases: {
+              type: "object",
+              description: "Per-mode primitive variable names approved by the designer (from inspect_ds_setup_gaps.plannedAliases). Keys are mode names (e.g. \"Light\", \"Dark\"); values are primitive ref names like \"color/green/700\". When provided, the bridge uses these as-is. When omitted, the server falls back to recomputing them.",
+              properties: {
+                Light: { type: "string" },
+                Dark: { type: "string" }
+              },
+              additionalProperties: { type: "string" }
+            }
           },
-          required: ["source"]
+          required: ["bg", "source"]
         },
-        description: "Designer-approved repairs, usually copied from inspect_ds_setup_gaps semanticGaps."
+        description: "Designer-approved missing-foreground repairs, usually copied from inspect_ds_setup_gaps.semanticGaps."
+      },
+      aliasUpdates: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            token: { type: "string", description: "Existing semantic variable name to re-alias (e.g. \"color/on-surface/variant\")." },
+            mode: { type: "string", description: "Mode name to update (e.g. \"Dark\")." },
+            newAliasTarget: { type: "string", description: "Primitive variable name the token should alias in this mode (e.g. \"color/neutral/200\")." },
+            to: { type: "string", description: "Legacy alias for newAliasTarget, accepted for plannedReAlias round-trips." },
+            expectedCurrentAlias: { type: "string", description: "Optional primitive variable name the token was expected to alias when approved. Prevents stale approvals from overwriting newer Figma edits." },
+            from: { type: "string", description: "Legacy alias for expectedCurrentAlias." }
+          },
+          required: ["token", "mode"]
+        },
+        description: "Designer-approved re-alias updates for existing semantic variables, usually copied from inspect_ds_setup_gaps.contrastFailures[*].plannedReAlias. Each entry replaces one mode's alias on one existing var."
       },
       config_path: {
         type: "string",
@@ -32,17 +62,42 @@ const applyDsSetupRepairsTool = {
         type: "boolean",
         description: "When false, do not update design-system.config.js after applying repairs. Defaults to true."
       }
-    },
-    required: ["repairs"]
+    }
   }
 };
 
 function _normalizeRepairs(repairs) {
-  return (Array.isArray(repairs) ? repairs : []).map(repair => ({
-    bg: repair && repair.bg ? String(repair.bg) : "",
-    name: repair && (repair.name || repair.recommended) ? String(repair.name || repair.recommended) : "",
-    source: repair && repair.source ? String(repair.source) : "",
-  })).filter(repair => repair.name && repair.source);
+  return (Array.isArray(repairs) ? repairs : []).map(repair => {
+    const out = {
+      bg: repair && repair.bg ? String(repair.bg) : "",
+      name: repair && (repair.name || repair.recommended) ? String(repair.name || repair.recommended) : "",
+      source: repair && repair.source ? String(repair.source) : "",
+    };
+    if (repair && repair.aliases && typeof repair.aliases === "object") {
+      const aliases = {};
+      const keys = Object.keys(repair.aliases);
+      for (let i = 0; i < keys.length; i++) {
+        const v = repair.aliases[keys[i]];
+        if (typeof v === "string" && v) aliases[keys[i]] = v;
+      }
+      if (Object.keys(aliases).length) out.aliases = aliases;
+    }
+    return out;
+  }).filter(repair => repair.bg && repair.name && repair.source);
+}
+
+function _normalizeAliasUpdates(updates) {
+  return (Array.isArray(updates) ? updates : []).map(u => {
+    const out = {
+      token: u && u.token ? String(u.token) : "",
+      mode: u && u.mode ? String(u.mode) : "",
+      newAliasTarget: u && (u.newAliasTarget || u.to) ? String(u.newAliasTarget || u.to) : "",
+    };
+    if (u && (u.expectedCurrentAlias || u.from)) {
+      out.expectedCurrentAlias = String(u.expectedCurrentAlias || u.from);
+    }
+    return out;
+  }).filter(u => u.token && u.mode && u.newAliasTarget);
 }
 
 function _updateConfigPairs(configPath, repairs) {
@@ -92,7 +147,10 @@ function _updateConfigPairs(configPath, repairs) {
 
 function handleApplyDsSetupRepairs(args = {}) {
   const repairs = _normalizeRepairs(args.repairs);
-  if (!repairs.length) return Promise.resolve({ error: "At least one approved repair with recommended/name and source is required." });
+  const aliasUpdates = _normalizeAliasUpdates(args.aliasUpdates);
+  if (!repairs.length && !aliasUpdates.length) {
+    return Promise.resolve({ error: "Provide at least one approved repair (with recommended/name and source) or one aliasUpdate (token + mode + newAliasTarget)." });
+  }
 
   const updateConfig = args.update_config !== false;
   const configPath = args.config_path ? path.resolve(args.config_path) : getActiveFileConfigPath();
@@ -101,8 +159,35 @@ function handleApplyDsSetupRepairs(args = {}) {
     if (guardError) return Promise.resolve(guardError);
   }
 
+  // Two-step approve-then-apply: if the caller passes designer-approved
+  // `aliases` per repair (the plannedAliases shown by inspect_ds_setup_gaps),
+  // forward them unchanged so what the designer saw is exactly what Figma
+  // gets. Recompute only when aliases were not supplied (legacy/no-preview
+  // path) — still better than blind copy-values, and the bridge falls back
+  // to copy-values when even recomputation isn't possible.
+  const snapshot = loadActiveSnapshot(getActiveFilePaths);
+  const existingDs = loadDsConfigSafe(configPath);
+  const answers = (args.answers && typeof args.answers === "object") ? args.answers : {};
+  const algorithm = answers.algorithm === "apca"
+    ? "apca"
+    : (existingDs && existingDs.color && existingDs.color.contrastAlgorithm === "apca" ? "apca" : "wcag");
+  const algoOpt = { algorithm };
+
+  const wirePayload = repairs.map(repair => {
+    const out = { bg: repair.bg, name: repair.name, source: repair.source };
+    if (repair.aliases) {
+      out.aliases = repair.aliases;
+    } else if (snapshot) {
+      const planned = computePlannedAliases(repair, snapshot, existingDs, algoOpt);
+      if (planned && planned.aliases) out.aliases = planned.aliases;
+    }
+    return out;
+  });
+
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
-  const body = JSON.stringify({ repairs });
+  const requestBody = { repairs: wirePayload };
+  if (aliasUpdates.length) requestBody.aliasUpdates = aliasUpdates;
+  const body = JSON.stringify(requestBody);
 
   return new Promise((resolve) => {
     const req = http.request(`${receiverUrl}/request-setup-repairs`, {
@@ -126,6 +211,9 @@ function handleApplyDsSetupRepairs(args = {}) {
             created: result.created || [],
             skipped: result.skipped || [],
             unresolved: result.unresolved || [],
+            updated: result.updated || [],
+            updateSkipped: result.updateSkipped || [],
+            updateUnresolved: result.updateUnresolved || [],
             configUpdate,
             message: result.message || "Setup repairs complete.",
             error: result.error,
@@ -170,5 +258,6 @@ module.exports = {
   applyDsSetupRepairsTool,
   handleApplyDsSetupRepairs,
   _normalizeRepairs,
+  _normalizeAliasUpdates,
   _updateConfigPairs,
 };

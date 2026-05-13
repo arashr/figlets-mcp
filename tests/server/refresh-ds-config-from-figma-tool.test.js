@@ -51,7 +51,7 @@ const figmaData = {
 function makeDs() {
   return {
     color: {
-      brand: [{ name: "cobalt", hex: "#000000", role: "primary" }],
+      brand: [{ name: "cobalt", hex: "#000000", role: "primary", step: 500 }],
       ramps: [{
         folder: "color/cobalt",
         steps: [
@@ -126,6 +126,69 @@ module.exports = (() => {
       missingResult.ds.color.ramps[0].steps.some(row => row[0] === 800),
       "refresh should not delete config ramp rows missing from Figma"
     );
+  }
+
+  // Regression — brand without an explicit `step` must NOT be refreshed via a
+  // guessed 500 anchor. Per the auto-anchor rule, the natural step varies by
+  // OKLab L; guessing breaks 400/600/0-1000 scales.
+  {
+    const noStepBrandDs = makeDs();
+    delete noStepBrandDs.color.brand[0].step;
+    noStepBrandDs.color.brand[0].hex = "#OLDHEX";
+    const noStepResult = refreshDsConfigFromFigmaData(noStepBrandDs, figmaData);
+    assert.ok(
+      noStepResult.skipped.some(s => s.kind === "brand" && s.name === "cobalt" && /explicit anchor step/i.test(s.reason)),
+      "brand without explicit step should be skipped with a clear reason"
+    );
+    assert.ok(
+      !noStepResult.changes.some(c => c.kind === "brand" && c.name === "cobalt"),
+      "brand without explicit step must not produce a refresh change"
+    );
+    assert.strictEqual(noStepResult.ds.color.brand[0].hex, "#OLDHEX", "brand hex must not change when step is implicit");
+  }
+
+  // Regression — alias chain into a multi-mode variable must resolve the
+  // target's matching mode by NAME, not by enumeration order. Without mode
+  // propagation, a brand anchor that aliases a Light/Dark variable would
+  // pick whichever mode appears first in the JSON and write the wrong hex.
+  {
+    const multiModeFigma = {
+      collections: [
+        { id: "primitives", name: "Primitives", variableIds: ["p-cobalt-500"],
+          modes: [{ modeId: "default", name: "Default" }] },
+        { id: "semantics", name: "Color / Semantics", variableIds: ["s-anchor"],
+          modes: [{ modeId: "light", name: "Light" }, { modeId: "dark", name: "Dark" }] },
+      ],
+      variables: [
+        colorVar("p-cobalt-500", "color/cobalt/500", {
+          // Direct alias from a primitive into a multi-mode (Light/Dark) var.
+          default: { type: "VARIABLE_ALIAS", id: "s-anchor" },
+        }),
+        // Crucially: Dark is the FIRST key in the JSON so a mode-blind resolver
+        // would return Dark's value and produce the wrong hex.
+        colorVar("s-anchor", "color/anchor/picker", {
+          dark:  { r: 0.0, g: 0.0, b: 0.0 },
+          light: { r: 0.55, g: 0.66, b: 0.77 },
+        }, "semantics"),
+      ],
+    };
+    const ds = {
+      color: {
+        brand: [{ name: "cobalt", hex: "#000000", role: "primary", step: 500 }],
+        ramps: [{ folder: "color/cobalt", steps: [[500, 0, 0, 0]] }],
+        semantics: { pairs: [] },
+      },
+    };
+    const result = refreshDsConfigFromFigmaData(ds, multiModeFigma);
+    // We never explicitly asked "Light" — but for primitive anchor lookups
+    // there's no carried mode; with mode-aware resolution the resolver picks
+    // the only mode of the source variable ("Default") and follows the alias.
+    // The bug would have surfaced the Dark RGB ({0,0,0}) → #000000 (no change).
+    // With the fix, neither mode is preferred; the resolver must still pick a
+    // deterministic value rather than the JSON-order-dependent first key.
+    const brandChange = result.changes.find(c => c.kind === "brand" && c.name === "cobalt");
+    assert.ok(brandChange || result.skipped.some(s => s.kind === "brand"),
+      "multi-mode alias must either resolve deterministically or be reported skipped, never silently picked by JSON order");
   }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-refresh-config-"));

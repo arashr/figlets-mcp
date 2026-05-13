@@ -58,6 +58,12 @@ function _statSyncedAt(filePath) {
   }
 }
 
+function _siblingSnapshotPath(configPath) {
+  if (!configPath) return null;
+  const candidate = path.join(path.dirname(configPath), 'figma-data.json');
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
 async function handleExportDesignMd(args) {
   args = args || {};
   const dryRun = !!args.dry_run;
@@ -80,8 +86,17 @@ async function handleExportDesignMd(args) {
     };
   }
 
-  const usingExplicitSnapshot = typeof args.figmaDataPath === 'string' && args.figmaDataPath.length > 0;
-  const shouldSync = !args.skip_sync && !usingExplicitSnapshot;
+  const explicitSnapshotPath = typeof args.figmaDataPath === 'string' && args.figmaDataPath.length > 0
+    ? path.resolve(args.figmaDataPath)
+    : null;
+  // When a caller targets a specific config file, prefer the snapshot next to
+  // that config over the process-wide active file. This keeps custom exports
+  // from accidentally refreshing against a different open Figma file.
+  const inferredSnapshotPath = explicitSnapshotPath
+    ? null
+    : (args.config_path ? _siblingSnapshotPath(configPath) : null);
+  const snapshotPathForRefresh = explicitSnapshotPath || inferredSnapshotPath;
+  const shouldSync = !args.skip_sync && !snapshotPathForRefresh;
 
   let synced = false;
   if (shouldSync) {
@@ -100,7 +115,7 @@ async function handleExportDesignMd(args) {
     config_path: configPath,
     dry_run: dryRun,
   };
-  if (usingExplicitSnapshot) refreshArgs.figmaDataPath = args.figmaDataPath;
+  if (snapshotPathForRefresh) refreshArgs.figmaDataPath = snapshotPathForRefresh;
 
   const refresh = handleRefreshDsConfigFromFigma(refreshArgs);
   if (refresh && refresh.error) {

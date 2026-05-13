@@ -66,6 +66,24 @@ module.exports = (async () => {
     }
   }
 
+  // --- Explicit config path prefers sibling figma-data.json over any active/global snapshot
+  {
+    const ws = makeWorkspace('sibling-snapshot');
+    try {
+      const result = await handleExportDesignMd({
+        config_path: ws.configPath,
+        skip_sync: true,
+      });
+      assert.ok(!result.error, 'expected sibling snapshot export, got error: ' + JSON.stringify(result));
+      assert.strictEqual(result.sync.attempted, false, 'skip_sync should avoid bridge sync');
+      assert.strictEqual(result.sync.snapshotPath, ws.snapshotPath, 'explicit config export should refresh from sibling figma-data.json');
+      const refreshedConfig = fs.readFileSync(ws.configPath, 'utf8');
+      assert.ok(refreshedConfig.includes('0.5'), 'sibling snapshot should refresh the custom config');
+    } finally {
+      fs.rmSync(ws.tmp, { recursive: true, force: true });
+    }
+  }
+
   // --- output_path override lands DESIGN.md at the chosen location
   {
     const ws = makeWorkspace('outpath');

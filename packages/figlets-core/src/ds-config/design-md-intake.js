@@ -329,6 +329,13 @@ function _slugForToken(name) {
   return String(name || '').replace(/\//g, '-');
 }
 
+function _brandRoleColorKey(role) {
+  const normalized = _slug(role);
+  if (normalized === 'accent') return 'tertiary';
+  if (['primary', 'secondary', 'tertiary', 'neutral'].includes(normalized)) return normalized;
+  return null;
+}
+
 // Build the colors map. Emits bare brand role names (e.g. `primary: "#..."`)
 // alongside ramp-stepped names (`primary-500: "#..."`) so the Google linter's
 // recommended-colors rule is satisfied.
@@ -338,7 +345,10 @@ function _buildColorsMap(DS) {
     for (const brand of DS.color.brand) {
       if (!brand || !brand.name) continue;
       const hex = _hex(brand.hex) || brand.hex;
-      if (hex) colors[_slug(brand.name)] = hex;
+      if (!hex) continue;
+      colors[_slug(brand.name)] = hex;
+      const roleKey = _brandRoleColorKey(brand.role);
+      if (roleKey) colors[roleKey] = hex;
     }
   }
   if (DS.color && Array.isArray(DS.color.ramps)) {

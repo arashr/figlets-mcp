@@ -11,7 +11,7 @@ const DS = {
   color: {
     contrastAlgorithm: 'apca',
     ramps: [
-      { folder: 'color/primary', steps: [
+      { folder: 'color/brand', steps: [
         [100, 0.92, 0.88, 0.98],
         [500, 0.4, 0.2, 0.8],
         [900, 0.12, 0.06, 0.24]
@@ -23,7 +23,7 @@ const DS = {
       ] }
     ],
     brand: [
-      { name: 'primary', hex: '#6633CC', role: 'primary', step: 500 },
+      { name: 'brand', hex: '#6633CC', role: 'primary', step: 500 },
       { name: 'neutral', hex: '#808080', role: 'neutral', step: 500 }
     ],
     semantics: {
@@ -37,8 +37,8 @@ const DS = {
         {
           bg: 'color/surface/brand',
           text: 'color/on-surface/brand',
-          Light: { bg: 'color/primary/500', text: 'color/primary/100' },
-          Dark: { bg: 'color/primary/900', text: 'color/primary/100' }
+          Light: { bg: 'color/brand/500', text: 'color/brand/100' },
+          Dark: { bg: 'color/brand/900', text: 'color/brand/100' }
         }
       ]
     }
@@ -70,6 +70,10 @@ module.exports = (async () => {
   }
 
   const markdown = designMdIntake.dsConfigToDesignMd(DS);
+  assert.ok(
+    /colors:\n(?:  .+\n)*  primary: "#6633CC"/.test(markdown),
+    'Brand role should emit a bare `primary` color even when the ramp/name is `brand`.'
+  );
   const report = lint(markdown);
 
   assert.strictEqual(

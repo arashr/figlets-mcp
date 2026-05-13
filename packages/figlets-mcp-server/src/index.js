@@ -296,7 +296,11 @@ server.tool(
   inspectDsSetupGapsTool.name,
   inspectDsSetupGapsTool.description,
   {
-    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
+    config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path. Used only to read contrastAlgorithm; inspection remains read-only."),
+    answers: z.object({
+      algorithm: z.enum(["wcag", "apca"]).optional()
+    }).optional().describe("Optional QA choices. Pass algorithm to override the config's contrast algorithm for this inspection.")
   },
   async (args) => {
     try {
@@ -323,13 +327,25 @@ server.tool(
   applyDsSetupRepairsTool.description,
   {
     repairs: z.array(z.object({
-      bg: z.string().optional(),
+      bg: z.string(),
       recommended: z.string().optional(),
       name: z.string().optional(),
-      source: z.string()
-    })).describe("Designer-approved repairs, usually copied from inspect_ds_setup_gaps semanticGaps."),
+      source: z.string(),
+      aliases: z.record(z.string()).optional().describe("Per-mode primitive variable names approved by the designer, usually copied from plannedAliases.")
+    })).optional().describe("Designer-approved missing-foreground repairs, usually copied from inspect_ds_setup_gaps.semanticGaps."),
+    aliasUpdates: z.array(z.object({
+      token: z.string().describe("Existing semantic variable name to re-alias."),
+      mode: z.string().describe("Mode name to update, e.g. Light or Dark."),
+      newAliasTarget: z.string().optional().describe("Primitive variable name the token should alias in this mode."),
+      to: z.string().optional().describe("Legacy alias for newAliasTarget, accepted for plannedReAlias round-trips."),
+      expectedCurrentAlias: z.string().optional().describe("Optional primitive variable name the token was expected to alias when approved."),
+      from: z.string().optional().describe("Legacy alias for expectedCurrentAlias.")
+    })).optional().describe("Designer-approved re-alias updates for existing semantic variables, usually copied from contrastFailures[*].plannedReAlias."),
     config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path to update after Figma succeeds. Defaults to the active file config."),
-    update_config: z.boolean().optional().describe("When false, do not update design-system.config.js after applying repairs. Defaults to true.")
+    update_config: z.boolean().optional().describe("When false, do not update design-system.config.js after applying repairs. Defaults to true."),
+    answers: z.object({
+      algorithm: z.enum(["wcag", "apca"]).optional()
+    }).optional().describe("Optional repair choices. Pass algorithm to override the config's contrast algorithm when recomputing aliases.")
   },
   async (args) => {
     try {

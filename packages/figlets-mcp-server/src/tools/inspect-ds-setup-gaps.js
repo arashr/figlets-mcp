@@ -553,6 +553,8 @@ function handleInspectDsSetupGaps(input = {}) {
         mode: f.mode,
         from: f.fgPrimitive ? f.fgPrimitive.name : null,
         to: upgrade,
+        expectedCurrentAlias: f.fgPrimitive ? f.fgPrimitive.name : null,
+        newAliasTarget: upgrade,
       };
     }
   }

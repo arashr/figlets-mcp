@@ -133,8 +133,8 @@ function resolveRepairRefs(repair, snapshot) {
 }
 
 // Reuses `validateSemanticPairs` to pick accessible per-mode primitive refs.
-// `existingDs` may be partial — bootstrap data is overlaid first so ramps +
-// brand are always populated; the designer's authored values win when present.
+// Figma is the source of truth for repair planning: ramps + brand come from
+// the synced snapshot. Config contributes policy only, such as contrast mode.
 // Returns null on any failure so the caller can fall back safely.
 function computePlannedAliases(repair, snapshot, existingDs, opts) {
   const refs = resolveRepairRefs(repair, snapshot);
@@ -143,10 +143,9 @@ function computePlannedAliases(repair, snapshot, existingDs, opts) {
   const baseDs = bootstrapDsFromSnapshot(snapshot, opts || {});
   if (existingDs && existingDs.color) {
     const ec = existingDs.color;
-    if (ec.contrastAlgorithm) baseDs.color.contrastAlgorithm = ec.contrastAlgorithm;
-    if (Array.isArray(ec.brand) && ec.brand.length) baseDs.color.brand = JSON.parse(JSON.stringify(ec.brand));
-    if (Array.isArray(ec.ramps) && ec.ramps.length) baseDs.color.ramps = JSON.parse(JSON.stringify(ec.ramps));
-    if (ec.rampStrategy) baseDs.color.rampStrategy = ec.rampStrategy;
+    if (!opts || !opts.algorithm) {
+      if (ec.contrastAlgorithm) baseDs.color.contrastAlgorithm = ec.contrastAlgorithm;
+    }
     if (ec.convention) baseDs.color.convention = ec.convention;
   }
   if (!Array.isArray(baseDs.color.ramps) || !baseDs.color.ramps.length) return null;

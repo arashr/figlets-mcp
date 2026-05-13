@@ -5738,11 +5738,13 @@ async function _updateDsPrimitives(payload) {
 
 async function _applyDsSetupRepairs(payload) {
   var repairs = (payload && Array.isArray(payload.repairs)) ? payload.repairs : [];
-  if (!repairs.length) return { error: 'No approved repairs provided.' };
+  var updates = (payload && Array.isArray(payload.aliasUpdates)) ? payload.aliasUpdates : [];
+  if (!repairs.length && !updates.length) return { error: 'No approved repairs provided.' };
 
   var allColls = await figma.variables.getLocalVariableCollectionsAsync();
   var allVars = await figma.variables.getLocalVariablesAsync();
   var byName = {};
+  var byId = {};
   var collByVarId = {};
   for (var ci = 0; ci < allColls.length; ci++) {
     var c = allColls[ci];
@@ -5752,6 +5754,7 @@ async function _applyDsSetupRepairs(payload) {
   }
   for (var ai = 0; ai < allVars.length; ai++) {
     byName[allVars[ai].name] = allVars[ai];
+    byId[allVars[ai].id] = allVars[ai];
   }
 
   var created = [];
@@ -5839,7 +5842,6 @@ async function _applyDsSetupRepairs(payload) {
   // Used to fix contrast failures by pointing the fg at a different primitive
   // step on the same ramp. The MCP server picked the new step using the same
   // ramp walker the setup flow uses; the plugin just writes it.
-  var updates = (payload && Array.isArray(payload.aliasUpdates)) ? payload.aliasUpdates : [];
   var updated = [];
   var updateSkipped = [];
   var updateUnresolved = [];
@@ -5847,7 +5849,8 @@ async function _applyDsSetupRepairs(payload) {
     var u = updates[ui] || {};
     var tokenName = u.token || '';
     var modeName = u.mode || '';
-    var targetName = u.newAliasTarget || '';
+    var targetName = u.newAliasTarget || u.to || '';
+    var expectedName = u.expectedCurrentAlias || u.from || '';
     if (!tokenName || !modeName || !targetName) {
       updateUnresolved.push({ token: tokenName, mode: modeName, reason: 'aliasUpdate requires token, mode, and newAliasTarget.' });
       continue;
@@ -5879,6 +5882,24 @@ async function _applyDsSetupRepairs(payload) {
     if (currentVal && currentVal.type === 'VARIABLE_ALIAS' && currentVal.id === targetVar.id) {
       updateSkipped.push({ token: tokenName, mode: modeName, reason: 'Already aliased to target.' });
       continue;
+    }
+    if (expectedName) {
+      var expectedVar = byName[expectedName];
+      if (!expectedVar) {
+        updateUnresolved.push({ token: tokenName, mode: modeName, reason: 'Expected current alias "' + expectedName + '" not found.' });
+        continue;
+      }
+      if (!currentVal || currentVal.type !== 'VARIABLE_ALIAS' || currentVal.id !== expectedVar.id) {
+        var currentTarget = currentVal && currentVal.type === 'VARIABLE_ALIAS' ? byId[currentVal.id] : null;
+        updateUnresolved.push({
+          token: tokenName,
+          mode: modeName,
+          reason: 'Current alias changed since approval.',
+          expected: expectedName,
+          actual: currentTarget ? currentTarget.name : null
+        });
+        continue;
+      }
     }
     try {
       tokenVar.setValueForMode(modeMatch.modeId, { type: 'VARIABLE_ALIAS', id: targetVar.id });

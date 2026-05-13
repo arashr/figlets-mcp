@@ -150,10 +150,17 @@ module.exports = (async () => {
       { token: "color/on-surface/warning", mode: "", newAliasTarget: "color/yellow/950" },
       { token: "color/on-surface/info", mode: "Light", newAliasTarget: "" },
       { token: "color/on-surface/success", mode: "Light", newAliasTarget: "color/green/700" },
+      { token: "color/on-surface/danger", mode: "Light", from: "color/neutral/300", to: "color/neutral/950" },
     ]),
     [
       { token: "color/on-surface/variant", mode: "Dark", newAliasTarget: "color/neutral/200" },
       { token: "color/on-surface/success", mode: "Light", newAliasTarget: "color/green/700" },
+      {
+        token: "color/on-surface/danger",
+        mode: "Light",
+        newAliasTarget: "color/neutral/950",
+        expectedCurrentAlias: "color/neutral/300",
+      },
     ]
   );
 
@@ -192,13 +199,18 @@ module.exports = (async () => {
   try {
     const aliasResult = await handleApplyDsSetupRepairs({
       aliasUpdates: [
-        { token: "color/on-surface/variant", mode: "Dark", newAliasTarget: "color/neutral/200" },
+        { token: "color/on-surface/variant", mode: "Dark", to: "color/neutral/200", from: "color/neutral/900" },
       ],
       update_config: false,
     });
     assert.ok(!aliasResult.error, "alias-only apply should succeed");
     assert.deepStrictEqual(aliasBody.aliasUpdates, [
-      { token: "color/on-surface/variant", mode: "Dark", newAliasTarget: "color/neutral/200" },
+      {
+        token: "color/on-surface/variant",
+        mode: "Dark",
+        newAliasTarget: "color/neutral/200",
+        expectedCurrentAlias: "color/neutral/900",
+      },
     ]);
     // Repairs array can still be sent (empty) — the wire-format is consistent.
     assert.deepStrictEqual(aliasBody.repairs, []);

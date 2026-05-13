@@ -45,9 +45,12 @@ const applyDsSetupRepairsTool = {
           properties: {
             token: { type: "string", description: "Existing semantic variable name to re-alias (e.g. \"color/on-surface/variant\")." },
             mode: { type: "string", description: "Mode name to update (e.g. \"Dark\")." },
-            newAliasTarget: { type: "string", description: "Primitive variable name the token should alias in this mode (e.g. \"color/neutral/200\")." }
+            newAliasTarget: { type: "string", description: "Primitive variable name the token should alias in this mode (e.g. \"color/neutral/200\")." },
+            to: { type: "string", description: "Legacy alias for newAliasTarget, accepted for plannedReAlias round-trips." },
+            expectedCurrentAlias: { type: "string", description: "Optional primitive variable name the token was expected to alias when approved. Prevents stale approvals from overwriting newer Figma edits." },
+            from: { type: "string", description: "Legacy alias for expectedCurrentAlias." }
           },
-          required: ["token", "mode", "newAliasTarget"]
+          required: ["token", "mode"]
         },
         description: "Designer-approved re-alias updates for existing semantic variables, usually copied from inspect_ds_setup_gaps.contrastFailures[*].plannedReAlias. Each entry replaces one mode's alias on one existing var."
       },
@@ -84,11 +87,17 @@ function _normalizeRepairs(repairs) {
 }
 
 function _normalizeAliasUpdates(updates) {
-  return (Array.isArray(updates) ? updates : []).map(u => ({
-    token: u && u.token ? String(u.token) : "",
-    mode: u && u.mode ? String(u.mode) : "",
-    newAliasTarget: u && u.newAliasTarget ? String(u.newAliasTarget) : "",
-  })).filter(u => u.token && u.mode && u.newAliasTarget);
+  return (Array.isArray(updates) ? updates : []).map(u => {
+    const out = {
+      token: u && u.token ? String(u.token) : "",
+      mode: u && u.mode ? String(u.mode) : "",
+      newAliasTarget: u && (u.newAliasTarget || u.to) ? String(u.newAliasTarget || u.to) : "",
+    };
+    if (u && (u.expectedCurrentAlias || u.from)) {
+      out.expectedCurrentAlias = String(u.expectedCurrentAlias || u.from);
+    }
+    return out;
+  }).filter(u => u.token && u.mode && u.newAliasTarget);
 }
 
 function _updateConfigPairs(configPath, repairs) {
@@ -159,7 +168,10 @@ function handleApplyDsSetupRepairs(args = {}) {
   const snapshot = loadActiveSnapshot(getActiveFilePaths);
   const existingDs = loadDsConfigSafe(configPath);
   const answers = (args.answers && typeof args.answers === "object") ? args.answers : {};
-  const algoOpt = { algorithm: answers.algorithm === "apca" ? "apca" : "wcag" };
+  const algorithm = answers.algorithm === "apca"
+    ? "apca"
+    : (existingDs && existingDs.color && existingDs.color.contrastAlgorithm === "apca" ? "apca" : "wcag");
+  const algoOpt = { algorithm };
 
   const wirePayload = repairs.map(repair => {
     const out = { bg: repair.bg, name: repair.name, source: repair.source };

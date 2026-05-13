@@ -172,6 +172,8 @@ module.exports = (() => {
       // The picker walks the same ramp; with only n950 left as a darker step,
       // that's the upgrade target.
       assert.strictEqual(dangerLight.plannedReAlias.to, "color/neutral/950");
+      assert.strictEqual(dangerLight.plannedReAlias.expectedCurrentAlias, "color/neutral/300");
+      assert.strictEqual(dangerLight.plannedReAlias.newAliasTarget, "color/neutral/950");
     } finally {
       if (prevLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevLocal;
       else delete process.env.FIGLETS_LOCAL_DIR;

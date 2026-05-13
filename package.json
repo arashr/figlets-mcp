@@ -10,10 +10,15 @@
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev -w @figlets/mcp-server",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "node tests/run-tests.js"
+    "test": "node tests/run-tests.js",
+    "figlets:export-design-md": "node packages/figlets-mcp-server/src/cli/export-design-md.js",
+    "figlets:lint-design-md": "node packages/figlets-mcp-server/src/cli/lint-design-md.js"
   },
   "engines": {
     "node": ">=10"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@google/design.md": "^0.1.1"
+  }
 }

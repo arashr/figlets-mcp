@@ -185,6 +185,40 @@ function designMdToDsConfig(markdown, options) {
   options = options || {};
   const parsed = parseDesignMd(markdown);
   const tokens = parsed.tokens || {};
+
+  // If the body carries a `figlets-extended` block written by our own exporter,
+  // use it as the canonical DS. Front matter parsing is the fallback for
+  // external DESIGN.md files that have no extended block.
+  const extended = _readExtendedBlock(parsed.markdown);
+  if (extended && extended.ds && typeof extended.ds === 'object') {
+    const ds = extended.ds;
+    if (!ds.source) {
+      ds.source = {
+        type: 'design.md',
+        path: options.sourcePath || null,
+        version: tokens.version || null
+      };
+    }
+    return {
+      ds: ds,
+      parsed: {
+        name: tokens.name || (ds.project && ds.project.name) || null,
+        colors: Object.keys(tokens.colors || {}).length,
+        typography: Object.keys(tokens.typography || {}).length,
+        spacing: Object.keys(tokens.spacing || {}).length,
+        rounded: Object.keys(tokens.rounded || {}).length,
+        components: Object.keys(tokens.components || {}).length,
+        extended: true
+      },
+      mapped: {
+        brandColors: ds.color && Array.isArray(ds.color.brand) ? ds.color.brand.length : 0,
+        typographyRoles: ds.typography && ds.typography.scale ? Object.keys(ds.typography.scale).length : 0,
+        gridBase: ds.grid && ds.grid.base ? ds.grid.base : 8
+      },
+      warnings: []
+    };
+  }
+
   const colors = tokens.colors && typeof tokens.colors === 'object' ? tokens.colors : {};
   const brand = [];
 
@@ -287,105 +321,399 @@ function _hexFromRgb(r, g, b) {
   return '#' + c(r) + c(g) + c(b);
 }
 
-function _quote(value) {
+function _yamlString(value) {
   return JSON.stringify(String(value == null ? '' : value));
 }
 
-function _writeYamlMap(lines, name, values) {
-  const keys = Object.keys(values || {});
-  if (!keys.length) return;
-  lines.push(name + ':');
-  for (const key of keys) {
-    const value = values[key];
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      lines.push('  ' + key + ':');
-      for (const childKey of Object.keys(value)) {
-        lines.push('    ' + childKey + ': ' + _quote(value[childKey]));
-      }
-    } else {
-      lines.push('  ' + key + ': ' + _quote(value));
-    }
-  }
+function _slugForToken(name) {
+  return String(name || '').replace(/\//g, '-');
 }
 
-function dsConfigToDesignMd(ds, options) {
-  options = options || {};
-  const DS = ds || {};
+// Build the colors map. Emits bare brand role names (e.g. `primary: "#..."`)
+// alongside ramp-stepped names (`primary-500: "#..."`) so the Google linter's
+// recommended-colors rule is satisfied.
+function _buildColorsMap(DS) {
   const colors = {};
-
+  if (DS.color && Array.isArray(DS.color.brand)) {
+    for (const brand of DS.color.brand) {
+      if (!brand || !brand.name) continue;
+      const hex = _hex(brand.hex) || brand.hex;
+      if (hex) colors[_slug(brand.name)] = hex;
+    }
+  }
   if (DS.color && Array.isArray(DS.color.ramps)) {
     for (const ramp of DS.color.ramps) {
       const rampName = String(ramp.folder || '').replace(/^color\//, '');
       if (!rampName) continue;
       for (const row of ramp.steps || []) {
+        if (!Array.isArray(row) || row.length < 4) continue;
         colors[rampName + '-' + row[0]] = _hexFromRgb(row[1], row[2], row[3]);
       }
     }
-  } else if (DS.color && Array.isArray(DS.color.brand)) {
-    for (const brand of DS.color.brand) {
-      if (brand && brand.name && brand.hex) colors[_slug(brand.name)] = _hex(brand.hex) || brand.hex;
-    }
   }
+  return colors;
+}
 
+function _buildTypographyMap(DS) {
   const typography = {};
-  if (DS.typography && DS.typography.scale) {
-    const family = DS.typography.families && DS.typography.families.sans ? DS.typography.families.sans : 'Inter';
-    for (const role of Object.keys(DS.typography.scale)) {
-      const entry = DS.typography.scale[role] || {};
-      const sizes = entry.sizes || [];
-      const lineHeights = entry.lineHeights || [];
-      typography[role.replace(/\//g, '-')] = {
-        fontFamily: family,
-        fontSize: _formatDimension(sizes[sizes.length - 1] || sizes[0] || 16),
-        fontWeight: entry.weight || 400,
-        lineHeight: _formatDimension(lineHeights[lineHeights.length - 1] || lineHeights[0] || 24),
-        letterSpacing: _formatDimension(entry.tracking || 0)
-      };
-    }
+  if (!DS.typography || !DS.typography.scale) return typography;
+  const families = DS.typography.families || {};
+  const defaultFamily = families.sans || 'Inter';
+  for (const role of Object.keys(DS.typography.scale)) {
+    const entry = DS.typography.scale[role] || {};
+    const sizes = entry.sizes || [];
+    const lineHeights = entry.lineHeights || [];
+    typography[_slugForToken(role)] = {
+      fontFamily: entry.family || defaultFamily,
+      fontSize: _formatDimension(sizes[sizes.length - 1] || sizes[0] || 16),
+      fontWeight: Number(entry.weight || 400),
+      lineHeight: _formatDimension(lineHeights[lineHeights.length - 1] || lineHeights[0] || 24),
+      letterSpacing: _formatDimension(entry.tracking || 0)
+    };
   }
+  return typography;
+}
 
+function _buildSpacingMap(DS) {
   const spacing = {};
   if (DS.spacing && DS.spacing.semantic) {
     for (const key of Object.keys(DS.spacing.semantic)) {
       const vals = DS.spacing.semantic[key] || [];
-      spacing[key.replace(/\//g, '-')] = _formatDimension(vals[vals.length - 1] || vals[0]);
+      const value = _formatDimension(vals[vals.length - 1] || vals[0]);
+      if (value) spacing[_slugForToken(key)] = value;
     }
   }
+  return spacing;
+}
 
+function _buildRoundedMap(DS) {
   const rounded = {};
   if (DS.spacing && DS.spacing.radius) {
     for (const key of Object.keys(DS.spacing.radius)) {
       const value = DS.spacing.radius[key];
-      if (value !== 9999) rounded[key] = _formatDimension(value);
+      if (value == null || value === 9999) continue;
+      const formatted = _formatDimension(value);
+      if (formatted) rounded[_slugForToken(key)] = formatted;
     }
   }
+  return rounded;
+}
+
+// Resolve a semantic alias like `color/primary/500` to a colors-map key
+// (`primary-500`) that the front matter actually emits. Returns null when the
+// alias cannot be expressed as a primitive reference (e.g. multi-hop aliases or
+// missing ramp steps).
+function _aliasToColorsKey(alias, colorsMap) {
+  const s = String(alias || '');
+  const match = s.match(/^color\/(.+)$/);
+  if (!match) return null;
+  const candidate = match[1].replace(/\//g, '-');
+  return colorsMap[candidate] ? candidate : null;
+}
+
+function _buildComponentsMap(DS, colorsMap) {
+  const components = {};
+  const pairs = DS.color && DS.color.semantics && Array.isArray(DS.color.semantics.pairs)
+    ? DS.color.semantics.pairs
+    : [];
+  for (const pair of pairs) {
+    if (!pair || (!pair.bg && !pair.text)) continue;
+    const bgName = pair.bg || '';
+    const textName = pair.text || '';
+    const slug = _slugForToken(String(bgName || textName).replace(/^color\//, ''));
+    if (!slug) continue;
+    // Prefer Light mode aliases when present; fall back to the only mode given.
+    const modes = ['Light', 'Dark'];
+    let modeAlias = null;
+    for (const mode of modes) {
+      if (pair[mode] && (pair[mode].bg || pair[mode].text)) {
+        modeAlias = pair[mode];
+        break;
+      }
+    }
+    const bgKey = modeAlias && modeAlias.bg ? _aliasToColorsKey(modeAlias.bg, colorsMap) : null;
+    const textKey = modeAlias && modeAlias.text ? _aliasToColorsKey(modeAlias.text, colorsMap) : null;
+    const entry = {};
+    if (bgKey) entry.backgroundColor = '{colors.' + bgKey + '}';
+    if (textKey) entry.textColor = '{colors.' + textKey + '}';
+    if (Object.keys(entry).length) components[slug] = entry;
+  }
+  return components;
+}
+
+function _writeMap(lines, name, values) {
+  const keys = Object.keys(values || {});
+  if (!keys.length) return;
+  lines.push(name + ':');
+  for (const key of keys) {
+    lines.push('  ' + key + ': ' + _yamlString(values[key]));
+  }
+}
+
+function _writeTypographyMap(lines, name, typography) {
+  const keys = Object.keys(typography || {});
+  if (!keys.length) return;
+  lines.push(name + ':');
+  for (const role of keys) {
+    const entry = typography[role];
+    lines.push('  ' + role + ':');
+    if (entry.fontFamily != null) lines.push('    fontFamily: ' + _yamlString(entry.fontFamily));
+    if (entry.fontSize != null) lines.push('    fontSize: ' + _yamlString(entry.fontSize));
+    if (entry.fontWeight != null) lines.push('    fontWeight: ' + Number(entry.fontWeight));
+    if (entry.lineHeight != null) lines.push('    lineHeight: ' + _yamlString(entry.lineHeight));
+    if (entry.letterSpacing != null) lines.push('    letterSpacing: ' + _yamlString(entry.letterSpacing));
+  }
+}
+
+function _writeComponentsMap(lines, name, components) {
+  const keys = Object.keys(components || {});
+  if (!keys.length) return;
+  lines.push(name + ':');
+  for (const slug of keys) {
+    const entry = components[slug];
+    lines.push('  ' + slug + ':');
+    for (const fieldKey of Object.keys(entry)) {
+      lines.push('    ' + fieldKey + ': ' + _yamlString(entry[fieldKey]));
+    }
+  }
+}
+
+// --- Body sections ----------------------------------------------------------
+
+function _formatHex(hex) {
+  return _hex(hex) || hex;
+}
+
+function _bodyOverview(DS) {
+  if (DS.project && DS.project.description) return DS.project.description;
+  const name = (DS.project && DS.project.name) || 'This design system';
+  return name + ' is a Figma-rooted design system exported to DESIGN.md as a portable handoff artifact. The tokens below are the normative values; the prose provides context for how to apply them.';
+}
+
+function _bodyColors(DS, colorsMap) {
+  const lines = [];
+  const brand = DS.color && Array.isArray(DS.color.brand) ? DS.color.brand : [];
+  if (brand.length) {
+    lines.push('The palette is rooted in the following key colors:');
+    lines.push('');
+    for (const entry of brand) {
+      if (!entry || !entry.name) continue;
+      const hex = _formatHex(entry.hex);
+      const role = entry.role && entry.role !== entry.name ? ' (' + entry.role + ')' : '';
+      lines.push('- **' + entry.name + role + ':** ' + (hex || 'no hex'));
+    }
+  } else {
+    lines.push('The palette is exported from the prepared Figlets ramps.');
+  }
+  const ramps = DS.color && Array.isArray(DS.color.ramps) ? DS.color.ramps : [];
+  if (ramps.length) {
+    lines.push('');
+    lines.push('Each palette is exported as a contrast-aware ramp. Step tokens follow the pattern `<ramp>-<step>` (for example `primary-500`).');
+  }
+  return lines.join('\n');
+}
+
+function _bodyTypography(DS) {
+  const lines = [];
+  const families = (DS.typography && DS.typography.families) || {};
+  if (families.sans) lines.push('Primary typeface: **' + families.sans + '**.');
+  if (families.mono) lines.push('Monospace typeface: **' + families.mono + '**.');
+  if (families.display) lines.push('Display typeface: **' + families.display + '**.');
+  if (!lines.length) lines.push('Typography is exported from the prepared Figlets scale.');
+  const scale = DS.typography && DS.typography.scale ? DS.typography.scale : null;
+  if (scale) {
+    const rows = Object.keys(scale);
+    if (rows.length) {
+      lines.push('');
+      lines.push('| Role | Sizes (mobile / tablet / desktop) | Weight | Tracking |');
+      lines.push('|---|---|---|---|');
+      for (const role of rows) {
+        const entry = scale[role] || {};
+        const sizes = entry.sizes || [];
+        const sizeCell = sizes.length === 3
+          ? (sizes[0] + ' / ' + sizes[1] + ' / ' + sizes[2] + ' px')
+          : ((sizes[sizes.length - 1] || sizes[0] || '?') + ' px');
+        lines.push('| ' + role + ' | ' + sizeCell + ' | ' + (entry.weight || 400) + ' | ' + (entry.tracking || 0) + ' |');
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+function _bodyLayout(DS) {
+  const lines = [];
+  const grid = DS.grid && DS.grid.base ? DS.grid.base + 'px' : null;
+  if (grid) lines.push('Spacing follows a ' + grid + ' grid.');
+  const semantic = DS.spacing && DS.spacing.semantic ? DS.spacing.semantic : null;
+  if (semantic && Object.keys(semantic).length) {
+    lines.push('');
+    lines.push('| Role | Mobile / Tablet / Desktop |');
+    lines.push('|---|---|');
+    for (const key of Object.keys(semantic)) {
+      const vals = semantic[key] || [];
+      const cell = vals.length === 3
+        ? (vals[0] + ' / ' + vals[1] + ' / ' + vals[2] + ' px')
+        : ((vals[vals.length - 1] || vals[0] || '?') + ' px');
+      lines.push('| ' + key + ' | ' + cell + ' |');
+    }
+  }
+  const border = DS.spacing && DS.spacing.border ? DS.spacing.border : null;
+  if (border && border.default != null) {
+    lines.push('');
+    lines.push('Default border width: ' + border.default + 'px.');
+  }
+  if (!lines.length) lines.push('Spacing tokens are exported from DS.spacing.');
+  return lines.join('\n');
+}
+
+function _bodyElevation(DS) {
+  const elevation = DS.elevation;
+  if (!elevation || typeof elevation !== 'object') return null;
+  const lines = ['Shadows are exported from the prepared Figlets elevation scale.'];
+  const keys = Object.keys(elevation);
+  if (keys.length) {
+    lines.push('');
+    lines.push('| Step | Definition |');
+    lines.push('|---|---|');
+    for (const key of keys) {
+      const value = elevation[key];
+      let summary;
+      if (value && typeof value === 'object') summary = '`' + JSON.stringify(value) + '`';
+      else summary = '`' + String(value) + '`';
+      lines.push('| ' + key + ' | ' + summary + ' |');
+    }
+  }
+  return lines.join('\n');
+}
+
+function _bodyShapes(DS) {
+  const radius = DS.spacing && DS.spacing.radius ? DS.spacing.radius : null;
+  if (!radius || !Object.keys(radius).length) return null;
+  const lines = ['Corner radii follow a small named scale.'];
+  lines.push('');
+  lines.push('| Token | Value |');
+  lines.push('|---|---|');
+  for (const key of Object.keys(radius)) {
+    if (radius[key] === 9999) {
+      lines.push('| ' + key + ' | full / pill |');
+    } else {
+      lines.push('| ' + key + ' | ' + radius[key] + 'px |');
+    }
+  }
+  return lines.join('\n');
+}
+
+function _bodyComponents(DS) {
+  const pairs = DS.color && DS.color.semantics && Array.isArray(DS.color.semantics.pairs)
+    ? DS.color.semantics.pairs
+    : [];
+  if (!pairs.length) return null;
+  const algo = DS.color && DS.color.contrastAlgorithm ? DS.color.contrastAlgorithm.toUpperCase() : 'APCA/WCAG';
+  const lines = [
+    'Semantic background + text pairs validated against ' + algo + ' contrast. The `components` block in the front matter encodes the Light-mode relationship; Dark-mode aliases are recorded in the `figlets-extended` block below for round-trip fidelity.',
+    ''
+  ];
+  lines.push('| Pair | Light bg / text | Dark bg / text |');
+  lines.push('|---|---|---|');
+  for (const pair of pairs) {
+    if (!pair || (!pair.bg && !pair.text)) continue;
+    const name = (pair.bg || pair.text || '').replace(/^color\//, '');
+    const light = pair.Light || {};
+    const dark = pair.Dark || {};
+    const lightCell = (light.bg || '—') + ' / ' + (light.text || '—');
+    const darkCell = (dark.bg || '—') + ' / ' + (dark.text || '—');
+    lines.push('| ' + name + ' | ' + lightCell + ' | ' + darkCell + ' |');
+  }
+  return lines.join('\n');
+}
+
+// --- Extended block (round-trip restoration) -------------------------------
+
+function _stripVolatile(ds) {
+  // Clone and strip fields that are environment-dependent or generated.
+  const clone = JSON.parse(JSON.stringify(ds || {}));
+  if (clone.source) delete clone.source;
+  if (clone.primitives) delete clone.primitives;
+  return clone;
+}
+
+function _buildExtendedBlock(DS, options) {
+  const payload = {
+    schemaVersion: '1',
+    generator: (options && options.generator) || 'figlets-mcp',
+    ds: _stripVolatile(DS)
+  };
+  return [
+    '```figlets-extended',
+    JSON.stringify(payload, null, 2),
+    '```'
+  ].join('\n');
+}
+
+function _readExtendedBlock(markdownBody) {
+  const text = String(markdownBody || '');
+  const match = text.match(/```figlets-extended\s*\r?\n([\s\S]*?)\r?\n```/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch (_) {
+    return null;
+  }
+}
+
+// --- Public exporters -------------------------------------------------------
+
+function dsConfigToDesignMd(ds, options) {
+  options = options || {};
+  const DS = ds || {};
+
+  const colorsMap = _buildColorsMap(DS);
+  const typographyMap = _buildTypographyMap(DS);
+  const spacingMap = _buildSpacingMap(DS);
+  const roundedMap = _buildRoundedMap(DS);
+  const componentsMap = _buildComponentsMap(DS, colorsMap);
 
   const lines = ['---'];
-  lines.push('version: "alpha"');
-  lines.push('name: ' + _quote((DS.project && DS.project.name) || options.name || 'Figlets Design System'));
-  if (DS.project && DS.project.description) lines.push('description: ' + _quote(DS.project.description));
-  _writeYamlMap(lines, 'colors', colors);
-  _writeYamlMap(lines, 'typography', typography);
-  _writeYamlMap(lines, 'rounded', rounded);
-  _writeYamlMap(lines, 'spacing', spacing);
+  lines.push('version: alpha');
+  lines.push('name: ' + _yamlString((DS.project && DS.project.name) || options.name || 'Figlets Design System'));
+  if (DS.project && DS.project.description) lines.push('description: ' + _yamlString(DS.project.description));
+  _writeMap(lines, 'colors', colorsMap);
+  _writeTypographyMap(lines, 'typography', typographyMap);
+  _writeMap(lines, 'rounded', roundedMap);
+  _writeMap(lines, 'spacing', spacingMap);
+  _writeComponentsMap(lines, 'components', componentsMap);
   lines.push('---');
   lines.push('');
-  lines.push('## Overview');
+
+  function pushSection(heading, content) {
+    if (!content) return;
+    lines.push('## ' + heading);
+    lines.push('');
+    lines.push(content);
+    lines.push('');
+  }
+
+  // Canonical section order per the DESIGN.md spec.
+  pushSection('Overview', _bodyOverview(DS));
+  pushSection('Colors', _bodyColors(DS, colorsMap));
+  pushSection('Typography', _bodyTypography(DS));
+  pushSection('Layout', _bodyLayout(DS));
+  pushSection('Elevation & Depth', _bodyElevation(DS));
+  pushSection('Shapes', _bodyShapes(DS));
+  pushSection('Components', _bodyComponents(DS));
+
+  // Footer + round-trip block.
+  const algo = DS.color && DS.color.contrastAlgorithm ? DS.color.contrastAlgorithm.toUpperCase() : null;
+  const footer = 'Generated by Figlets from `design-system.config.js`. Standard: Google DESIGN.md (alpha).'
+    + (algo ? ' Contrast algorithm: ' + algo + '.' : '');
+  lines.push('---');
   lines.push('');
-  lines.push('Generated from Figlets design-system.config.js. Treat this file as portable agent context; the prepared Figlets config and Figma variables remain the source of truth.');
+  lines.push(footer);
   lines.push('');
-  lines.push('## Colors');
+  lines.push(_buildExtendedBlock(DS, options));
   lines.push('');
-  lines.push('Color tokens are exported from the prepared Figlets ramps.');
-  lines.push('');
-  lines.push('## Typography');
-  lines.push('');
-  lines.push('Typography tokens are exported from DS.typography.scale.');
-  lines.push('');
-  lines.push('## Layout');
-  lines.push('');
-  lines.push('Spacing and radius tokens are exported from DS.spacing.');
-  return lines.join('\n') + '\n';
+
+  return lines.join('\n');
 }
 
 function writeDesignMdFromDsConfig(configPath, outputPath) {
@@ -408,5 +736,6 @@ module.exports = {
   designMdToDsConfig,
   readDesignMdAsDsConfig,
   dsConfigToDesignMd,
-  writeDesignMdFromDsConfig
+  writeDesignMdFromDsConfig,
+  _readExtendedBlock: _readExtendedBlock
 };

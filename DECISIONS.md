@@ -4,6 +4,55 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-13] DESIGN.md export is spec-compliant with a `figlets-extended` round-trip block
+
+**Decision:** The DESIGN.md exporter ([packages/figlets-core/src/ds-config/design-md-intake.js](packages/figlets-core/src/ds-config/design-md-intake.js)) now produces output that lints clean against Google's `@google/design.md` v0.1.1 (zero errors). To carry information the Google spec can't express — Dark-mode aliases, responsive size/spacing triples, contrast algorithm, full ramps — the body embeds a fenced ```figlets-extended``` JSON block. The intake parser, when it sees that block, uses it as the canonical DS; falls back to the legacy front-matter-only parse for external DESIGN.md files.
+
+**Compliance changes vs. the previous exporter:**
+
+1. **Bare brand role colors.** `colors:` now emits `primary`, `secondary`, `tertiary`, `neutral` from `DS.color.brand` alongside the existing `<ramp>-<step>` keys. Clears the linter's "no primary defined" warning.
+2. **`fontWeight` as a bare number.** Spec accepts either, but bare numbers are the example form and match `Number` typing in downstream tools.
+3. **Canonical section order.** Overview → Colors → Typography → Layout → Elevation & Depth (when present) → Shapes (radii) → Components (semantic pairs). Matches the spec's section ordering rule exactly.
+4. **`components:` front-matter section.** `DS.color.semantics.pairs` are rendered as components with `{colors.<step>}` references on `backgroundColor` / `textColor`, using Light-mode aliases. Maps semantic pairs into the spec's first-class compositional slot rather than into an unknown key.
+5. **Rich body content.** Every section carries readable prose plus tables (typography sizes per breakpoint, spacing responsive triples, radius scale, semantic pair Light/Dark aliases) — the YAML is for tools, the body is for humans and agents reading the markdown.
+
+**The `figlets-extended` block:**
+
+The exporter writes the full DS (minus environment-dependent fields like `source` and `primitives`) as JSON inside a fenced ```figlets-extended``` code block in the body. Google's linter ignores it (unknown info-string fenced blocks pass through). Our intake parser detects the block and uses it as the DS — so reading our own export is lossless (Dark-mode aliases, responsive triples, contrast algorithm choice, breakpoints, naming conventions all round-trip).
+
+**Why a fenced block, not extra YAML keys:** Strict zod-based validators (which `@google/design.md` uses) may reject unknown front-matter keys. A fenced code block is unambiguous markdown content and never violates the schema. Tools that don't know about `figlets-extended` simply render it as a code block.
+
+**Validation infrastructure:** `@google/design.md` is now a `devDependency`. A new integration test ([tests/integration/design-md-google-lint.test.js](tests/integration/design-md-google-lint.test.js)) calls the linter's programmatic API (`lint()`) on a representative DS export, asserts zero errors, asserts canonical section order, and asserts round-trip fidelity for the lossy fields. The test skips cleanly (with a `SKIP` notice on stderr) when the dev dependency is missing — offline contributors aren't blocked. A new CLI [packages/figlets-mcp-server/src/cli/lint-design-md.js](packages/figlets-mcp-server/src/cli/lint-design-md.js) wraps the same `lint()` API; `npm run figlets:lint-design-md` is the entry point.
+
+**Known remaining lint signals (intentional):**
+
+- `orphanedTokens` warnings (color X defined but not referenced by any component). Reflects a real DS shape: many primitives, fewer compositions. Not a compliance issue — the linter is correctly observing token utilization. Suppressing it would lie about the system.
+
+**Round-trip contract:** Reading our own export reconstructs the DS exactly (modulo `source` and `primitives` which are environment-dependent). The `parsed.extended: true` field on the intake result signals when the extended block was used; consumers can trust the DS is canonical in that case.
+
+**Out of scope (intentional):**
+- Emitting `lineHeight` as a unitless multiplier when ratios are clean. Optional spec form; dimension strings work everywhere.
+- Re-merging extended-block DS over front-matter parse for partial overrides. Today's behavior: extended block wins entirely when present; otherwise front matter parses normally. Mixing the two would invite drift between the two halves.
+
+---
+
+## [2026-05-13] DESIGN.md export is a first-class flow, not a side effect of setup
+
+**Decision:** `export_design_md` is now a standalone MCP tool (plus matching CLI `npm run figlets:export-design-md` and designer prompt at [docs/designer-export-md-prompt.md](docs/designer-export-md-prompt.md)). It chains `sync_figma_data` → `refresh_ds_config_from_figma` → `writeDesignMdFromDsConfig` in one call. Sync + refresh are bundled by default; `figmaDataPath`, `skip_sync`, and `dry_run` short-circuit specific steps. The CLI mirrors the handler one-to-one for no-MCP fallback.
+
+**Why:** DESIGN.md export already existed inside `prepare_ds_config` and `apply_ds_setup` as a side effect — designers couldn't refresh the markdown without re-running setup, and there was no designer-facing entry point for "give me a portable DESIGN.md right now." The export is a high-value, read-only handoff artifact (coding agents, code repos, cross-team share). Hiding it inside setup conflated two intents.
+
+**Why sync + refresh are bundled by default:** If we synced without refreshing the config, the freshly pulled Figma values would not flow into DESIGN.md — the sync would be wasted work. The "sync first" choice implies "refresh from sync." `dry_run` lets designers preview both writes (config + DESIGN.md) without committing either.
+
+**Out of scope (intentional):**
+- Bootstrapping a `design-system.config.js` when one doesn't exist. Export errors with a "run setup first" hint instead. Two different flows; do not conflate.
+- Writing to Figma. Export is read-only by definition.
+- Plugin UI button. The plugin can't write to the host filesystem from its sandbox, so a button would require posting to the receiver and an MCP-side handler for plugin-originated requests — that's its own architectural piece, deferred.
+
+**Consequence:** `apply_ds_setup` / `prepare_ds_config` keep their incidental DESIGN.md side effect (no regression). The new tool reuses `writeDesignMdFromDsConfig` from `figlets-core` so there is one exporter, not two. Adapter docs ([packages/figlets-adapter/AGENTS.md](packages/figlets-adapter/AGENTS.md), [packages/figlets-adapter/CLAUDE.md](packages/figlets-adapter/CLAUDE.md)) list the new tool; the tool-coverage test enforces that listing. Tests cover happy path, output-path override, dry run, and missing-config error.
+
+---
+
 ## [2026-05-11] Setup repairs use inspect-then-approved-apply
 
 **Decision:** Existing-file setup repairs are split into an explicit config refresh, read-only inspection step, and designer-approved apply step. `refresh_ds_config_from_figma` updates already-existing config entries from the synced Figma snapshot without creating new config tokens and without mutating Figma. `inspect_ds_setup_gaps` reads the synced current Figma snapshot and reports additive semantic repair candidates without requiring a prepared config and without mutating Figma or config. `apply_ds_setup_repairs` accepts only the designer-approved repairs, creates those missing semantic variables by copying aliases from the approved source token, and updates the file-scoped config only for approved pairs that do not conflict with an existing pair for the same background.

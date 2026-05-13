@@ -17,6 +17,7 @@ const { refreshDsConfigFromFigmaTool, handleRefreshDsConfigFromFigma } = require
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
 const { designMdIntakeTool, handleCreateDsConfigFromDesignMd } = require("./tools/design-md-intake.js");
+const { exportDesignMdTool, handleExportDesignMd } = require("./tools/export-design-md.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
@@ -134,6 +135,36 @@ server.tool(
     try {
       const result = handleCreateDsConfigFromDesignMd(args);
       if (result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- export_design_md ---
+server.tool(
+  exportDesignMdTool.name,
+  exportDesignMdTool.description,
+  {
+    config_path: z.string().optional().describe("Optional absolute path to design-system.config.js. Defaults to the active file config."),
+    output_path: z.string().optional().describe("Optional absolute path for the DESIGN.md output. Defaults to DESIGN.md next to the config."),
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. When provided, sync is skipped."),
+    skip_sync: z.boolean().optional().describe("When true, skip the sync_figma_data step and use whatever snapshot is already on disk."),
+    dry_run: z.boolean().optional().describe("When true, do not write design-system.config.js or DESIGN.md; report what would change.")
+  },
+  async (args) => {
+    try {
+      const result = await handleExportDesignMd(args || {});
+      if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
           isError: true

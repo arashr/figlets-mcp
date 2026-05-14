@@ -85,8 +85,6 @@ function getKnownTargets(options) {
   const env = _env(options);
   const appData = env.APPDATA || _join(home, "AppData", "Roaming");
   const marketplacePath = _marketplacePath(options);
-  const claudeOnPath = _findOnPath("claude", options);
-  const marketplaceAvailable = fs.existsSync(marketplacePath);
 
   const claudeDesktopPath = platform === "win32"
     ? _join(appData, "Claude", "claude_desktop_config.json")
@@ -98,10 +96,12 @@ function getKnownTargets(options) {
     ? _join(appData, "Cursor", "mcp.json")
     : _join(home, ".cursor", "mcp.json");
 
-  const targets = [];
-
-  if (claudeOnPath && marketplaceAvailable) {
-    targets.push({
+  // The Claude Code plugin install target is always included so an explicit --hosts=claude-code-plugin
+  // returns an actionable plan (with a clear manual reason) even when claude or the marketplace folder
+  // is missing. Whether it supersedes the legacy claude-code target in the default run is decided
+  // after planning, based on whether the plugin path is actually viable in this environment.
+  return [
+    {
       id: "claude-code-plugin",
       label: "Claude Code plugin",
       type: "claude-plugin-install",
@@ -112,10 +112,7 @@ function getKnownTargets(options) {
       pluginSpec: FIGLETS_PLUGIN_SPEC,
       scope: "user",
       description: "Installs the Figlets Claude Code plugin (MCP server + /figlets:start command + designer skill) via claude plugin marketplace add and claude plugin install. This is the recommended path for Claude Code.",
-    });
-  }
-
-  return targets.concat([
+    },
     {
       id: "claude-desktop",
       label: "Claude Desktop",
@@ -180,7 +177,7 @@ function getKnownTargets(options) {
       },
       description: "Writes a project-local .mcp.json so Claude Code sessions opened in this repo can discover Figlets.",
     },
-  ]);
+  ];
 }
 
 function _readTextIfExists(filePath) {
@@ -272,21 +269,26 @@ function planClaudePluginInstall(target, options) {
 function getSetupPlan(options) {
   const selected = options && options.hosts ? new Set(options.hosts) : null;
   const knownTargets = getKnownTargets(options);
-  const knownIds = new Set(knownTargets.map(target => target.id));
-  const targets = knownTargets
-    .filter(target => {
-      if (selected) return selected.has(target.id);
-      // Default run: drop targets that have been superseded by another available target.
-      if (target.supersededBy && knownIds.has(target.supersededBy)) return false;
-      return true;
-    })
-    .map(target => {
-      if (target.type === "json-mcpServers" || target.type === "json-servers") return planJsonPatch(target);
-      if (target.type === "toml-codex") return planTomlPatch(target);
-      if (target.type === "native-command") return planNativeCommand(target, options);
-      if (target.type === "claude-plugin-install") return planClaudePluginInstall(target, options);
-      return Object.assign({}, target, { status: "manual" });
-    });
+  const filteredTargets = knownTargets.filter(target => !selected || selected.has(target.id));
+  const planned = filteredTargets.map(target => {
+    if (target.type === "json-mcpServers" || target.type === "json-servers") return planJsonPatch(target);
+    if (target.type === "toml-codex") return planTomlPatch(target);
+    if (target.type === "native-command") return planNativeCommand(target, options);
+    if (target.type === "claude-plugin-install") return planClaudePluginInstall(target, options);
+    return Object.assign({}, target, { status: "manual" });
+  });
+
+  // Supersession applies only to the default run (no explicit --hosts). A target is dropped only
+  // when its superseder is actually viable in this environment (would-run or unchanged) — otherwise
+  // we keep the legacy target so the user still sees an actionable fallback.
+  const targets = selected
+    ? planned
+    : planned.filter(target => {
+        if (!target.supersededBy) return true;
+        const superseder = planned.find(item => item.id === target.supersededBy);
+        if (!superseder) return true;
+        return !(superseder.status === "would-run" || superseder.status === "unchanged");
+      });
 
   return {
     command: "figlets-mcp",

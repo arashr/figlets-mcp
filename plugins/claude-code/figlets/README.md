@@ -6,9 +6,16 @@ Designer-friendly entrypoint for the Figlets design-system toolkit. Installing t
 - Adds a `/figlets:start` slash command that routes Claude Code into the Figlets designer workflow.
 - Ships a `figlets-designer` skill that auto-triggers on phrases like *"help me with my design system"* so designers do not have to remember the slash command.
 
-## One-command install (recommended)
+## Status: not yet a no-clone install
 
-From a clone of the `figlets-mcp` repo:
+> [!IMPORTANT]
+> The plugin manifest registers the Figlets MCP server as `npx -y @figlets/mcp-server`, but `@figlets/mcp-server` is **not yet published to npm**. Until it is, the plugin can only start its MCP server when the package is locally resolvable — either because you have this repo cloned with `npm install` run (the workspace symlink at `node_modules/@figlets/mcp-server` makes `npx` resolve it), or because you have applied the local-dev override below.
+>
+> The next release step is `npm publish` from `packages/figlets-mcp-server/`. The `prepack` script already bundles this marketplace into the tarball, so once published the plugin works on any machine with Node and Claude Code — no clone required.
+
+## One-command install (from a clone)
+
+From a clone of the `figlets-mcp` repo with `npm install` run:
 
 ```
 node packages/figlets-mcp-server/bin/figlets-mcp.js setup --hosts=claude-code-plugin --yes
@@ -20,7 +27,7 @@ node packages/figlets-mcp-server/bin/figlets-mcp.js setup --hosts=claude-code-pl
 figlets-mcp setup --hosts=claude-code-plugin --yes
 ```
 
-That command runs `claude plugin marketplace add` and `claude plugin install` for you, detects existing state, and is idempotent. Restart Claude Code afterwards.
+That command runs `claude plugin marketplace add` and `claude plugin install` for you, detects existing state, removes any legacy `figlets` MCP entries the plugin supersedes, and is idempotent. Restart Claude Code afterwards.
 
 ## Manual install
 
@@ -41,14 +48,13 @@ Restart the Claude Code session, then either type:
 
 ## Requirements
 
-The plugin's MCP server entry runs `npx -y @figlets/mcp-server`. That requires:
-
+- Claude Code with `claude plugin` support.
 - Node.js and `npx` on `PATH`.
-- The `@figlets/mcp-server` package to be reachable. While that package is unpublished, use the local-dev override below.
+- The `@figlets/mcp-server` package locally resolvable — see the *Status* callout above and the *Local development override* below.
 
 ## Local development override
 
-Until `@figlets/mcp-server` is published to npm, replace the `mcpServers.figlets` entry in `.claude-plugin/plugin.json` with an absolute path to this checkout, e.g.:
+Until `@figlets/mcp-server` is published to npm and you do not have the repo cloned, replace the `mcpServers.figlets` entry in `.claude-plugin/plugin.json` with an absolute path to a local checkout:
 
 ```json
 "mcpServers": {
@@ -65,4 +71,4 @@ Do not commit that override — it is machine-specific. The committed manifest t
 
 - `commands/start.md` → the `/figlets:start` slash command (designer types this explicitly).
 - `skills/figlets-designer/SKILL.md` → auto-trigger skill bound to designer phrases. Forbids developer-mode options and raw-Figma-tool fallback in line with root `CLAUDE.md`.
-- `mcpServers.figlets` → the Figlets MCP server, registered as `figlets` when the plugin is enabled.
+- `mcpServers.figlets` → the Figlets MCP server, registered as `plugin:figlets:figlets` when the plugin is enabled.

@@ -24,11 +24,27 @@ fs.mkdirSync(path.dirname(fakeFigletsBin), { recursive: true });
 
 try {
   {
-    const plan = getSetupPlan({ homeDir: home, cwd, platform: "darwin", env: { PATH: "" }, nodePath: fakeNode, figletsBinPath: fakeFigletsBin });
+    const fakeMarketplaceForLeakCheck = path.join(TEMP_DIR, "marketplace", "claude-code");
+    fs.mkdirSync(fakeMarketplaceForLeakCheck, { recursive: true });
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      env: { PATH: "" },
+      nodePath: fakeNode,
+      figletsBinPath: fakeFigletsBin,
+      marketplacePath: fakeMarketplaceForLeakCheck,
+    });
     assert.strictEqual(plan.command, "figlets-mcp");
     assert.ok(plan.targets.some(target => target.id === "claude-desktop"));
     assert.ok(plan.targets.some(target => target.id === "codex"));
     assert.ok(plan.targets.some(target => target.id === "claude-code" && target.status === "manual"));
+    // The plugin target is always present so explicit --hosts=claude-code-plugin always returns an
+    // actionable plan; when claude is not on PATH it reports manual with a clear next step.
+    const pluginTarget = plan.targets.find(target => target.id === "claude-code-plugin");
+    assert.ok(pluginTarget, "claude-code-plugin should always appear so explicit selection works");
+    assert.strictEqual(pluginTarget.status, "manual");
+    assert.ok(pluginTarget.reason && /not found on PATH/i.test(pluginTarget.reason), "manual reason should explain the missing claude binary");
     assert.ok(!JSON.stringify(plan).includes("/Users/arash"), "setup plan should not leak a developer-local repo path");
   }
 
@@ -202,7 +218,8 @@ try {
     assert.strictEqual(plan.targets[0].id, "claude-code");
   }
 
-  // Claude Code plugin install — manual when claude is not on PATH.
+  // Explicit --hosts=claude-code-plugin must always return a target — never an empty plan — so the
+  // user gets a clear next step. When claude is missing, status is manual with an actionable reason.
   {
     const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
     fs.mkdirSync(fakeMarketplace, { recursive: true });
@@ -214,7 +231,28 @@ try {
       env: { PATH: "" },
       marketplacePath: fakeMarketplace,
     });
-    assert.strictEqual(plan.targets.length, 0, "plugin target should be filtered out when claude is not on PATH");
+    assert.strictEqual(plan.targets.length, 1, "explicit plugin target should always plan, even when claude is missing");
+    assert.strictEqual(plan.targets[0].id, "claude-code-plugin");
+    assert.strictEqual(plan.targets[0].status, "manual");
+    assert.ok(/claude.*not found on PATH/i.test(plan.targets[0].reason), "manual reason should call out the missing claude binary");
+    assert.ok(plan.targets[0].reason.includes("plugin marketplace add"), "manual reason should show the commands to run after installing Claude Code");
+    assert.ok(plan.targets[0].reason.includes(FIGLETS_PLUGIN_SPEC), "manual reason should reference the plugin spec");
+  }
+
+  // And when the marketplace folder is missing, the status is manual with a different reason.
+  {
+    const missingMarketplace = path.join(TEMP_DIR, "no-such-marketplace");
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code-plugin"],
+      env: { PATH: bin },
+      marketplacePath: missingMarketplace,
+    });
+    assert.strictEqual(plan.targets.length, 1);
+    assert.strictEqual(plan.targets[0].status, "manual");
+    assert.ok(/marketplace folder not found/i.test(plan.targets[0].reason), "manual reason should call out the missing marketplace folder");
   }
 
   // Claude Code plugin install — fresh install runs both marketplace add and plugin install.

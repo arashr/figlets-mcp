@@ -35,19 +35,27 @@ To let Figlets patch supported MCP configs after reviewing the dry run:
 figlets-mcp setup --yes
 ```
 
-To connect only Claude Code:
+### Claude Code (recommended path)
+
+For Claude Code, the recommended install is the Figlets plugin — it registers the MCP server, adds a `/figlets:start` slash command, and ships an auto-trigger `figlets-designer` skill so designer phrases route into Designer Mode automatically:
+
+```bash
+figlets-mcp setup --hosts=claude-code-plugin --yes
+```
+
+Behind the scenes that runs `claude plugin marketplace add` + `claude plugin install`, is idempotent on re-run, and also removes any pre-existing user/project/local-scope `figlets` MCP entries that the plugin supersedes so Claude Code does not end up with two `figlets` servers. After a session restart, designers can either type `/figlets:start` or just describe their design system.
+
+When Claude Code (`claude` on `PATH`) and the marketplace folder are both available, this is also what the default `figlets-mcp setup --yes` runs for Claude Code — the legacy `claude mcp add` path below is dropped from defaults via supersession in that case.
+
+### Claude Code (legacy fallback)
+
+For environments that cannot run the plugin path (older Claude Code without `claude plugin marketplace add`, or hosts that consume only raw MCP config), the legacy `claude mcp add` path is still reachable:
 
 ```bash
 figlets-mcp setup --hosts=claude-code --yes
 ```
 
-For local product testing inside this repo, the most reliable Claude Code path is project-local:
-
-```bash
-figlets-mcp setup --hosts=claude-code-project --yes
-```
-
-The setup command backs up existing config files before writing, preserves unrelated MCP servers, and uses `"command": "figlets-mcp"` instead of machine-specific paths for JSON/TOML configs. For Claude Code, it uses Claude's native user-scope MCP command with the current Node executable and the local `figlets-mcp.js` binary, which avoids PATH issues inside Claude Code. If Claude reports a stale existing `figlets` entry, setup removes Figlets entries from Claude Code's local/project/user scopes and re-adds the user-scope entry.
+This uses Claude's native user-scope MCP command with the current Node executable and the local `figlets-mcp.js` binary. If Claude reports a stale existing `figlets` entry, setup removes Figlets entries from Claude Code's local/project/user scopes and re-adds the user-scope entry. The setup command backs up existing config files before writing, preserves unrelated MCP servers, and uses `"command": "figlets-mcp"` instead of machine-specific paths for the JSON/TOML configs of every other host.
 
 To check the local bridge after your MCP host has started Figlets:
 

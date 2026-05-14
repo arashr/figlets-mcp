@@ -237,6 +237,15 @@ module.exports = (() => {
     ],
   };
   const familyResult = inspectDsSetupGapsFromFigmaData(familySnap);
+  const missingFocus = familyResult.foundationRoleFindings.find(
+    gap => gap.role === "focus-border"
+  );
+  assert.ok(missingFocus, "files with border semantics but no focus border should flag the foundational focus role");
+  assert.strictEqual(missingFocus.confidence, "high");
+  assert.strictEqual(missingFocus.agentAction, "ask-designer");
+  assert.ok(missingFocus.suggestedNames.includes("color/border/focus"));
+  assert.strictEqual(familyResult.summary.foundationRoleFindingCount, 1);
+
   const missingSuccessIcon = familyResult.missingSemanticRoles.find(
     gap => gap.family === "success" && gap.missingRole === "icon"
   );

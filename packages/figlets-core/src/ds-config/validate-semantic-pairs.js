@@ -138,6 +138,10 @@ function validateSemanticPairs(ds) {
     { bg: 'color/fill/warning',      text: 'color/text/on-warning', L: { bg: 'yellow/200',  text: 'neutral/950' }, D: { bg: 'yellow/200',  text: 'neutral/950' }, min: 4.5, minLc: 75, note: '⚠ yellow filled surfaces use dark text in both modes' },
     { bg: 'color/bg/info',           text: 'color/text/info',       L: { bg: 'blue/50',     text: 'blue/800'    }, D: { bg: 'blue/950',    text: 'blue/100'    }, min: 4.5, minLc: 75 },
     { bg: 'color/fill/info',         text: 'color/text/on-info',    L: { bg: 'blue/700',    text: 'neutral/50'  }, D: { bg: 'blue/100',    text: 'neutral/950' }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/default',   text: 'color/text/default',    L: { bg: 'neutral/50',  text: 'neutral/950' }, D: { bg: 'neutral/950', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/raised',    text: 'color/text/default',    L: { bg: 'neutral/100', text: 'neutral/950' }, D: { bg: 'neutral/900', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/overlay',   text: 'color/text/default',    L: { bg: 'neutral/100', text: 'neutral/950' }, D: { bg: 'neutral/800', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
+    { bg: 'color/surface/sunken',    text: 'color/text/default',    L: { bg: 'neutral/100', text: 'neutral/950' }, D: { bg: 'neutral/800', text: 'neutral/50'  }, min: 4.5, minLc: 75 },
   ];
 
   const SURFACE_PAIRS = [
@@ -169,6 +173,11 @@ function validateSemanticPairs(ds) {
     { token: 'color/icon/warning', L: { icon: 'yellow/700',  bg: 'neutral/50'  }, D: { icon: 'yellow/400',  bg: 'neutral/950' } },
     { token: 'color/icon/info',    L: { icon: 'blue/600',    bg: 'neutral/50'  }, D: { icon: 'blue/400',    bg: 'neutral/950' } },
     { token: 'color/icon/inverse', L: { icon: 'neutral/50',  bg: 'neutral/950' }, D: { icon: 'neutral/950', bg: 'neutral/50'  } },
+    { token: 'color/icon/on-brand',   L: { icon: 'neutral/50',  bg: 'primary/900' }, D: { icon: 'neutral/950', bg: 'primary/50'  } },
+    { token: 'color/icon/on-danger',  L: { icon: 'neutral/50',  bg: 'red/900'     }, D: { icon: 'neutral/950', bg: 'red/100'     } },
+    { token: 'color/icon/on-success', L: { icon: 'neutral/50',  bg: 'green/900'   }, D: { icon: 'neutral/950', bg: 'green/100'   } },
+    { token: 'color/icon/on-warning', L: { icon: 'neutral/950', bg: 'yellow/100'  }, D: { icon: 'neutral/950', bg: 'yellow/100'  } },
+    { token: 'color/icon/on-info',    L: { icon: 'neutral/50',  bg: 'blue/900'    }, D: { icon: 'neutral/950', bg: 'blue/100'    } },
   ];
 
   const ROLE_UNPAIRED = [
@@ -176,13 +185,17 @@ function validateSemanticPairs(ds) {
     { token: 'color/border/default', L: 'neutral/200', D: 'neutral/800' },
     { token: 'color/border/subtle',  L: 'neutral/100', D: 'neutral/900' },
     { token: 'color/border/strong',  L: 'neutral/400', D: 'neutral/600' },
-    { token: 'color/border/brand',   L: 'primary/500', D: 'primary/500' },
-    { token: 'color/border/danger',  L: 'red/500',     D: 'red/500'     },
+    { token: 'color/border/brand',   L: 'primary/700', D: 'primary/300' },
+    { token: 'color/border/brand-subtle', L: 'primary/200', D: 'primary/800' },
+    { token: 'color/border/danger',  L: 'red/200',     D: 'red/800'     },
+    { token: 'color/border/success', L: 'green/200',   D: 'green/800'   },
+    { token: 'color/border/warning', L: 'yellow/200',  D: 'yellow/800'  },
+    { token: 'color/border/info',    L: 'blue/200',    D: 'blue/800'    },
     { token: 'color/border/focus',   L: 'primary/500', D: 'primary/400', note: '3:1 vs adjacent bg required' },
     { token: 'color/surface/default',L: 'neutral/50',  D: 'neutral/950' },
     { token: 'color/surface/raised', L: 'neutral/100', D: 'neutral/900' },
-    { token: 'color/surface/overlay',L: 'neutral/200', D: 'neutral/800' },
-    { token: 'color/surface/sunken', L: 'neutral/200', D: 'neutral/800' },
+    { token: 'color/surface/overlay',L: 'neutral/100', D: 'neutral/800' },
+    { token: 'color/surface/sunken', L: 'neutral/100', D: 'neutral/800' },
     { token: 'color/scrim/overlay',  L: 'color/scrim/black/40', D: 'color/scrim/black/60', scrim: true },
     { token: 'color/scrim/hover',    L: 'color/scrim/black/8',  D: 'color/scrim/white/8',  scrim: true },
     { token: 'color/scrim/pressed',  L: 'color/scrim/black/12', D: 'color/scrim/white/12', scrim: true },
@@ -211,6 +224,9 @@ function validateSemanticPairs(ds) {
 
   const pairTemplates     = convention === 'surface-based' ? SURFACE_PAIRS    : ROLE_PAIRS;
   const unpairedTemplates = convention === 'surface-based' ? SURFACE_UNPAIRED : ROLE_UNPAIRED;
+  const existingSemantics = DS.color.semantics || {};
+  const existingIcons = Array.isArray(existingSemantics.icons) ? existingSemantics.icons : null;
+  const wantsIconSemantics = existingIcons ? existingIcons.length > 0 : existingSemantics.icons !== false;
   const contrastHarmonized = DS.color.rampStrategy === 'contrast-harmonized';
 
   function applyContrastHarmonizedPair(row) {
@@ -418,7 +434,18 @@ function validateSemanticPairs(ds) {
     tableRows.push(row);
   }
 
+  const existingUnpairedMap = {};
+  if (Array.isArray(existingSemantics.unpaired)) {
+    for (const item of existingSemantics.unpaired) {
+      if (item && item.token) existingUnpairedMap[item.token] = item;
+    }
+  }
+
   const resolvedUnpaired = unpairedTemplates.map(u => {
+    const saved = existingUnpairedMap[u.token];
+    if (saved && (saved.Light || saved.Dark)) {
+      return { token: u.token, Light: saved.Light || null, Dark: saved.Dark || null, note: saved.note || u.note };
+    }
     if (u.scrim) return { token: u.token, Light: u.L, Dark: u.D, note: u.note };
     const lRes = resolve(u.L), dRes = resolve(u.D);
     return {
@@ -428,11 +455,16 @@ function validateSemanticPairs(ds) {
       note:  u.note,
     };
   });
+  for (const item of Object.values(existingUnpairedMap)) {
+    if (item && item.token && !resolvedUnpaired.some(u => u.token === item.token)) {
+      resolvedUnpaired.push(item);
+    }
+  }
 
   // Preserve manually edited icon values across re-runs (same pattern as existingPairs).
   const existingIconMap = {};
-  if (DS.color.semantics && DS.color.semantics.icons) {
-    for (const ic of DS.color.semantics.icons) {
+  if (existingIcons) {
+    for (const ic of existingIcons) {
       existingIconMap[ic.token] = { Light: ic.Light, Dark: ic.Dark };
     }
   }
@@ -442,7 +474,7 @@ function validateSemanticPairs(ds) {
   const iconScorer    = algorithm === 'apca' ? apcaScorer : wcagScorer;
   const iconThreshold = algorithm === 'apca' ? 60 : 3;
 
-  const resolvedIcons = ROLE_ICONS.map(ic => {
+  const resolvedIcons = wantsIconSemantics ? ROLE_ICONS.map(ic => {
     // Prefer saved values from a previous run; fall back to template defaults.
     const saved = existingIconMap[ic.token];
     const lRef  = saved && saved.Light ? saved.Light.replace(/^color\//, '') : ic.L.icon;
@@ -489,7 +521,7 @@ function validateSemanticPairs(ds) {
       Dark:  finalDIcon ? finalDIcon.path : null,
       lRatio, dRatio, lPass, dPass,
     };
-  });
+  }) : [];
 
   // ── Format output ────────────────────────────────────────────────────────────
   const r2 = x => x != null ? `${x.toFixed(1)}:1` : '—';

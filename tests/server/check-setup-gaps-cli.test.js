@@ -14,6 +14,7 @@ function emptySummary(extra) {
     incompleteModeCount: 0,
     contrastFailureCount: 0,
     brokenAliasCount: 0,
+    foundationRoleFindingCount: 0,
     companionAdvisoryCount: 0,
   }, extra || {});
 }
@@ -152,6 +153,15 @@ module.exports = (async () => {
         brokenAliases: [
           { kind: "broken-alias", holder: "color/surface/danger", mode: "Dark", missingTargetId: "deleted-id" },
         ],
+        foundationRoleFindings: [
+          {
+            kind: "missing-foundation-role",
+            role: "focus-border",
+            suggestedNames: ["color/border/focus", "color/border/focus-ring"],
+            confidence: "high",
+            reason: "This DS uses border/outline semantics but has no focus indicator border token. Keyboard focus needs a deliberate, prominent role.",
+          },
+        ],
         companionAdvisories: [
           { kind: "missing-companion-advisory", bg: "color/surface/brand", fg: "color/on-surface/brand", missing: [{ role: "border", suggestedNames: ["color/border/brand"] }] },
         ],
@@ -160,7 +170,7 @@ module.exports = (async () => {
           semanticGapCount: 2, proposedCount: 1, unresolvedCount: 1,
           missingSemanticRoleCount: 1, highConfidenceSemanticRoleGapCount: 1,
           missingBackgroundCount: 1, incompleteModeCount: 1, contrastFailureCount: 1,
-          brokenAliasCount: 1, companionAdvisoryCount: 1,
+          brokenAliasCount: 1, foundationRoleFindingCount: 1, companionAdvisoryCount: 1,
         }),
       },
     });
@@ -168,13 +178,14 @@ module.exports = (async () => {
     assert.ok(out.includes('Brand "Primary" step 500'));
 
     // Header summarizes total findings + algorithm
-    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 8 findings (contrast checked with WCAG ratio)"));
+    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 9 findings (contrast checked with WCAG ratio)"));
 
     // Severity ordering: broken aliases first, then contrast, then missing fg/bg, modes, advisories
     const orderTokens = [
       "Broken aliases in the semantic layer:",
       "Contrast failures:",
       "Likely semantic-family gaps:",
+      "Foundational role gaps:",
       "Possible naming gaps:",
       "Foregrounds without a background:",
       "Tokens with incomplete modes:",
@@ -192,6 +203,9 @@ module.exports = (async () => {
     assert.ok(out.includes('high confidence: "success" is missing icon'));
     assert.ok(out.includes('possible token: "color/icon/success"'));
     assert.ok(out.includes("next step: ask the designer before treating this as a repair"));
+    assert.ok(out.includes("Foundational role gaps: 1"));
+    assert.ok(out.includes("high confidence: missing focus-border"));
+    assert.ok(out.includes('possible token: "color/border/focus"'));
 
     assert.ok(out.includes("Possible naming gaps: 2"));
     assert.ok(!/ready to repair/.test(out), "should not say 'ready to repair'");
@@ -222,6 +236,7 @@ module.exports = (async () => {
     assert.ok(out.includes("URGENT: 1 semantic token references variables that were deleted"));
     assert.ok(out.includes("A11Y: 1 pair fails the contrast threshold") || out.includes("A11Y: 1 pairs fail"));
     assert.ok(out.includes("1 semantic family looks incomplete (1 high-confidence). Ask before repairing."));
+    assert.ok(out.includes("1 foundational semantic role missing."));
     assert.ok(out.includes("2 backgrounds missing a foreground companion"));
     assert.ok(out.includes("1 foreground (on-*) without a matching background"));
     assert.ok(out.includes("Side note: your local config is out of date in 2 places"));

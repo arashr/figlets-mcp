@@ -155,6 +155,18 @@ function _formatMissingSemanticRole(item) {
   return lines;
 }
 
+function _formatFoundationRole(item) {
+  const lines = [
+    `${item.confidence || "medium"} confidence: missing ${item.role}`
+  ];
+  if (Array.isArray(item.suggestedNames) && item.suggestedNames.length) {
+    lines.push(`    possible token: "${item.suggestedNames[0]}"`);
+  }
+  lines.push(`    reason: ${item.reason}`);
+  lines.push("    next step: ask the designer before treating this as a repair");
+  return lines;
+}
+
 function _renderSection(lines, items, header, formatter, max) {
   if (!Array.isArray(items) || !items.length) return;
   lines.push("");
@@ -252,6 +264,7 @@ function formatCheckReport(state) {
       + (summary.incompleteModeCount || 0)
       + (summary.contrastFailureCount || 0)
       + (summary.brokenAliasCount || 0)
+      + (summary.foundationRoleFindingCount || 0)
       + (summary.companionAdvisoryCount || 0);
 
     if (!totals) {
@@ -296,7 +309,15 @@ function formatCheckReport(state) {
       _formatMissingSemanticRole
     );
 
-    // 4. Missing foregrounds
+    // 4. Required/foundational semantic roles
+    _renderSection(
+      lines,
+      gaps.foundationRoleFindings || [],
+      `Foundational role gaps: ${summary.foundationRoleFindingCount || 0}`,
+      _formatFoundationRole
+    );
+
+    // 5. Missing foregrounds
     _renderSection(
       lines,
       gaps.semanticGaps || [],
@@ -304,7 +325,7 @@ function formatCheckReport(state) {
       _formatMissingFgGap
     );
 
-    // 5. Missing backgrounds
+    // 6. Missing backgrounds
     _renderSection(
       lines,
       gaps.missingBackgrounds || [],
@@ -312,7 +333,7 @@ function formatCheckReport(state) {
       (item) => `"${item.fg}" expects "${item.expectedBg}" — missing in Figma`
     );
 
-    // 6. Incomplete modes
+    // 7. Incomplete modes
     _renderSection(
       lines,
       gaps.incompleteModes || [],
@@ -320,7 +341,7 @@ function formatCheckReport(state) {
       (item) => `"${item.token}" missing value in: ${item.missingModes.join(", ")}`
     );
 
-    // 7. Companion advisories (and any DS-wide role suppression)
+    // 8. Companion advisories (and any DS-wide role suppression)
     if (Array.isArray(gaps.suppressedAdvisoryRoles) && gaps.suppressedAdvisoryRoles.length) {
       lines.push("");
       for (const s of gaps.suppressedAdvisoryRoles) {
@@ -348,6 +369,7 @@ function formatCheckReport(state) {
     + (summary.incompleteModeCount || 0)
     + (summary.contrastFailureCount || 0)
     + (summary.brokenAliasCount || 0)
+    + (summary.foundationRoleFindingCount || 0)
     + (summary.companionAdvisoryCount || 0);
   const isCleanQa = !findingCount && !gaps.error;
   if (isCleanQa && !refreshCount && !refresh.error) {
@@ -371,6 +393,7 @@ function formatCheckReport(state) {
       const detail = high ? ` (${high} high-confidence)` : "";
       lines.push(`- ${summary.missingSemanticRoleCount} semantic famil${summary.missingSemanticRoleCount === 1 ? "y looks" : "ies look"} incomplete${detail}. Ask before repairing.`);
     }
+    if (summary.foundationRoleFindingCount) lines.push(`- ${summary.foundationRoleFindingCount} foundational semantic role${summary.foundationRoleFindingCount === 1 ? "" : "s"} missing. These are not tied to one color family, but matter for product states like focus.`);
     if (summary.semanticGapCount) lines.push(`- ${summary.semanticGapCount} background${summary.semanticGapCount === 1 ? "" : "s"} missing a foreground companion.`);
     if (summary.missingBackgroundCount) lines.push(`- ${summary.missingBackgroundCount} foreground${summary.missingBackgroundCount === 1 ? "" : "s"} (on-*) without a matching background.`);
     if (summary.incompleteModeCount) lines.push(`- ${summary.incompleteModeCount} token${summary.incompleteModeCount === 1 ? "" : "s"} have a value in some modes but not others.`);

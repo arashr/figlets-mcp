@@ -26,6 +26,14 @@ const _ON_TO_BG = { "on-surface": "surface", "on-bg": "bg", "on-background": "ba
 const _BORDER_FAMILIES = ["border", "outline", "stroke"];
 const _ICON_FAMILIES = ["icon"];
 const _FG_FAMILIES = ["text", "fg", "foreground", "on-surface", "on-bg", "on-background"];
+const _FOUNDATION_ROLE_SPECS = [
+  {
+    role: "focus-border",
+    families: _BORDER_FAMILIES,
+    leaves: ["focus", "focus-ring"],
+    reason: "This DS uses border/outline semantics but has no focus indicator border token. Keyboard focus needs a deliberate, prominent role.",
+  },
+];
 
 const _WCAG_THRESHOLD = 4.5;
 const _APCA_THRESHOLD = 75;
@@ -155,6 +163,40 @@ function _missingRoleFinding(cluster, missingRole, exampleName, confidence, reas
   };
 }
 
+function _roleFamilySeen(names, families) {
+  return names.some(name => {
+    const parts = String(name || "").split("/");
+    return _findFamilyIndex(parts, families) >= 0;
+  });
+}
+
+function _foundationRoleFindings(allNames, semanticContext) {
+  const findings = [];
+  const configUnpaired = semanticContext && semanticContext.unpairedTokens
+    ? Array.from(semanticContext.unpairedTokens)
+    : [];
+  const hasBorderSemantics = _roleFamilySeen(allNames, _BORDER_FAMILIES) || _roleFamilySeen(configUnpaired, _BORDER_FAMILIES);
+  if (!hasBorderSemantics) return findings;
+
+  for (const spec of _FOUNDATION_ROLE_SPECS) {
+    const candidates = [];
+    for (const family of spec.families) {
+      for (const leaf of spec.leaves) candidates.push(`color/${family}/${leaf}`);
+    }
+    if (candidates.some(name => allNames.indexOf(name) !== -1)) continue;
+    findings.push({
+      kind: "missing-foundation-role",
+      role: spec.role,
+      suggestedNames: candidates,
+      confidence: "high",
+      basis: "foundation-role",
+      agentAction: "ask-designer",
+      reason: spec.reason,
+    });
+  }
+  return findings;
+}
+
 function _semanticContextFromConfig(ds) {
   const semantics = ds && ds.color && ds.color.semantics ? ds.color.semantics : {};
   const pairTextByBg = new Map();
@@ -282,6 +324,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   const algorithm = options.algorithm === "apca" ? "apca" : "wcag";
   const semanticFamilies = _clusterSemanticFamilies(semanticVars);
   const semanticContext = _semanticContextFromConfig(options.existingDs);
+  const foundationRoleFindings = _foundationRoleFindings(allColorNames, semanticContext);
 
   // ── Missing-foreground gaps ────────────────────────────────────────────────
   // Any background-family semantic token without a matching foreground in the
@@ -627,6 +670,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     incompleteModes,
     contrastFailures,
     brokenAliases,
+    foundationRoleFindings,
     companionAdvisories,
     suppressedAdvisoryRoles: suppressedRoles,
     contrastAlgorithm: algorithm,
@@ -646,6 +690,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       contrastFailureCount: contrastFailures.length,
       contrastNearMissCount: contrastFailures.filter(f => f.nearMiss).length,
       brokenAliasCount: brokenAliases.length,
+      foundationRoleFindingCount: foundationRoleFindings.length,
       companionAdvisoryCount: companionAdvisories.length,
       suppressedAdvisoryRoleCount: suppressedRoles.length,
     },
@@ -791,6 +836,7 @@ function _composeMessage(s) {
   if (s.incompleteModeCount) parts.push(`${s.incompleteModeCount} token${s.incompleteModeCount === 1 ? "" : "s"} with incomplete modes`);
   if (s.contrastFailureCount) parts.push(`${s.contrastFailureCount} contrast failure${s.contrastFailureCount === 1 ? "" : "s"}`);
   if (s.brokenAliasCount) parts.push(`${s.brokenAliasCount} broken alias${s.brokenAliasCount === 1 ? "" : "es"}`);
+  if (s.foundationRoleFindingCount) parts.push(`${s.foundationRoleFindingCount} foundation role gap${s.foundationRoleFindingCount === 1 ? "" : "s"}`);
   if (s.companionAdvisoryCount) parts.push(`${s.companionAdvisoryCount} pair${s.companionAdvisoryCount === 1 ? "" : "s"} missing border/icon (advisory)`);
   if (!parts.length) return "Semantic color layer looks clean — no QA findings in the synced Figma snapshot.";
   return parts.join(", ") + ". Read-only QA pass — review with the designer before changing anything in Figma.";

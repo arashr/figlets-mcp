@@ -2774,11 +2774,12 @@ async function _buildShowcase(opts) {
     frame.fills = [_paint(o.bgRGB, o.bgVar)];
     if (o.borderRGB) {
       frame.strokes = [_paint(o.borderRGB, o.borderVar)];
-      frame.strokeWeight = 1.5;
+      frame.strokeWeight = 1;
     } else {
       frame.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
-      frame.strokeWeight = 0.5;
+      frame.strokeWeight = 1;
     }
+    _bindNumericProp(frame, 'strokeWeight', frame.strokeWeight, 'border');
     frame.strokeAlign = 'INSIDE';
     frame.primaryAxisSizingMode = 'FIXED';
     frame.counterAxisSizingMode = 'FIXED';
@@ -2817,8 +2818,8 @@ async function _buildShowcase(opts) {
   function _buildSemIconGlyph(rgb, varRef) {
     if (typeof figma.createNodeFromSvg !== 'function') return null;
     var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">' +
-      '<circle cx="8" cy="8" r="6" fill="none" stroke="#000000" stroke-width="1.5"/>' +
-      '<path d="M5 8.5 L7.2 10.5 L11 6.5" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<circle cx="8" cy="8" r="6" fill="none" stroke="#000000" stroke-width="1"/>' +
+      '<path d="M5 8.5 L7.2 10.5 L11 6.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>' +
       '</svg>';
     var node;
     try { node = figma.createNodeFromSvg(svg); }
@@ -3424,6 +3425,25 @@ async function _buildShowcase(opts) {
           }
           return '';
         }
+        function _tryContentIcon(srcName, toName) {
+          if (!srcName) return '';
+          var parts = String(srcName).split('/');
+          for (var i = parts.length - 1; i >= 0; i--) {
+            if (/^text$/i.test(parts[i])) {
+              var textCand = parts.slice();
+              textCand[i] = toName;
+              var textResolved = _lookupName(textCand.join('/'));
+              if (textResolved) return textResolved;
+            }
+            if (/^on-fill$/i.test(parts[i]) || /^on-surface$/i.test(parts[i])) {
+              var contentCand = parts.slice();
+              contentCand.splice(i, 1, toName, parts[i]);
+              var contentResolved = _lookupName(contentCand.join('/'));
+              if (contentResolved) return contentResolved;
+            }
+          }
+          return '';
+        }
         function _tryWithSuffixStrip(srcName, fromRe, toName) {
           var direct = _trySubstitute(srcName, fromRe, toName);
           if (direct) return direct;
@@ -3444,12 +3464,18 @@ async function _buildShowcase(opts) {
 
         var iconRef = '';
         var iconTargets = ['icon', 'graphic', 'symbol'];
+        var fgIsOnColor = /(?:^|\/)(?:on[-_][^/]+|text\/on[-_][^/]+)(?:\/|$)/i.test(String(fgName || ''));
+        if (fgIsOnColor && fgName) {
+          for (var fit = 0; fit < iconTargets.length && !iconRef; fit++) {
+            iconRef = _tryContentIcon(fgName, iconTargets[fit]);
+          }
+        }
         for (var it = 0; it < iconTargets.length && !iconRef; it++) {
           iconRef = _tryWithSuffixStrip(bgName, FAMILY_RE, iconTargets[it]);
         }
         if (!iconRef && fgName) {
           for (var it2 = 0; it2 < iconTargets.length && !iconRef; it2++) {
-            iconRef = _tryWithSuffixStrip(fgName, FG_FAMILY_RE, iconTargets[it2]);
+            iconRef = _tryContentIcon(fgName, iconTargets[it2]) || _tryWithSuffixStrip(fgName, FG_FAMILY_RE, iconTargets[it2]);
           }
         }
 
@@ -3576,14 +3602,19 @@ async function _buildShowcase(opts) {
             const raw = resolveVarValue(v);
             if (!raw || !('r' in raw)) continue;
             const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
-            const effectiveFg = (function() {
+            var effectiveFg = (function() {
               var ind = _swatchIndicator(bgRGB);
               return ind.show ? ind.fg : _textColor;
             })();
+            const defaultFgRef = varByName['color/text/default']
+              ? 'color/text/default'
+              : (varByName['color/on-surface/default'] ? 'color/on-surface/default' : '');
+            const defaultFgInfo = _resolveSemRef(defaultFgRef);
+            if (defaultFgInfo) effectiveFg = defaultFgInfo.rgb;
             const row = _buildSemColorRow(_tokenLabel(v.name), _tokenDesc(v.name), bgRGB, effectiveFg, v, {
-              fgVar: null,
-              hasPairing: false,
-              roleNames: { bg: _tokenLabel(v.name), fg: '' }
+              fgVar: defaultFgInfo ? defaultFgInfo.varRef : null,
+              hasPairing: !!defaultFgInfo,
+              roleNames: { bg: _tokenLabel(v.name), fg: defaultFgInfo ? _tokenLabel(defaultFgRef) : '' }
             });
             _semTable.appendChild(row);
             row.layoutSizingHorizontal = 'FILL';

@@ -1143,6 +1143,47 @@ The contrast picker stays inside `validateSemanticPairs` / `accessible-repair-al
 
 ---
 
+## [2026-05-14] Semantic setup uses content-role icons and subtle passive borders
+
+**Decision:** Role-based setup now treats status border tokens as passive container borders by default, while keeping focus/strong borders available for emphasis. Passive borders sit close to their paired surface rather than at the saturated midpoint: soft status surfaces use about two ramp steps away from the surface (`200` in light mode, `800` in dark mode), while the strong brand surface uses `700`/`300` against its `900`/`50` background. It also adds explicit `color/icon/on-*` roles for filled status surfaces only when the DS is using icon semantics. Showcase inference prefers those on-color icon roles for `text/on-*` foregrounds and omits icons when the DS has no matching icon token.
+
+**Why:**
+- Major systems split container/fill roles from on-color content roles. Reusing `icon/danger` on `fill/danger` can make the glyph nearly invisible because both tokens come from the same hue/ramp side.
+- Passive borders should frame a surface quietly; validation/focus states can be stronger. A single saturated midpoint status border (`500/500`) overstates passive rows.
+- Some design systems intentionally do not expose icon color semantics. An existing `semantics.icons: []` is treated as an opt-out on re-run, not as an invitation to generate icons.
+
+**Consequence:** New role-based setups produce clearer status previews: filled rows use `icon/on-danger`, `icon/on-success`, `icon/on-warning`, or `icon/on-info` when available; passive status borders default to near-surface steps (`brand 700/300`, `danger/success/warning/info 200/800`); and designer-authored icon/unpaired decisions are preserved on setup reruns.
+
+**Follow-up:** `bg/brand-subtle` must not borrow `border/brand`, because the strong-brand border is tuned for the filled/strong brand surface. Setup now creates `color/border/brand-subtle` (`primary/200` light, `primary/800` dark), and the showcase's existing direct-match companion inference will pick it before falling back to stripped `border/brand`.
+
+**Foundation roles:** Focus is not a color-family companion; it is a foundational interaction role. Setup still creates `color/border/focus`, and the setup-gap QA now reports a high-confidence `focus-border` foundation gap when a DS uses border/outline semantics but has no focus border token.
+
+---
+
+## [2026-05-14] Surface previews must have real foreground relationships when available
+
+**Decision:** Role-based setup now writes explicit surface relationships for `surface/default`, `surface/raised`, `surface/overlay`, and `surface/sunken` paired with `text/default`. Showcase extra surface rows also resolve `color/text/default` or `color/on-surface/default` when a config relationship is absent, so accessibility badges are shown only when a real foreground variable was found.
+
+**Why:**
+- The previous showcase could render surface samples with a hardcoded readable foreground while displaying `FG —`, which hid the contrast badge and made the visual row look more authoritative than the semantic data.
+- Surface roles are not merely decorative swatches; designers use them as card, panel, overlay, and recessed-region backgrounds, so default foreground compatibility is a useful QA signal.
+
+**Consequence:** Surface rows read as actual background+foreground relationships instead of unpaired color samples. If no default foreground token exists, the row remains an honest unpaired preview.
+
+---
+
+## [2026-05-14] Semantic preview swatch border width is token-bound at 1px
+
+**Decision:** Semantic preview swatches use a 1px stroke for both semantic border-token outlines and fallback outlines, and bind `strokeWeight` through the border-width variable picker when possible.
+
+**Why:**
+- The previous 1.5px semantic outline was visibly heavier than the token system and produced binding audit warnings.
+- A showcase row should demonstrate the DS token stack: color variables for fills/strokes and numeric variables for border width.
+
+**Consequence:** Semantic swatches are less visually aggressive and align with the expected `border/1` primitive. Missing numeric bindings still warn through the normal showcase binding path.
+
+---
+
 ## [2026-05-08] Showcase contrast labels follow the configured contrast algorithm
 
 **Decision:** Primitive and semantic color swatch labels in the Figma showcase branch on `DS.color.contrastAlgorithm`. APCA mode shows Lc labels (`✓ Lc NN` / `✗ Lc NN`). WCAG mode keeps the same visual treatment but shows ratio-status labels (`✓ AAA`, `✓ AA`, `~ Large`, `✓ 3:1`, `✗ Fail`).

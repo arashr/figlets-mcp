@@ -73,6 +73,7 @@ const makeRow = new Function(
   'function _contrastRatio() { return 4.56; }\n' +
   'function _apcaLc() { return 78; }\n' +
   'function _buildBadge(ratio) { var node = createNode("FRAME", "Badge"); node.ratio = ratio; return node; }\n' +
+  'function _bindNumericProp(node, prop, value, purpose) { node.boundNumeric = { prop: prop, value: value, purpose: purpose }; return true; }\n' +
   rowHelpers + '\n' +
   'return _buildSemColorRow;'
 )(createNode);
@@ -142,6 +143,12 @@ assert.strictEqual(
   fullPreview.strokes[0].varRef.name,
   'color/border/brand',
   'preview swatch must use the resolved border variable as its stroke'
+);
+assert.strictEqual(fullPreview.strokeWeight, 1, 'semantic preview border stroke should use the 1px border width');
+assert.deepStrictEqual(
+  fullPreview.boundNumeric,
+  { prop: 'strokeWeight', value: 1, purpose: 'border' },
+  'semantic preview border width should be bound through the border variable picker'
 );
 assert.strictEqual(findByName(fullPreview, 'Icon').length, 1, 'preview swatch must include the resolved icon glyph');
 assert.strictEqual(findByName(fullRow, 'WcagCell').length, 1, 'paired rows must render the WCAG pill cell');

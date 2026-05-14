@@ -252,6 +252,56 @@ function makeDs(overrides) {
   assert.strictEqual(successFill.text, 'color/text/on-success');
   assert.ok(/green\/50$/.test(successBg.Light.bg), 'bg/success Light should be a soft surface tint');
   assert.ok(/green\/800$/.test(successFill.Light.bg), 'fill/success Light should be the strong filled surface');
+  const dangerFillIcon = ds2.color.semantics.icons.find(ic => ic.token === 'color/icon/on-danger');
+  assert.ok(dangerFillIcon, 'role-based setup should include on-fill icon roles when icon semantics are enabled');
+  assert.strictEqual(dangerFillIcon.Light, 'color/neutral/50');
+  const passiveSuccessBorder = ds2.color.semantics.unpaired.find(u => u.token === 'color/border/success');
+  assert.ok(passiveSuccessBorder, 'role-based setup should include passive semantic status borders');
+  assert.strictEqual(passiveSuccessBorder.Light, 'color/green/200');
+  assert.strictEqual(passiveSuccessBorder.Dark, 'color/green/800');
+  const passiveBrandBorder = ds2.color.semantics.unpaired.find(u => u.token === 'color/border/brand');
+  assert.strictEqual(passiveBrandBorder.Light, 'color/cobalt/700');
+  assert.strictEqual(passiveBrandBorder.Dark, 'color/cobalt/300');
+  const passiveBrandSubtleBorder = ds2.color.semantics.unpaired.find(u => u.token === 'color/border/brand-subtle');
+  assert.strictEqual(passiveBrandSubtleBorder.Light, 'color/cobalt/200');
+  assert.strictEqual(passiveBrandSubtleBorder.Dark, 'color/cobalt/800');
+  const passiveDangerBorder = ds2.color.semantics.unpaired.find(u => u.token === 'color/border/danger');
+  assert.strictEqual(passiveDangerBorder.Light, 'color/red/200');
+  assert.strictEqual(passiveDangerBorder.Dark, 'color/red/800');
+  const raisedSurfacePair = ds2.color.semantics.pairs.find(p => p.bg === 'color/surface/raised' && p.text === 'color/text/default');
+  assert.ok(raisedSurfacePair, 'role-based setup should pair surfaces with the default foreground for accessibility previews');
+}
+
+// Existing DS choices are preserved: an imported setup can opt out of icon roles,
+// and manually added unpaired roles survive a setup re-run.
+{
+  let ds = computeDsConfig(makeDs({ color: {
+    scale: '50-950',
+    convention: 'role-based',
+    brand: [{ name: 'cobalt', hex: '#3B82F6', role: 'primary' }],
+    semantics: {
+      pairs: [{
+        bg: 'color/bg/default',
+        text: 'color/text/default',
+        Light: { bg: 'color/neutral/50', text: 'color/neutral/950' },
+        Dark: { bg: 'color/neutral/950', text: 'color/neutral/50' },
+      }],
+      icons: [],
+      unpaired: [
+        { token: 'color/border/custom', Light: 'color/red/300', Dark: 'color/red/700' },
+        { token: 'color/border/success', Light: 'color/green/300', Dark: 'color/green/700' },
+      ],
+    },
+  }})).ds;
+  ds = generateColorRamps(ds).ds;
+  ds = validateSemanticPairs(ds).ds;
+  assert.deepStrictEqual(ds.color.semantics.icons, [], 'empty existing icons array should opt out of generated icon semantics');
+  assert.ok(
+    ds.color.semantics.unpaired.some(u => u.token === 'color/border/custom'),
+    'custom unpaired semantic roles should be preserved'
+  );
+  const savedSuccessBorder = ds.color.semantics.unpaired.find(u => u.token === 'color/border/success');
+  assert.strictEqual(savedSuccessBorder.Light, 'color/green/300', 'manual unpaired values should win on re-run');
 }
 
 // neutral-variant backfills generated surface semantics without clobbering unrelated pairs

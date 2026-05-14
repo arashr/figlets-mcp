@@ -24,7 +24,7 @@ const figmaData = {
     {
       id: "semantics",
       name: "Color / Semantics",
-      variableIds: ["s-info-bg", "s-info-text"],
+      variableIds: ["s-info-bg", "s-info-text", "s-border-info"],
       modes: [
         { modeId: "light", name: "Light" },
         { modeId: "dark", name: "Dark" },
@@ -43,6 +43,10 @@ const figmaData = {
     colorVar("s-info-text", "color/on-surface/info", {
       light: { type: "VARIABLE_ALIAS", id: "p-blue-800" },
       dark: { type: "VARIABLE_ALIAS", id: "p-blue-100" },
+    }, "semantics"),
+    colorVar("s-border-info", "color/border/info", {
+      light: { type: "VARIABLE_ALIAS", id: "p-blue-100" },
+      dark: { type: "VARIABLE_ALIAS", id: "p-blue-800" },
     }, "semantics"),
     colorVar("p-new", "color/cobalt/700", { default: { r: 0.7, g: 0.7, b: 0.7 } }),
   ],
@@ -65,6 +69,11 @@ function makeDs() {
           text: "color/on-surface/info",
           Light: { bg: "color/old/500", text: "color/old/900" },
           Dark: { bg: "color/old/600", text: "color/old/100" },
+        }],
+        unpaired: [{
+          token: "color/border/info",
+          Light: "color/old/200",
+          Dark: "color/old/800",
         }]
       }
     }
@@ -75,7 +84,7 @@ module.exports = (() => {
   assert.strictEqual(refreshDsConfigFromFigmaTool.name, "refresh_ds_config_from_figma");
 
   const result = refreshDsConfigFromFigmaData(makeDs(), figmaData);
-  assert.strictEqual(result.changes.length, 7);
+  assert.strictEqual(result.changes.length, 9);
   assert.strictEqual(result.ds.color.brand[0].hex, "#1A334D");
   assert.deepStrictEqual(result.ds.color.ramps[0].steps, [
     [500, 0.1, 0.2, 0.3],
@@ -98,6 +107,11 @@ module.exports = (() => {
     1,
     "refresh should not create semantic pairs that only exist in Figma"
   );
+  assert.deepStrictEqual(result.ds.color.semantics.unpaired[0], {
+    token: "color/border/info",
+    Light: "color/blue/100",
+    Dark: "color/blue/800",
+  });
 
   {
     const noSemanticFields = makeDs();
@@ -200,12 +214,12 @@ module.exports = (() => {
   try {
     const dryRun = handleRefreshDsConfigFromFigma({ config_path: configPath, figmaDataPath: snapshotPath, dry_run: true });
     assert.strictEqual(dryRun.dryRun, true);
-    assert.strictEqual(dryRun.summary.changedCount, 7);
+    assert.strictEqual(dryRun.summary.changedCount, 9);
     assert.ok(fs.readFileSync(configPath, "utf8").includes("#000000"), "dry run should not write config");
 
     const applied = handleRefreshDsConfigFromFigma({ config_path: configPath, figmaDataPath: snapshotPath });
     assert.strictEqual(applied.dryRun, false);
-    assert.strictEqual(applied.summary.changedCount, 7);
+    assert.strictEqual(applied.summary.changedCount, 9);
     const updated = fs.readFileSync(configPath, "utf8");
     assert.ok(updated.includes("#1A334D"), "apply should write refreshed brand hex");
     assert.ok(updated.includes("color/blue/800"), "apply should write refreshed semantic alias refs");

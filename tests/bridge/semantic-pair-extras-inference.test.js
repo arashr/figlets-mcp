@@ -141,10 +141,10 @@ assertResult(
   _inferSemPairExtras(
     'color/fill/danger',
     'color/text/on-danger',
-    makeVbn(['color/fill/danger', 'color/border/danger', 'color/icon/danger'])
+    makeVbn(['color/fill/danger', 'color/border/danger', 'color/icon/danger', 'color/icon/on-danger'])
   ),
-  { borderRef: 'color/border/danger', iconRef: 'color/icon/danger', fillRef: '' },
-  '8. Border/icon still inferred from a fill bg; fill itself never inferred'
+  { borderRef: 'color/border/danger', iconRef: 'color/icon/on-danger', fillRef: '' },
+  '8. Filled surfaces prefer on-fill icon content roles; fill itself never inferred'
 );
 
 // 9. Icon via fg fallback when bg-side substitution fails.
@@ -309,6 +309,30 @@ assertResult(
   '22. Case-insensitive lookup returns the actual target variable name'
 );
 
+// 23. Surface-based filled content: color/on-fill/danger can map to
+// color/icon/on-fill/danger when the DS chooses that namespace.
+assertResult(
+  _inferSemPairExtras(
+    'color/fill/danger',
+    'color/on-fill/danger',
+    makeVbn(['color/icon/on-fill/danger', 'color/icon/danger'])
+  ),
+  { borderRef: '', iconRef: 'color/icon/on-fill/danger', fillRef: '' },
+  '23. Surface-based on-fill foreground maps to icon/on-fill when available'
+);
+
+// 24. Strong brand surfaces can be named bg/brand while still using on-color
+// content. The foreground role should drive the icon companion in that case.
+assertResult(
+  _inferSemPairExtras(
+    'color/bg/brand',
+    'color/text/on-brand',
+    makeVbn(['color/icon/brand', 'color/icon/on-brand'])
+  ),
+  { borderRef: '', iconRef: 'color/icon/on-brand', fillRef: '' },
+  '24. text/on-brand foreground prefers icon/on-brand over icon/brand'
+);
+
 // ── Integration assertions on the assembly source ────────────────────────────
 
 // Pin that the config-pairs branch uses the explicit-wins pattern for border
@@ -352,4 +376,4 @@ assert.strictEqual(
   'Helper must not call any substitution targeting "fill" as a destination role'
 );
 
-console.log('semantic-pair-extras-inference: 22 cases + 5 integration assertions passed.');
+console.log('semantic-pair-extras-inference: 24 cases + 5 integration assertions passed.');

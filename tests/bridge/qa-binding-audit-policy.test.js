@@ -134,8 +134,9 @@ assert.ok(
     code.includes("varByName[pair.text]") &&
     code.includes("const _extraBgGroups = {};") &&
     code.includes("if (_seenConfigBgRefs[v.name]) continue;") &&
-    code.includes("hasPairing: false"),
-  "Showcase semantic color rows must use prepared DS.color.semantics.pairs and still surface unpaired bg/surface/fill variables when a config is present"
+    code.includes("const defaultFgRef = varByName['color/text/default']") &&
+    code.includes("hasPairing: !!defaultFgInfo"),
+  "Showcase semantic color rows must use prepared DS.color.semantics.pairs and still surface extra bg/surface/fill variables with default foreground badges when available"
 );
 
 assert.ok(

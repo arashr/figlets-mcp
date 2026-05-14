@@ -112,6 +112,28 @@ function _modeIdByName(collection, modeName) {
   return exact ? exact.modeId : null;
 }
 
+function _refreshSemanticModeAliases(rows, varsByName, varsById, collections, changes, kind) {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    const token = row && row.token ? row.token : null;
+    const variable = token ? varsByName.get(token) : null;
+    if (!variable) continue;
+    const collection = _collectionForVariable(variable, collections);
+    const lightId = _modeIdByName(collection, "Light");
+    const darkId = _modeIdByName(collection, "Dark");
+    for (const modeName of ["Light", "Dark"]) {
+      if (!(modeName in row)) continue;
+      const modeId = modeName === "Light" ? lightId : darkId;
+      if (!modeId) continue;
+      const nextAlias = _aliasTargetName(variable, varsById, modeId);
+      if (nextAlias && row[modeName] !== nextAlias) {
+        changes.push({ kind, token, mode: modeName, from: row[modeName] || null, to: nextAlias });
+        row[modeName] = nextAlias;
+      }
+    }
+  }
+}
+
 function _loadDefaultActiveSnapshot() {
   const activePaths = getActiveFilePaths();
   if (!fs.existsSync(activePaths.data)) return null;
@@ -225,6 +247,10 @@ function refreshDsConfigFromFigmaData(ds, figmaData = {}) {
         }
       }
     }
+  }
+  if (sem) {
+    _refreshSemanticModeAliases(sem.icons, byName, varsById, collections, changes, "semantic-icon-alias");
+    _refreshSemanticModeAliases(sem.unpaired, byName, varsById, collections, changes, "semantic-unpaired-alias");
   }
 
   return { ds, changes, skipped };

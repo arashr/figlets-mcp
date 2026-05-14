@@ -4,6 +4,20 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-14] Claude Code plugin packaging lives under `plugins/claude-code/`
+
+**Decision:** Distribute the designer-facing Claude Code experience as a Claude Code plugin shipped from this monorepo at `plugins/claude-code/figlets/`, with `plugins/claude-code/.claude-plugin/marketplace.json` turning that folder into a self-hosted marketplace. The plugin manifest registers the Figlets MCP server inline (`mcpServers.figlets`) and ships a single slash command `/figlets:start` whose body asks the agent to call `figlets_start` and reply with `designerResponse`.
+
+**Why:** Manual `claude mcp add` and project `.mcp.json` editing was unreliable for designer testing — user-scope registration did not consistently expose `figlets_start`. A plugin install collapses MCP registration and the curated entrypoint into one command-palette action and removes the need for designers to edit JSON. Keeping the folder under `plugins/<agent>/` leaves room for future Cursor/Windsurf plugins without renaming.
+
+**Command resolution:** The plugin's MCP server entry uses `npx -y @figlets/mcp-server`. This avoids requiring a global install or a Node path that survives the `${CLAUDE_PLUGIN_ROOT}` copy into `~/.claude/plugins/cache/`. Until `@figlets/mcp-server` is published, the plugin README documents a machine-local override (absolute `node` + bin path) but the committed manifest tracks the published target — overrides must not be committed.
+
+**Contract reuse:** The plugin does not invent a new workflow contract. The `/figlets:start` command body intentionally mirrors the Designer Mode rules from root `CLAUDE.md`/`AGENTS.md` and defers everything else to `figlets_start.designerResponse` and the Agent Interface registry.
+
+**Consequence:** Designer install path becomes `/plugin marketplace add <repo-or-path>/plugins/claude-code` → `/plugin install figlets@figlets-claude-code` → `/figlets:start`. `figlets-mcp setup` and `figlets-mcp launch` remain available as fallbacks for hosts that do not support plugins, but plugin install is the recommended Claude Code path.
+
+---
+
 ## [2026-05-14] Agent Interface starts as read-only workflow guidance
 
 **Decision:** The Agent Interface is a product layer, not a replacement for deterministic tools. It starts with a read-only workflow registry plus three MCP guide tools:

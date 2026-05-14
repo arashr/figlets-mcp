@@ -1,0 +1,14 @@
+{
+  "name": "figlets-claude-code",
+  "owner": {
+    "name": "Figlets"
+  },
+  "description": "Claude Code plugins for the Figlets design-system toolkit.",
+  "plugins": [
+    {
+      "name": "figlets",
+      "source": "./figlets",
+      "description": "Designer-friendly entrypoint for Figlets: registers the Figlets MCP server and adds the /figlets:start slash command."
+    }
+  ]
+}

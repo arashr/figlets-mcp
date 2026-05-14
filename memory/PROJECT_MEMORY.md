@@ -4,6 +4,31 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-14 — Claude Code plugin packaging branch open]
+
+**Active branch:** `codex/claude-code-plugin-package`.
+
+**Status:** Plugin scaffold committed on branch; not merged to `main`. All 59 tests green (`npm test`).
+
+**What landed:**
+
+- `plugins/claude-code/.claude-plugin/marketplace.json` — turns `plugins/claude-code/` into a self-hosted Claude Code marketplace.
+- `plugins/claude-code/figlets/.claude-plugin/plugin.json` — plugin manifest, inline `mcpServers.figlets` using `npx -y @figlets/mcp-server`.
+- `plugins/claude-code/figlets/commands/start.md` — `/figlets:start` slash command whose body asks the agent to call `figlets_start` and reply with `designerResponse`. Forbids developer-mode options and raw-Figma-tool fallback in line with root `CLAUDE.md`.
+- `plugins/claude-code/figlets/README.md` — designer install steps and a local-dev override (do not commit machine-local paths).
+- `plugins/claude-code/README.md` — marketplace overview; reserves sibling `plugins/<agent>/` slots for future plugins.
+- `tests/plugins/claude-code-plugin.test.js` — validates marketplace + plugin JSON, MCP server contract, command frontmatter/body, and README install instructions.
+
+**Open follow-ups before this is broadly usable:**
+
+1. Publish `@figlets/mcp-server` to npm (the plugin manifest already targets this). Until then, designers must apply the README's local-dev override.
+2. Decide whether `figlets-mcp setup` should add a "Claude Code plugin" target that emits the `/plugin marketplace add ...` instructions instead of editing `.mcp.json`.
+3. Consider whether to convert the `/figlets:start` command into an auto-triggering skill so designer phrases like "help me with my design system" land in Designer Mode without typing a command.
+
+**Why the manifest uses `npx`, not `${CLAUDE_PLUGIN_ROOT}`:** Claude Code copies the plugin to `~/.claude/plugins/cache/`, away from the rest of the monorepo, so `${CLAUDE_PLUGIN_ROOT}` cannot reach `packages/figlets-mcp-server`. `npx -y` keeps the manifest portable without bundling node_modules.
+
+---
+
 ### [2026-05-14 — Agent Interface workflow guidance MVP started]
 
 **Active branch:** `main`.

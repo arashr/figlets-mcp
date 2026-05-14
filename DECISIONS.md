@@ -6,7 +6,7 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ## [2026-05-14] Claude Code plugin packaging lives under `plugins/claude-code/`
 
-**Decision:** Distribute the designer-facing Claude Code experience as a Claude Code plugin shipped from this monorepo at `plugins/claude-code/figlets/`, with `plugins/claude-code/.claude-plugin/marketplace.json` turning that folder into a self-hosted marketplace. The plugin manifest registers the Figlets MCP server inline (`mcpServers.figlets`) and ships a single slash command `/figlets:start` whose body asks the agent to call `figlets_start` and reply with `designerResponse`.
+**Decision:** Distribute the designer-facing Claude Code experience as a Claude Code plugin shipped from this monorepo at `plugins/claude-code/figlets/`, with `plugins/claude-code/.claude-plugin/marketplace.json` turning that folder into a self-hosted marketplace. The plugin manifest registers the Figlets MCP server inline (`mcpServers.figlets`), ships a slash command `/figlets:start`, and bundles a `figlets-designer` skill so designer phrases auto-trigger Designer Mode without typing the slash command.
 
 **Why:** Manual `claude mcp add` and project `.mcp.json` editing was unreliable for designer testing — user-scope registration did not consistently expose `figlets_start`. A plugin install collapses MCP registration and the curated entrypoint into one command-palette action and removes the need for designers to edit JSON. Keeping the folder under `plugins/<agent>/` leaves room for future Cursor/Windsurf plugins without renaming.
 
@@ -14,7 +14,11 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Contract reuse:** The plugin does not invent a new workflow contract. The `/figlets:start` command body intentionally mirrors the Designer Mode rules from root `CLAUDE.md`/`AGENTS.md` and defers everything else to `figlets_start.designerResponse` and the Agent Interface registry.
 
-**Consequence:** Designer install path becomes `/plugin marketplace add <repo-or-path>/plugins/claude-code` → `/plugin install figlets@figlets-claude-code` → `/figlets:start`. `figlets-mcp setup` and `figlets-mcp launch` remain available as fallbacks for hosts that do not support plugins, but plugin install is the recommended Claude Code path.
+**Consequence:** Designer install path becomes `figlets-mcp setup --hosts=claude-code-plugin --yes` (or the default `figlets-mcp setup --yes` — see supersession below). That single command runs `claude plugin marketplace add` + `claude plugin install` idempotently, then a session restart enables `/figlets:start` and the auto-trigger skill. `figlets-mcp launch` remains available as the local-only fallback for hosts that do not support plugins.
+
+**Supersession:** When the `claude` binary is on `PATH` and the marketplace folder is reachable, `figlets-mcp setup` adds a `claude-code-plugin` target and drops the legacy `claude-code` target (`claude mcp add ...`) from the default run via a `supersededBy` marker. This prevents Figlets from being registered twice (once as a user-scope MCP server and once as a plugin-bundled MCP server). The legacy path is still reachable via `--hosts=claude-code` for hosts/versions that do not support plugins.
+
+**Distribution:** `@figlets/mcp-server`'s `package.json` declares `files` including `plugins/`, and a `prepack` script (`scripts/sync-plugins.js`) copies `<repo-root>/plugins/claude-code/` into the package directory before publish. `_marketplacePath()` resolves to the monorepo source first (so live edits work during dev) and falls back to the package-local copy (so npm-installed users still resolve a real folder). The package is not yet published to npm; the plugin README documents a local-dev override for the MCP server command that uses an absolute path until `@figlets/mcp-server` is on the registry.
 
 ---
 

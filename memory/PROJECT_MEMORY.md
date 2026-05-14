@@ -8,24 +8,42 @@ Active context for the project so future sessions can recover quickly without re
 
 **Active branch:** `codex/claude-code-plugin-package`.
 
-**Status:** Plugin scaffold committed on branch; not merged to `main`. All 59 tests green (`npm test`).
+**Status:** Plugin scaffold + automated install + auto-trigger skill landed on branch. Not merged to `main`. All 59 tests green (`npm test`). `claude plugin validate` passes on both the marketplace and the plugin manifest.
 
-**What landed:**
+**What landed (initial commit):**
 
-- `plugins/claude-code/.claude-plugin/marketplace.json` — turns `plugins/claude-code/` into a self-hosted Claude Code marketplace.
+- `plugins/claude-code/.claude-plugin/marketplace.json` — self-hosted Claude Code marketplace; description lives under `metadata.description` to satisfy `claude plugin validate`.
 - `plugins/claude-code/figlets/.claude-plugin/plugin.json` — plugin manifest, inline `mcpServers.figlets` using `npx -y @figlets/mcp-server`.
-- `plugins/claude-code/figlets/commands/start.md` — `/figlets:start` slash command whose body asks the agent to call `figlets_start` and reply with `designerResponse`. Forbids developer-mode options and raw-Figma-tool fallback in line with root `CLAUDE.md`.
-- `plugins/claude-code/figlets/README.md` — designer install steps and a local-dev override (do not commit machine-local paths).
-- `plugins/claude-code/README.md` — marketplace overview; reserves sibling `plugins/<agent>/` slots for future plugins.
-- `tests/plugins/claude-code-plugin.test.js` — validates marketplace + plugin JSON, MCP server contract, command frontmatter/body, and README install instructions.
+- `plugins/claude-code/figlets/commands/start.md` — `/figlets:start` slash command.
+- `plugins/claude-code/figlets/skills/figlets-designer/SKILL.md` — auto-trigger skill matching designer phrases ("help me with my design system", "check my design system", etc.). Routes to `figlets_start`. Forbids developer-mode options.
+- Plugin + marketplace READMEs.
 
-**Open follow-ups before this is broadly usable:**
+**What landed (follow-up commit on this branch):**
 
-1. Publish `@figlets/mcp-server` to npm (the plugin manifest already targets this). Until then, designers must apply the README's local-dev override.
-2. Decide whether `figlets-mcp setup` should add a "Claude Code plugin" target that emits the `/plugin marketplace add ...` instructions instead of editing `.mcp.json`.
-3. Consider whether to convert the `/figlets:start` command into an auto-triggering skill so designer phrases like "help me with my design system" land in Designer Mode without typing a command.
+- `figlets-mcp setup` learned a `claude-code-plugin` target (type `claude-plugin-install`). When the `claude` binary is on `PATH` and the marketplace folder exists, it's added to the default target list and supersedes the legacy `claude-code` target (which would otherwise double-register Figlets).
+- State detection happens at apply-time via `claude plugin marketplace list` + `claude plugin list`, so the apply is idempotent.
+- `@figlets/mcp-server`'s `package.json` now declares `keywords`, `files`, `license`, `publishConfig.access`, and a `prepack` script (`scripts/sync-plugins.js`) that copies `<repo-root>/plugins/claude-code/` into the package directory before publish.
+- `_marketplacePath()` in `src/cli/setup.js` resolves monorepo-source first then package-local fallback, so dev edits and npm installs both work.
+- `tests/server/setup-cli.test.js` covers: plugin install fresh, idempotent, missing-`claude` fallback, default supersession, and explicit-`--hosts=claude-code` reachability.
+- `tests/plugins/claude-code-plugin.test.js` covers the skill file (frontmatter, body, designer-phrase trigger description).
+
+**Designer install path (now):**
+
+```
+figlets-mcp setup --hosts=claude-code-plugin --yes   # or just figlets-mcp setup --yes
+# restart Claude Code
+/figlets:start                                       # or just describe your design system
+```
+
+**Open follow-ups:**
+
+1. Publish `@figlets/mcp-server` to npm so `npx -y @figlets/mcp-server` in the plugin manifest resolves without the local-dev override. `prepack` already syncs `plugins/` into the package, so the published tarball will include the marketplace.
+2. Once a public GitHub remote exists, the marketplace can also be installed via `claude plugin marketplace add <owner>/<repo>`, removing the dependency on a local clone entirely.
+3. Consider an end-to-end smoke test (live `claude plugin install`) gated on a CI flag — current tests mock `spawnSync` to avoid mutating the developer's plugin state.
 
 **Why the manifest uses `npx`, not `${CLAUDE_PLUGIN_ROOT}`:** Claude Code copies the plugin to `~/.claude/plugins/cache/`, away from the rest of the monorepo, so `${CLAUDE_PLUGIN_ROOT}` cannot reach `packages/figlets-mcp-server`. `npx -y` keeps the manifest portable without bundling node_modules.
+
+**Why the legacy `claude-code` target is dropped from defaults (not deleted):** It still works for hosts/versions that don't support plugins. The supersession is data-driven (`supersededBy: "claude-code-plugin"`) so it disappears from defaults only when the plugin path is viable — and `--hosts=claude-code` still reaches it explicitly.
 
 ---
 

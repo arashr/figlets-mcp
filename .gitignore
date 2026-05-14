@@ -10,3 +10,7 @@ coverage/
 component-specs/
 .claude/
 .obsidian/
+
+# scripts/sync-plugins.js copies plugins/claude-code into this folder at prepack time
+# so the published npm tarball ships the Claude Code marketplace. Not committed.
+packages/figlets-mcp-server/plugins/

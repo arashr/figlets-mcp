@@ -24,7 +24,7 @@ In Designer Mode:
 
 If `figlets_start` is not available, stop the designer workflow and say:
 
-> "Figlets is not connected in this Claude Code session yet. To use the Figlets designer flow, run `figlets-mcp setup --hosts=claude-code --yes`, restart Claude Code, then ask me again. I should not approximate this flow with raw Figma tools."
+> "Figlets is not connected in this Claude Code session yet. To use the Figlets designer flow, run `figlets-mcp setup --yes` (which installs the Figlets Claude Code plugin when `claude` is on `PATH`), restart Claude Code, then ask me again. I should not approximate this flow with raw Figma tools."
 
 Do not offer to proceed with raw `figma-console`, generic Figma MCP tools, repo inspection, or project-memory summaries as a substitute for Figlets.
 

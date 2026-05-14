@@ -4,6 +4,8 @@ const os = require("os");
 const path = require("path");
 
 const {
+  FIGLETS_PLUGIN_MARKETPLACE_NAME,
+  FIGLETS_PLUGIN_SPEC,
   getSetupPlan,
   applySetupPlan,
   formatSetupPlan,
@@ -161,6 +163,148 @@ try {
     assert.ok(output.includes("Mode: dry run"));
     assert.ok(output.includes("rerun with --yes"));
     assert.ok(output.includes("Open the Figlets Bridge plugin"));
+  }
+
+  // When the plugin marketplace and claude binary are both available, the legacy claude-code
+  // target is dropped from the default run so we don't double-register Figlets.
+  {
+    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
+    fs.mkdirSync(fakeMarketplace, { recursive: true });
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      env: { PATH: bin },
+      nodePath: fakeNode,
+      figletsBinPath: fakeFigletsBin,
+      marketplacePath: fakeMarketplace,
+    });
+    const ids = plan.targets.map(target => target.id);
+    assert.ok(ids.includes("claude-code-plugin"), "default plan should include the plugin install target when available");
+    assert.ok(!ids.includes("claude-code"), "default plan should drop the legacy claude-code target when the plugin path is available");
+  }
+
+  // But the legacy target is still reachable when explicitly requested.
+  {
+    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
+    fs.mkdirSync(fakeMarketplace, { recursive: true });
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code"],
+      env: { PATH: bin },
+      nodePath: fakeNode,
+      figletsBinPath: fakeFigletsBin,
+      marketplacePath: fakeMarketplace,
+    });
+    assert.strictEqual(plan.targets.length, 1);
+    assert.strictEqual(plan.targets[0].id, "claude-code");
+  }
+
+  // Claude Code plugin install — manual when claude is not on PATH.
+  {
+    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
+    fs.mkdirSync(fakeMarketplace, { recursive: true });
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code-plugin"],
+      env: { PATH: "" },
+      marketplacePath: fakeMarketplace,
+    });
+    assert.strictEqual(plan.targets.length, 0, "plugin target should be filtered out when claude is not on PATH");
+  }
+
+  // Claude Code plugin install — fresh install runs both marketplace add and plugin install.
+  {
+    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
+    fs.mkdirSync(fakeMarketplace, { recursive: true });
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code-plugin"],
+      env: { PATH: bin },
+      marketplacePath: fakeMarketplace,
+    });
+    assert.strictEqual(plan.targets[0].id, "claude-code-plugin");
+    assert.strictEqual(plan.targets[0].status, "would-run");
+    assert.ok(plan.targets[0].command.includes("claude plugin marketplace add"));
+    assert.ok(plan.targets[0].command.includes("claude plugin install"));
+
+    const calls = [];
+    const applied = applySetupPlan(plan, {
+      runner: (command, args) => {
+        calls.push({ command, args });
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
+          return { status: 0, stdout: "Configured marketplaces:\n  ❯ karpathy-skills\n", stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "add") {
+          return { status: 0, stdout: `Added marketplace ${FIGLETS_PLUGIN_MARKETPLACE_NAME}\n`, stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "list") {
+          return { status: 0, stdout: "Installed plugins:\n  ❯ andrej-karpathy-skills@karpathy-skills\n", stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "install") {
+          return { status: 0, stdout: `Installed ${FIGLETS_PLUGIN_SPEC}\n`, stderr: "" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    assert.strictEqual(applied.targets[0].status, "updated");
+    assert.deepStrictEqual(applied.targets[0].steps.map(step => step.step), ["marketplace-add", "plugin-install"]);
+    assert.strictEqual(applied.targets[0].steps[0].status, "ok");
+    assert.strictEqual(applied.targets[0].steps[1].status, "ok");
+    assert.ok(applied.targets[0].reason.includes("/figlets:start"));
+
+    const sequence = calls.map(call => {
+      const head = call.args.slice(0, 2).join(" ");
+      return head === "plugin marketplace" ? call.args.slice(0, 3).join(" ") : head;
+    });
+    assert.deepStrictEqual(sequence, [
+      "plugin marketplace list",
+      "plugin marketplace add",
+      "plugin list",
+      "plugin install",
+    ]);
+    assert.strictEqual(calls[1].args[3], fakeMarketplace);
+    assert.deepStrictEqual(calls[1].args.slice(4), ["--scope", "user"]);
+    assert.strictEqual(calls[3].args[2], FIGLETS_PLUGIN_SPEC);
+    assert.deepStrictEqual(calls[3].args.slice(3), ["--scope", "user"]);
+  }
+
+  // Claude Code plugin install — idempotent when marketplace and plugin already present.
+  {
+    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
+    fs.mkdirSync(fakeMarketplace, { recursive: true });
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code-plugin"],
+      env: { PATH: bin },
+      marketplacePath: fakeMarketplace,
+    });
+    const calls = [];
+    const applied = applySetupPlan(plan, {
+      runner: (command, args) => {
+        calls.push({ command, args });
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
+          return { status: 0, stdout: `Configured marketplaces:\n  ❯ ${FIGLETS_PLUGIN_MARKETPLACE_NAME}\n    Source: ${fakeMarketplace}\n`, stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "list") {
+          return { status: 0, stdout: `Installed plugins:\n  ❯ ${FIGLETS_PLUGIN_SPEC}\n    Status: enabled\n`, stderr: "" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    assert.strictEqual(applied.targets[0].status, "unchanged");
+    assert.ok(applied.targets[0].steps.every(step => step.status === "skipped"));
+    const issuedSubcommands = calls.map(call => call.args.slice(0, 2).join(" "));
+    assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin install")), "should not re-run plugin install when already present");
+    assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin marketplace add")), "should not re-add marketplace when already present");
   }
 
 } finally {

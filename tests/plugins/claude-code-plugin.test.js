@@ -44,7 +44,26 @@ assert.ok(body.includes("designerResponse"), "start.md must direct the agent to 
 assert.ok(/not approximate.*raw Figma/i.test(body), "start.md must forbid raw-Figma-tool fallback when Figlets is unavailable");
 assert.ok(!/repo edit|plugin edit|developer/i.test(body) || /not.*developer-mode/i.test(body), "start.md must not offer developer-mode options");
 
+// Auto-trigger skill file.
+const skillPath = path.join(PLUGIN_DIR, "skills", "figlets-designer", "SKILL.md");
+assert.ok(fs.existsSync(skillPath), "plugin must ship a figlets-designer skill so designer phrases auto-route to Figlets");
+const skillSource = fs.readFileSync(skillPath, "utf-8");
+const skillMatch = skillSource.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+assert.ok(skillMatch, "SKILL.md must have YAML frontmatter");
+const [, skillFrontmatter, skillBody] = skillMatch;
+assert.ok(/^name:\s*figlets-designer\s*$/m.test(skillFrontmatter), "skill frontmatter must declare name: figlets-designer");
+const descriptionMatch = skillFrontmatter.match(/description:\s*(.+)/);
+assert.ok(descriptionMatch, "skill frontmatter must declare a description");
+const description = descriptionMatch[1];
+assert.ok(/Figma design system/i.test(description), "skill description must mention Figma design system");
+assert.ok(/figlets_start/.test(description), "skill description must mention routing to figlets_start so the agent knows the entrypoint");
+assert.ok(skillBody.includes("figlets_start"), "skill body must instruct calling figlets_start");
+assert.ok(skillBody.includes("designerResponse"), "skill body must direct the agent to use figlets_start.designerResponse");
+assert.ok(!/repo edit|plugin edit/i.test(skillBody) || /not.*developer-mode|do not offer developer-mode/i.test(skillBody), "skill body must not offer developer-mode options");
+
 // Plugin README sanity.
 const readme = fs.readFileSync(path.join(PLUGIN_DIR, "README.md"), "utf-8");
-assert.ok(readme.includes("/plugin marketplace add"), "plugin README must show the marketplace-add install step");
+assert.ok(readme.includes("figlets-mcp setup --hosts=claude-code-plugin"), "plugin README must show the one-command setup path");
+assert.ok(readme.includes("/plugin marketplace add"), "plugin README must show the manual marketplace-add fallback");
 assert.ok(readme.includes("/figlets:start"), "plugin README must mention the /figlets:start command");
+assert.ok(readme.includes("figlets-designer"), "plugin README must mention the auto-triggering designer skill");

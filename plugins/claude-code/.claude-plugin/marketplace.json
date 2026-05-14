@@ -3,7 +3,9 @@
   "owner": {
     "name": "Figlets"
   },
-  "description": "Claude Code plugins for the Figlets design-system toolkit.",
+  "metadata": {
+    "description": "Claude Code plugins for the Figlets design-system toolkit."
+  },
   "plugins": [
     {
       "name": "figlets",

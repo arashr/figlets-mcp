@@ -5,11 +5,29 @@ const childProcess = require("child_process");
 const { runDoctor } = require("./doctor.js");
 
 const FIGLETS_SERVER = { command: "figlets-mcp" };
+const FIGLETS_PLUGIN_MARKETPLACE_NAME = "figlets-claude-code";
+const FIGLETS_PLUGIN_NAME = "figlets";
+const FIGLETS_PLUGIN_SPEC = `${FIGLETS_PLUGIN_NAME}@${FIGLETS_PLUGIN_MARKETPLACE_NAME}`;
 
 function _figletsBinPath(options) {
   return options && options.figletsBinPath
     ? options.figletsBinPath
     : path.resolve(__dirname, "../../bin/figlets-mcp.js");
+}
+
+function _marketplacePath(options) {
+  if (options && options.marketplacePath) return options.marketplacePath;
+  // Monorepo source first so live edits to plugins/claude-code take effect immediately during dev.
+  // Package-local fallback is populated by scripts/sync-plugins.js at prepack time, so npm-installed
+  // copies still resolve to a real folder.
+  const candidates = [
+    path.resolve(__dirname, "../../../../plugins/claude-code"),
+    path.resolve(__dirname, "../../plugins/claude-code"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[0];
 }
 
 function _nodePath(options) {
@@ -66,6 +84,9 @@ function getKnownTargets(options) {
   const platform = _platform(options);
   const env = _env(options);
   const appData = env.APPDATA || _join(home, "AppData", "Roaming");
+  const marketplacePath = _marketplacePath(options);
+  const claudeOnPath = _findOnPath("claude", options);
+  const marketplaceAvailable = fs.existsSync(marketplacePath);
 
   const claudeDesktopPath = platform === "win32"
     ? _join(appData, "Claude", "claude_desktop_config.json")
@@ -77,7 +98,24 @@ function getKnownTargets(options) {
     ? _join(appData, "Cursor", "mcp.json")
     : _join(home, ".cursor", "mcp.json");
 
-  return [
+  const targets = [];
+
+  if (claudeOnPath && marketplaceAvailable) {
+    targets.push({
+      id: "claude-code-plugin",
+      label: "Claude Code plugin",
+      type: "claude-plugin-install",
+      binary: "claude",
+      marketplaceName: FIGLETS_PLUGIN_MARKETPLACE_NAME,
+      marketplacePath,
+      pluginName: FIGLETS_PLUGIN_NAME,
+      pluginSpec: FIGLETS_PLUGIN_SPEC,
+      scope: "user",
+      description: "Installs the Figlets Claude Code plugin (MCP server + /figlets:start command + designer skill) via claude plugin marketplace add and claude plugin install. This is the recommended path for Claude Code.",
+    });
+  }
+
+  return targets.concat([
     {
       id: "claude-desktop",
       label: "Claude Desktop",
@@ -128,7 +166,8 @@ function getKnownTargets(options) {
       args: ["mcp", "add", "--scope", "user", "--transport", "stdio", "figlets", "--", _nodePath(options), _figletsBinPath(options)],
       command: `claude mcp add --scope user --transport stdio figlets -- ${_claudeCodeCommand(options)}`,
       repairScopes: ["local", "project", "user"],
-      description: "Uses Claude Code's native MCP add command at user scope when the claude binary is available.",
+      supersededBy: "claude-code-plugin",
+      description: "Legacy: registers Figlets as a user-scope MCP server via claude mcp add. Superseded by the claude-code-plugin target whenever the plugin marketplace folder is available.",
     },
     {
       id: "claude-code-project",
@@ -141,7 +180,7 @@ function getKnownTargets(options) {
       },
       description: "Writes a project-local .mcp.json so Claude Code sessions opened in this repo can discover Figlets.",
     },
-  ];
+  ]);
 }
 
 function _readTextIfExists(filePath) {
@@ -207,14 +246,45 @@ function planNativeCommand(target, options) {
   });
 }
 
+function planClaudePluginInstall(target, options) {
+  const executable = _findOnPath(target.binary, options);
+  if (!executable) {
+    return Object.assign({}, target, {
+      executable: null,
+      status: "manual",
+      reason: `${target.binary} was not found on PATH. After installing Claude Code, run: claude plugin marketplace add ${target.marketplacePath} --scope ${target.scope} && claude plugin install ${target.pluginSpec} --scope ${target.scope}`,
+    });
+  }
+  if (!fs.existsSync(target.marketplacePath)) {
+    return Object.assign({}, target, {
+      executable,
+      status: "manual",
+      reason: `Marketplace folder not found at ${target.marketplacePath}. Clone the figlets-mcp repo or point at a published marketplace URL with: claude plugin marketplace add <source>.`,
+    });
+  }
+  return Object.assign({}, target, {
+    executable,
+    status: "would-run",
+    command: `claude plugin marketplace add ${target.marketplacePath} --scope ${target.scope} && claude plugin install ${target.pluginSpec} --scope ${target.scope}`,
+  });
+}
+
 function getSetupPlan(options) {
   const selected = options && options.hosts ? new Set(options.hosts) : null;
-  const targets = getKnownTargets(options)
-    .filter(target => !selected || selected.has(target.id))
+  const knownTargets = getKnownTargets(options);
+  const knownIds = new Set(knownTargets.map(target => target.id));
+  const targets = knownTargets
+    .filter(target => {
+      if (selected) return selected.has(target.id);
+      // Default run: drop targets that have been superseded by another available target.
+      if (target.supersededBy && knownIds.has(target.supersededBy)) return false;
+      return true;
+    })
     .map(target => {
       if (target.type === "json-mcpServers" || target.type === "json-servers") return planJsonPatch(target);
       if (target.type === "toml-codex") return planTomlPatch(target);
       if (target.type === "native-command") return planNativeCommand(target, options);
+      if (target.type === "claude-plugin-install") return planClaudePluginInstall(target, options);
       return Object.assign({}, target, { status: "manual" });
     });
 
@@ -310,6 +380,67 @@ function applyNativeCommand(plan, options) {
   return Object.assign({}, plan, { status: "updated" });
 }
 
+function applyClaudePluginInstall(plan, options) {
+  const runner = options && options.runner ? options.runner : childProcess.spawnSync;
+  const executable = plan.executable;
+  const steps = [];
+
+  const marketplaceList = runner(executable, ["plugin", "marketplace", "list"], { encoding: "utf-8" });
+  if (marketplaceList && marketplaceList.error) {
+    return Object.assign({}, plan, { status: "blocked", reason: marketplaceList.error.message, steps });
+  }
+  const marketplaceListOutput = marketplaceList ? String((marketplaceList.stdout || "") + (marketplaceList.stderr || "")) : "";
+  const marketplaceRegistered = new RegExp("(^|\\n)\\s*[^\\n]*\\b" + plan.marketplaceName + "\\b", "i").test(marketplaceListOutput);
+
+  if (!marketplaceRegistered) {
+    const addResult = runner(executable, ["plugin", "marketplace", "add", plan.marketplacePath, "--scope", plan.scope], { encoding: "utf-8" });
+    const addOutput = addResult ? String((addResult.stdout || "") + (addResult.stderr || "")) : "";
+    if (addResult && addResult.error) {
+      return Object.assign({}, plan, { status: "blocked", reason: addResult.error.message, steps });
+    }
+    const addStatus = addResult && typeof addResult.status === "number" ? addResult.status : null;
+    const alreadyExists = /already exists|already registered|already added/i.test(addOutput);
+    if (addStatus !== 0 && addStatus !== null && !alreadyExists) {
+      return Object.assign({}, plan, { status: "blocked", reason: (addOutput || `marketplace add exited with ${addStatus}`).trim(), steps });
+    }
+    steps.push({ step: "marketplace-add", status: alreadyExists ? "already" : "ok" });
+  } else {
+    steps.push({ step: "marketplace-add", status: "skipped" });
+  }
+
+  const pluginList = runner(executable, ["plugin", "list"], { encoding: "utf-8" });
+  if (pluginList && pluginList.error) {
+    return Object.assign({}, plan, { status: "blocked", reason: pluginList.error.message, steps });
+  }
+  const pluginListOutput = pluginList ? String((pluginList.stdout || "") + (pluginList.stderr || "")) : "";
+  const pluginInstalled = new RegExp("\\b" + plan.pluginName + "@" + plan.marketplaceName + "\\b").test(pluginListOutput);
+
+  if (!pluginInstalled) {
+    const installResult = runner(executable, ["plugin", "install", plan.pluginSpec, "--scope", plan.scope], { encoding: "utf-8" });
+    const installOutput = installResult ? String((installResult.stdout || "") + (installResult.stderr || "")) : "";
+    if (installResult && installResult.error) {
+      return Object.assign({}, plan, { status: "blocked", reason: installResult.error.message, steps });
+    }
+    const installStatus = installResult && typeof installResult.status === "number" ? installResult.status : null;
+    const alreadyInstalled = /already installed|already enabled/i.test(installOutput);
+    if (installStatus !== 0 && installStatus !== null && !alreadyInstalled) {
+      return Object.assign({}, plan, { status: "blocked", reason: (installOutput || `plugin install exited with ${installStatus}`).trim(), steps });
+    }
+    steps.push({ step: "plugin-install", status: alreadyInstalled ? "already" : "ok" });
+  } else {
+    steps.push({ step: "plugin-install", status: "skipped" });
+  }
+
+  const everySkipped = steps.every(step => step.status === "skipped");
+  return Object.assign({}, plan, {
+    status: everySkipped ? "unchanged" : "updated",
+    steps,
+    reason: everySkipped
+      ? "Marketplace and plugin already in place. Restart Claude Code if it was running before this changed."
+      : "Marketplace added and Figlets plugin installed. Restart Claude Code, then type /figlets:start (or just describe your design system to trigger the figlets-designer skill).",
+  });
+}
+
 function applySetupPlan(plan, options) {
   const results = [];
   for (const target of plan.targets) {
@@ -323,6 +454,8 @@ function applySetupPlan(plan, options) {
       results.push(applyTomlPatch(target));
     } else if (target.type === "native-command") {
       results.push(applyNativeCommand(target, options));
+    } else if (target.type === "claude-plugin-install") {
+      results.push(applyClaudePluginInstall(target, options));
     } else {
       results.push(target);
     }
@@ -350,6 +483,15 @@ function formatSetupPlan(plan, applied) {
       lines.push(`- ${target.label}: ${target.status}`);
       lines.push(`  Run: ${target.command}`);
       if (target.repaired) lines.push("  Repair: removed stale figlets entries and re-added at user scope");
+      if (target.reason) lines.push(`  Reason: ${target.reason}`);
+      continue;
+    }
+    if (target.type === "claude-plugin-install") {
+      lines.push(`- ${target.label}: ${target.status}`);
+      if (target.command) lines.push(`  Run: ${target.command}`);
+      if (target.steps && target.steps.length) {
+        lines.push(`  Steps: ${target.steps.map(step => `${step.step}=${step.status}`).join(", ")}`);
+      }
       if (target.reason) lines.push(`  Reason: ${target.reason}`);
       continue;
     }
@@ -409,10 +551,14 @@ if (require.main === module) {
 
 module.exports = {
   FIGLETS_SERVER,
+  FIGLETS_PLUGIN_MARKETPLACE_NAME,
+  FIGLETS_PLUGIN_NAME,
+  FIGLETS_PLUGIN_SPEC,
   getKnownTargets,
   getSetupPlan,
   applySetupPlan,
   applyNativeCommand,
+  applyClaudePluginInstall,
   formatSetupPlan,
   runSetup,
 };

@@ -10,7 +10,7 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 
 > Hi! I want a fresh `DESIGN.md` for my Figma file's design system so I can hand it to a coding agent. Here's how I want this to go — follow it step by step.
 >
-> **Project location:** `/Users/arash/Projects/figlets-mcp`
+> You don't need a project path from me. Use the connected Figlets MCP tools and report the paths those tools return.
 >
 > ---
 >
@@ -35,7 +35,7 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 >
 > ### Step 2 — Offer a dry run first (optional)
 >
-> If I'm not sure whether the config is up to date with Figma, offer to do a preview first by calling `export_design_md` with `dry_run: true`. Summarize what would change in plain language:
+> If you have the Agent Interface tools, call `figlets_workflow_guide` for `export-design-md` first so you follow the current Figlets workflow contract. If I'm not sure whether the config is up to date with Figma, offer to do a preview first by calling `export_design_md` with `dry_run: true`. Summarize what would change in plain language:
 >
 > - "Your config matches Figma — exporting now would just write the markdown."
 > - "Two ramp colors and one semantic alias have drifted since the config was last refreshed. Want me to refresh them and export, or skip the refresh?"
@@ -57,7 +57,7 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 >
 > Example:
 >
-> > "Exported `DESIGN.md` to `/Users/.../.local/<fileKey>/DESIGN.md`. Refreshed 3 ramp colors and 1 semantic alias from Figma along the way. Snapshot was taken just now."
+> > "Exported `DESIGN.md` to the path returned by Figlets. Refreshed 3 ramp colors and 1 semantic alias from Figma along the way. Snapshot was taken just now."
 >
 > ### Step 5 — Offer the next step
 >

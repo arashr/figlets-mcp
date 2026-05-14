@@ -18,11 +18,74 @@ const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tool
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
 const { designMdIntakeTool, handleCreateDsConfigFromDesignMd } = require("./tools/design-md-intake.js");
 const { exportDesignMdTool, handleExportDesignMd } = require("./tools/export-design-md.js");
+const {
+  figletsStartTool,
+  figletsRouteIntentTool,
+  figletsWorkflowGuideTool,
+  handleFigletsStart,
+  handleFigletsRouteIntent,
+  handleFigletsWorkflowGuide,
+} = require("./tools/agent-interface.js");
 
 const server = new McpServer({
   name: "figlets-mcp",
   version: "0.1.0"
 });
+
+// --- figlets_start ---
+server.tool(
+  figletsStartTool.name,
+  figletsStartTool.description,
+  {},
+  async () => {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify(handleFigletsStart(), null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- figlets_route_intent ---
+server.tool(
+  figletsRouteIntentTool.name,
+  figletsRouteIntentTool.description,
+  {
+    intent: z.string().describe("The designer's natural-language request, such as 'check my design system' or 'document this component'.")
+  },
+  async (args) => {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify(handleFigletsRouteIntent(args), null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- figlets_workflow_guide ---
+server.tool(
+  figletsWorkflowGuideTool.name,
+  figletsWorkflowGuideTool.description,
+  {
+    workflow_id: z.string().describe("Workflow id returned by figlets_start or figlets_route_intent, e.g. setup-gap-qa, build-showcase, component-docs.")
+  },
+  async (args) => {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify(handleFigletsWorkflowGuide(args), null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
 
 // --- detect_design_system ---
 server.tool(

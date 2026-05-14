@@ -1,0 +1,21 @@
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.resolve(__dirname, "../..");
+const files = ["CLAUDE.md", "AGENTS.md"];
+
+for (const file of files) {
+  const content = fs.readFileSync(path.join(ROOT, file), "utf-8");
+  assert.ok(content.includes("## Designer Mode"), `${file} should define Designer Mode`);
+  assert.ok(content.includes("Call the Figlets MCP tool `figlets_start` first"), `${file} should require figlets_start first`);
+  assert.ok(content.includes("Use `figlets_start.designerResponse`"), `${file} should use the MCP-provided designer menu`);
+  assert.ok(content.includes("If `figlets_start` is not available"), `${file} should define missing-MCP behavior`);
+  assert.ok(content.includes("I should not approximate this flow with raw Figma tools"), `${file} should reject raw-tool fallback`);
+  assert.ok(content.includes("Do not read `memory/PROJECT_MEMORY.md`"), `${file} should block project memory before designer intro`);
+  assert.ok(content.includes("Do not offer developer work"), `${file} should block developer options in designer mode`);
+  assert.ok(content.includes("Plugin / MCP server code") === false, `${file} should not offer plugin code as a menu item`);
+  assert.ok(content.includes("Check my design system"), `${file} should list designer menu items`);
+  assert.ok(content.includes("Export DESIGN.md"), `${file} should list designer menu items`);
+  assert.ok(content.includes("## Developer Mode"), `${file} should preserve a developer path`);
+}

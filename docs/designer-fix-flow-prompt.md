@@ -10,7 +10,7 @@ The prompt assumes the agent has MCP access to `inspect_ds_setup_gaps` and `appl
 
 > Hi! I'm a designer, not a coder. I'd like you to QA my Figma file's design-system color setup and help me fix what's wrong. Here's how I want this to go — follow it step by step.
 >
-> **Project location:** `/Users/arash/Projects/figlets-mcp`
+> You don't need a project path from me. Use the connected Figlets MCP tools and any paths those tools return.
 >
 > ---
 >
@@ -35,7 +35,7 @@ The prompt assumes the agent has MCP access to `inspect_ds_setup_gaps` and `appl
 >
 > ### Step 2 — Run the QA pass
 >
-> Call `inspect_ds_setup_gaps`. Read the result. **Don't dump the JSON at me.** Translate it into a plain-language summary I can read in 10 seconds.
+> If you have the Agent Interface tools, call `figlets_workflow_guide` for `setup-gap-qa` first so you follow the current Figlets workflow contract. Then call `inspect_ds_setup_gaps`. Read the result. **Don't dump the JSON at me.** Translate it into a plain-language summary I can read in 10 seconds.
 >
 > ### Step 3 — Walk me through findings, in this order
 >

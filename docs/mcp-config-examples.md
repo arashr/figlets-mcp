@@ -15,6 +15,48 @@ npm link --workspace=@figlets/mcp-server
 
 After linking, `figlets-mcp` is available as a global command. All configs below use it this way — no absolute paths needed.
 
+To preview agent config updates without changing files:
+
+```bash
+figlets-mcp setup
+```
+
+For local designer-experience testing, use the launcher:
+
+```bash
+figlets-mcp launch
+```
+
+It writes the project-local Claude Code MCP config, previews the exact designer menu, checks bridge status, and prints the prompt to send in Claude Code.
+
+To let Figlets patch supported MCP configs after reviewing the dry run:
+
+```bash
+figlets-mcp setup --yes
+```
+
+To connect only Claude Code:
+
+```bash
+figlets-mcp setup --hosts=claude-code --yes
+```
+
+For local product testing inside this repo, the most reliable Claude Code path is project-local:
+
+```bash
+figlets-mcp setup --hosts=claude-code-project --yes
+```
+
+The setup command backs up existing config files before writing, preserves unrelated MCP servers, and uses `"command": "figlets-mcp"` instead of machine-specific paths for JSON/TOML configs. For Claude Code, it uses Claude's native user-scope MCP command with the current Node executable and the local `figlets-mcp.js` binary, which avoids PATH issues inside Claude Code. If Claude reports a stale existing `figlets` entry, setup removes Figlets entries from Claude Code's local/project/user scopes and re-adds the user-scope entry.
+
+To check the local bridge after your MCP host has started Figlets:
+
+```bash
+figlets-mcp doctor
+```
+
+`doctor` may report the bridge receiver as not running immediately after setup. That is expected until an MCP host starts the Figlets server.
+
 ---
 
 ## Claude Desktop
@@ -130,6 +172,9 @@ Once connected, the agent will have access to:
 
 | Tool | Description |
 |---|---|
+| `figlets_start` | Returns the Agent Interface intro, safety contract, runtime environment hints, capability menu, and first designer-facing question. |
+| `figlets_route_intent` | Routes a designer's natural-language request to the most likely Figlets workflow. |
+| `figlets_workflow_guide` | Returns workflow steps, read/write boundaries, confirmation points, recovery notes, and safe next flows. |
 | `sync_figma_data` | Triggers the Figma bridge plugin to extract and save the full design system snapshot. Blocks until complete. |
 | `inspect_component` | Grabs the currently selected Figma node(s) and returns structure, layout, and variant properties. |
 | `detect_design_system` | Analyzes a saved snapshot and returns a structured design system summary. |

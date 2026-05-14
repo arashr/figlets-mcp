@@ -16,6 +16,9 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 
 | Tool | Purpose | When to use |
 |------|---------|-------------|
+| `figlets_start` | Returns the Agent Interface intro, safety contract, runtime environment hints, capability menu, and first designer-facing question | At the start of a Figlets conversation, before improvising workflow steps |
+| `figlets_route_intent` | Maps the designer's natural-language request to the most likely Figlets workflow | After the designer says what they want, especially when the wording is broad or ambiguous |
+| `figlets_workflow_guide` | Returns the step-by-step contract for a workflow, including read/write steps, confirmation points, error recovery, and next flows | Before running a workflow that could lead to Figma writes or local file writes |
 | `sync_figma_data` | Triggers the bridge plugin to extract the full DS snapshot and save it to `.local/figma-data.json` | Before any analysis when the user wants fresh data from Figma |
 | `detect_design_system` | Analyzes the snapshot: collections, variables, styles, inferred capabilities | After syncing, or when a snapshot already exists on disk |
 | `inspect_component` | Extracts layout, variants, and properties of the currently selected Figma node | When the user wants to inspect a specific component or frame |
@@ -48,6 +51,12 @@ Designers should be able to ask in natural language. Route their intent to MCP t
 | "Document this component" | Ask them to select the component, inspect it, craft human usage copy, then call `generate_component_doc`. |
 
 Keep the designer-facing language non-technical. Say "I'll check what's available in the file" rather than "I'll call `sync_figma_data` and `detect_design_system`." Tool names are for internal clarity and debugging, not the default user experience.
+
+When starting a fresh Figlets conversation, call `figlets_start` first and use its `designerResponse` as the opening response whenever possible. It intentionally uses a capability-menu format; preserve that shape instead of inventing a broad capability list. Use `figlets_route_intent` to pick a workflow from the designer's words, then call `figlets_workflow_guide` before executing the workflow. These Agent Interface tools are read-only; they exist so agents can follow the same product contract across runtimes.
+
+Do not broaden the Figlets introduction with generic Figma authoring capabilities from other MCP servers such as figma-console. Figlets is the design-system workflow layer: setup, QA, approved repair, showcase, component documentation, and DESIGN.md export.
+
+Never offer "Plugin / MCP server code", repo editing, plugin editing, or arbitrary Figma create/delete/move actions in the designer-facing menu. Those are developer tasks, not Figlets designer workflow options.
 
 ---
 

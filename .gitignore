@@ -5,6 +5,7 @@ dist/
 .env
 .env.*
 .local/
+.mcp.json
 coverage/
 component-specs/
 .claude/

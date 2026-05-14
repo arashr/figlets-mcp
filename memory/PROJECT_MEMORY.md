@@ -4,6 +4,127 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-14 — Agent Interface workflow guidance MVP started]
+
+**Active branch:** `main`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** The designer wants a complete first-prompt-to-next-step experience that feels like Claude Code skills but remains agent agnostic. The current repo had the right ingredients (adapter docs, paste-ready prompts, MCP tool descriptions), but no single source of truth an arbitrary MCP agent could ask: "What can Figlets do, which workflow fits this request, and where must I ask for approval?"
+
+**Product contract captured:**
+
+1. **Read-only guide layer:** `figlets_start`, `figlets_route_intent`, and `figlets_workflow_guide` only return workflow guidance. They do not sync, inspect Figma, mutate Figma, write files, or run setup.
+2. **Workflow registry as source of truth:** `packages/figlets-mcp-server/src/agent-interface/workflows.js` stores the MVP workflows, designer intent phrases, prerequisites, read/write/confirmation steps, safe next flows, and recovery notes.
+3. **Approval boundaries are data-backed:** Mutating steps are marked `requiresApproval: true`. Tests assert this for write steps and known mutating tools.
+4. **Portable paths:** The product plan and tests now reject developer-local path leakage in guide payloads. The guide uses the `figlets-mcp` command and runtime path utilities instead of hardcoded repo paths.
+5. **Installer is a separate track:** `figlets_start` cannot solve installation because it is only callable after MCP is connected. The product plan now calls out `npx figlets-mcp setup` and Claude Code plugin packaging as the install path.
+
+**Files changed:**
+
+- `docs/agent-interface-product-plan.md` (new)
+  - Defines the Agent Interface product, path portability rules, install strategy, workflow diagrams, MVP workflows, registry data model, phases, and open questions.
+- `packages/figlets-mcp-server/src/agent-interface/workflows.js` (new)
+  - Pure workflow registry/helpers: `getStartGuide`, `routeIntent`, `getWorkflowGuide`, `listWorkflows`.
+- `packages/figlets-mcp-server/src/tools/agent-interface.js` (new)
+  - MCP tool metadata and handlers for `figlets_start`, `figlets_route_intent`, `figlets_workflow_guide`.
+- `packages/figlets-mcp-server/src/index.js`
+  - Registers the three Agent Interface tools.
+- `packages/figlets-adapter/AGENTS.md`, `packages/figlets-adapter/CLAUDE.md`
+  - Lists the new tools and tells agents to call `figlets_start` before improvising.
+- `tests/server/agent-interface-tool.test.js` (new)
+  - Pins routing, start payload shape, approval gates, workflow starts, next steps, and local path leakage guard.
+- `DECISIONS.md`
+  - Logs the read-only Agent Interface decision.
+
+**Verification:**
+
+- `node --check packages/figlets-mcp-server/src/agent-interface/workflows.js`
+- `node --check packages/figlets-mcp-server/src/tools/agent-interface.js`
+- `node tests/server/agent-interface-tool.test.js`
+- `npm test`: 55/55 passing.
+
+**Recommended next implementation slice:**
+
+1. Add `figlets_next_step` after the first three guide tools are exercised.
+2. Expand `figlets-mcp setup` beyond the first safe local patcher: richer host detection, clearer prompts, and eventually Claude Code plugin packaging.
+3. Add a designer-facing install README with screenshots for the Figma Bridge dev-import path.
+
+**Follow-up completed in the same working set:**
+
+- Removed hardcoded `/Users/arash/Projects/figlets-mcp` from the product-facing designer fix/export prompt bodies.
+- Added `packages/figlets-mcp-server/src/cli/setup.js`.
+  - Dry-run by default.
+  - Patches supported configs only with `--yes`.
+  - Uses `"command": "figlets-mcp"` instead of absolute paths.
+  - Backs up existing config files.
+  - Preserves unrelated MCP servers.
+  - Handles JSON config shapes for Claude Desktop/Cursor/Windsurf/Gemini and workspace VS Code.
+  - Handles Codex TOML by appending a `[[mcp_servers]]` block when missing.
+  - Uses Claude Code's native command when `claude` is available on PATH: `claude mcp add --transport stdio figlets -- figlets-mcp`.
+  - Falls back to printing the Claude Code command manually when `claude` is not available.
+  - Prints the Figma Bridge checklist.
+- Wired `figlets-mcp setup` through `packages/figlets-mcp-server/bin/figlets-mcp.js`.
+- Documented setup usage in `docs/mcp-config-examples.md`.
+- Added `tests/server/setup-cli.test.js`.
+
+**Additional verification after installer slice:**
+
+- `node --check packages/figlets-mcp-server/src/cli/setup.js`
+- `node --check packages/figlets-mcp-server/bin/figlets-mcp.js`
+- `node tests/server/setup-cli.test.js`
+- `npm test`: 56/56 passing.
+
+**Latest installer refinement:** `figlets-mcp setup --hosts=claude-code --yes` now executes the native Claude Code registration command when possible instead of only printing it. `tests/server/setup-cli.test.js` covers both no-`claude` manual fallback and detected-`claude` command execution via an injected runner.
+
+**Follow-up from real setup output:** Claude Code can return a non-zero exit with "MCP server figlets already exists in local config" (and unrelated runtime warnings). `setup` now treats that as `unchanged`, not `blocked`. Setup also no longer runs `doctor` by default, because the bridge receiver is normally not running until an MCP host starts Figlets; use `figlets-mcp doctor` explicitly after launching the host/plugin.
+
+**Follow-up from first Claude designer test:** Claude mixed Figlets with generic `figma-console` capabilities and produced a misleading broad Figma-authoring menu. `figlets_start` now returns a literal `designerIntro` plus a `scope.figletsDoesNotMean[]` guardrail telling agents not to advertise generic create/delete/move/resize powers, not to say the flow is through figma-console, not to mix unrelated MCP servers into the Figlets intro, and not to lead with implementation guardrails. Adapter docs now tell agents to use `designerIntro` as the opening response.
+
+**Menu-format refinement:** To make the first response more enforceable across agents, `figlets_start` now returns:
+
+- `responseContract.openingFormat = "capability-menu"`
+- `responseContract.useVerbatimWhenPossible = "designerResponse"`
+- `capabilityMenu[]` as structured menu items
+- `designerResponse` as copy-ready markdown with a two-column menu
+
+Adapter docs now instruct agents to preserve `designerResponse` instead of inventing a broad capability list. `tests/server/agent-interface-tool.test.js` pins the table shape and menu items.
+
+**Designer menu hardening after screenshot test:** Claude offered "Plugin / MCP server code" and repo/plugin editing in the designer menu. That is explicitly forbidden now:
+
+- `figlets_start.forbiddenDesignerMenuItems[]` includes `Plugin / MCP server code`, repo editing, plugin editing, MCP server code, arbitrary node authoring, generic Figma tools, and raw Figma console tools.
+- `responseContract.doNotOfferMenuItems = "forbiddenDesignerMenuItems"`.
+- Adapter docs say never to offer repo/plugin/server-code editing in the designer-facing menu.
+- Tests assert those strings are absent from `designerResponse` and present in `forbiddenDesignerMenuItems`.
+
+**Root entrypoint hardening after memory-first test:** Claude Code was reading project memory and presenting a repo/developer-flavored capability list before using Figlets. Added root `CLAUDE.md` and `AGENTS.md` so repo-aware agents choose Designer Mode vs Developer Mode first. Designer Mode explicitly requires calling `figlets_start` first, using `figlets_start.designerResponse`, preserving the menu, and not reading `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, source files, or package docs before the first designer response. Added `tests/docs/root-agent-entrypoint.test.js`. `npm test`: 57/57 passing.
+
+**Missing Figlets MCP fallback hardening:** Claude correctly noticed `figlets_start` was unavailable but offered to approximate with raw Figma tools. Root `CLAUDE.md`/`AGENTS.md` now say that if `figlets_start` is unavailable, the agent must stop the designer workflow and ask the user to connect Figlets instead of proceeding with raw Figma tools, repo inspection, or project-memory summaries. Also changed Claude Code setup to user scope (`claude mcp add --scope user --transport stdio figlets -- figlets-mcp`) because `claude mcp add --help` shows the default scope is `local`, which was brittle for testing new sessions. `npm test`: 57/57 passing.
+
+**Claude Code connection repair:** The user still saw "Figlets is not connected" despite the bridge being open. The bridge is not enough; Claude Code must expose `figlets_start`. `claude mcp list/get` can hang because it spawns stdio servers for health checks, so do not rely on it for designer onboarding. `figlets-mcp setup --hosts=claude-code --yes` now:
+
+- registers Claude Code at user scope
+- uses the current Node executable plus the local `figlets-mcp.js` binary instead of relying on Claude Code's PATH to resolve `figlets-mcp`
+- when Claude reports an existing stale `figlets` entry, removes `figlets` from local/project/user scopes and re-adds the user-scope entry
+
+This is intentionally less "portable-looking" in the config but more reliable for actual Claude Code launches. `npm test`: 57/57 passing.
+
+**Project-local Claude Code fallback:** User-scope Claude Code registration still did not expose `figlets_start` in the user's session. Added a `claude-code-project` setup target that writes an ignored repo-local `.mcp.json` with the current Node executable and local `figlets-mcp.js` path. `.mcp.json` is now in `.gitignore`. Generated `/Users/arash/Projects/figlets-mcp/.mcp.json` locally via `node packages/figlets-mcp-server/src/cli/setup.js --hosts=claude-code-project --yes --skip-doctor`. This is for local product testing and should not be committed. `npm test`: 57/57 passing.
+
+**Local launcher slice:** Added `figlets-mcp launch` as the option-2 local launcher for designer-experience testing without asking the designer to understand MCP plumbing. It:
+
+- writes/repairs the project-local Claude Code `.mcp.json` through the `claude-code-project` setup target
+- renders the exact `figlets_start.designerResponse` menu locally
+- checks bridge status via `getDoctorReport`
+- explains that receiver-not-running is normal before Claude Code starts Figlets
+- prints one prompt to send in Claude Code: `Help me with my Figma design system using Figlets.`
+
+Files: `packages/figlets-mcp-server/src/cli/launch.js`, `packages/figlets-mcp-server/bin/figlets-mcp.js`, `packages/figlets-mcp-server/package.json`, `tests/server/launch-cli.test.js`, `docs/mcp-config-examples.md`.
+
+Local run output showed the project config as `unchanged`, bridge receiver not running, the correct designer menu preview, and clear next steps. `npm test`: 58/58 passing.
+
+---
+
 ### [2026-05-14 — Setup gap QA + approved role repair flow hardened from live designer test]
 
 **Active branch:** `main`.

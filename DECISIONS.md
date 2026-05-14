@@ -4,6 +4,28 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-14] Agent Interface starts as read-only workflow guidance
+
+**Decision:** The Agent Interface is a product layer, not a replacement for deterministic tools. It starts with a read-only workflow registry plus three MCP guide tools:
+
+- `figlets_start`
+- `figlets_route_intent`
+- `figlets_workflow_guide`
+
+These tools teach any MCP-speaking agent how to introduce Figlets, route designer intent, follow workflow steps, honor confirmation boundaries, recover from common errors, and suggest next flows. They do not inspect Figma, mutate Figma, write local files, or perform setup logic.
+
+**Why:** The existing product behavior was spread across adapter docs, paste-ready prompts, and individual tool descriptions. That works for a careful agent, but it is fragile for arbitrary MCP hosts. A first-class Agent Interface lets Figlets itself provide the operating contract while preserving agent-agnostic use.
+
+**Path policy:** Product-facing guide payloads must not hardcode developer-local paths. Agents should prefer the global `figlets-mcp` command and use runtime paths returned by tools or active-file path utilities. Installation remains a separate CLI/plugin packaging track because `figlets_start` can only be called after MCP is already connected.
+
+**Safety policy:** Any workflow step that mutates Figma requires explicit designer approval in the registry. Tests pin that write steps such as `apply_ds_setup`, `apply_ds_setup_repairs`, `build_ds_showcase`, `generate_component_doc`, and binding fixes are approval-gated.
+
+**Consequence:** Adapter docs now instruct agents to call the Agent Interface tools before improvising. Future Claude Code plugin commands, `npx figlets-mcp setup`, and public prompt docs should consume or mirror this registry rather than inventing separate workflow rules.
+
+**Installer follow-up:** The first installer slice is `figlets-mcp setup`. It is dry-run by default, patches supported local MCP configs only with `--yes`, backs up existing files, preserves unrelated MCP servers, and writes `"command": "figlets-mcp"` rather than absolute Node/repo paths. For Claude Code, it uses Claude Code's native `claude mcp add --transport stdio figlets -- figlets-mcp` command when the `claude` binary is available; otherwise it prints that command as the manual fallback.
+
+---
+
 ## [2026-05-14] Setup gap QA now separates read-only judgment from approved fixes
 
 **Decision:** The setup gap flow is now explicitly productized as two phases:

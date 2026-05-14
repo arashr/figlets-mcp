@@ -205,4 +205,87 @@ module.exports = (() => {
   assert.strictEqual(tiny.counts.completePairs, 2);
   assert.strictEqual(tiny.suppressedAdvisoryRoles.length, 0, "below threshold (3 pairs) suppression should not trigger");
   assert.ok(tiny.companionAdvisories.length >= 2, "small files should still see per-pair advisories");
+
+  // ── Semantic-family completeness: inherited DS QA should catch a family
+  // that lost one text role and one icon role without relying on a saved
+  // config contract. This is still read-only: findings carry agentAction and
+  // confidence so the next step is designer confirmation, not mutation.
+  const familyVars = [
+    sem("bg-success", "color/bg/success", alias("n50"), alias("n950")),
+    sem("text-success", "color/text/success", alias("n950"), alias("n50")),
+    sem("border-success", "color/border/success", alias("r700"), alias("r700")),
+    // color/icon/success intentionally missing
+
+    sem("bg-warning", "color/bg/warning", alias("n50"), alias("n950")),
+    sem("icon-warning", "color/icon/warning", alias("r700"), alias("r700")),
+    sem("border-warning", "color/border/warning", alias("r700"), alias("r700")),
+    // color/text/warning intentionally missing
+
+    sem("bg-info", "color/bg/info", alias("n50"), alias("n950")),
+    sem("text-info", "color/text/info", alias("n950"), alias("n50")),
+    sem("icon-info", "color/icon/info", alias("r700"), alias("r700")),
+
+    sem("bg-danger", "color/bg/danger", alias("n50"), alias("n950")),
+    sem("text-danger", "color/text/danger", alias("n950"), alias("n50")),
+    sem("icon-danger", "color/icon/danger", alias("r700"), alias("r700")),
+  ];
+  const familySnap = {
+    variables: primitives.concat(familyVars),
+    collections: [
+      { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+      { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: familyVars.map(v => v.id) },
+    ],
+  };
+  const familyResult = inspectDsSetupGapsFromFigmaData(familySnap);
+  const missingSuccessIcon = familyResult.missingSemanticRoles.find(
+    gap => gap.family === "success" && gap.missingRole === "icon"
+  );
+  assert.ok(missingSuccessIcon, "success family should report the deleted icon role");
+  assert.strictEqual(missingSuccessIcon.confidence, "high");
+  assert.strictEqual(missingSuccessIcon.agentAction, "ask-designer");
+  assert.strictEqual(missingSuccessIcon.suggestedName, "color/icon/success");
+  assert.ok(missingSuccessIcon.evidence.includes("color/bg/success"));
+  assert.ok(missingSuccessIcon.evidence.includes("color/text/success"));
+  assert.ok(missingSuccessIcon.evidence.includes("color/border/success"));
+
+  const missingWarningText = familyResult.missingSemanticRoles.find(
+    gap => gap.family === "warning" && gap.missingRole === "foreground"
+  );
+  assert.ok(missingWarningText, "warning family should report the deleted text role");
+  assert.strictEqual(missingWarningText.confidence, "high");
+  assert.strictEqual(missingWarningText.agentAction, "ask-designer");
+  assert.strictEqual(missingWarningText.suggestedName, "color/text/warning");
+  assert.strictEqual(
+    familyResult.summary.missingSemanticRoleCount,
+    familyResult.missingSemanticRoles.length,
+    "summary should count semantic-family role gaps"
+  );
+
+  // ── Config context is a suppressive hint, not the source of truth. When a
+  // bg is explicitly paired to a shared foreground, the naming fallback should
+  // stop asking for a same-leaf foreground.
+  const sharedFgVars = [
+    sem("bg-brand-subtle", "color/bg/brand-subtle", alias("n50"), alias("n950")),
+    sem("text-brand", "color/text/brand", alias("n950"), alias("n50")),
+  ];
+  const sharedFgSnap = {
+    variables: primitives.concat(sharedFgVars),
+    collections: [
+      { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+      { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: sharedFgVars.map(v => v.id) },
+    ],
+  };
+  const namingOnly = inspectDsSetupGapsFromFigmaData(sharedFgSnap);
+  assert.ok(namingOnly.semanticGaps.some(gap => gap.bg === "color/bg/brand-subtle"));
+  const withConfigHint = inspectDsSetupGapsFromFigmaData(sharedFgSnap, {
+    existingDs: {
+      color: {
+        semantics: {
+          pairs: [{ bg: "color/bg/brand-subtle", text: "color/text/brand" }],
+        },
+      },
+    },
+  });
+  assert.ok(!withConfigHint.semanticGaps.some(gap => gap.bg === "color/bg/brand-subtle"));
+  assert.ok(!withConfigHint.missingSemanticRoles.some(gap => gap.family === "brand-subtle"));
 })();

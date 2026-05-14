@@ -4,6 +4,67 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-14] Setup gap QA now separates read-only judgment from approved fixes
+
+**Decision:** The setup gap flow is now explicitly productized as two phases:
+
+1. **Read-only QA / conversation:** `sync_figma_data` → `refresh_ds_config_from_figma({ dry_run: true })` → `inspect_ds_setup_gaps` or the fallback CLI `npm run figlets:check-setup-gaps`. This phase may classify, rank, explain, and suggest questions, but it must not mutate Figma or config.
+2. **Designer-approved fix:** `apply_ds_setup_repairs` applies only the exact approved repairs, then the agent reruns sync/QA. Config refresh happens after Figma succeeds when needed, so local config follows the approved live file rather than driving it silently.
+
+The designer-facing contract is: designers talk to the agent in natural language; the agent runs the scripts/tools, translates the QA findings, asks for explicit approval on ambiguous decisions, applies only approved changes, and verifies with a read-only QA pass. There should be no code editing in a normal public-product session.
+
+**Semantic-family QA:** `inspect_ds_setup_gaps` now builds semantic families from the live Figma token namespace (`bg/text/icon/border` around leaves like `success`, `warning`, `info`) and emits `missingSemanticRoles[]` with:
+
+- `confidence` (`high` / `medium`)
+- `basis: "semantic-family"`
+- `agentAction` (`ask-designer` / `advisory-only`)
+- `evidence[]`
+- `suggestedName`
+
+This preserves the Figma-first handover goal while giving the agent enough structure to avoid blindly trusting a flat script outcome. The old naming-based `semanticGaps` remains, but the CLI now labels it as "Possible naming gaps" and renders semantic-family gaps first.
+
+**Config as context, not authority:** `design-system.config.js` remains a hint layer for this QA tool, not the source of truth. It is used to:
+
+- avoid false positives when a background intentionally pairs to a shared foreground (e.g. `color/bg/brand-subtle` → `color/text/brand`)
+- avoid treating configured unpaired surfaces (`surface/raised`, `surface/overlay`, `surface/sunken`) as missing text roles
+- suppress companion advisories when a same-name bg/text pair contradicts a configured pair (e.g. muted should pair through default)
+- choose the contrast algorithm
+
+Figma remains the live inventory being inspected.
+
+**Fix path extension:** `apply_ds_setup_repairs` now supports a third repair kind:
+
+- `roleRepairs[]` — creates explicitly approved border/icon semantic role variables with designer-approved per-mode primitive aliases.
+
+This is intentionally separate from `repairs[]` (missing foreground companions) so agents cannot smuggle border/icon creation through the foreground path. The bridge writes role repairs only when `roleRepairs` is present; otherwise the QA remains read-only. Created role tokens update the file-scoped config after Figma succeeds: icon roles go into `DS.color.semantics.icons`; border roles go into `DS.color.semantics.unpaired`.
+
+**Live flow result that shaped the contract:** In the live test file, QA initially flagged:
+
+- `color/text/muted` failing APCA on `color/bg/default`
+- missing `border/info`, `border/warning`, `border/success`, `icon/success`
+- muted border/icon noise
+
+After explicit designer approval, the fix flow:
+
+- re-aliased `color/text/muted` Light → `color/neutral/600`, Dark → `color/neutral/100`
+- created `color/border/success`, `color/icon/success`
+- after a second explicit confirmation, created `color/border/info`, `color/border/warning`
+- refreshed config from Figma
+- reran `npm run figlets:check-setup-gaps`
+
+Final QA reported: `Semantic-layer QA: clean — no findings`.
+
+**Out of scope (intentional):**
+
+- Auto-applying semantic-family gaps based on confidence alone. Even high confidence means "ask designer", not "mutate".
+- Making config authoritative over Figma. Existing DS handover remains Figma-first.
+- Creating arbitrary role types. The supported public path is approved border/icon role creation with explicit aliases.
+- Adding a broad "fix all" command. The agent can orchestrate multiple approved repairs, but the tools keep the approval payload explicit.
+
+**Consequence:** The public-product flow can now remain script/tool-driven instead of code-edit-driven: run QA, talk through findings, apply approved fixes, refresh config, rerun QA. Tests cover semantic-family detection, config-context suppression, role repair normalization/wire format/config update, and the existing read-only CLI framing.
+
+---
+
 ## [2026-05-13] DESIGN.md export is spec-compliant with a `figlets-extended` round-trip block
 
 **Decision:** The DESIGN.md exporter ([packages/figlets-core/src/ds-config/design-md-intake.js](packages/figlets-core/src/ds-config/design-md-intake.js)) now produces output that lints clean against Google's `@google/design.md` v0.1.1 (zero errors). To carry information the Google spec can't express — Dark-mode aliases, responsive size/spacing triples, contrast algorithm, full ramps — the body embeds a fenced ```figlets-extended``` JSON block. The intake parser, when it sees that block, uses it as the canonical DS; falls back to the legacy front-matter-only parse for external DESIGN.md files.

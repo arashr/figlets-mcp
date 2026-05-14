@@ -9,7 +9,9 @@ const {
   handleApplyDsSetupRepairs,
   _normalizeRepairs,
   _normalizeAliasUpdates,
+  _normalizeRoleRepairs,
   _updateConfigPairs,
+  _updateConfigRoles,
 } = require("../../packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js");
 
 module.exports = (async () => {
@@ -164,6 +166,32 @@ module.exports = (async () => {
     ]
   );
 
+  assert.deepStrictEqual(
+    _normalizeRoleRepairs([
+      { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500", Empty: "" } },
+      { name: "color/icon/success", role: "icon", aliases: { Light: "color/green/800" } },
+      { name: "", role: "border", aliases: { Light: "color/blue/500" } },
+      { name: "color/border/warning", role: "border", aliases: {} },
+    ]),
+    [
+      { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500" } },
+      { name: "color/icon/success", role: "icon", aliases: { Light: "color/green/800" } },
+    ]
+  );
+
+  const roleConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-role-config-"));
+  const roleConfigPath = path.join(roleConfigDir, "design-system.config.js");
+  fs.writeFileSync(roleConfigPath, `const DS = { color: { semantics: { icons: [], unpaired: [] } } };\n`, "utf8");
+  const roleConfigResult = _updateConfigRoles(roleConfigPath, [
+    { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500" } },
+    { name: "color/icon/success", role: "icon", aliases: { Light: "color/green/800", Dark: "color/green/200" } },
+  ]);
+  assert.deepStrictEqual(roleConfigResult, { updated: true, added: 2 });
+  const roleConfigText = fs.readFileSync(roleConfigPath, "utf8");
+  assert.ok(roleConfigText.includes("color/border/info"));
+  assert.ok(roleConfigText.includes("color/icon/success"));
+  fs.rmSync(roleConfigDir, { recursive: true, force: true });
+
   // ── aliasUpdates wire-format + handler round-trip ────────────────────────
   // Mock receiver inspects the body, returns an updated/result payload, and
   // the handler should surface `updated` back to the caller.
@@ -222,6 +250,60 @@ module.exports = (async () => {
     else delete process.env.FIGLETS_LOCAL_DIR;
     await new Promise(resolve => aliasServer.close(resolve));
     fs.rmSync(aliasTmp, { recursive: true, force: true });
+  }
+
+  // ── roleRepairs wire-format + handler round-trip ────────────────────────
+  let roleBody = null;
+  const roleServer = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/request-setup-repairs") {
+      let body = "";
+      req.on("data", chunk => { body += chunk.toString(); });
+      req.on("end", () => {
+        roleBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          success: true,
+          result: {
+            created: [], skipped: [], unresolved: [],
+            roleCreated: [{ name: "color/border/info", role: "border", collection: "Color" }],
+            roleSkipped: [], roleUnresolved: [],
+            updated: [], updateSkipped: [], updateUnresolved: [],
+            message: "0 created, 1 role created, 0 skipped, 0 unresolved."
+          }
+        }));
+      });
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise(resolve => roleServer.listen(0, resolve));
+  const rolePort = roleServer.address().port;
+  process.env.FIGLETS_RECEIVER_URL = `http://localhost:${rolePort}`;
+  const roleTmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-role-apply-"));
+  const roleApplyConfig = path.join(roleTmp, "design-system.config.js");
+  fs.writeFileSync(roleApplyConfig, `const DS = { color: { semantics: { icons: [], unpaired: [] } } };\n`, "utf8");
+  const prevRoleLocal = process.env.FIGLETS_LOCAL_DIR;
+  process.env.FIGLETS_LOCAL_DIR = roleTmp;
+  try {
+    const roleResult = await handleApplyDsSetupRepairs({
+      config_path: roleApplyConfig,
+      roleRepairs: [
+        { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500" } },
+      ],
+    });
+    assert.ok(!roleResult.error, "role repair apply should succeed");
+    assert.deepStrictEqual(roleBody.roleRepairs, [
+      { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500" } },
+    ]);
+    assert.strictEqual(roleResult.roleCreated.length, 1);
+    assert.deepStrictEqual(roleResult.roleConfigUpdate, { updated: true, added: 1 });
+  } finally {
+    delete process.env.FIGLETS_RECEIVER_URL;
+    if (prevRoleLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevRoleLocal;
+    else delete process.env.FIGLETS_LOCAL_DIR;
+    await new Promise(resolve => roleServer.close(resolve));
+    fs.rmSync(roleTmp, { recursive: true, force: true });
   }
 
   // No inputs → error

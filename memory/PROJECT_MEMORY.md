@@ -4,6 +4,102 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-14 — Setup gap QA + approved role repair flow hardened from live designer test]
+
+**Active branch:** `main`.
+
+**Status:** Implemented locally; not committed yet.
+
+**Why this exists:** A live designer-style test of `npm run figlets:check-setup-gaps` showed the previous QA was too literal. It correctly stayed read-only, but it over-reported same-name companion guesses (`brand-subtle`, unpaired surfaces, muted) and missed the product nuance: this tool is for inherited design systems where the designer asks "what setup gaps should I consider?" The public-product flow should not require code edits between QA and fixing; the designer should talk to the agent, approve decisions, and the agent should use stable tools/scripts.
+
+**Product contract now captured in code:**
+
+1. **Read-only first:** `check-setup-gaps` still only checks bridge health, syncs, runs `refresh_ds_config_from_figma({ dry_run: true })`, runs inspection, and prints "No changes were made to Figma." It is the no-MCP fallback. The MCP version remains `sync_figma_data` / `refresh_ds_config_from_figma(dry_run)` / `inspect_ds_setup_gaps`.
+2. **Agent judgment layer:** `inspect_ds_setup_gaps` now emits `missingSemanticRoles[]` by clustering live Figma semantic families and assigning `confidence`, `basis`, `agentAction`, `evidence`, and `suggestedName`. The agent should lead with these and ask before repairing; confidence is not approval.
+3. **Config as a suppressive hint:** File-scoped config is used only to reduce false positives and choose contrast algorithm. Examples:
+   - `color/bg/brand-subtle` configured with `color/text/brand` no longer asks for `color/text/brand-subtle`.
+   - `color/surface/raised|overlay|sunken` in `semantics.unpaired` no longer asks for matching text roles.
+   - `color/bg/muted` configured to pair through default no longer creates muted border/icon role gaps or companion advisories.
+4. **Approved role repair path:** `apply_ds_setup_repairs` now supports `roleRepairs[]` alongside existing `repairs[]` and `aliasUpdates[]`. This creates explicitly approved border/icon semantic role vars with per-mode aliases. The bridge writes them to the Color semantic collection and returns `roleCreated`, `roleSkipped`, `roleUnresolved`. The server updates config after Figma succeeds: icons go to `DS.color.semantics.icons`, border roles go to `DS.color.semantics.unpaired`.
+5. **MCP schema aligned:** `packages/figlets-mcp-server/src/index.js` exposes `roleRepairs` so agents can call the new approved path without relying on ad hoc CLI/Node snippets.
+
+**Files changed:**
+
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js`
+  - Added semantic-family clustering helpers.
+  - Added `missingSemanticRoles`, `semanticFamilies`, summary counts, and message wording.
+  - Added config-context suppression for declared shared foregrounds, unpaired surfaces, and config-invalid same-name companion advisories.
+  - Contrast pass now prefers configured pair text when available, reducing same-name false positives.
+- `packages/figlets-mcp-server/src/cli/check-setup-gaps.js`
+  - Renders "Likely semantic-family gaps" before "Possible naming gaps".
+  - Every family gap says "ask the designer before treating this as a repair".
+  - Totals and "What this means" include semantic-family counts.
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js`
+  - Added `roleRepairs` schema/normalization.
+  - Added `_updateConfigRoles` after successful Figma creation.
+  - Returned `roleCreated`, `roleSkipped`, `roleUnresolved`, `roleConfigUpdate`.
+- `packages/figlets-mcp-server/src/index.js`
+  - Added `roleRepairs` to the MCP registration schema.
+- `packages/figma-bridge-plugin/code.js`
+  - Added role repair handling in `_applyDsSetupRepairs`.
+  - Selects the semantic Light/Dark color collection instead of the primitive single-mode collection.
+  - Creates approved role variables and aliases them to approved primitives.
+- Tests:
+  - `tests/server/inspect-ds-setup-gaps-qa.test.js`: deleted text/icon scenario, config suppression.
+  - `tests/server/check-setup-gaps-cli.test.js`: new report section and ask-first wording.
+  - `tests/server/apply-ds-setup-repairs-tool.test.js`: role repair normalization, wire format, config update.
+
+**Live test details:**
+
+Initial improved QA on file `local_movbxur3_6gow4h4j` reported:
+
+- APCA failures for `color/bg/default + color/text/muted` in Light/Dark.
+- Semantic-family gaps for `info`, `warning`, `success`, and muted.
+
+Designer decisions:
+
+- Approved fixing muted contrast.
+- Approved high-confidence `info`/`warning` border roles.
+- Approved success border/icon.
+- Rejected muted border/icon because muted should pair to default.
+
+Applied fixes:
+
+- `color/text/muted`
+  - Light: `color/neutral/500` → `color/neutral/600`
+  - Dark: `color/neutral/500` → `color/neutral/100`
+- Created `color/border/success` → Light/Dark `color/green/500`.
+- Created `color/icon/success` → Light `color/green/800`, Dark `color/green/200`.
+- Created `color/border/info` → Light/Dark `color/blue/500`.
+- Created `color/border/warning` → Light/Dark `color/yellow/500`.
+- Ran `refresh_ds_config_from_figma` after the muted re-alias so config matched Figma.
+
+Final live QA:
+
+```text
+Step 3/3 Semantic-layer QA: clean — no findings
+Snapshot: 340 variables, 5 collections
+No changes were made to Figma.
+```
+
+**Verification:**
+
+- `npm test`: 54/54 passing.
+- Focused local mock-server test for `apply-ds-setup-repairs`: passing with escalated local server permission.
+- `node --check` clean on touched JS files during the flow.
+- Final live read-only QA clean.
+
+**Important product note for future agents:** In a normal public use session, do **not** edit code between QA and fix. The code changes in this session were product hardening caused by a test-flow discovery. The intended external workflow is now stable:
+
+1. Run read-only QA.
+2. Explain findings with judgment.
+3. Ask the designer for explicit approvals.
+4. Call `apply_ds_setup_repairs` with only approved `aliasUpdates`, `repairs`, and/or `roleRepairs`.
+5. Refresh config from Figma if aliases changed.
+6. Rerun read-only QA and report clean/remaining findings.
+
+---
+
 ### [2026-05-13 — DESIGN.md export: spec compliance + round-trip via figlets-extended block]
 
 **Active branch:** `design-md-export-flow` (off `main`).

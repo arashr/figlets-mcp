@@ -143,6 +143,18 @@ function _formatContrastFailure(item) {
   return lines;
 }
 
+function _formatMissingSemanticRole(item) {
+  const lines = [
+    `${item.confidence || "medium"} confidence: "${item.family}" is missing ${item.missingRole}`
+  ];
+  if (item.suggestedName) lines.push(`    possible token: "${item.suggestedName}"`);
+  if (Array.isArray(item.evidence) && item.evidence.length) {
+    lines.push(`    evidence: ${item.evidence.slice(0, 4).map(name => `"${name}"`).join(", ")}`);
+  }
+  lines.push(`    next step: ask the designer before treating this as a repair`);
+  return lines;
+}
+
 function _renderSection(lines, items, header, formatter, max) {
   if (!Array.isArray(items) || !items.length) return;
   lines.push("");
@@ -235,6 +247,7 @@ function formatCheckReport(state) {
   } else {
     const summary = gaps.summary || {};
     const totals = (summary.semanticGapCount || 0)
+      + (summary.missingSemanticRoleCount || 0)
       + (summary.missingBackgroundCount || 0)
       + (summary.incompleteModeCount || 0)
       + (summary.contrastFailureCount || 0)
@@ -275,15 +288,23 @@ function formatCheckReport(state) {
       _formatContrastFailure
     );
 
-    // 3. Missing foregrounds
+    // 3. Likely family-level setup gaps
+    _renderSection(
+      lines,
+      gaps.missingSemanticRoles || [],
+      `Likely semantic-family gaps: ${summary.missingSemanticRoleCount || 0}${summary.highConfidenceSemanticRoleGapCount ? ` (${summary.highConfidenceSemanticRoleGapCount} high-confidence)` : ""}`,
+      _formatMissingSemanticRole
+    );
+
+    // 4. Missing foregrounds
     _renderSection(
       lines,
       gaps.semanticGaps || [],
-      `Missing foregrounds: ${summary.semanticGapCount || 0}`,
+      `Possible naming gaps: ${summary.semanticGapCount || 0}`,
       _formatMissingFgGap
     );
 
-    // 4. Missing backgrounds
+    // 5. Missing backgrounds
     _renderSection(
       lines,
       gaps.missingBackgrounds || [],
@@ -291,7 +312,7 @@ function formatCheckReport(state) {
       (item) => `"${item.fg}" expects "${item.expectedBg}" — missing in Figma`
     );
 
-    // 5. Incomplete modes
+    // 6. Incomplete modes
     _renderSection(
       lines,
       gaps.incompleteModes || [],
@@ -299,7 +320,7 @@ function formatCheckReport(state) {
       (item) => `"${item.token}" missing value in: ${item.missingModes.join(", ")}`
     );
 
-    // 6. Companion advisories (and any DS-wide role suppression)
+    // 7. Companion advisories (and any DS-wide role suppression)
     if (Array.isArray(gaps.suppressedAdvisoryRoles) && gaps.suppressedAdvisoryRoles.length) {
       lines.push("");
       for (const s of gaps.suppressedAdvisoryRoles) {
@@ -322,6 +343,7 @@ function formatCheckReport(state) {
   const refreshCount = refresh.summary ? refresh.summary.changedCount : 0;
   const summary = (gaps && gaps.summary) || {};
   const findingCount = (summary.semanticGapCount || 0)
+    + (summary.missingSemanticRoleCount || 0)
     + (summary.missingBackgroundCount || 0)
     + (summary.incompleteModeCount || 0)
     + (summary.contrastFailureCount || 0)
@@ -343,6 +365,11 @@ function formatCheckReport(state) {
       const detail = nearFails && realFails ? ` (${realFails} gross, ${nearFails} near-miss)` : nearFails ? " (all near-miss)" : "";
       const verb = summary.contrastFailureCount === 1 ? "fails" : "fail";
       lines.push(`- A11Y: ${summary.contrastFailureCount} pair${summary.contrastFailureCount === 1 ? "" : "s"} ${verb} the contrast threshold${detail}.`);
+    }
+    if (summary.missingSemanticRoleCount) {
+      const high = summary.highConfidenceSemanticRoleGapCount || 0;
+      const detail = high ? ` (${high} high-confidence)` : "";
+      lines.push(`- ${summary.missingSemanticRoleCount} semantic famil${summary.missingSemanticRoleCount === 1 ? "y looks" : "ies look"} incomplete${detail}. Ask before repairing.`);
     }
     if (summary.semanticGapCount) lines.push(`- ${summary.semanticGapCount} background${summary.semanticGapCount === 1 ? "" : "s"} missing a foreground companion.`);
     if (summary.missingBackgroundCount) lines.push(`- ${summary.missingBackgroundCount} foreground${summary.missingBackgroundCount === 1 ? "" : "s"} (on-*) without a matching background.`);

@@ -25,6 +25,7 @@ const _ON_FAMILIES = ["on-surface", "on-bg", "on-background"];
 const _ON_TO_BG = { "on-surface": "surface", "on-bg": "bg", "on-background": "background" };
 const _BORDER_FAMILIES = ["border", "outline", "stroke"];
 const _ICON_FAMILIES = ["icon"];
+const _FG_FAMILIES = ["text", "fg", "foreground", "on-surface", "on-bg", "on-background"];
 
 const _WCAG_THRESHOLD = 4.5;
 const _APCA_THRESHOLD = 75;
@@ -75,6 +76,100 @@ function _swapSegment(parts, index, replacement) {
 
 function _findFamilyIndex(parts, families) {
   return parts.findIndex(part => families.includes(_norm(part)));
+}
+
+function _roleForParts(parts) {
+  const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+  if (bgIndex >= 0) return { role: "background", roleIndex: bgIndex };
+  const fgIndex = _findFamilyIndex(parts, _FG_FAMILIES);
+  if (fgIndex >= 0) return { role: "foreground", roleIndex: fgIndex };
+  const iconIndex = _findFamilyIndex(parts, _ICON_FAMILIES);
+  if (iconIndex >= 0) return { role: "icon", roleIndex: iconIndex };
+  const borderIndex = _findFamilyIndex(parts, _BORDER_FAMILIES);
+  if (borderIndex >= 0) return { role: "border", roleIndex: borderIndex };
+  return null;
+}
+
+function _familyKeyForParts(parts, roleIndex) {
+  const afterRole = parts.slice(roleIndex + 1);
+  if (afterRole.length) return afterRole.join("/");
+  const beforeRole = parts.slice(1, roleIndex);
+  return beforeRole.length ? beforeRole.join("/") : parts.slice(1).join("/");
+}
+
+function _candidateNameForRole(exampleName, role) {
+  const parts = String(exampleName || "").split("/");
+  const info = _roleForParts(parts);
+  if (!info) return null;
+  const replacements = {
+    foreground: info.role === "background" && _norm(parts[info.roleIndex]) === "surface" ? "on-surface" : "text",
+    background: info.role === "foreground" && /^on-/.test(_norm(parts[info.roleIndex]))
+      ? _norm(parts[info.roleIndex]).replace(/^on-/, "")
+      : "bg",
+    icon: "icon",
+    border: "border",
+  };
+  const replacement = replacements[role];
+  if (!replacement) return null;
+  return _swapSegment(parts, info.roleIndex, replacement).join("/");
+}
+
+function _clusterSemanticFamilies(semanticVars) {
+  const clusters = new Map();
+  for (const variable of semanticVars) {
+    const parts = variable.name.split("/");
+    const info = _roleForParts(parts);
+    if (!info) continue;
+    const key = _familyKeyForParts(parts, info.roleIndex);
+    if (!key) continue;
+    if (!clusters.has(key)) {
+      clusters.set(key, {
+        family: key,
+        roles: { background: [], foreground: [], icon: [], border: [] },
+      });
+    }
+    clusters.get(key).roles[info.role].push(variable.name);
+  }
+  return Array.from(clusters.values()).sort((a, b) => a.family.localeCompare(b.family));
+}
+
+function _roleEvidence(cluster) {
+  const names = [];
+  for (const role of ["background", "foreground", "icon", "border"]) {
+    for (const name of cluster.roles[role]) names.push(name);
+  }
+  return names.sort();
+}
+
+function _missingRoleFinding(cluster, missingRole, exampleName, confidence, reason) {
+  return {
+    kind: "missing-semantic-role",
+    family: cluster.family,
+    missingRole,
+    suggestedName: _candidateNameForRole(exampleName, missingRole),
+    evidence: _roleEvidence(cluster),
+    confidence,
+    basis: "semantic-family",
+    agentAction: confidence === "high" ? "ask-designer" : "advisory-only",
+    reason,
+  };
+}
+
+function _semanticContextFromConfig(ds) {
+  const semantics = ds && ds.color && ds.color.semantics ? ds.color.semantics : {};
+  const pairTextByBg = new Map();
+  const unpairedTokens = new Set();
+  if (Array.isArray(semantics.pairs)) {
+    for (const pair of semantics.pairs) {
+      if (pair && pair.bg && pair.text) pairTextByBg.set(pair.bg, pair.text);
+    }
+  }
+  if (Array.isArray(semantics.unpaired)) {
+    for (const item of semantics.unpaired) {
+      if (item && item.token) unpairedTokens.add(item.token);
+    }
+  }
+  return { pairTextByBg, unpairedTokens };
 }
 
 // Pick fg target families in priority order. Preserves the existing convention
@@ -185,6 +280,8 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   const varsById = new Map(variables.filter(v => v && v.id).map(v => [v.id, v]));
   const allColorNames = colorVars.map(v => v.name);
   const algorithm = options.algorithm === "apca" ? "apca" : "wcag";
+  const semanticFamilies = _clusterSemanticFamilies(semanticVars);
+  const semanticContext = _semanticContextFromConfig(options.existingDs);
 
   // ── Missing-foreground gaps ────────────────────────────────────────────────
   // Any background-family semantic token without a matching foreground in the
@@ -196,6 +293,9 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    const configuredText = semanticContext.pairTextByBg.get(variable.name);
+    if (configuredText && byName.has(configuredText)) continue;
+    if (semanticContext.unpairedTokens.has(variable.name)) continue;
 
     const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
     const companionCandidates = families.map(family => _swapSegment(parts, bgIndex, family).join("/"));
@@ -290,9 +390,12 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
     const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
-    const candidate = families
-      .map(family => _swapSegment(parts, bgIndex, family).join("/"))
-      .find(name => byName.has(name));
+    const configuredText = semanticContext.pairTextByBg.get(variable.name);
+    const candidate = (configuredText && byName.has(configuredText))
+      ? configuredText
+      : families
+        .map(family => _swapSegment(parts, bgIndex, family).join("/"))
+        .find(name => byName.has(name));
     if (!candidate) continue;
     const fgVar = byName.get(candidate);
     const coll = _collectionFor(variable, collections);
@@ -380,6 +483,8 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       .map(family => _swapSegment(parts, bgIndex, family).join("/"))
       .find(name => byName.has(name));
     if (!fgName) continue;
+    const configuredText = semanticContext.pairTextByBg.get(variable.name);
+    if (configuredText && configuredText !== fgName) continue;
     totalCompletePairs += 1;
 
     const missing = [];
@@ -419,7 +524,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     }
   }
   const suppressedRoleNames = new Set(suppressedRoles.map(r => r.role));
-  const companionAdvisories = [];
+  let companionAdvisories = [];
   for (const adv of rawAdvisories) {
     const filtered = adv.missing.filter(m => !suppressedRoleNames.has(m.role));
     if (!filtered.length) continue;
@@ -427,8 +532,97 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   }
   companionAdvisories.sort((a, b) => a.bg.localeCompare(b.bg));
 
+  // ── Semantic-family role gaps ─────────────────────────────────────────────
+  // This is still Figma-first QA: infer whether a semantic family looks
+  // incomplete from the live token neighborhood, not from a saved contract.
+  // It is intentionally read-only and emits confidence/action metadata so the
+  // agent asks before moving into the repair flow.
+  const rolePresence = { foreground: 0, icon: 0, border: 0 };
+  for (const cluster of semanticFamilies) {
+    for (const role of Object.keys(rolePresence)) {
+      if (cluster.roles[role] && cluster.roles[role].length) rolePresence[role] += 1;
+    }
+  }
+  const missingSemanticRoles = [];
+  for (const cluster of semanticFamilies) {
+    const hasBg = cluster.roles.background.length > 0;
+    const hasFg = cluster.roles.foreground.length > 0;
+    const hasIcon = cluster.roles.icon.length > 0;
+    const hasBorder = cluster.roles.border.length > 0;
+    const evidenceCount = _roleEvidence(cluster).length;
+    const example = (cluster.roles.background[0] || cluster.roles.foreground[0] || cluster.roles.icon[0] || cluster.roles.border[0]);
+    const backgroundConfiguredElsewhere = cluster.roles.background.some(name => {
+      const configuredText = semanticContext.pairTextByBg.get(name);
+      return configuredText && byName.has(configuredText);
+    });
+    const backgroundConfiguredInCluster = cluster.roles.background.some(name => {
+      const configuredText = semanticContext.pairTextByBg.get(name);
+      return configuredText && cluster.roles.foreground.indexOf(configuredText) !== -1;
+    });
+    const hasPairContext = semanticContext.pairTextByBg.size > 0;
+    const allBackgroundsUnpaired = hasBg && cluster.roles.background.every(name => semanticContext.unpairedTokens.has(name));
+
+    if (hasBg && !hasFg && !backgroundConfiguredElsewhere && !allBackgroundsUnpaired) {
+      missingSemanticRoles.push(_missingRoleFinding(
+        cluster,
+        "foreground",
+        example,
+        (hasIcon || hasBorder) ? "high" : "medium",
+        "This semantic family has a background role but no foreground/text role in Figma."
+      ));
+    }
+
+    if (!hasBg && hasFg && (hasIcon || hasBorder)) {
+      missingSemanticRoles.push(_missingRoleFinding(
+        cluster,
+        "background",
+        example,
+        "high",
+        "This semantic family has foreground/icon/border roles but no background role in Figma."
+      ));
+    }
+
+    if (rolePresence.icon >= _ADVISORY_SUPPRESS_MIN_PAIRS && hasBg && hasFg && !hasIcon && evidenceCount >= 2 && (!hasPairContext || backgroundConfiguredInCluster)) {
+      missingSemanticRoles.push(_missingRoleFinding(
+        cluster,
+        "icon",
+        example,
+        hasBorder ? "high" : "medium",
+        "This semantic family has background and foreground roles, and this DS uses icon roles elsewhere."
+      ));
+    }
+
+    if (rolePresence.border >= _ADVISORY_SUPPRESS_MIN_PAIRS && hasBg && hasFg && !hasBorder && evidenceCount >= 2 && (!hasPairContext || backgroundConfiguredInCluster)) {
+      missingSemanticRoles.push(_missingRoleFinding(
+        cluster,
+        "border",
+        example,
+        hasIcon ? "high" : "medium",
+        "This semantic family has background and foreground roles, and this DS uses border roles elsewhere."
+      ));
+    }
+  }
+  missingSemanticRoles.sort((a, b) => {
+    const order = { high: 0, medium: 1, low: 2 };
+    return (order[a.confidence] || 9) - (order[b.confidence] || 9)
+      || a.family.localeCompare(b.family)
+      || a.missingRole.localeCompare(b.missingRole);
+  });
+  const reportedRoleByFamily = new Set(missingSemanticRoles.map(gap => `${gap.family}:${gap.missingRole}`));
+  companionAdvisories = companionAdvisories
+    .map((adv) => {
+      const parts = String(adv.bg || "").split("/");
+      const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+      const family = bgIndex >= 0 ? _familyKeyForParts(parts, bgIndex) : "";
+      const missing = adv.missing.filter(m => !reportedRoleByFamily.has(`${family}:${m.role}`));
+      return Object.assign({}, adv, { missing });
+    })
+    .filter(adv => adv.missing.length);
+
   return {
     semanticGaps,
+    semanticFamilies,
+    missingSemanticRoles,
     missingBackgrounds,
     incompleteModes,
     contrastFailures,
@@ -439,8 +633,11 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     counts: {
       semanticVariables: semanticVars.length,
       completePairs: totalCompletePairs,
+      semanticFamilies: semanticFamilies.length,
     },
     summary: {
+      missingSemanticRoleCount: missingSemanticRoles.length,
+      highConfidenceSemanticRoleGapCount: missingSemanticRoles.filter(gap => gap.confidence === "high").length,
       semanticGapCount: semanticGaps.length,
       proposedCount: semanticGaps.filter(gap => gap.status === "proposed").length,
       unresolvedCount: semanticGaps.filter(gap => gap.status === "unresolved").length,
@@ -504,7 +701,7 @@ function handleInspectDsSetupGaps(input = {}) {
     ? "apca"
     : (existingDs && existingDs.color && existingDs.color.contrastAlgorithm === "apca" ? "apca" : "wcag");
 
-  const result = inspectDsSetupGapsFromFigmaData(dataSource.figmaData, { algorithm });
+  const result = inspectDsSetupGapsFromFigmaData(dataSource.figmaData, { algorithm, existingDs });
 
   // Compute per-mode primitive aliases the designer would actually get if they
   // approved a missing-fg repair. Forwarded verbatim by apply_ds_setup_repairs
@@ -588,6 +785,7 @@ function handleInspectDsSetupGaps(input = {}) {
 
 function _composeMessage(s) {
   const parts = [];
+  if (s.missingSemanticRoleCount) parts.push(`${s.missingSemanticRoleCount} semantic-family role gap${s.missingSemanticRoleCount === 1 ? "" : "s"}`);
   if (s.semanticGapCount) parts.push(`${s.semanticGapCount} missing fg companion${s.semanticGapCount === 1 ? "" : "s"}`);
   if (s.missingBackgroundCount) parts.push(`${s.missingBackgroundCount} fg without bg`);
   if (s.incompleteModeCount) parts.push(`${s.incompleteModeCount} token${s.incompleteModeCount === 1 ? "" : "s"} with incomplete modes`);

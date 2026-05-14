@@ -9,6 +9,8 @@ function emptySummary(extra) {
     proposedCount: 0,
     unresolvedCount: 0,
     missingBackgroundCount: 0,
+    missingSemanticRoleCount: 0,
+    highConfidenceSemanticRoleGapCount: 0,
     incompleteModeCount: 0,
     contrastFailureCount: 0,
     brokenAliasCount: 0,
@@ -131,6 +133,16 @@ module.exports = (async () => {
         missingBackgrounds: [
           { kind: "missing-background-for-foreground", fg: "color/on-surface/info", expectedBg: "color/surface/info" },
         ],
+        missingSemanticRoles: [
+          {
+            kind: "missing-semantic-role",
+            family: "success",
+            missingRole: "icon",
+            suggestedName: "color/icon/success",
+            evidence: ["color/bg/success", "color/text/success", "color/border/success"],
+            confidence: "high",
+          },
+        ],
         incompleteModes: [
           { kind: "incomplete-modes", token: "color/surface/warning", collection: "Color", missingModes: ["Dark"] },
         ],
@@ -146,6 +158,7 @@ module.exports = (async () => {
         contrastAlgorithm: "wcag",
         summary: emptySummary({
           semanticGapCount: 2, proposedCount: 1, unresolvedCount: 1,
+          missingSemanticRoleCount: 1, highConfidenceSemanticRoleGapCount: 1,
           missingBackgroundCount: 1, incompleteModeCount: 1, contrastFailureCount: 1,
           brokenAliasCount: 1, companionAdvisoryCount: 1,
         }),
@@ -155,13 +168,14 @@ module.exports = (async () => {
     assert.ok(out.includes('Brand "Primary" step 500'));
 
     // Header summarizes total findings + algorithm
-    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 7 findings (contrast checked with WCAG ratio)"));
+    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 8 findings (contrast checked with WCAG ratio)"));
 
     // Severity ordering: broken aliases first, then contrast, then missing fg/bg, modes, advisories
     const orderTokens = [
       "Broken aliases in the semantic layer:",
       "Contrast failures:",
-      "Missing foregrounds:",
+      "Likely semantic-family gaps:",
+      "Possible naming gaps:",
       "Foregrounds without a background:",
       "Tokens with incomplete modes:",
       "Pairs missing border/icon companions (advisory):",
@@ -174,7 +188,12 @@ module.exports = (async () => {
     }
 
     // Missing-fg framing: no "ready to repair", no "would add", no plannedAliases preview
-    assert.ok(out.includes("Missing foregrounds: 2"));
+    assert.ok(out.includes("Likely semantic-family gaps: 1 (1 high-confidence)"));
+    assert.ok(out.includes('high confidence: "success" is missing icon'));
+    assert.ok(out.includes('possible token: "color/icon/success"'));
+    assert.ok(out.includes("next step: ask the designer before treating this as a repair"));
+
+    assert.ok(out.includes("Possible naming gaps: 2"));
     assert.ok(!/ready to repair/.test(out), "should not say 'ready to repair'");
     assert.ok(!/would add/.test(out), "should not preview the apply step in QA");
     assert.ok(!/upgraded for contrast/.test(out), "should not surface plannedAliases-driven copy");
@@ -202,6 +221,7 @@ module.exports = (async () => {
     // What this means — severity-ordered
     assert.ok(out.includes("URGENT: 1 semantic token references variables that were deleted"));
     assert.ok(out.includes("A11Y: 1 pair fails the contrast threshold") || out.includes("A11Y: 1 pairs fail"));
+    assert.ok(out.includes("1 semantic family looks incomplete (1 high-confidence). Ask before repairing."));
     assert.ok(out.includes("2 backgrounds missing a foreground companion"));
     assert.ok(out.includes("1 foreground (on-*) without a matching background"));
     assert.ok(out.includes("Side note: your local config is out of date in 2 places"));

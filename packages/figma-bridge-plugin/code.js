@@ -5739,7 +5739,8 @@ async function _updateDsPrimitives(payload) {
 async function _applyDsSetupRepairs(payload) {
   var repairs = (payload && Array.isArray(payload.repairs)) ? payload.repairs : [];
   var updates = (payload && Array.isArray(payload.aliasUpdates)) ? payload.aliasUpdates : [];
-  if (!repairs.length && !updates.length) return { error: 'No approved repairs provided.' };
+  var roleRepairs = (payload && Array.isArray(payload.roleRepairs)) ? payload.roleRepairs : [];
+  if (!repairs.length && !updates.length && !roleRepairs.length) return { error: 'No approved repairs provided.' };
 
   var allColls = await figma.variables.getLocalVariableCollectionsAsync();
   var allVars = await figma.variables.getLocalVariablesAsync();
@@ -5760,6 +5761,9 @@ async function _applyDsSetupRepairs(payload) {
   var created = [];
   var skipped = [];
   var unresolved = [];
+  var roleCreated = [];
+  var roleSkipped = [];
+  var roleUnresolved = [];
 
   for (var ri = 0; ri < repairs.length; ri++) {
     var repair = repairs[ri] || {};
@@ -5838,6 +5842,74 @@ async function _applyDsSetupRepairs(payload) {
     }
   }
 
+  // ── roleRepairs: create approved border/icon semantic role variables ─────
+  // This is intentionally separate from missing foreground repairs so agents
+  // cannot smuggle arbitrary roles through the fg-companion path.
+  for (var rri = 0; rri < roleRepairs.length; rri++) {
+    var roleRepair = roleRepairs[rri] || {};
+    var roleName = roleRepair.name || '';
+    var roleKind = roleRepair.role || '';
+    var roleAliases = (roleRepair.aliases && typeof roleRepair.aliases === 'object') ? roleRepair.aliases : {};
+    if (!roleName || !roleKind || !Object.keys(roleAliases).length) {
+      roleUnresolved.push({ name: roleName, role: roleKind, reason: 'roleRepair requires name, role, and aliases.' });
+      continue;
+    }
+    if (byName[roleName]) {
+      roleSkipped.push({ name: roleName, role: roleKind, reason: 'Variable already exists.' });
+      continue;
+    }
+
+    var roleColl = null;
+    for (var rcName in byName) {
+      if (!Object.prototype.hasOwnProperty.call(byName, rcName)) continue;
+      if (rcName.indexOf('color/') !== 0) continue;
+      var possibleColl = collByVarId[byName[rcName].id];
+      if (possibleColl && possibleColl.modes && possibleColl.modes.length) {
+        var hasNamedModes = false;
+        for (var pcm = 0; pcm < possibleColl.modes.length; pcm++) {
+          var pcmName = String(possibleColl.modes[pcm].name || '').toLowerCase();
+          if (pcmName === 'light' || pcmName === 'dark') hasNamedModes = true;
+        }
+        if (!hasNamedModes) continue;
+        roleColl = possibleColl;
+        break;
+      }
+    }
+    if (!roleColl) {
+      roleUnresolved.push({ name: roleName, role: roleKind, reason: 'Color semantic collection not found.' });
+      continue;
+    }
+
+    try {
+      var roleVar = figma.variables.createVariable(roleName, roleColl, 'COLOR');
+      _setVariableScopesForName(roleVar, roleName, 'COLOR');
+      var anyRoleAliasSet = false;
+      var roleModeNames = Object.keys(roleAliases);
+      for (var rmi = 0; rmi < roleModeNames.length; rmi++) {
+        var roleModeName = roleModeNames[rmi];
+        var rolePrimitiveName = roleAliases[roleModeName];
+        if (!rolePrimitiveName) continue;
+        var roleModeMatch = (roleColl.modes || []).find(function (m) {
+          return String(m.name || '').toLowerCase() === String(roleModeName).toLowerCase();
+        });
+        if (!roleModeMatch) continue;
+        var rolePrimVar = byName[rolePrimitiveName];
+        if (!rolePrimVar) continue;
+        roleVar.setValueForMode(roleModeMatch.modeId, { type: 'VARIABLE_ALIAS', id: rolePrimVar.id });
+        anyRoleAliasSet = true;
+      }
+      if (!anyRoleAliasSet) {
+        roleUnresolved.push({ name: roleName, role: roleKind, reason: 'No approved aliases matched collection modes and primitive variables.' });
+        try { roleVar.remove(); } catch (_) {}
+        continue;
+      }
+      byName[roleName] = roleVar;
+      roleCreated.push({ name: roleName, role: roleKind, collection: roleColl.name, aliases: roleAliases });
+    } catch (err) {
+      roleUnresolved.push({ name: roleName, role: roleKind, reason: err.message || 'Create failed.' });
+    }
+  }
+
   // ── aliasUpdates: re-alias an existing semantic var in a specific mode ───
   // Used to fix contrast failures by pointing the fg at a different primitive
   // step on the same ramp. The MCP server picked the new step using the same
@@ -5911,8 +5983,13 @@ async function _applyDsSetupRepairs(payload) {
 
   var msgParts = [];
   msgParts.push(created.length + ' created');
+  if (roleRepairs.length) msgParts.push(roleCreated.length + ' role created');
   msgParts.push(skipped.length + ' skipped');
   msgParts.push(unresolved.length + ' unresolved');
+  if (roleRepairs.length) {
+    if (roleSkipped.length) msgParts.push(roleSkipped.length + ' role skipped');
+    if (roleUnresolved.length) msgParts.push(roleUnresolved.length + ' role unresolved');
+  }
   if (updates.length) {
     msgParts.push(updated.length + ' re-aliased');
     if (updateSkipped.length) msgParts.push(updateSkipped.length + ' re-alias skipped');
@@ -5921,6 +5998,9 @@ async function _applyDsSetupRepairs(payload) {
 
   return {
     created: created,
+    roleCreated: roleCreated,
+    roleSkipped: roleSkipped,
+    roleUnresolved: roleUnresolved,
     skipped: skipped,
     unresolved: unresolved,
     updated: updated,

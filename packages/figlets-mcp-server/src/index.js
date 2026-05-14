@@ -341,6 +341,11 @@ server.tool(
       expectedCurrentAlias: z.string().optional().describe("Optional primitive variable name the token was expected to alias when approved."),
       from: z.string().optional().describe("Legacy alias for expectedCurrentAlias.")
     })).optional().describe("Designer-approved re-alias updates for existing semantic variables, usually copied from contrastFailures[*].plannedReAlias."),
+    roleRepairs: z.array(z.object({
+      name: z.string().describe("Semantic role variable to create, e.g. color/border/info or color/icon/success."),
+      role: z.string().describe("Role type, usually border or icon."),
+      aliases: z.record(z.string()).describe("Per-mode primitive variable names approved by the designer.")
+    })).optional().describe("Designer-approved missing border/icon semantic role variables."),
     config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path to update after Figma succeeds. Defaults to the active file config."),
     update_config: z.boolean().optional().describe("When false, do not update design-system.config.js after applying repairs. Defaults to true."),
     answers: z.object({

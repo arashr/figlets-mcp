@@ -11,7 +11,7 @@ const {
 const applyDsSetupRepairsTool = {
   name: "apply_ds_setup_repairs",
   description:
-    "Apply designer-approved setup changes to Figma. Two repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode (used to fix contrast failures via the same picker the setup flow uses). Updates the file-scoped config only after Figma succeeds.",
+    "Apply designer-approved setup changes to Figma. Repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode; `roleRepairs` creates approved missing border/icon semantic role variables. Updates the file-scoped config only after Figma succeeds.",
   inputSchema: {
     type: "object",
     properties: {
@@ -54,6 +54,27 @@ const applyDsSetupRepairsTool = {
         },
         description: "Designer-approved re-alias updates for existing semantic variables, usually copied from inspect_ds_setup_gaps.contrastFailures[*].plannedReAlias. Each entry replaces one mode's alias on one existing var."
       },
+      roleRepairs: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Semantic role variable to create, e.g. color/border/info or color/icon/success." },
+            role: { type: "string", description: "Role type, usually border or icon." },
+            aliases: {
+              type: "object",
+              description: "Per-mode primitive variable names approved by the designer.",
+              properties: {
+                Light: { type: "string" },
+                Dark: { type: "string" }
+              },
+              additionalProperties: { type: "string" }
+            }
+          },
+          required: ["name", "role", "aliases"]
+        },
+        description: "Designer-approved missing border/icon semantic role variables. Does not run unless the designer explicitly approves these role repairs."
+      },
       config_path: {
         type: "string",
         description: "Optional file-scoped design-system.config.js path to update after Figma succeeds. Defaults to the active file config."
@@ -66,6 +87,17 @@ const applyDsSetupRepairsTool = {
   }
 };
 
+function _cleanAliases(aliases) {
+  const out = {};
+  if (!aliases || typeof aliases !== "object") return out;
+  const keys = Object.keys(aliases);
+  for (let i = 0; i < keys.length; i++) {
+    const v = aliases[keys[i]];
+    if (typeof v === "string" && v) out[keys[i]] = v;
+  }
+  return out;
+}
+
 function _normalizeRepairs(repairs) {
   return (Array.isArray(repairs) ? repairs : []).map(repair => {
     const out = {
@@ -73,17 +105,18 @@ function _normalizeRepairs(repairs) {
       name: repair && (repair.name || repair.recommended) ? String(repair.name || repair.recommended) : "",
       source: repair && repair.source ? String(repair.source) : "",
     };
-    if (repair && repair.aliases && typeof repair.aliases === "object") {
-      const aliases = {};
-      const keys = Object.keys(repair.aliases);
-      for (let i = 0; i < keys.length; i++) {
-        const v = repair.aliases[keys[i]];
-        if (typeof v === "string" && v) aliases[keys[i]] = v;
-      }
-      if (Object.keys(aliases).length) out.aliases = aliases;
-    }
+    const aliases = _cleanAliases(repair && repair.aliases);
+    if (Object.keys(aliases).length) out.aliases = aliases;
     return out;
   }).filter(repair => repair.bg && repair.name && repair.source);
+}
+
+function _normalizeRoleRepairs(repairs) {
+  return (Array.isArray(repairs) ? repairs : []).map(repair => ({
+    name: repair && repair.name ? String(repair.name) : "",
+    role: repair && repair.role ? String(repair.role) : "",
+    aliases: _cleanAliases(repair && repair.aliases),
+  })).filter(repair => repair.name && repair.role && Object.keys(repair.aliases).length);
 }
 
 function _normalizeAliasUpdates(updates) {
@@ -145,11 +178,57 @@ function _updateConfigPairs(configPath, repairs) {
   return { updated: added > 0, added, conflicts };
 }
 
+function _updateConfigRoles(configPath, roleRepairs) {
+  if (!configPath || !fs.existsSync(configPath)) {
+    return { updated: false, reason: "Config path not found." };
+  }
+
+  const guardError = getConfigPathGuardError(configPath);
+  if (guardError) return { updated: false, reason: guardError.error };
+
+  let readDsConfig, writeDsConfig;
+  try {
+    ({ readDsConfig, writeDsConfig } = require("@figlets/core").dsConfig);
+  } catch (e) {
+    ({ readDsConfig, writeDsConfig } = require("../../../figlets-core/src/ds-config/index.js"));
+  }
+
+  let ds;
+  try {
+    ds = readDsConfig(configPath);
+  } catch (err) {
+    return { updated: false, reason: err.message };
+  }
+
+  if (!ds.color) ds.color = {};
+  if (!ds.color.semantics) ds.color.semantics = {};
+  if (!Array.isArray(ds.color.semantics.icons)) ds.color.semantics.icons = [];
+  if (!Array.isArray(ds.color.semantics.unpaired)) ds.color.semantics.unpaired = [];
+
+  let added = 0;
+  for (const repair of roleRepairs) {
+    const row = Object.assign({ token: repair.name }, repair.aliases);
+    if (repair.role === "icon") {
+      if (ds.color.semantics.icons.some(item => item && item.token === repair.name)) continue;
+      ds.color.semantics.icons.push(row);
+      added += 1;
+      continue;
+    }
+    if (ds.color.semantics.unpaired.some(item => item && item.token === repair.name)) continue;
+    ds.color.semantics.unpaired.push(row);
+    added += 1;
+  }
+
+  if (added > 0) writeDsConfig(configPath, ds);
+  return { updated: added > 0, added };
+}
+
 function handleApplyDsSetupRepairs(args = {}) {
   const repairs = _normalizeRepairs(args.repairs);
   const aliasUpdates = _normalizeAliasUpdates(args.aliasUpdates);
-  if (!repairs.length && !aliasUpdates.length) {
-    return Promise.resolve({ error: "Provide at least one approved repair (with recommended/name and source) or one aliasUpdate (token + mode + newAliasTarget)." });
+  const roleRepairs = _normalizeRoleRepairs(args.roleRepairs);
+  if (!repairs.length && !aliasUpdates.length && !roleRepairs.length) {
+    return Promise.resolve({ error: "Provide at least one approved repair (with recommended/name and source), aliasUpdate (token + mode + newAliasTarget), or roleRepair (name + role + aliases)." });
   }
 
   const updateConfig = args.update_config !== false;
@@ -187,6 +266,7 @@ function handleApplyDsSetupRepairs(args = {}) {
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
   const requestBody = { repairs: wirePayload };
   if (aliasUpdates.length) requestBody.aliasUpdates = aliasUpdates;
+  if (roleRepairs.length) requestBody.roleRepairs = roleRepairs;
   const body = JSON.stringify(requestBody);
 
   return new Promise((resolve) => {
@@ -207,14 +287,21 @@ function handleApplyDsSetupRepairs(args = {}) {
           const configUpdate = updateConfig && !result.error
             ? _updateConfigPairs(configPath, repairs.filter(repair => (result.created || []).some(row => row.name === repair.name)))
             : { updated: false, reason: updateConfig ? "Figma repair failed." : "Config update disabled." };
+          const roleConfigUpdate = updateConfig && !result.error
+            ? _updateConfigRoles(configPath, roleRepairs.filter(repair => (result.roleCreated || []).some(row => row.name === repair.name)))
+            : { updated: false, reason: updateConfig ? "Figma repair failed." : "Config update disabled." };
           resolve({
             created: result.created || [],
+            roleCreated: result.roleCreated || [],
+            roleSkipped: result.roleSkipped || [],
+            roleUnresolved: result.roleUnresolved || [],
             skipped: result.skipped || [],
             unresolved: result.unresolved || [],
             updated: result.updated || [],
             updateSkipped: result.updateSkipped || [],
             updateUnresolved: result.updateUnresolved || [],
             configUpdate,
+            roleConfigUpdate,
             message: result.message || "Setup repairs complete.",
             error: result.error,
           });
@@ -259,5 +346,7 @@ module.exports = {
   handleApplyDsSetupRepairs,
   _normalizeRepairs,
   _normalizeAliasUpdates,
+  _normalizeRoleRepairs,
   _updateConfigPairs,
+  _updateConfigRoles,
 };

@@ -22,6 +22,7 @@ Active context for the project so future sessions can recover quickly without re
 
 - `figlets-mcp setup` learned a `claude-code-plugin` target (type `claude-plugin-install`). When the `claude` binary is on `PATH` and the marketplace folder exists, it's added to the default target list and supersedes the legacy `claude-code` target (which would otherwise double-register Figlets).
 - State detection happens at apply-time via `claude plugin marketplace list` + `claude plugin list`, so the apply is idempotent.
+- After install, the target also runs `claude mcp remove --scope <user|project|local> figlets` to drop legacy registrations the plugin supersedes. Verified live: a fresh install + restart now shows only `plugin:figlets:figlets` connected, not the duplicate `figlets` entry that prior `claude mcp add` calls had created.
 - `@figlets/mcp-server`'s `package.json` now declares `keywords`, `files`, `license`, `publishConfig.access`, and a `prepack` script (`scripts/sync-plugins.js`) that copies `<repo-root>/plugins/claude-code/` into the package directory before publish.
 - `_marketplacePath()` in `src/cli/setup.js` resolves monorepo-source first then package-local fallback, so dev edits and npm installs both work.
 - `tests/server/setup-cli.test.js` covers: plugin install fresh, idempotent, missing-`claude` fallback, default supersession, and explicit-`--hosts=claude-code` reachability.

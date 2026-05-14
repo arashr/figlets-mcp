@@ -250,14 +250,25 @@ try {
         if (args[0] === "plugin" && args[1] === "install") {
           return { status: 0, stdout: `Installed ${FIGLETS_PLUGIN_SPEC}\n`, stderr: "" };
         }
+        if (args[0] === "mcp" && args[1] === "remove" && args[3] === "user") {
+          return { status: 0, stdout: "Removed MCP server figlets from user config\n", stderr: "" };
+        }
+        if (args[0] === "mcp" && args[1] === "remove") {
+          return { status: 1, stdout: "", stderr: `No MCP server found with name: figlets\n` };
+        }
         return { status: 0, stdout: "", stderr: "" };
       },
     });
     assert.strictEqual(applied.targets[0].status, "updated");
-    assert.deepStrictEqual(applied.targets[0].steps.map(step => step.step), ["marketplace-add", "plugin-install"]);
+    const stepKinds = applied.targets[0].steps.map(step => step.step);
+    assert.deepStrictEqual(stepKinds, ["marketplace-add", "plugin-install", "mcp-remove-user", "mcp-remove-project", "mcp-remove-local"]);
     assert.strictEqual(applied.targets[0].steps[0].status, "ok");
     assert.strictEqual(applied.targets[0].steps[1].status, "ok");
+    assert.strictEqual(applied.targets[0].steps[2].status, "removed");
+    assert.strictEqual(applied.targets[0].steps[3].status, "absent");
+    assert.strictEqual(applied.targets[0].steps[4].status, "absent");
     assert.ok(applied.targets[0].reason.includes("/figlets:start"));
+    assert.ok(applied.targets[0].reason.includes("legacy figlets MCP entries"));
 
     const sequence = calls.map(call => {
       const head = call.args.slice(0, 2).join(" ");
@@ -268,11 +279,19 @@ try {
       "plugin marketplace add",
       "plugin list",
       "plugin install",
+      "mcp remove",
+      "mcp remove",
+      "mcp remove",
     ]);
     assert.strictEqual(calls[1].args[3], fakeMarketplace);
     assert.deepStrictEqual(calls[1].args.slice(4), ["--scope", "user"]);
     assert.strictEqual(calls[3].args[2], FIGLETS_PLUGIN_SPEC);
     assert.deepStrictEqual(calls[3].args.slice(3), ["--scope", "user"]);
+    assert.deepStrictEqual(calls.slice(4).map(call => call.args), [
+      ["mcp", "remove", "--scope", "user", "figlets"],
+      ["mcp", "remove", "--scope", "project", "figlets"],
+      ["mcp", "remove", "--scope", "local", "figlets"],
+    ]);
   }
 
   // Claude Code plugin install — idempotent when marketplace and plugin already present.
@@ -297,11 +316,17 @@ try {
         if (args[0] === "plugin" && args[1] === "list") {
           return { status: 0, stdout: `Installed plugins:\n  ❯ ${FIGLETS_PLUGIN_SPEC}\n    Status: enabled\n`, stderr: "" };
         }
+        if (args[0] === "mcp" && args[1] === "remove") {
+          return { status: 1, stdout: "", stderr: `No MCP server found with name: figlets\n` };
+        }
         return { status: 0, stdout: "", stderr: "" };
       },
     });
     assert.strictEqual(applied.targets[0].status, "unchanged");
-    assert.ok(applied.targets[0].steps.every(step => step.status === "skipped"));
+    const installSteps = applied.targets[0].steps.filter(step => step.step === "marketplace-add" || step.step === "plugin-install");
+    assert.ok(installSteps.every(step => step.status === "skipped"));
+    const removeSteps = applied.targets[0].steps.filter(step => step.step.startsWith("mcp-remove-"));
+    assert.ok(removeSteps.every(step => step.status === "absent"), "no legacy figlets MCP entries should be removed when nothing to clean up");
     const issuedSubcommands = calls.map(call => call.args.slice(0, 2).join(" "));
     assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin install")), "should not re-run plugin install when already present");
     assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin marketplace add")), "should not re-add marketplace when already present");

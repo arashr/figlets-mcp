@@ -431,13 +431,42 @@ function applyClaudePluginInstall(plan, options) {
     steps.push({ step: "plugin-install", status: "skipped" });
   }
 
-  const everySkipped = steps.every(step => step.status === "skipped");
+  // Auto-clean legacy non-plugin figlets MCP registrations so the plugin's server isn't duplicated.
+  // A user who had previously run `claude mcp add ... figlets` (or the legacy claude-code target)
+  // would otherwise see two figlets entries — the plugin's and the user/project/local one — both
+  // exposing the same tools. The plugin install supersedes those, so we remove them.
+  const legacyScopes = ["user", "project", "local"];
+  for (const scope of legacyScopes) {
+    const removeResult = runner(executable, ["mcp", "remove", "--scope", scope, "figlets"], { encoding: "utf-8" });
+    const removeOutput = removeResult ? String((removeResult.stdout || "") + (removeResult.stderr || "")) : "";
+    const removeStatus = removeResult && typeof removeResult.status === "number" ? removeResult.status : null;
+    const notFound = /no .*mcp server found|no server.*found|not found/i.test(removeOutput);
+    if (removeResult && removeResult.error) {
+      steps.push({ step: `mcp-remove-${scope}`, status: "error", reason: removeResult.error.message });
+      continue;
+    }
+    if (removeStatus === 0 && !notFound) {
+      steps.push({ step: `mcp-remove-${scope}`, status: "removed" });
+    } else {
+      steps.push({ step: `mcp-remove-${scope}`, status: "absent" });
+    }
+  }
+
+  const installSteps = steps.filter(step => step.step === "marketplace-add" || step.step === "plugin-install");
+  const everySkipped = installSteps.every(step => step.status === "skipped");
+  const removedAny = steps.some(step => step.step.startsWith("mcp-remove-") && step.status === "removed");
+  let resultStatus;
+  if (everySkipped && !removedAny) resultStatus = "unchanged";
+  else resultStatus = "updated";
+
   return Object.assign({}, plan, {
-    status: everySkipped ? "unchanged" : "updated",
+    status: resultStatus,
     steps,
-    reason: everySkipped
+    reason: resultStatus === "unchanged"
       ? "Marketplace and plugin already in place. Restart Claude Code if it was running before this changed."
-      : "Marketplace added and Figlets plugin installed. Restart Claude Code, then type /figlets:start (or just describe your design system to trigger the figlets-designer skill).",
+      : everySkipped
+        ? "Plugin already installed; removed legacy figlets MCP entries that the plugin supersedes. Restart Claude Code."
+        : "Marketplace added and Figlets plugin installed" + (removedAny ? " (and legacy figlets MCP entries removed)" : "") + ". Restart Claude Code, then type /figlets:start (or just describe your design system to trigger the figlets-designer skill).",
   });
 }
 

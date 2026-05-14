@@ -18,6 +18,8 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Supersession:** When the `claude` binary is on `PATH` and the marketplace folder is reachable, `figlets-mcp setup` adds a `claude-code-plugin` target and drops the legacy `claude-code` target (`claude mcp add ...`) from the default run via a `supersededBy` marker. This prevents Figlets from being registered twice (once as a user-scope MCP server and once as a plugin-bundled MCP server). The legacy path is still reachable via `--hosts=claude-code` for hosts/versions that do not support plugins.
 
+**Auto-cleanup of pre-plugin installs:** After a successful (or already-applied) plugin install, the target runs `claude mcp remove --scope <user|project|local> figlets` to drop any pre-existing `figlets` MCP registrations that the plugin now supersedes. "No server found" responses are treated as `absent` (silent skip). This was added after live testing showed a fresh install left both `plugin:figlets:figlets` (new) and `figlets` (legacy `claude mcp add`) connected, exposing duplicate tools.
+
 **Distribution:** `@figlets/mcp-server`'s `package.json` declares `files` including `plugins/`, and a `prepack` script (`scripts/sync-plugins.js`) copies `<repo-root>/plugins/claude-code/` into the package directory before publish. `_marketplacePath()` resolves to the monorepo source first (so live edits work during dev) and falls back to the package-local copy (so npm-installed users still resolve a real folder). The package is not yet published to npm; the plugin README documents a local-dev override for the MCP server command that uses an absolute path until `@figlets/mcp-server` is on the registry.
 
 ---

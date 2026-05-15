@@ -8,6 +8,9 @@ const FIGLETS_SERVER = { command: "figlets-mcp" };
 const FIGLETS_PLUGIN_MARKETPLACE_NAME = "figlets-claude-code";
 const FIGLETS_PLUGIN_NAME = "figlets";
 const FIGLETS_PLUGIN_SPEC = `${FIGLETS_PLUGIN_NAME}@${FIGLETS_PLUGIN_MARKETPLACE_NAME}`;
+const FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME = "figlets-codex";
+const FIGLETS_CODEX_PLUGIN_NAME = "figlets";
+const FIGLETS_CODEX_PLUGIN_SPEC = `${FIGLETS_CODEX_PLUGIN_NAME}@${FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME}`;
 // The plugin is distributed from the public GitHub repo. Claude Code reads the marketplace manifest
 // strictly from <repo-root>/.claude-plugin/marketplace.json, so the GitHub shorthand is the repo
 // slug; --sparse limits the monorepo checkout to just the Claude integration paths.
@@ -28,6 +31,17 @@ function _marketplaceSource(options) {
   const env = _env(options);
   if (env && env.FIGLETS_MARKETPLACE_SOURCE) return env.FIGLETS_MARKETPLACE_SOURCE;
   return FIGLETS_PLUGIN_GITHUB_SOURCE;
+}
+
+function _repoRoot() {
+  return path.resolve(__dirname, "../../../..");
+}
+
+function _codexMarketplaceSource(options) {
+  if (options && options.codexMarketplaceSource) return options.codexMarketplaceSource;
+  const env = _env(options);
+  if (env && env.FIGLETS_CODEX_MARKETPLACE_SOURCE) return env.FIGLETS_CODEX_MARKETPLACE_SOURCE;
+  return _repoRoot();
 }
 
 // A marketplace source is either a GitHub shorthand ("owner/repo"), a git/https
@@ -97,6 +111,7 @@ function getKnownTargets(options) {
   const env = _env(options);
   const appData = env.APPDATA || _join(home, "AppData", "Roaming");
   const marketplaceSource = _marketplaceSource(options);
+  const codexMarketplaceSource = _codexMarketplaceSource(options);
 
   const claudeDesktopPath = platform === "win32"
     ? _join(appData, "Claude", "claude_desktop_config.json")
@@ -169,7 +184,23 @@ function getKnownTargets(options) {
       label: "Codex CLI",
       type: "toml-codex",
       path: _join(home, ".codex", "config.toml"),
-      description: "Adds Figlets to Codex CLI config.",
+      server: {
+        command: _nodePath(options),
+        args: [_figletsBinPath(options)],
+      },
+      supersededBy: "codex-plugin",
+      description: "Legacy: adds Figlets as a raw Codex MCP server entry using the current Node executable and local Figlets bin. Superseded by the Codex plugin target when the plugin marketplace source is available.",
+    },
+    {
+      id: "codex-plugin",
+      label: "Codex plugin",
+      type: "codex-plugin-install",
+      path: _join(home, ".codex", "config.toml"),
+      marketplaceName: FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME,
+      marketplaceSource: codexMarketplaceSource,
+      pluginName: FIGLETS_CODEX_PLUGIN_NAME,
+      pluginSpec: FIGLETS_CODEX_PLUGIN_SPEC,
+      description: "Enables the Figlets Codex plugin (designer skill + MCP server config) by registering this repo as a local Codex plugin marketplace.",
     },
     {
       id: "claude-code",
@@ -241,12 +272,91 @@ function planJsonPatch(target) {
 
 function planTomlPatch(target) {
   const text = _readTextIfExists(target.path) || "";
-  const hasFiglets = /\[\[mcp_servers\]\][\s\S]*?name\s*=\s*["']figlets["']/.test(text);
-  const hasCommand = /command\s*=\s*["']figlets-mcp["']/.test(text);
+  const figletsBlock = _tomlTableBlock(text, "\\[mcp_servers\\.figlets");
+  const server = target.server || FIGLETS_SERVER;
+  const expectedArgs = server.args || [];
+  const hasCommand = figletsBlock && figletsBlock.indexOf(`command = ${_tomlString(server.command)}`) !== -1;
+  const hasArgs = expectedArgs.length
+    ? figletsBlock && figletsBlock.indexOf(`args = ${_tomlArray(expectedArgs)}`) !== -1
+    : true;
   return Object.assign({}, target, {
     exists: fs.existsSync(target.path),
-    status: hasFiglets && hasCommand ? "unchanged" : "would-update",
-    block: '[[mcp_servers]]\nname = "figlets"\ncommand = "figlets-mcp"\n',
+    status: hasCommand && hasArgs ? "unchanged" : "would-update",
+    server,
+    block: _codexMcpServerBlock(server),
+  });
+}
+
+function _tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function _tomlArray(values) {
+  return "[" + values.map(_tomlString).join(", ") + "]";
+}
+
+function _codexMcpServerBlock(server) {
+  const lines = [
+    "[mcp_servers.figlets]",
+    `command = ${_tomlString(server.command)}`,
+  ];
+  if (server.args && server.args.length) {
+    lines.push(`args = ${_tomlArray(server.args)}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+function _tomlTableBlock(text, headerPattern) {
+  const re = new RegExp("(^|\\n)(" + headerPattern + "\\][\\s\\S]*?)(?=\\n\\[|$)");
+  const match = String(text || "").match(re);
+  return match ? match[2] : null;
+}
+
+function _withoutTomlTableBlock(text, headerPattern) {
+  const re = new RegExp("(^|\\n)" + headerPattern + "\\][\\s\\S]*?(?=\\n\\[|$)", "g");
+  return String(text || "").replace(re, (match, prefix) => prefix || "").replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "");
+}
+
+function _withoutFigletsMcpArrayBlocks(text) {
+  return String(text || "").replace(/(^|\n)(\[\[mcp_servers\]\][\s\S]*?)(?=\n\[|$)/g, (match, prefix, block) => {
+    if (/name\s*=\s*["']figlets["']/.test(block)) return prefix || "";
+    return match;
+  }).replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "");
+}
+
+function _codexPluginBlock(target) {
+  return [
+    `[marketplaces.${target.marketplaceName}]`,
+    `source_type = "local"`,
+    `source = ${_tomlString(target.marketplaceSource)}`,
+    "",
+    `[plugins.${_tomlString(target.pluginSpec)}]`,
+    "enabled = true",
+    "",
+  ].join("\n");
+}
+
+function planCodexPluginPatch(target) {
+  if (!fs.existsSync(path.join(target.marketplaceSource, ".agents", "plugins", "marketplace.json"))) {
+    return Object.assign({}, target, {
+      exists: fs.existsSync(target.path),
+      status: "manual",
+      reason: `Local Codex marketplace source ${target.marketplaceSource} has no .agents/plugins/marketplace.json. Run setup from the figlets-mcp repo checkout, or set FIGLETS_CODEX_MARKETPLACE_SOURCE to that checkout.`,
+    });
+  }
+
+  const text = _readTextIfExists(target.path) || "";
+  const marketplaceBlock = _tomlTableBlock(text, `\\[marketplaces\\.${target.marketplaceName}`);
+  const pluginBlock = _tomlTableBlock(text, `\\[plugins\\.${_tomlString(target.pluginSpec).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  const marketplaceOk = marketplaceBlock
+    && /source_type\s*=\s*["']local["']/.test(marketplaceBlock)
+    && marketplaceBlock.indexOf(`source = ${_tomlString(target.marketplaceSource)}`) !== -1;
+  const pluginOk = pluginBlock && /enabled\s*=\s*true/.test(pluginBlock);
+
+  return Object.assign({}, target, {
+    exists: fs.existsSync(target.path),
+    status: marketplaceOk && pluginOk ? "unchanged" : "would-update",
+    block: _codexPluginBlock(target),
   });
 }
 
@@ -331,21 +441,22 @@ function getSetupPlan(options) {
   const planned = filteredTargets.map(target => {
     if (target.type === "json-mcpServers" || target.type === "json-servers") return planJsonPatch(target);
     if (target.type === "toml-codex") return planTomlPatch(target);
+    if (target.type === "codex-plugin-install") return planCodexPluginPatch(target);
     if (target.type === "native-command") return planNativeCommand(target, options);
     if (target.type === "claude-plugin-install") return planClaudePluginInstall(target, options);
     return Object.assign({}, target, { status: "manual" });
   });
 
   // Supersession applies only to the default run (no explicit --hosts). A target is dropped only
-  // when its superseder is actually viable in this environment (would-run or unchanged) — otherwise
-  // we keep the legacy target so the user still sees an actionable fallback.
+  // when its superseder is actually viable in this environment (would-run/would-update/unchanged)
+  // — otherwise we keep the legacy target so the user still sees an actionable fallback.
   const targets = selected
     ? planned
     : planned.filter(target => {
         if (!target.supersededBy) return true;
         const superseder = planned.find(item => item.id === target.supersededBy);
         if (!superseder) return true;
-        return !(superseder.status === "would-run" || superseder.status === "unchanged");
+        return !(superseder.status === "would-run" || superseder.status === "would-update" || superseder.status === "unchanged");
       });
 
   return {
@@ -366,8 +477,18 @@ function _backupPath(filePath) {
   return filePath + "." + stamp + ".bak";
 }
 
+function _mkdirp(dirPath) {
+  if (!dirPath || fs.existsSync(dirPath)) return;
+  _mkdirp(path.dirname(dirPath));
+  try {
+    fs.mkdirSync(dirPath);
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+  }
+}
+
 function _writeWithBackup(filePath, text) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  _mkdirp(path.dirname(filePath));
   let backup = null;
   if (fs.existsSync(filePath)) {
     backup = _backupPath(filePath);
@@ -387,10 +508,25 @@ function applyJsonPatch(plan) {
 }
 
 function applyTomlPatch(plan) {
-  const current = _readTextIfExists(plan.path) || "";
+  let current = _readTextIfExists(plan.path) || "";
+  current = _withoutTomlTableBlock(current, "\\[mcp_servers\\.figlets");
+  current = _withoutFigletsMcpArrayBlocks(current);
   const separator = current && !/\n$/.test(current) ? "\n\n" : current ? "\n" : "";
   const backup = _writeWithBackup(plan.path, current + separator + plan.block);
   return Object.assign({}, plan, { status: "updated", backup });
+}
+
+function applyCodexPluginPatch(plan) {
+  const current = _readTextIfExists(plan.path) || "";
+  let next = _withoutTomlTableBlock(current, `\\[marketplaces\\.${plan.marketplaceName}`);
+  next = _withoutTomlTableBlock(next, `\\[plugins\\.${_tomlString(plan.pluginSpec).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  const separator = next && !/\n$/.test(next) ? "\n\n" : next ? "\n" : "";
+  const backup = _writeWithBackup(plan.path, next + separator + plan.block);
+  return Object.assign({}, plan, {
+    status: "updated",
+    backup,
+    reason: "Registered the local Figlets Codex plugin marketplace and enabled figlets@figlets-codex. Restart Codex, then ask for help with your Figma design system.",
+  });
 }
 
 function applyNativeCommand(plan, options) {
@@ -627,6 +763,8 @@ function applySetupPlan(plan, options) {
       results.push(applyJsonPatch(target));
     } else if (target.type === "toml-codex") {
       results.push(applyTomlPatch(target));
+    } else if (target.type === "codex-plugin-install") {
+      results.push(applyCodexPluginPatch(target));
     } else if (target.type === "native-command") {
       results.push(applyNativeCommand(target, options));
     } else if (target.type === "claude-plugin-install") {
@@ -667,6 +805,15 @@ function formatSetupPlan(plan, applied) {
       if (target.steps && target.steps.length) {
         lines.push(`  Steps: ${target.steps.map(step => `${step.step}=${step.status}`).join(", ")}`);
       }
+      if (target.reason) lines.push(`  Reason: ${target.reason}`);
+      continue;
+    }
+    if (target.type === "codex-plugin-install") {
+      lines.push(`- ${target.label}: ${target.status}`);
+      lines.push(`  File: ${target.path}`);
+      lines.push(`  Marketplace: ${target.marketplaceName} (${target.marketplaceSource})`);
+      lines.push(`  Plugin: ${target.pluginSpec}`);
+      if (target.backup) lines.push(`  Backup: ${target.backup}`);
       if (target.reason) lines.push(`  Reason: ${target.reason}`);
       continue;
     }
@@ -731,6 +878,9 @@ module.exports = {
   FIGLETS_PLUGIN_SPEC,
   FIGLETS_PLUGIN_GITHUB_SOURCE,
   FIGLETS_PLUGIN_SPARSE_PATHS,
+  FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME,
+  FIGLETS_CODEX_PLUGIN_NAME,
+  FIGLETS_CODEX_PLUGIN_SPEC,
   getKnownTargets,
   getSetupPlan,
   applySetupPlan,

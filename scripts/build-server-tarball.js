@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Builds a SELF-CONTAINED @figlets/mcp-server tarball and prints how to attach
-// it to a GitHub release. The Claude Code plugin manifest points at that release
-// asset via `npx -y <tarball-url>`, so no npm publish / npm account is needed.
+// it to a GitHub release. Host plugins point at that release asset via
+// `npx -y <tarball-url>`, so no npm publish / npm account is needed.
 //
 // The server depends on the private workspace package @figlets/core, which is
 // not published. We stage a copy of the server plus a vendored node_modules/
@@ -70,13 +70,20 @@ try {
 
   const result = childProcess.spawnSync(
     "npm",
-    ["pack", "--pack-destination", DIST_DIR],
+    ["pack"],
     { cwd: stagingPkgDir, encoding: "utf-8" }
   );
   if (result.status !== 0) {
     process.stderr.write((result.stderr || result.stdout || "npm pack failed") + "\n");
     process.exit(result.status || 1);
   }
+  const packedName = (result.stdout || "").trim().split(/\s+/).pop();
+  const packedPath = path.join(stagingPkgDir, packedName || "");
+  if (!packedName || !fs.existsSync(packedPath)) {
+    process.stderr.write(`npm pack did not produce the expected tarball (stdout: ${result.stdout || ""}).\n`);
+    process.exit(1);
+  }
+  fs.copyFileSync(packedPath, path.join(DIST_DIR, tarballName));
 } finally {
   fs.rmSync(stagingRoot, { recursive: true, force: true });
 }
@@ -100,25 +107,54 @@ if (!hasCore || !hasServer) {
   process.exit(1);
 }
 
-const manifestPath = path.join(REPO_ROOT, "plugins", "claude-code", "figlets", ".claude-plugin", "plugin.json");
-const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-const manifestUrl = manifest.mcpServers && manifest.mcpServers.figlets && manifest.mcpServers.figlets.args
-  ? manifest.mcpServers.figlets.args[manifest.mcpServers.figlets.args.length - 1]
-  : "(unset)";
 const expectedUrl = `https://github.com/arashr/figlets-mcp/releases/download/${tag}/${tarballName}`;
+const hostManifests = [
+  {
+    label: "Claude Code plugin",
+    path: path.join(REPO_ROOT, "plugins", "claude-code", "figlets", ".claude-plugin", "plugin.json"),
+    getUrl: manifest => manifest.mcpServers && manifest.mcpServers.figlets && manifest.mcpServers.figlets.args
+      ? manifest.mcpServers.figlets.args[manifest.mcpServers.figlets.args.length - 1]
+      : "(unset)",
+  },
+  {
+    label: "Codex plugin",
+    path: path.join(REPO_ROOT, "plugins", "codex", "figlets", ".codex-plugin", "plugin.json"),
+    getUrl: () => {
+      const mcpPath = path.join(REPO_ROOT, "plugins", "codex", "figlets", ".mcp.json");
+      const mcp = JSON.parse(fs.readFileSync(mcpPath, "utf-8"));
+      return mcp.mcpServers && mcp.mcpServers.figlets && mcp.mcpServers.figlets.args
+        ? mcp.mcpServers.figlets.args[mcp.mcpServers.figlets.args.length - 1]
+        : "(unset)";
+    },
+  },
+];
 
-// Claude Code keys its plugin cache on plugin.json "version". A release that
-// does not bump it will NOT reach already-installed users no matter what
-// `claude plugin marketplace update` / `plugin update` does. So the plugin
-// version must track the server version on every release.
-const manifestVersion = manifest.version;
-const versionMatches = manifestVersion === version;
-const urlMatches = manifestUrl === expectedUrl;
-if (!versionMatches || !urlMatches) {
+// Host plugins cache/update by plugin manifest version. Keep every host wrapper
+// in lockstep with the server release and tarball URL.
+const manifestChecks = hostManifests.map(item => {
+  const manifest = JSON.parse(fs.readFileSync(item.path, "utf-8"));
+  const manifestUrl = item.getUrl(manifest);
+  return {
+    label: item.label,
+    path: path.relative(REPO_ROOT, item.path),
+    version: manifest.version,
+    url: manifestUrl,
+    versionMatches: manifest.version === version,
+    urlMatches: manifestUrl === expectedUrl,
+  };
+});
+const failedChecks = manifestChecks.filter(item => !item.versionMatches || !item.urlMatches);
+if (failedChecks.length) {
+  const details = failedChecks.map(item => {
+    return [
+      `  - ${item.label} (${item.path})`,
+      item.versionMatches ? null : `    "version" is ${JSON.stringify(item.version)}, expected ${JSON.stringify(version)} (plugin cache key; unchanged = installed users get no update)`,
+      item.urlMatches ? null : `    MCP server URL is ${item.url}, expected ${expectedUrl}`,
+    ].filter(Boolean).join("\n");
+  }).join("\n");
   process.stderr.write(
-    "\nRelease pre-flight FAILED — update plugins/claude-code/figlets/.claude-plugin/plugin.json:\n" +
-    (versionMatches ? "" : `  - "version" is ${JSON.stringify(manifestVersion)}, expected ${JSON.stringify(version)} (it is the plugin cache key; unchanged = installed users get no update)\n`) +
-    (urlMatches ? "" : `  - mcpServers.figlets URL is ${manifestUrl}, expected ${expectedUrl}\n`) +
+    "\nRelease pre-flight FAILED — update host plugin manifests:\n" +
+    details + "\n" +
     "The tarball was still built at dist/, but do NOT cut the release until plugin.json matches.\n"
   );
   process.exit(2);
@@ -138,7 +174,8 @@ process.stdout.write([
   `     (or upload dist/${tarballName} via the GitHub Releases web UI for tag ${tag}.)`,
   "",
   "Manifest pre-flight: OK",
-  `  plugin.json version: ${manifestVersion} (matches server)`,
-  `  plugin.json server URL: ${manifestUrl}`,
+].concat(manifestChecks.map(item => {
+  return `  ${item.label}: ${item.version} -> ${item.url}`;
+})).concat([
   "",
-].join("\n"));
+]).join("\n"));

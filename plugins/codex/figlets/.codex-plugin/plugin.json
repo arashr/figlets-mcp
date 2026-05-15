@@ -1,0 +1,39 @@
+{
+  "name": "figlets",
+  "version": "0.1.0",
+  "description": "Figlets MCP toolkit for designer-driven Figma design-system workflows. Registers the Figlets MCP server and adds a curated designer entrypoint for Codex.",
+  "author": {
+    "name": "Figlets"
+  },
+  "homepage": "https://github.com/arashr/figlets-mcp",
+  "repository": "https://github.com/arashr/figlets-mcp",
+  "license": "MIT",
+  "keywords": [
+    "figma",
+    "design-system",
+    "mcp",
+    "figlets"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Figlets",
+    "shortDescription": "Designer workflows for Figma design systems",
+    "longDescription": "Figlets lets designers talk naturally to Codex while deterministic MCP tools handle design-system setup, QA, token math, contrast checks, semantic gap detection, component documentation, DESIGN.md export, and approved Figma fixes.",
+    "developerName": "Figlets",
+    "category": "Design",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/arashr/figlets-mcp",
+    "defaultPrompt": [
+      "Help me with my Figma design system",
+      "Check my design system",
+      "Export DESIGN.md"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

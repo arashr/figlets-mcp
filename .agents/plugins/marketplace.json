@@ -1,0 +1,20 @@
+{
+  "name": "figlets-codex",
+  "interface": {
+    "displayName": "Figlets"
+  },
+  "plugins": [
+    {
+      "name": "figlets",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex/figlets"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Design"
+    }
+  ]
+}

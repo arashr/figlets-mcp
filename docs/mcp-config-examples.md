@@ -140,12 +140,32 @@ File: `.vscode/mcp.json` in your project root:
 
 ## Codex CLI (OpenAI)
 
-File: `~/.codex/config.toml` (global) or `.codex/config.toml` (project):
+### Codex plugin (recommended local-marketplace path)
+
+For Codex, the recommended Figlets path is the Codex plugin package. It registers the Figlets MCP server through the plugin's `.mcp.json` and ships the `figlets-designer` skill so designer phrases route into the Figlets-curated capability menu:
+
+```bash
+figlets-mcp setup --hosts=codex-plugin --yes
+```
+
+Setup registers this repo checkout as a local `figlets-codex` marketplace in `~/.codex/config.toml` and enables `figlets@figlets-codex`. Restart Codex afterwards, then ask: `Help me with my Figma design system using Figlets.`
+
+Codex has a local plugin manifest/marketplace convention (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, `skills/`, and `.mcp.json`), but this repo does not assume a public Codex marketplace install command equivalent to Claude Code's `plugin marketplace add owner/repo`. If Codex adds one later, Figlets should move setup to that path while preserving the same designer contract.
+
+### Codex raw MCP fallback
+
+For local development, prefer setup so Codex does not depend on a shell-only NVM/Homebrew PATH:
+
+```bash
+figlets-mcp setup --hosts=codex --yes
+```
+
+Setup writes the current Node executable plus the local Figlets server bin. The resulting `~/.codex/config.toml` looks like:
 
 ```toml
-[[mcp_servers]]
-name = "figlets"
-command = "figlets-mcp"
+[mcp_servers.figlets]
+command = "/absolute/path/to/node"
+args = ["/absolute/path/to/figlets-mcp/packages/figlets-mcp-server/bin/figlets-mcp.js"]
 ```
 
 Or in JSON format if your version of Codex uses `config.json`:

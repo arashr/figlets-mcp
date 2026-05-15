@@ -4,6 +4,46 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-15 — Codex plugin-style package added]
+
+**Active branch:** `codex/claude-code-plugin-package`.
+
+**Status:** Codex now has a parallel plugin-style package under `plugins/codex/figlets/`, plus a repo-root Codex marketplace manifest at `.agents/plugins/marketplace.json`. This is intentionally separate from the Claude Code package and reuses the same Agent Interface contract (`figlets_start` → `designerResponse` → `figlets_route_intent` → `figlets_workflow_guide`).
+
+**Codex distribution model:** The current Codex environment supports local plugin manifests (`.codex-plugin/plugin.json`), local marketplace metadata (`.agents/plugins/marketplace.json`), plugin `skills/`, and plugin `.mcp.json`. No public Codex marketplace install command equivalent to Claude Code's `claude plugin marketplace add owner/repo` was verified, so do not invent one. The reliable setup path is:
+
+```
+figlets-mcp setup --hosts=codex-plugin --yes
+# restart Codex
+# ask: Help me with my Figma design system using Figlets.
+```
+
+Setup registers the repo checkout as local marketplace `figlets-codex` in `~/.codex/config.toml` and enables `figlets@figlets-codex`. It repairs source drift and disabled plugin entries while preserving unrelated Codex config. The raw `codex` MCP target remains as an explicit legacy fallback and is superseded by `codex-plugin` in default setup when the local marketplace is available.
+
+**Raw Codex fallback correction:** A live local test showed Codex rejects the old documented/setup form `[[mcp_servers]]` with `invalid type: sequence, expected a map in mcp_servers`. The raw `--hosts=codex` fallback now writes `[mcp_servers.figlets]` and repairs the bad sequence form while preserving unrelated config. A follow-up live test still showed `figlets_start` missing because `command = "figlets-mcp"` depended on a shell-only NVM PATH. The fallback now writes the current Node executable plus the local `packages/figlets-mcp-server/bin/figlets-mcp.js` path, matching the Claude Code local reliability fix. If a user already hit either issue, restore the generated backup or rerun the fixed setup.
+
+**MCP tools/list crash fixed:** Another live Codex retry still did not expose `figlets_start`. Direct JSON-RPC smoke test against the exact configured command proved the process started but `tools/list` failed with `Cannot read properties of undefined (reading '_zod')`. Root cause was Zod 4 record schema syntax in `packages/figlets-mcp-server/src/index.js`: `z.record(z.string())` leaves the value schema undefined. Fixed by using `z.record(z.string(), z.string())`, adding `zod` as a direct server dependency, and adding `tests/server/mcp-tools-list.test.js` to start the stdio server and assert the Agent Interface tools are listable. After this fix, direct smoke output includes `figlets_start`.
+
+**Files added/changed:**
+
+- `.agents/plugins/marketplace.json`
+- `plugins/codex/README.md`
+- `plugins/codex/figlets/.codex-plugin/plugin.json`
+- `plugins/codex/figlets/.mcp.json`
+- `plugins/codex/figlets/commands/start.md`
+- `plugins/codex/figlets/skills/figlets-designer/SKILL.md`
+- `plugins/codex/figlets/README.md`
+- `packages/figlets-mcp-server/src/cli/setup.js` (`codex-plugin` target)
+- `scripts/build-server-tarball.js` (release pre-flight checks Claude + Codex plugin versions/URLs)
+- `tests/plugins/codex-plugin.test.js`
+- `tests/server/setup-cli.test.js`
+- `docs/mcp-config-examples.md`
+- `DECISIONS.md`
+
+**Release rule:** The Codex plugin `.codex-plugin/plugin.json` version and `.mcp.json` tarball URL must move in lockstep with `packages/figlets-mcp-server/package.json`, exactly like the Claude plugin. `npm run build:server-tarball` enforces both host wrappers.
+
+---
+
 ### [2026-05-14 — Claude Code plugin packaging branch open]
 
 **Active branch:** `codex/claude-code-plugin-package`.

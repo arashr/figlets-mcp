@@ -6,6 +6,8 @@ const path = require("path");
 const {
   FIGLETS_PLUGIN_MARKETPLACE_NAME,
   FIGLETS_PLUGIN_SPEC,
+  FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME,
+  FIGLETS_CODEX_PLUGIN_SPEC,
   getSetupPlan,
   applySetupPlan,
   formatSetupPlan,
@@ -17,10 +19,23 @@ const cwd = path.join(TEMP_DIR, "project");
 const bin = path.join(TEMP_DIR, "bin");
 const fakeNode = path.join(bin, "node");
 const fakeFigletsBin = path.join(TEMP_DIR, "repo", "packages", "figlets-mcp-server", "bin", "figlets-mcp.js");
-fs.mkdirSync(home, { recursive: true });
-fs.mkdirSync(cwd, { recursive: true });
-fs.mkdirSync(bin, { recursive: true });
-fs.mkdirSync(path.dirname(fakeFigletsBin), { recursive: true });
+const codexMarketplaceSource = path.join(TEMP_DIR, "repo");
+mkdirp(home);
+mkdirp(cwd);
+mkdirp(bin);
+mkdirp(path.dirname(fakeFigletsBin));
+mkdirp(path.join(codexMarketplaceSource, ".agents", "plugins"));
+fs.writeFileSync(path.join(codexMarketplaceSource, ".agents", "plugins", "marketplace.json"), JSON.stringify({ name: "figlets-codex", plugins: [] }));
+
+function mkdirp(dirPath) {
+  if (fs.existsSync(dirPath)) return;
+  mkdirp(path.dirname(dirPath));
+  try {
+    fs.mkdirSync(dirPath);
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+  }
+}
 
 try {
   {
@@ -33,10 +48,12 @@ try {
       env: { PATH: "" },
       nodePath: fakeNode,
       figletsBinPath: fakeFigletsBin,
+      codexMarketplaceSource,
     });
     assert.strictEqual(plan.command, "figlets-mcp");
     assert.ok(plan.targets.some(target => target.id === "claude-desktop"));
-    assert.ok(plan.targets.some(target => target.id === "codex"));
+    assert.ok(plan.targets.some(target => target.id === "codex-plugin"));
+    assert.ok(!plan.targets.some(target => target.id === "codex"), "default plan should prefer the Codex plugin when its local marketplace is available");
     assert.ok(plan.targets.some(target => target.id === "claude-code" && target.status === "manual"));
     // The plugin target is always present so explicit --hosts=claude-code-plugin always returns an
     // actionable plan; when claude is not on PATH it reports manual with a clear next step.
@@ -146,7 +163,7 @@ try {
 
   {
     const cursorPath = path.join(home, ".cursor", "mcp.json");
-    fs.mkdirSync(path.dirname(cursorPath), { recursive: true });
+    mkdirp(path.dirname(cursorPath));
     fs.writeFileSync(cursorPath, JSON.stringify({ mcpServers: { other: { command: "other-server" } } }, null, 2));
 
     const plan = getSetupPlan({ homeDir: home, cwd, platform: "darwin", hosts: ["cursor"] });
@@ -165,12 +182,138 @@ try {
 
   {
     const codexPath = path.join(home, ".codex", "config.toml");
-    const plan = getSetupPlan({ homeDir: home, cwd, platform: "darwin", hosts: ["codex"] });
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["codex"],
+      nodePath: fakeNode,
+      figletsBinPath: fakeFigletsBin,
+    });
     const applied = applySetupPlan(plan);
     assert.strictEqual(applied.targets[0].status, "updated");
     const text = fs.readFileSync(codexPath, "utf-8");
-    assert.ok(text.includes('name = "figlets"'));
-    assert.ok(text.includes('command = "figlets-mcp"'));
+    assert.ok(text.includes("[mcp_servers.figlets]"));
+    assert.ok(text.includes(`command = "${fakeNode}"`));
+    assert.ok(text.includes(`args = ["${fakeFigletsBin}"]`));
+
+    const idempotent = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["codex"],
+      nodePath: fakeNode,
+      figletsBinPath: fakeFigletsBin,
+    });
+    assert.strictEqual(idempotent.targets[0].status, "unchanged");
+  }
+
+  {
+    const codexPath = path.join(home, ".codex", "config.toml");
+    fs.writeFileSync(codexPath, [
+      "[projects.\"/tmp/example\"]",
+      "trust_level = \"trusted\"",
+      "",
+      "[[mcp_servers]]",
+      "name = \"figlets\"",
+      "command = \"figlets-mcp\"",
+      "",
+    ].join("\n"));
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["codex"],
+      nodePath: fakeNode,
+      figletsBinPath: fakeFigletsBin,
+    });
+    assert.strictEqual(plan.targets[0].status, "would-update", "legacy Codex mcp_servers array form should be repaired");
+    const applied = applySetupPlan(plan);
+    assert.strictEqual(applied.targets[0].status, "updated");
+    const text = fs.readFileSync(codexPath, "utf-8");
+    assert.ok(text.includes("[projects.\"/tmp/example\"]"), "unrelated Codex config should be preserved");
+    assert.ok(!text.includes("[[mcp_servers]]"), "invalid sequence-style Codex MCP config should be removed");
+    assert.ok(text.includes("[mcp_servers.figlets]"), "Codex MCP config should be written as a map table");
+    assert.ok(text.includes(`command = "${fakeNode}"`));
+    assert.ok(text.includes(`args = ["${fakeFigletsBin}"]`));
+  }
+
+  {
+    const codexPath = path.join(home, ".codex", "config.toml");
+    if (fs.existsSync(codexPath)) fs.unlinkSync(codexPath);
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["codex-plugin"],
+      codexMarketplaceSource,
+    });
+    assert.strictEqual(plan.targets[0].id, "codex-plugin");
+    assert.strictEqual(plan.targets[0].status, "would-update");
+    assert.strictEqual(plan.targets[0].marketplaceName, FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME);
+    assert.strictEqual(plan.targets[0].pluginSpec, FIGLETS_CODEX_PLUGIN_SPEC);
+
+    const applied = applySetupPlan(plan);
+    assert.strictEqual(applied.targets[0].status, "updated");
+    const text = fs.readFileSync(codexPath, "utf-8");
+    assert.ok(text.includes(`[marketplaces.${FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME}]`));
+    assert.ok(text.includes(`source = "${codexMarketplaceSource.replace(/\\/g, "\\\\")}"`));
+    assert.ok(text.includes(`[plugins."${FIGLETS_CODEX_PLUGIN_SPEC}"]`));
+    assert.ok(text.includes("enabled = true"));
+
+    const idempotent = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["codex-plugin"],
+      codexMarketplaceSource,
+    });
+    assert.strictEqual(idempotent.targets[0].status, "unchanged");
+  }
+
+  {
+    const codexPath = path.join(home, ".codex", "config.toml");
+    mkdirp(path.dirname(codexPath));
+    fs.writeFileSync(codexPath, [
+      "[projects.\"/tmp/example\"]",
+      "trust_level = \"trusted\"",
+      "",
+      `[marketplaces.${FIGLETS_CODEX_PLUGIN_MARKETPLACE_NAME}]`,
+      "source_type = \"local\"",
+      "source = \"/old/figlets-mcp\"",
+      "",
+      `[plugins."${FIGLETS_CODEX_PLUGIN_SPEC}"]`,
+      "enabled = false",
+      "",
+    ].join("\n"));
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["codex-plugin"],
+      codexMarketplaceSource,
+    });
+    assert.strictEqual(plan.targets[0].status, "would-update", "source drift or disabled plugin should be repaired");
+    const applied = applySetupPlan(plan);
+    assert.strictEqual(applied.targets[0].status, "updated");
+    const text = fs.readFileSync(codexPath, "utf-8");
+    assert.ok(text.includes("[projects.\"/tmp/example\"]"), "unrelated Codex config should be preserved");
+    assert.ok(!text.includes("/old/figlets-mcp"), "stale marketplace source should be removed");
+    assert.ok(text.includes(`source = "${codexMarketplaceSource.replace(/\\/g, "\\\\")}"`), "marketplace source should be updated");
+    assert.ok(text.includes("enabled = true"), "plugin should be enabled");
+  }
+
+  {
+    const missingSource = path.join(TEMP_DIR, "missing-codex-marketplace");
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["codex-plugin"],
+      codexMarketplaceSource: missingSource,
+    });
+    assert.strictEqual(plan.targets[0].status, "manual");
+    assert.ok(/no .agents\/plugins\/marketplace\.json/i.test(plan.targets[0].reason));
   }
 
   {
@@ -237,7 +380,7 @@ try {
   // A local-path source override that lacks .claude-plugin/marketplace.json is manual with a clear reason.
   {
     const badLocalSource = path.join(TEMP_DIR, "bad-local-source");
-    fs.mkdirSync(badLocalSource, { recursive: true });
+    mkdirp(badLocalSource);
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
@@ -254,7 +397,7 @@ try {
   // A local-path source override WITH .claude-plugin/marketplace.json is would-run and uses no --sparse.
   {
     const goodLocalSource = path.join(TEMP_DIR, "good-local-source");
-    fs.mkdirSync(path.join(goodLocalSource, ".claude-plugin"), { recursive: true });
+    mkdirp(path.join(goodLocalSource, ".claude-plugin"));
     fs.writeFileSync(path.join(goodLocalSource, ".claude-plugin", "marketplace.json"), "{}");
     const plan = getSetupPlan({
       homeDir: home,
@@ -286,7 +429,7 @@ try {
   // P3: a local source containing spaces must be shell-quoted in the displayed command.
   {
     const spaced = path.join(TEMP_DIR, "dir with spaces", "figlets-mcp");
-    fs.mkdirSync(path.join(spaced, ".claude-plugin"), { recursive: true });
+    mkdirp(path.join(spaced, ".claude-plugin"));
     fs.writeFileSync(path.join(spaced, ".claude-plugin", "marketplace.json"), "{}");
     const plan = getSetupPlan({
       homeDir: home, cwd, platform: "darwin", hosts: ["claude-code-plugin"], env: { PATH: bin },
@@ -557,5 +700,18 @@ try {
   }
 
 } finally {
-  fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+  rmrf(TEMP_DIR);
+}
+
+function rmrf(targetPath) {
+  if (!fs.existsSync(targetPath)) return;
+  const stat = fs.lstatSync(targetPath);
+  if (stat.isDirectory()) {
+    for (const entry of fs.readdirSync(targetPath)) {
+      rmrf(path.join(targetPath, entry));
+    }
+    fs.rmdirSync(targetPath);
+    return;
+  }
+  fs.unlinkSync(targetPath);
 }

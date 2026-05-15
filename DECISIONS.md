@@ -4,6 +4,24 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-15] Codex plugin package uses Codex local marketplace conventions
+
+**Decision:** Ship the Codex designer experience as a Codex plugin package under `plugins/codex/figlets/`, with repo-root `.agents/plugins/marketplace.json` as the local marketplace manifest. The plugin includes `.codex-plugin/plugin.json`, `.mcp.json`, a `figlets-designer` skill, and a `/start`-style command file that mirrors the Figlets Designer Mode contract.
+
+**Why:** The current Codex environment exposes a real plugin convention (`.codex-plugin/plugin.json`, local marketplace metadata under `.agents/plugins/marketplace.json`, `skills/`, and plugin `.mcp.json`), but not an observed public marketplace install command equivalent to Claude Code's `claude plugin marketplace add owner/repo`. So Figlets should not invent a remote Codex marketplace flow. The reliable product-equivalent path is deterministic local setup: `figlets-mcp setup --hosts=codex-plugin --yes` writes the local marketplace registration and enables `figlets@figlets-codex` in `~/.codex/config.toml`.
+
+**Contract reuse:** The Codex skill and command do not define a parallel workflow. They call `figlets_start` first, use `figlets_start.designerResponse`, then route through `figlets_route_intent` and `figlets_workflow_guide`. If `figlets_start` is unavailable, the flow stops and asks the user to connect Figlets; it must not approximate Figlets with raw Figma tools or repo/plugin editing.
+
+**Distribution:** The Codex plugin's `.mcp.json` launches the same GitHub release tarball as the Claude Code plugin (`npx -y https://github.com/arashr/figlets-mcp/releases/download/v<version>/figlets-mcp-server-<version>.tgz`). `npm run build:server-tarball` now checks both host plugin manifests so the server version, Codex plugin version, Claude plugin version, and tarball URLs stay in lockstep.
+
+**Consequence:** Public agent-specific files remain separated by host (`plugins/claude-code/` vs `plugins/codex/`). The only machine-specific Codex path is written into the user's own `~/.codex/config.toml` because Codex local marketplaces need a local checkout path; no public manifest or docs should contain developer-local absolute paths.
+
+**Raw MCP fallback correction:** Codex expects `mcp_servers` to be a map, not an array. The legacy raw MCP fallback therefore writes `[mcp_servers.figlets]` and setup repairs the invalid `[[mcp_servers]]` sequence form if an earlier run created it. For local reliability it writes the current Node executable plus the local `figlets-mcp.js` bin, instead of relying on `command = "figlets-mcp"`, because Codex may not inherit shell-only NVM/Homebrew PATH entries when it starts the MCP server.
+
+**MCP listability is release-critical:** A live Codex retry showed the server process started but Codex still did not expose `figlets_start`. Direct JSON-RPC smoke testing found `tools/list` crashed with `Cannot read properties of undefined (reading '_zod')`. Root cause: Zod 4 requires `z.record(keySchema, valueSchema)`; our MCP schemas used `z.record(z.string())`, which left the value schema undefined during JSON Schema conversion. Fix: all record-shaped MCP schemas now use `z.record(z.string(), z.string())`, `zod` is a direct server dependency, and a `tests/server/mcp-tools-list.test.js` regression test starts the stdio server and asserts `figlets_start`, `figlets_route_intent`, and `figlets_workflow_guide` appear in `tools/list`.
+
+---
+
 ## [2026-05-15] Release tarball is self-contained; install is migration-safe
 
 Code-review hardening of the GitHub-tarball distribution:

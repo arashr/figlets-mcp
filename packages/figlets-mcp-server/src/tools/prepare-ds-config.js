@@ -114,10 +114,10 @@ function handlePrepareDsConfig({ config_path }) {
   let runDsPipeline;
   let designMdIntake;
   try {
-    ({ runDsPipeline, designMdIntake } = require('@figlets/core').dsConfig);
+    ({ runDsPipeline, designMdIntake } = require("../figlets-core.js").dsConfig);
   } catch (e) {
     // Fallback: direct path for development environments
-    ({ runDsPipeline, designMdIntake } = require('../../../figlets-core/src/ds-config/index.js'));
+    ({ runDsPipeline, designMdIntake } = require("../figlets-core.js").dsConfig);
   }
 
   let result;

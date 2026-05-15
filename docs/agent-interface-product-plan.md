@@ -62,7 +62,7 @@ The Agent Interface must preserve the existing Figlets philosophy:
 
 The Agent Interface must be self-aware about where Figlets is installed and where active-file artifacts live.
 
-Current repo docs still contain some developer-local examples such as `/Users/arash/Projects/figlets-mcp`. Those are acceptable in internal handoff context, but they are not acceptable in product-facing prompts or generated workflow guidance.
+Repo docs and examples must use relative paths or generic placeholders (e.g. `<repo-root>`), never developer-local absolute paths that embed a username. Such paths are not acceptable in product-facing prompts or generated workflow guidance.
 
 ### Rules
 

@@ -394,7 +394,7 @@ server.tool(
       recommended: z.string().optional(),
       name: z.string().optional(),
       source: z.string(),
-      aliases: z.record(z.string()).optional().describe("Per-mode primitive variable names approved by the designer, usually copied from plannedAliases.")
+      aliases: z.record(z.string(), z.string()).optional().describe("Per-mode primitive variable names approved by the designer, usually copied from plannedAliases.")
     })).optional().describe("Designer-approved missing-foreground repairs, usually copied from inspect_ds_setup_gaps.semanticGaps."),
     aliasUpdates: z.array(z.object({
       token: z.string().describe("Existing semantic variable name to re-alias."),
@@ -407,7 +407,7 @@ server.tool(
     roleRepairs: z.array(z.object({
       name: z.string().describe("Semantic role variable to create, e.g. color/border/info or color/icon/success."),
       role: z.string().describe("Role type, usually border or icon."),
-      aliases: z.record(z.string()).describe("Per-mode primitive variable names approved by the designer.")
+      aliases: z.record(z.string(), z.string()).describe("Per-mode primitive variable names approved by the designer.")
     })).optional().describe("Designer-approved missing border/icon semantic role variables."),
     config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path to update after Figma succeeds. Defaults to the active file config."),
     update_config: z.boolean().optional().describe("When false, do not update design-system.config.js after applying repairs. Defaults to true."),
@@ -443,7 +443,7 @@ server.tool(
     description: z.string().optional().describe("Human-readable description (1-2 sentences) shown under the title on the spec sheet. Agent should craft this after inspecting the component."),
     usage_do: z.array(z.string()).optional().describe("Do rules for the usage panel. Agent should ground these in the component's actual purpose, not pass generic placeholders."),
     usage_dont: z.array(z.string()).optional().describe("Don't rules for the usage panel. Agent should ground these in the component's actual purpose."),
-    variant_descriptions: z.record(z.string()).optional().describe("Map of exact variant name to short purpose (<=10 words).")
+    variant_descriptions: z.record(z.string(), z.string()).optional().describe("Map of exact variant name to short purpose (<=10 words).")
   },
   async (args) => {
     try {

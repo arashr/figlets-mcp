@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
-const { inspectComponentData } = require("../../../figlets-core/src/index.js");
+const { inspectComponentData } = require("../figlets-core.js");
 
 const inspectComponentTool = {
   name: "inspect_component",

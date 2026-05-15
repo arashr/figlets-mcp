@@ -67,34 +67,33 @@ That gives us a full fetch-then-analyze seam today, while keeping room for a rea
 
 ## Try It
 
-From anywhere:
+From the repo root:
 
 ```bash
-node /Users/arash/Projects/figlets-mcp/packages/figlets-mcp-server/src/index.js
+node packages/figlets-mcp-server/src/index.js
 ```
 
 To run the first tool directly against the bundled example:
 
 ```bash
-node /Users/arash/Projects/figlets-mcp/packages/figlets-mcp-server/src/cli/detect-design-system.js
+node packages/figlets-mcp-server/src/cli/detect-design-system.js
 ```
 
 To run it against your own JSON payload:
 
 ```bash
-node /Users/arash/Projects/figlets-mcp/packages/figlets-mcp-server/src/cli/detect-design-system.js /absolute/path/to/figma-data.json
+node packages/figlets-mcp-server/src/cli/detect-design-system.js /absolute/path/to/figma-data.json
 ```
 
 To run it through an external exporter command:
 
 ```bash
-node /Users/arash/Projects/figlets-mcp/packages/figlets-mcp-server/src/cli/detect-design-system.js --command "cat /absolute/path/to/figma-data.json"
+node packages/figlets-mcp-server/src/cli/detect-design-system.js --command "cat /absolute/path/to/figma-data.json"
 ```
 
-To run the unit tests:
+To run the unit tests (from the repo root):
 
 ```bash
-cd /Users/arash/Projects/figlets-mcp
 npm test
 ```
 
@@ -116,22 +115,22 @@ Set one of these environment variables, or put it in `.env`:
 export FIGMA_ACCESS_TOKEN=your_token_here
 ```
 
-Then run:
+Then run (from the repo root):
 
 ```bash
-node /Users/arash/Projects/figlets-mcp/packages/figlets-mcp-server/src/cli/export-figma-file.js --file "https://www.figma.com/design/FILE_KEY/File-Name" --output /absolute/path/to/figma-data.json
+node packages/figlets-mcp-server/src/cli/export-figma-file.js --file "https://www.figma.com/design/FILE_KEY/File-Name" --output /absolute/path/to/figma-data.json
 ```
 
-A local-only example path would be:
+A local-only example writing into the gitignored `.local/` directory:
 
 ```bash
-node /Users/arash/Projects/figlets-mcp/packages/figlets-mcp-server/src/cli/export-figma-file.js --file "https://www.figma.com/design/FILE_KEY/File-Name" --output /Users/arash/Projects/figlets-mcp/.local/figma-data.json
+node packages/figlets-mcp-server/src/cli/export-figma-file.js --file "https://www.figma.com/design/FILE_KEY/File-Name" --output .local/figma-data.json
 ```
 
 Then analyze that export:
 
 ```bash
-node /Users/arash/Projects/figlets-mcp/packages/figlets-mcp-server/src/cli/detect-design-system.js /absolute/path/to/figma-data.json
+node packages/figlets-mcp-server/src/cli/detect-design-system.js /absolute/path/to/figma-data.json
 ```
 
 Notes:

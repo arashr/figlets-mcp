@@ -81,9 +81,9 @@ function handleUpdateDsPrimitives(args) {
 
   let readDsConfig;
   try {
-    ({ readDsConfig } = require('@figlets/core').dsConfig);
+    ({ readDsConfig } = require("../figlets-core.js").dsConfig);
   } catch (e) {
-    ({ readDsConfig } = require('../../../figlets-core/src/ds-config/index.js'));
+    ({ readDsConfig } = require("../figlets-core.js").dsConfig);
   }
 
   let ds;

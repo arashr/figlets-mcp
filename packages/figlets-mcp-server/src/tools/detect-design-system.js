@@ -2,7 +2,7 @@ const fs = require("fs");
 const {
   detectDesignSystem,
   detectDesignSystemFromFigmaData
-} = require("../../../figlets-core/src/index.js");
+} = require("../figlets-core.js");
 const {
   explainMissingFigmaBridge,
   loadFigmaDataSource

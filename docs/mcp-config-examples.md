@@ -35,19 +35,31 @@ To let Figlets patch supported MCP configs after reviewing the dry run:
 figlets-mcp setup --yes
 ```
 
-To connect only Claude Code:
+### Claude Code (recommended path)
+
+For Claude Code, the recommended install is the Figlets plugin — it registers the MCP server, adds a `/figlets:start` slash command, and ships an auto-trigger `figlets-designer` skill so designer phrases route into Designer Mode automatically:
+
+```bash
+figlets-mcp setup --hosts=claude-code-plugin --yes
+```
+
+Behind the scenes that runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent on re-run, re-points the marketplace if its source changed, and — only after a smoke check confirms the plugin's MCP server is actually reachable — removes any pre-existing user/project/local-scope `figlets` MCP entries that the plugin supersedes. If the server is not reachable, setup leaves existing config intact and reports why, so a designer with a working setup is never migrated into a broken one. After a session restart, designers can either type `/figlets:start` or just describe their design system.
+
+The plugin is distributed from the public GitHub repo (`arashr/figlets-mcp`), and the plugin's MCP server runs via `npx -y <GitHub release tarball URL>` — no npm account or npm publish is involved. Before this works for anyone, the server tarball must be attached to a GitHub release: run `npm run build:server-tarball` from the repo root and follow the printed `gh release` step.
+
+> Local development before the release exists: `FIGLETS_MARKETPLACE_SOURCE=/path figlets-mcp setup --hosts=claude-code-plugin` only changes where Claude Code fetches the plugin *files* — the plugin still launches its MCP server from the pinned GitHub release tarball URL, so the server will not start until the release is published or the plugin manifest is manually overridden. For everyday pre-release local development, use the legacy path below (`figlets-mcp setup --hosts=claude-code --yes`); it registers the local server directly and works immediately.
+
+When `claude` is on `PATH`, this plugin path is also what the default `figlets-mcp setup --yes` runs for Claude Code — the legacy `claude mcp add` path below is dropped from defaults via supersession in that case.
+
+### Claude Code (legacy fallback)
+
+For environments that cannot run the plugin path (older Claude Code without `claude plugin marketplace add`, or hosts that consume only raw MCP config), the legacy `claude mcp add` path is still reachable:
 
 ```bash
 figlets-mcp setup --hosts=claude-code --yes
 ```
 
-For local product testing inside this repo, the most reliable Claude Code path is project-local:
-
-```bash
-figlets-mcp setup --hosts=claude-code-project --yes
-```
-
-The setup command backs up existing config files before writing, preserves unrelated MCP servers, and uses `"command": "figlets-mcp"` instead of machine-specific paths for JSON/TOML configs. For Claude Code, it uses Claude's native user-scope MCP command with the current Node executable and the local `figlets-mcp.js` binary, which avoids PATH issues inside Claude Code. If Claude reports a stale existing `figlets` entry, setup removes Figlets entries from Claude Code's local/project/user scopes and re-adds the user-scope entry.
+This uses Claude's native user-scope MCP command with the current Node executable and the local `figlets-mcp.js` binary. If Claude reports a stale existing `figlets` entry, setup removes Figlets entries from Claude Code's local/project/user scopes and re-adds the user-scope entry. The setup command backs up existing config files before writing, preserves unrelated MCP servers, and uses `"command": "figlets-mcp"` instead of machine-specific paths for the JSON/TOML configs of every other host.
 
 To check the local bridge after your MCP host has started Figlets:
 
@@ -128,12 +140,32 @@ File: `.vscode/mcp.json` in your project root:
 
 ## Codex CLI (OpenAI)
 
-File: `~/.codex/config.toml` (global) or `.codex/config.toml` (project):
+### Codex plugin (recommended local-marketplace path)
+
+For Codex, the recommended Figlets path is the Codex plugin package. It registers the Figlets MCP server through the plugin's `.mcp.json` and ships the `figlets-designer` skill so designer phrases route into the Figlets-curated capability menu:
+
+```bash
+figlets-mcp setup --hosts=codex-plugin --yes
+```
+
+Setup registers this repo checkout as a local `figlets-codex` marketplace in `~/.codex/config.toml` and enables `figlets@figlets-codex`. Restart Codex afterwards, then ask: `Help me with my Figma design system using Figlets.`
+
+Codex has a local plugin manifest/marketplace convention (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, `skills/`, and `.mcp.json`), but this repo does not assume a public Codex marketplace install command equivalent to Claude Code's `plugin marketplace add owner/repo`. If Codex adds one later, Figlets should move setup to that path while preserving the same designer contract.
+
+### Codex raw MCP fallback
+
+For local development, prefer setup so Codex does not depend on a shell-only NVM/Homebrew PATH:
+
+```bash
+figlets-mcp setup --hosts=codex --yes
+```
+
+Setup writes the current Node executable plus the local Figlets server bin. The resulting `~/.codex/config.toml` looks like:
 
 ```toml
-[[mcp_servers]]
-name = "figlets"
-command = "figlets-mcp"
+[mcp_servers.figlets]
+command = "/absolute/path/to/node"
+args = ["/absolute/path/to/figlets-mcp/packages/figlets-mcp-server/bin/figlets-mcp.js"]
 ```
 
 Or in JSON format if your version of Codex uses `config.json`:

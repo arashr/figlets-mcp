@@ -19,9 +19,9 @@ function _writeDesignMdExport(configPath) {
   try {
     let designMdIntake;
     try {
-      designMdIntake = require('@figlets/core').dsConfig.designMdIntake;
+      designMdIntake = require("../figlets-core.js").dsConfig.designMdIntake;
     } catch (_) {
-      designMdIntake = require('../../../figlets-core/src/ds-config/index.js').designMdIntake;
+      designMdIntake = require("../figlets-core.js").dsConfig.designMdIntake;
     }
     if (designMdIntake && designMdIntake.writeDesignMdFromDsConfig) {
       return designMdIntake.writeDesignMdFromDsConfig(configPath);
@@ -38,9 +38,9 @@ function handleApplyDsSetup({ config_path }) {
 
   let readDsConfig;
   try {
-    ({ readDsConfig } = require('@figlets/core').dsConfig);
+    ({ readDsConfig } = require("../figlets-core.js").dsConfig);
   } catch (e) {
-    ({ readDsConfig } = require('../../../figlets-core/src/ds-config/index.js'));
+    ({ readDsConfig } = require("../figlets-core.js").dsConfig);
   }
 
   let ds;

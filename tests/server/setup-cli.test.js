@@ -467,6 +467,9 @@ try {
         if (args[0] === "plugin" && args[1] === "list") {
           return { status: 0, stdout: `Installed plugins:\n  ❯ ${FIGLETS_PLUGIN_SPEC}\n    Status: enabled\n`, stderr: "" };
         }
+        if (args[0] === "plugin" && args[1] === "update") {
+          return { status: 0, stdout: `Updated ${FIGLETS_PLUGIN_SPEC}\n`, stderr: "" };
+        }
         if (args[0] === "mcp" && args[1] === "list") {
           return { status: 0, stdout: "plugin:figlets:figlets: npx -y https://example/x.tgz - ✓ Connected\n", stderr: "" };
         }
@@ -479,14 +482,78 @@ try {
     assert.strictEqual(applied.targets[0].status, "unchanged");
     const mpAdd = applied.targets[0].steps.find(s => s.step === "marketplace-add");
     assert.strictEqual(mpAdd.status, "refreshed", "same-source re-run refreshes the marketplace so new commits reach the user");
+    const mpUpdate = applied.targets[0].steps.find(s => s.step === "marketplace-update");
+    assert.strictEqual(mpUpdate.status, "ok");
+    const pluginUpdate = applied.targets[0].steps.find(s => s.step === "plugin-update");
+    assert.strictEqual(pluginUpdate.status, "ok");
     const pInstall = applied.targets[0].steps.find(s => s.step === "plugin-install");
     assert.strictEqual(pInstall.status, "skipped");
     const removeSteps = applied.targets[0].steps.filter(step => step.step.startsWith("mcp-remove-"));
     assert.ok(removeSteps.every(step => step.status === "absent"), "no legacy figlets MCP entries should be removed when nothing to clean up");
     assert.ok(calls.some(c => c.args[0] === "plugin" && c.args[1] === "marketplace" && c.args[2] === "update"), "should refresh the marketplace from source");
+    assert.ok(calls.some(c => c.args[0] === "plugin" && c.args[1] === "update" && c.args[2] === FIGLETS_PLUGIN_SPEC), "should update the installed plugin after refreshing marketplace metadata");
     const issuedSubcommands = calls.map(call => call.args.slice(0, 2).join(" "));
     assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin install")), "should not re-run plugin install when already present");
     assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin marketplace add")), "should not re-add marketplace when already present");
+  }
+
+  // Same source, but marketplace update fails: block instead of claiming refreshed/unchanged.
+  {
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code-plugin"],
+      env: { PATH: bin },
+    });
+    const calls = [];
+    const applied = applySetupPlan(plan, {
+      runner: (command, args) => {
+        calls.push({ command, args });
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
+          return { status: 0, stdout: `Configured marketplaces:\n  ❯ ${FIGLETS_PLUGIN_MARKETPLACE_NAME}\n    Source: GitHub (arashr/figlets-mcp)\n`, stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "update") {
+          return { status: 1, stdout: "", stderr: "network unavailable\n" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    assert.strictEqual(applied.targets[0].status, "blocked");
+    assert.ok(/network unavailable/i.test(applied.targets[0].reason), "marketplace update failure should be reported");
+    assert.ok(!calls.some(c => c.args[0] === "plugin" && c.args[1] === "update"), "must not run plugin update after marketplace update failed");
+    assert.ok(!calls.some(c => c.args[0] === "mcp" && c.args[1] === "remove"), "must not remove legacy MCP entries after marketplace update failed");
+  }
+
+  // Same source, marketplace update succeeds but plugin update fails: block honestly.
+  {
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code-plugin"],
+      env: { PATH: bin },
+    });
+    const calls = [];
+    const applied = applySetupPlan(plan, {
+      runner: (command, args) => {
+        calls.push({ command, args });
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
+          return { status: 0, stdout: `Configured marketplaces:\n  ❯ ${FIGLETS_PLUGIN_MARKETPLACE_NAME}\n    Source: GitHub (arashr/figlets-mcp)\n`, stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "update") {
+          return { status: 0, stdout: "Updated marketplace\n", stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "update") {
+          return { status: 1, stdout: "", stderr: "plugin update failed\n" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    assert.strictEqual(applied.targets[0].status, "blocked");
+    assert.ok(/plugin update failed/i.test(applied.targets[0].reason), "plugin update failure should be reported");
+    assert.ok(calls.some(c => c.args[0] === "plugin" && c.args[1] === "update" && c.args[2] === FIGLETS_PLUGIN_SPEC), "should attempt plugin update");
+    assert.ok(!calls.some(c => c.args[0] === "mcp" && c.args[1] === "remove"), "must not remove legacy MCP entries after plugin update failed");
   }
 
 } finally {

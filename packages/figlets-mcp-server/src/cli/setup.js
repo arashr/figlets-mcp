@@ -512,8 +512,27 @@ function applyClaudePluginInstall(plan, options) {
     // that version (see the release discipline in DECISIONS / build-server-tarball
     // version check). If the version is unchanged this is a harmless no-op — it
     // does NOT magically deliver new commits.
-    runner(executable, ["plugin", "marketplace", "update", plan.marketplaceName], { encoding: "utf-8" });
-    runner(executable, ["plugin", "update", plan.pluginSpec], { encoding: "utf-8" });
+    const mpUpdate = runner(executable, ["plugin", "marketplace", "update", plan.marketplaceName], { encoding: "utf-8" });
+    const mpUpdateOutput = mpUpdate ? String((mpUpdate.stdout || "") + (mpUpdate.stderr || "")) : "";
+    const mpUpdateStatus = mpUpdate && typeof mpUpdate.status === "number" ? mpUpdate.status : null;
+    if (mpUpdate && mpUpdate.error) {
+      return Object.assign({}, plan, { status: "blocked", reason: `marketplace update failed: ${mpUpdate.error.message}`, steps });
+    }
+    if (mpUpdateStatus !== 0 && mpUpdateStatus !== null) {
+      return Object.assign({}, plan, { status: "blocked", reason: (mpUpdateOutput || `marketplace update exited with ${mpUpdateStatus}`).trim(), steps });
+    }
+    steps.push({ step: "marketplace-update", status: "ok" });
+
+    const pluginUpdate = runner(executable, ["plugin", "update", plan.pluginSpec], { encoding: "utf-8" });
+    const pluginUpdateOutput = pluginUpdate ? String((pluginUpdate.stdout || "") + (pluginUpdate.stderr || "")) : "";
+    const pluginUpdateStatus = pluginUpdate && typeof pluginUpdate.status === "number" ? pluginUpdate.status : null;
+    if (pluginUpdate && pluginUpdate.error) {
+      return Object.assign({}, plan, { status: "blocked", reason: `plugin update failed: ${pluginUpdate.error.message}`, steps });
+    }
+    if (pluginUpdateStatus !== 0 && pluginUpdateStatus !== null) {
+      return Object.assign({}, plan, { status: "blocked", reason: (pluginUpdateOutput || `plugin update exited with ${pluginUpdateStatus}`).trim(), steps });
+    }
+    steps.push({ step: "plugin-update", status: "ok" });
     steps.push({ step: "marketplace-add", status: "refreshed" });
   }
 

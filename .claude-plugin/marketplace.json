@@ -1,0 +1,16 @@
+{
+  "name": "figlets-claude-code",
+  "owner": {
+    "name": "Figlets"
+  },
+  "metadata": {
+    "description": "Claude Code plugin for the Figlets design-system toolkit. The toolkit itself is agent-agnostic; this marketplace only covers the Claude Code integration under plugins/claude-code/."
+  },
+  "plugins": [
+    {
+      "name": "figlets",
+      "source": "./plugins/claude-code/figlets",
+      "description": "Designer-friendly entrypoint for Figlets: registers the Figlets MCP server and adds the /figlets:start command plus an auto-trigger figlets-designer skill."
+    }
+  ]
+}

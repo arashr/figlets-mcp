@@ -8,6 +8,11 @@ const FIGLETS_SERVER = { command: "figlets-mcp" };
 const FIGLETS_PLUGIN_MARKETPLACE_NAME = "figlets-claude-code";
 const FIGLETS_PLUGIN_NAME = "figlets";
 const FIGLETS_PLUGIN_SPEC = `${FIGLETS_PLUGIN_NAME}@${FIGLETS_PLUGIN_MARKETPLACE_NAME}`;
+// The plugin is distributed from the public GitHub repo. Claude Code reads the marketplace manifest
+// strictly from <repo-root>/.claude-plugin/marketplace.json, so the GitHub shorthand is the repo
+// slug; --sparse limits the monorepo checkout to just the Claude integration paths.
+const FIGLETS_PLUGIN_GITHUB_SOURCE = "arashr/figlets-mcp";
+const FIGLETS_PLUGIN_SPARSE_PATHS = [".claude-plugin", "plugins/claude-code"];
 
 function _figletsBinPath(options) {
   return options && options.figletsBinPath
@@ -15,19 +20,18 @@ function _figletsBinPath(options) {
     : path.resolve(__dirname, "../../bin/figlets-mcp.js");
 }
 
-function _marketplacePath(options) {
-  if (options && options.marketplacePath) return options.marketplacePath;
-  // Monorepo source first so live edits to plugins/claude-code take effect immediately during dev.
-  // Package-local fallback is populated by scripts/sync-plugins.js at prepack time, so npm-installed
-  // copies still resolve to a real folder.
-  const candidates = [
-    path.resolve(__dirname, "../../../../plugins/claude-code"),
-    path.resolve(__dirname, "../../plugins/claude-code"),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return candidates[0];
+// The marketplace source passed to `claude plugin marketplace add`. Defaults to the public GitHub
+// repo. For local development before the repo is pushed, pass options.marketplaceSource (or set
+// FIGLETS_MARKETPLACE_SOURCE) to the repo root, which now hosts .claude-plugin/marketplace.json.
+function _marketplaceSource(options) {
+  if (options && options.marketplaceSource) return options.marketplaceSource;
+  const env = _env(options);
+  if (env && env.FIGLETS_MARKETPLACE_SOURCE) return env.FIGLETS_MARKETPLACE_SOURCE;
+  return FIGLETS_PLUGIN_GITHUB_SOURCE;
+}
+
+function _isLocalPathSource(source) {
+  return typeof source === "string" && (source.startsWith("/") || source.startsWith("./") || source.startsWith("../") || source.startsWith("."));
 }
 
 function _nodePath(options) {
@@ -84,7 +88,7 @@ function getKnownTargets(options) {
   const platform = _platform(options);
   const env = _env(options);
   const appData = env.APPDATA || _join(home, "AppData", "Roaming");
-  const marketplacePath = _marketplacePath(options);
+  const marketplaceSource = _marketplaceSource(options);
 
   const claudeDesktopPath = platform === "win32"
     ? _join(appData, "Claude", "claude_desktop_config.json")
@@ -97,9 +101,12 @@ function getKnownTargets(options) {
     : _join(home, ".cursor", "mcp.json");
 
   // The Claude Code plugin install target is always included so an explicit --hosts=claude-code-plugin
-  // returns an actionable plan (with a clear manual reason) even when claude or the marketplace folder
-  // is missing. Whether it supersedes the legacy claude-code target in the default run is decided
-  // after planning, based on whether the plugin path is actually viable in this environment.
+  // returns an actionable plan (with a clear manual reason) even when claude is missing. Whether it
+  // supersedes the legacy claude-code target in the default run is decided after planning, based on
+  // whether the plugin path is actually viable in this environment.
+  const sparseArgs = _isLocalPathSource(marketplaceSource)
+    ? []
+    : ["--sparse"].concat(FIGLETS_PLUGIN_SPARSE_PATHS);
   return [
     {
       id: "claude-code-plugin",
@@ -107,7 +114,8 @@ function getKnownTargets(options) {
       type: "claude-plugin-install",
       binary: "claude",
       marketplaceName: FIGLETS_PLUGIN_MARKETPLACE_NAME,
-      marketplacePath,
+      marketplaceSource,
+      marketplaceSparseArgs: sparseArgs,
       pluginName: FIGLETS_PLUGIN_NAME,
       pluginSpec: FIGLETS_PLUGIN_SPEC,
       scope: "user",
@@ -243,26 +251,34 @@ function planNativeCommand(target, options) {
   });
 }
 
+function _claudePluginInstallCommand(target) {
+  const addParts = ["claude plugin marketplace add", target.marketplaceSource]
+    .concat(target.marketplaceSparseArgs || [])
+    .concat(["--scope", target.scope]);
+  return `${addParts.join(" ")} && claude plugin install ${target.pluginSpec} --scope ${target.scope}`;
+}
+
 function planClaudePluginInstall(target, options) {
   const executable = _findOnPath(target.binary, options);
   if (!executable) {
     return Object.assign({}, target, {
       executable: null,
       status: "manual",
-      reason: `${target.binary} was not found on PATH. After installing Claude Code, run: claude plugin marketplace add ${target.marketplacePath} --scope ${target.scope} && claude plugin install ${target.pluginSpec} --scope ${target.scope}`,
+      reason: `${target.binary} was not found on PATH. After installing Claude Code, run: ${_claudePluginInstallCommand(target)}`,
     });
   }
-  if (!fs.existsSync(target.marketplacePath)) {
+  // Local-path source (dev override) must point at a folder containing .claude-plugin/marketplace.json.
+  if (_isLocalPathSource(target.marketplaceSource) && !fs.existsSync(path.join(target.marketplaceSource, ".claude-plugin", "marketplace.json"))) {
     return Object.assign({}, target, {
       executable,
       status: "manual",
-      reason: `Marketplace folder not found at ${target.marketplacePath}. Clone the figlets-mcp repo or point at a published marketplace URL with: claude plugin marketplace add <source>.`,
+      reason: `Local marketplace source ${target.marketplaceSource} has no .claude-plugin/marketplace.json. Point FIGLETS_MARKETPLACE_SOURCE at the figlets-mcp repo root, or unset it to use the GitHub source ${FIGLETS_PLUGIN_GITHUB_SOURCE}.`,
     });
   }
   return Object.assign({}, target, {
     executable,
     status: "would-run",
-    command: `claude plugin marketplace add ${target.marketplacePath} --scope ${target.scope} && claude plugin install ${target.pluginSpec} --scope ${target.scope}`,
+    command: _claudePluginInstallCommand(target),
   });
 }
 
@@ -395,7 +411,10 @@ function applyClaudePluginInstall(plan, options) {
   const marketplaceRegistered = new RegExp("(^|\\n)\\s*[^\\n]*\\b" + plan.marketplaceName + "\\b", "i").test(marketplaceListOutput);
 
   if (!marketplaceRegistered) {
-    const addResult = runner(executable, ["plugin", "marketplace", "add", plan.marketplacePath, "--scope", plan.scope], { encoding: "utf-8" });
+    const addArgs = ["plugin", "marketplace", "add", plan.marketplaceSource]
+      .concat(plan.marketplaceSparseArgs || [])
+      .concat(["--scope", plan.scope]);
+    const addResult = runner(executable, addArgs, { encoding: "utf-8" });
     const addOutput = addResult ? String((addResult.stdout || "") + (addResult.stderr || "")) : "";
     if (addResult && addResult.error) {
       return Object.assign({}, plan, { status: "blocked", reason: addResult.error.message, steps });
@@ -585,6 +604,8 @@ module.exports = {
   FIGLETS_PLUGIN_MARKETPLACE_NAME,
   FIGLETS_PLUGIN_NAME,
   FIGLETS_PLUGIN_SPEC,
+  FIGLETS_PLUGIN_GITHUB_SOURCE,
+  FIGLETS_PLUGIN_SPARSE_PATHS,
   getKnownTargets,
   getSetupPlan,
   applySetupPlan,

@@ -1,14 +1,22 @@
-# Figlets — Claude Code marketplace
+# plugins/claude-code
 
-This folder is a Claude Code plugin marketplace. It currently ships one plugin:
+The Claude Code integration for the Figlets toolkit. This folder is intentionally isolated: the
+Figlets toolkit itself (in `packages/`) is agent-agnostic, and this is just the Claude-specific
+wrapper. Sibling integrations for other agents would live at `plugins/<agent>/`.
 
-- [`figlets/`](./figlets) — designer-friendly entrypoint that registers the Figlets MCP server and adds `/figlets:start`.
+- [`figlets/`](./figlets) — the plugin: `/figlets:start` command, `figlets-designer` auto-trigger
+  skill, and the `mcpServers.figlets` entry that launches the Figlets MCP server.
 
-Install locally with:
+The Claude Code **marketplace manifest is not here** — it lives at the repo root
+(`<repo>/.claude-plugin/marketplace.json`) because `claude plugin marketplace add owner/repo`
+only reads it from the repository root. That manifest's plugin `source` redirects here
+(`./plugins/claude-code/figlets`), so all real Claude content stays in this folder.
+
+Install (once the GitHub repo + `v0.1.0` release exist):
 
 ```
-/plugin marketplace add /absolute/path/to/figlets-mcp/plugins/claude-code
-/plugin install figlets@figlets-claude-code
+claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code
+claude plugin install figlets@figlets-claude-code
 ```
 
-Sibling agent marketplaces (Cursor, Windsurf, etc.) belong at `plugins/<agent>/`, not inside this folder.
+…or just run `figlets-mcp setup --hosts=claude-code-plugin --yes`.

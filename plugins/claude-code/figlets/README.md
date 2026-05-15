@@ -6,55 +6,42 @@ Designer-friendly entrypoint for the Figlets design-system toolkit. Installing t
 - Adds a `/figlets:start` slash command that routes Claude Code into the Figlets designer workflow.
 - Ships a `figlets-designer` skill that auto-triggers on phrases like *"help me with my design system"* so designers do not have to remember the slash command.
 
-## Status: not yet a no-clone install
+## How distribution works (no npm account)
+
+This plugin is **agent-agnostic-friendly**: the Figlets toolkit itself lives in the main repo and is shared by every agent. Only this thin Claude integration lives under `plugins/claude-code/`.
+
+- The marketplace manifest is at the **repo root** (`<repo>/.claude-plugin/marketplace.json`) because Claude Code only reads it from there. It just redirects to `./plugins/claude-code/figlets`.
+- The MCP server is **not** published to npm. Instead the manifest runs `npx -y <GitHub release tarball URL>`. `npx` downloads that tarball and resolves dependencies from the public npm registry (registry reads are free and need no login).
 
 > [!IMPORTANT]
-> The plugin manifest registers the Figlets MCP server as `npx -y @figlets/mcp-server`, but `@figlets/mcp-server` is **not yet published to npm**. Until it is, the plugin can only start its MCP server when the package is locally resolvable — either because you have this repo cloned with `npm install` run (the workspace symlink at `node_modules/@figlets/mcp-server` makes `npx` resolve it), or because you have applied the local-dev override below.
->
-> The next release step is `npm publish` from `packages/figlets-mcp-server/`. The `prepack` script already bundles this marketplace into the tarball, so once published the plugin works on any machine with Node and Claude Code — no clone required.
+> The server tarball must be attached to a GitHub release before this works for anyone. Build it with `npm run build:server-tarball` (from the repo root) and follow the printed steps to create the `v0.1.0` release on `github.com/arashr/figlets-mcp`. Until that release exists, use the *Local development override* below.
 
-## One-command install (from a clone)
-
-From a clone of the `figlets-mcp` repo with `npm install` run:
-
-```
-node packages/figlets-mcp-server/bin/figlets-mcp.js setup --hosts=claude-code-plugin --yes
-```
-
-…or, once `@figlets/mcp-server` is installed via `npm i -g @figlets/mcp-server`:
+## One-command install
 
 ```
 figlets-mcp setup --hosts=claude-code-plugin --yes
 ```
 
-That command runs `claude plugin marketplace add` and `claude plugin install` for you, detects existing state, removes any legacy `figlets` MCP entries the plugin supersedes, and is idempotent. Restart Claude Code afterwards.
+That runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent, and removes any legacy `figlets` MCP entries the plugin supersedes. Restart Claude Code afterwards.
+
+For local development before the GitHub repo is pushed, point setup at the repo root instead:
+
+```
+FIGLETS_MARKETPLACE_SOURCE=/absolute/path/to/figlets-mcp figlets-mcp setup --hosts=claude-code-plugin --yes
+```
 
 ## Manual install
 
-If you would rather drive Claude Code directly:
-
 ```
-/plugin marketplace add /absolute/path/to/figlets-mcp/plugins/claude-code
+/plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code
 /plugin install figlets@figlets-claude-code
 ```
 
-Restart the Claude Code session, then either type:
-
-```
-/figlets:start
-```
-
-…or just describe what you want — *"help me with my Figma design system"* — and the `figlets-designer` skill will route you in.
-
-## Requirements
-
-- Claude Code with `claude plugin` support.
-- Node.js and `npx` on `PATH`.
-- The `@figlets/mcp-server` package locally resolvable — see the *Status* callout above and the *Local development override* below.
+Restart the Claude Code session, then either type `/figlets:start` or just describe what you want — *"help me with my Figma design system"* — and the `figlets-designer` skill will route you in.
 
 ## Local development override
 
-Until `@figlets/mcp-server` is published to npm and you do not have the repo cloned, replace the `mcpServers.figlets` entry in `.claude-plugin/plugin.json` with an absolute path to a local checkout:
+Until the `v0.1.0` GitHub release exists, the `npx -y <tarball-url>` command in `.claude-plugin/plugin.json` cannot resolve. For local testing, replace `mcpServers.figlets` with an absolute path to your checkout:
 
 ```json
 "mcpServers": {
@@ -65,7 +52,7 @@ Until `@figlets/mcp-server` is published to npm and you do not have the repo clo
 }
 ```
 
-Do not commit that override — it is machine-specific. The committed manifest tracks the eventual published target.
+Do not commit that override — it is machine-specific. The committed manifest tracks the GitHub release target.
 
 ## What gets installed
 

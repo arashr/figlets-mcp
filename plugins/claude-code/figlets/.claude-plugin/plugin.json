@@ -8,7 +8,7 @@
   "mcpServers": {
     "figlets": {
       "command": "npx",
-      "args": ["-y", "@figlets/mcp-server"]
+      "args": ["-y", "https://github.com/arashr/figlets-mcp/releases/download/v0.1.0/figlets-mcp-server-0.1.0.tgz"]
     }
   }
 }

@@ -1,13 +1,12 @@
 {
   "name": "@figlets/mcp-server",
   "version": "0.1.0",
-  "description": "Agent-agnostic MCP server for Figma design system workflows. Bundled with the Claude Code marketplace at plugins/claude-code/ for one-command install.",
+  "description": "Agent-agnostic MCP server for Figma design system workflows.",
   "keywords": [
     "figma",
     "design-system",
     "mcp",
     "model-context-protocol",
-    "claude-code",
     "figlets"
   ],
   "license": "MIT",
@@ -18,7 +17,6 @@
   "files": [
     "bin/",
     "src/",
-    "plugins/",
     "README.md"
   ],
   "scripts": {
@@ -28,13 +26,9 @@
     "doctor": "node src/cli/doctor.js",
     "detect-ds": "node src/cli/detect-design-system.js",
     "export-figma-file": "node src/cli/export-figma-file.js",
-    "inspect-component": "node src/cli/inspect-component.js",
-    "prepack": "node scripts/sync-plugins.js"
+    "inspect-component": "node src/cli/inspect-component.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

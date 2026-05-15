@@ -3,34 +3,36 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname, "../..");
-const PLUGIN_ROOT = path.join(ROOT, "plugins", "claude-code");
-const PLUGIN_DIR = path.join(PLUGIN_ROOT, "figlets");
+const PLUGIN_DIR = path.join(ROOT, "plugins", "claude-code", "figlets");
 
-function readJson(relativePath) {
-  const full = path.join(PLUGIN_ROOT, relativePath);
-  return JSON.parse(fs.readFileSync(full, "utf-8"));
-}
-
-// Marketplace manifest.
-const marketplace = readJson(".claude-plugin/marketplace.json");
-assert.strictEqual(marketplace.name, "figlets-claude-code", "marketplace name must match published id");
+// Marketplace manifest lives at the REPO ROOT — Claude Code reads
+// <repo-root>/.claude-plugin/marketplace.json strictly for `claude plugin marketplace add owner/repo`.
+const marketplace = JSON.parse(fs.readFileSync(path.join(ROOT, ".claude-plugin", "marketplace.json"), "utf-8"));
+assert.strictEqual(marketplace.name, "figlets-claude-code", "marketplace name must match the install id");
 assert.ok(marketplace.owner && marketplace.owner.name, "marketplace must declare an owner");
 assert.ok(Array.isArray(marketplace.plugins) && marketplace.plugins.length >= 1, "marketplace must list at least one plugin");
 const figletsEntry = marketplace.plugins.find(p => p.name === "figlets");
 assert.ok(figletsEntry, "marketplace must list the figlets plugin");
-assert.strictEqual(figletsEntry.source, "./figlets", "marketplace must point at the bundled figlets plugin folder");
+assert.strictEqual(figletsEntry.source, "./plugins/claude-code/figlets", "marketplace source must resolve from the repo root to the nested plugin folder");
+// The nested marketplace.json was removed; only the root one should exist.
+assert.ok(!fs.existsSync(path.join(ROOT, "plugins", "claude-code", ".claude-plugin", "marketplace.json")), "nested plugins/claude-code/.claude-plugin/marketplace.json must not exist (superseded by the root manifest)");
 
 // Plugin manifest.
-const plugin = readJson("figlets/.claude-plugin/plugin.json");
+const plugin = JSON.parse(fs.readFileSync(path.join(PLUGIN_DIR, ".claude-plugin", "plugin.json"), "utf-8"));
 assert.strictEqual(plugin.name, "figlets", "plugin name must be 'figlets' so the command surfaces as /figlets:start");
 assert.ok(typeof plugin.version === "string" && plugin.version.length > 0, "plugin must declare a version");
 assert.ok(typeof plugin.description === "string" && plugin.description.length > 0, "plugin must declare a description");
 
-// MCP server contract.
+// MCP server contract — distributed as a GitHub release tarball, not an npm package (no npm account).
 assert.ok(plugin.mcpServers && plugin.mcpServers.figlets, "plugin must register a 'figlets' MCP server entry");
 const server = plugin.mcpServers.figlets;
 assert.strictEqual(server.command, "npx", "MCP command should be npx so designers do not need a global install");
-assert.deepStrictEqual(server.args, ["-y", "@figlets/mcp-server"], "MCP args must invoke the published Figlets server package");
+assert.strictEqual(server.args.length, 2, "MCP args should be ['-y', <tarball-url>]");
+assert.strictEqual(server.args[0], "-y");
+assert.ok(
+  /^https:\/\/github\.com\/arashr\/figlets-mcp\/releases\/download\/v\d+\.\d+\.\d+\/figlets-mcp-server-\d+\.\d+\.\d+\.tgz$/.test(server.args[1]),
+  "MCP args must invoke the Figlets server via a versioned GitHub release tarball URL"
+);
 
 // Slash command file.
 const commandPath = path.join(PLUGIN_DIR, "commands", "start.md");

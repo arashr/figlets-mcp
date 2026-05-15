@@ -43,9 +43,15 @@ For Claude Code, the recommended install is the Figlets plugin — it registers 
 figlets-mcp setup --hosts=claude-code-plugin --yes
 ```
 
-Behind the scenes that runs `claude plugin marketplace add` + `claude plugin install`, is idempotent on re-run, and also removes any pre-existing user/project/local-scope `figlets` MCP entries that the plugin supersedes so Claude Code does not end up with two `figlets` servers. After a session restart, designers can either type `/figlets:start` or just describe their design system.
+Behind the scenes that runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent on re-run, and also removes any pre-existing user/project/local-scope `figlets` MCP entries that the plugin supersedes so Claude Code does not end up with two `figlets` servers. After a session restart, designers can either type `/figlets:start` or just describe their design system.
 
-When Claude Code (`claude` on `PATH`) and the marketplace folder are both available, this is also what the default `figlets-mcp setup --yes` runs for Claude Code — the legacy `claude mcp add` path below is dropped from defaults via supersession in that case.
+The plugin is distributed from the public GitHub repo (`arashr/figlets-mcp`), and the plugin's MCP server runs via `npx -y <GitHub release tarball URL>` — no npm account or npm publish is involved. Before this works for anyone, the server tarball must be attached to a GitHub release: run `npm run build:server-tarball` from the repo root and follow the printed `gh release` step. For local development before the repo is pushed, point setup at the repo root instead:
+
+```bash
+FIGLETS_MARKETPLACE_SOURCE=/absolute/path/to/figlets-mcp figlets-mcp setup --hosts=claude-code-plugin --yes
+```
+
+When `claude` is on `PATH`, this plugin path is also what the default `figlets-mcp setup --yes` runs for Claude Code — the legacy `claude mcp add` path below is dropped from defaults via supersession in that case.
 
 ### Claude Code (legacy fallback)
 

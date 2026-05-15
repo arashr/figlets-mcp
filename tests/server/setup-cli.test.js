@@ -24,8 +24,8 @@ fs.mkdirSync(path.dirname(fakeFigletsBin), { recursive: true });
 
 try {
   {
-    const fakeMarketplaceForLeakCheck = path.join(TEMP_DIR, "marketplace", "claude-code");
-    fs.mkdirSync(fakeMarketplaceForLeakCheck, { recursive: true });
+    // Default source is the public GitHub slug, so nothing leaks a developer-local path even without
+    // any injected override.
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
@@ -33,7 +33,6 @@ try {
       env: { PATH: "" },
       nodePath: fakeNode,
       figletsBinPath: fakeFigletsBin,
-      marketplacePath: fakeMarketplaceForLeakCheck,
     });
     assert.strictEqual(plan.command, "figlets-mcp");
     assert.ok(plan.targets.some(target => target.id === "claude-desktop"));
@@ -45,6 +44,7 @@ try {
     assert.ok(pluginTarget, "claude-code-plugin should always appear so explicit selection works");
     assert.strictEqual(pluginTarget.status, "manual");
     assert.ok(pluginTarget.reason && /not found on PATH/i.test(pluginTarget.reason), "manual reason should explain the missing claude binary");
+    assert.ok(pluginTarget.reason.includes("arashr/figlets-mcp"), "manual reason should quote the GitHub marketplace source");
     assert.ok(!JSON.stringify(plan).includes("/Users/arash"), "setup plan should not leak a developer-local repo path");
   }
 
@@ -181,11 +181,9 @@ try {
     assert.ok(output.includes("Open the Figlets Bridge plugin"));
   }
 
-  // When the plugin marketplace and claude binary are both available, the legacy claude-code
-  // target is dropped from the default run so we don't double-register Figlets.
+  // When claude is on PATH (GitHub source is always usable), the legacy claude-code target is
+  // dropped from the default run so we don't double-register Figlets.
   {
-    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
-    fs.mkdirSync(fakeMarketplace, { recursive: true });
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
@@ -193,17 +191,18 @@ try {
       env: { PATH: bin },
       nodePath: fakeNode,
       figletsBinPath: fakeFigletsBin,
-      marketplacePath: fakeMarketplace,
     });
     const ids = plan.targets.map(target => target.id);
-    assert.ok(ids.includes("claude-code-plugin"), "default plan should include the plugin install target when available");
-    assert.ok(!ids.includes("claude-code"), "default plan should drop the legacy claude-code target when the plugin path is available");
+    assert.ok(ids.includes("claude-code-plugin"), "default plan should include the plugin install target when claude is available");
+    assert.ok(!ids.includes("claude-code"), "default plan should drop the legacy claude-code target when the plugin path is viable");
+    const pluginTarget = plan.targets.find(target => target.id === "claude-code-plugin");
+    assert.strictEqual(pluginTarget.status, "would-run");
+    assert.ok(pluginTarget.command.includes("claude plugin marketplace add arashr/figlets-mcp"), "default command should use the GitHub slug");
+    assert.ok(pluginTarget.command.includes("--sparse .claude-plugin plugins/claude-code"), "GitHub source should limit the monorepo checkout via --sparse");
   }
 
   // But the legacy target is still reachable when explicitly requested.
   {
-    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
-    fs.mkdirSync(fakeMarketplace, { recursive: true });
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
@@ -212,7 +211,6 @@ try {
       env: { PATH: bin },
       nodePath: fakeNode,
       figletsBinPath: fakeFigletsBin,
-      marketplacePath: fakeMarketplace,
     });
     assert.strictEqual(plan.targets.length, 1);
     assert.strictEqual(plan.targets[0].id, "claude-code");
@@ -221,55 +219,69 @@ try {
   // Explicit --hosts=claude-code-plugin must always return a target — never an empty plan — so the
   // user gets a clear next step. When claude is missing, status is manual with an actionable reason.
   {
-    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
-    fs.mkdirSync(fakeMarketplace, { recursive: true });
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
       platform: "darwin",
       hosts: ["claude-code-plugin"],
       env: { PATH: "" },
-      marketplacePath: fakeMarketplace,
     });
     assert.strictEqual(plan.targets.length, 1, "explicit plugin target should always plan, even when claude is missing");
     assert.strictEqual(plan.targets[0].id, "claude-code-plugin");
     assert.strictEqual(plan.targets[0].status, "manual");
     assert.ok(/claude.*not found on PATH/i.test(plan.targets[0].reason), "manual reason should call out the missing claude binary");
-    assert.ok(plan.targets[0].reason.includes("plugin marketplace add"), "manual reason should show the commands to run after installing Claude Code");
+    assert.ok(plan.targets[0].reason.includes("plugin marketplace add arashr/figlets-mcp"), "manual reason should show the GitHub install command");
     assert.ok(plan.targets[0].reason.includes(FIGLETS_PLUGIN_SPEC), "manual reason should reference the plugin spec");
   }
 
-  // And when the marketplace folder is missing, the status is manual with a different reason.
+  // A local-path source override that lacks .claude-plugin/marketplace.json is manual with a clear reason.
   {
-    const missingMarketplace = path.join(TEMP_DIR, "no-such-marketplace");
+    const badLocalSource = path.join(TEMP_DIR, "bad-local-source");
+    fs.mkdirSync(badLocalSource, { recursive: true });
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
       platform: "darwin",
       hosts: ["claude-code-plugin"],
       env: { PATH: bin },
-      marketplacePath: missingMarketplace,
+      marketplaceSource: badLocalSource,
     });
     assert.strictEqual(plan.targets.length, 1);
     assert.strictEqual(plan.targets[0].status, "manual");
-    assert.ok(/marketplace folder not found/i.test(plan.targets[0].reason), "manual reason should call out the missing marketplace folder");
+    assert.ok(/no .claude-plugin\/marketplace\.json/i.test(plan.targets[0].reason), "manual reason should call out the missing local marketplace manifest");
   }
 
-  // Claude Code plugin install — fresh install runs both marketplace add and plugin install.
+  // A local-path source override WITH .claude-plugin/marketplace.json is would-run and uses no --sparse.
   {
-    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
-    fs.mkdirSync(fakeMarketplace, { recursive: true });
+    const goodLocalSource = path.join(TEMP_DIR, "good-local-source");
+    fs.mkdirSync(path.join(goodLocalSource, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(path.join(goodLocalSource, ".claude-plugin", "marketplace.json"), "{}");
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
       platform: "darwin",
       hosts: ["claude-code-plugin"],
       env: { PATH: bin },
-      marketplacePath: fakeMarketplace,
+      marketplaceSource: goodLocalSource,
+    });
+    assert.strictEqual(plan.targets[0].status, "would-run");
+    assert.ok(plan.targets[0].command.includes(`claude plugin marketplace add ${goodLocalSource} --scope user`), "local source command should not include --sparse");
+    assert.ok(!plan.targets[0].command.includes("--sparse"), "local-path source must not pass git --sparse");
+  }
+
+  // Claude Code plugin install — fresh install runs marketplace add (GitHub slug + --sparse),
+  // plugin install, then legacy MCP cleanup.
+  {
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["claude-code-plugin"],
+      env: { PATH: bin },
     });
     assert.strictEqual(plan.targets[0].id, "claude-code-plugin");
     assert.strictEqual(plan.targets[0].status, "would-run");
-    assert.ok(plan.targets[0].command.includes("claude plugin marketplace add"));
+    assert.ok(plan.targets[0].command.includes("claude plugin marketplace add arashr/figlets-mcp"));
     assert.ok(plan.targets[0].command.includes("claude plugin install"));
 
     const calls = [];
@@ -321,8 +333,11 @@ try {
       "mcp remove",
       "mcp remove",
     ]);
-    assert.strictEqual(calls[1].args[3], fakeMarketplace);
-    assert.deepStrictEqual(calls[1].args.slice(4), ["--scope", "user"]);
+    assert.deepStrictEqual(calls[1].args, [
+      "plugin", "marketplace", "add", "arashr/figlets-mcp",
+      "--sparse", ".claude-plugin", "plugins/claude-code",
+      "--scope", "user",
+    ]);
     assert.strictEqual(calls[3].args[2], FIGLETS_PLUGIN_SPEC);
     assert.deepStrictEqual(calls[3].args.slice(3), ["--scope", "user"]);
     assert.deepStrictEqual(calls.slice(4).map(call => call.args), [
@@ -334,22 +349,19 @@ try {
 
   // Claude Code plugin install — idempotent when marketplace and plugin already present.
   {
-    const fakeMarketplace = path.join(TEMP_DIR, "plugins", "claude-code");
-    fs.mkdirSync(fakeMarketplace, { recursive: true });
     const plan = getSetupPlan({
       homeDir: home,
       cwd,
       platform: "darwin",
       hosts: ["claude-code-plugin"],
       env: { PATH: bin },
-      marketplacePath: fakeMarketplace,
     });
     const calls = [];
     const applied = applySetupPlan(plan, {
       runner: (command, args) => {
         calls.push({ command, args });
         if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
-          return { status: 0, stdout: `Configured marketplaces:\n  ❯ ${FIGLETS_PLUGIN_MARKETPLACE_NAME}\n    Source: ${fakeMarketplace}\n`, stderr: "" };
+          return { status: 0, stdout: `Configured marketplaces:\n  ❯ ${FIGLETS_PLUGIN_MARKETPLACE_NAME}\n    Source: GitHub (arashr/figlets-mcp)\n`, stderr: "" };
         }
         if (args[0] === "plugin" && args[1] === "list") {
           return { status: 0, stdout: `Installed plugins:\n  ❯ ${FIGLETS_PLUGIN_SPEC}\n    Status: enabled\n`, stderr: "" };

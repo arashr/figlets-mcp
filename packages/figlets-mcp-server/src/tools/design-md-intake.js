@@ -26,9 +26,9 @@ const designMdIntakeTool = {
 
 function _loadDesignMdIntake() {
   try {
-    return require('@figlets/core').dsConfig.designMdIntake;
+    return require("../figlets-core.js").dsConfig.designMdIntake;
   } catch (_) {
-    return require('../../../figlets-core/src/ds-config/index.js').designMdIntake;
+    return require("../figlets-core.js").dsConfig.designMdIntake;
   }
 }
 

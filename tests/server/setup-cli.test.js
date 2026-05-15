@@ -269,6 +269,34 @@ try {
     assert.ok(!plan.targets[0].command.includes("--sparse"), "local-path source must not pass git --sparse");
   }
 
+  // P3: a Windows-style path must be treated as a local path (not a GitHub slug),
+  // so it does NOT get the git-only --sparse flag.
+  {
+    const plan = getSetupPlan({
+      homeDir: home, cwd, platform: "darwin", hosts: ["claude-code-plugin"], env: { PATH: bin },
+      marketplaceSource: "C:\\Users\\dev\\figlets-mcp",
+    });
+    // Treated as local: status is manual here only because the path does not exist
+    // on this test machine — the point is it is NOT sent to git with --sparse.
+    assert.strictEqual(plan.targets[0].status, "manual");
+    assert.ok(/no .claude-plugin\/marketplace\.json/i.test(plan.targets[0].reason), "Windows path must be handled as a local source");
+    assert.ok(!String(plan.targets[0].command || "").includes("--sparse"), "Windows local path must not get --sparse");
+  }
+
+  // P3: a local source containing spaces must be shell-quoted in the displayed command.
+  {
+    const spaced = path.join(TEMP_DIR, "dir with spaces", "figlets-mcp");
+    fs.mkdirSync(path.join(spaced, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(path.join(spaced, ".claude-plugin", "marketplace.json"), "{}");
+    const plan = getSetupPlan({
+      homeDir: home, cwd, platform: "darwin", hosts: ["claude-code-plugin"], env: { PATH: bin },
+      marketplaceSource: spaced,
+    });
+    assert.strictEqual(plan.targets[0].status, "would-run");
+    assert.ok(plan.targets[0].command.includes(`'${spaced}'`), "a path with spaces must be single-quoted so the printed command is copy-pastable");
+    assert.ok(!plan.targets[0].command.includes(`add ${spaced} `), "unquoted spaced path would break when copied");
+  }
+
   // Claude Code plugin install — fresh install runs marketplace add (GitHub slug + --sparse),
   // plugin install, then legacy MCP cleanup.
   {
@@ -300,6 +328,9 @@ try {
         if (args[0] === "plugin" && args[1] === "install") {
           return { status: 0, stdout: `Installed ${FIGLETS_PLUGIN_SPEC}\n`, stderr: "" };
         }
+        if (args[0] === "mcp" && args[1] === "list") {
+          return { status: 0, stdout: "plugin:figlets:figlets: npx -y https://example/x.tgz - ✓ Connected\n", stderr: "" };
+        }
         if (args[0] === "mcp" && args[1] === "remove" && args[3] === "user") {
           return { status: 0, stdout: "Removed MCP server figlets from user config\n", stderr: "" };
         }
@@ -311,12 +342,13 @@ try {
     });
     assert.strictEqual(applied.targets[0].status, "updated");
     const stepKinds = applied.targets[0].steps.map(step => step.step);
-    assert.deepStrictEqual(stepKinds, ["marketplace-add", "plugin-install", "mcp-remove-user", "mcp-remove-project", "mcp-remove-local"]);
+    assert.deepStrictEqual(stepKinds, ["marketplace-add", "plugin-install", "smoke-check", "mcp-remove-user", "mcp-remove-project", "mcp-remove-local"]);
     assert.strictEqual(applied.targets[0].steps[0].status, "ok");
     assert.strictEqual(applied.targets[0].steps[1].status, "ok");
-    assert.strictEqual(applied.targets[0].steps[2].status, "removed");
-    assert.strictEqual(applied.targets[0].steps[3].status, "absent");
+    assert.strictEqual(applied.targets[0].steps[2].status, "connected");
+    assert.strictEqual(applied.targets[0].steps[3].status, "removed");
     assert.strictEqual(applied.targets[0].steps[4].status, "absent");
+    assert.strictEqual(applied.targets[0].steps[5].status, "absent");
     assert.ok(applied.targets[0].reason.includes("/figlets:start"));
     assert.ok(applied.targets[0].reason.includes("legacy figlets MCP entries"));
 
@@ -329,6 +361,7 @@ try {
       "plugin marketplace add",
       "plugin list",
       "plugin install",
+      "mcp list",
       "mcp remove",
       "mcp remove",
       "mcp remove",
@@ -340,14 +373,82 @@ try {
     ]);
     assert.strictEqual(calls[3].args[2], FIGLETS_PLUGIN_SPEC);
     assert.deepStrictEqual(calls[3].args.slice(3), ["--scope", "user"]);
-    assert.deepStrictEqual(calls.slice(4).map(call => call.args), [
+    assert.deepStrictEqual(calls.slice(5).map(call => call.args), [
       ["mcp", "remove", "--scope", "user", "figlets"],
       ["mcp", "remove", "--scope", "project", "figlets"],
       ["mcp", "remove", "--scope", "local", "figlets"],
     ]);
   }
 
-  // Claude Code plugin install — idempotent when marketplace and plugin already present.
+  // Smoke check fails (plugin server unreachable, e.g. release not published):
+  // legacy MCP cleanup must be SKIPPED so a working legacy setup is preserved.
+  {
+    const plan = getSetupPlan({
+      homeDir: home, cwd, platform: "darwin", hosts: ["claude-code-plugin"], env: { PATH: bin },
+    });
+    const calls = [];
+    const applied = applySetupPlan(plan, {
+      runner: (command, args) => {
+        calls.push({ command, args });
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
+          return { status: 0, stdout: "Configured marketplaces:\n  ❯ karpathy-skills\n", stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "list") {
+          return { status: 0, stdout: "Installed plugins:\n  ❯ other@x\n", stderr: "" };
+        }
+        if (args[0] === "mcp" && args[1] === "list") {
+          return { status: 0, stdout: "plugin:figlets:figlets: npx -y https://example/x.tgz - ✗ Failed to connect\n", stderr: "" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    const stepKinds = applied.targets[0].steps.map(step => step.step);
+    assert.deepStrictEqual(stepKinds, ["marketplace-add", "plugin-install", "smoke-check"], "no mcp-remove steps when the plugin server is unreachable");
+    assert.strictEqual(applied.targets[0].steps[2].status, "unreachable");
+    assert.ok(!calls.some(c => c.args[0] === "mcp" && c.args[1] === "remove"), "must not run any claude mcp remove when smoke check failed");
+    assert.ok(/not reachable/i.test(applied.targets[0].reason), "reason should explain the server is not reachable");
+    assert.ok(/intact/i.test(applied.targets[0].reason), "reason should state legacy config was left intact");
+  }
+
+  // Marketplace source changed (old local Directory → GitHub slug): must re-point,
+  // not silently report unchanged with a stale cached plugin.
+  {
+    const plan = getSetupPlan({
+      homeDir: home, cwd, platform: "darwin", hosts: ["claude-code-plugin"], env: { PATH: bin },
+    });
+    const calls = [];
+    const applied = applySetupPlan(plan, {
+      runner: (command, args) => {
+        calls.push({ command, args });
+        if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
+          return { status: 0, stdout: `Configured marketplaces:\n  ❯ ${FIGLETS_PLUGIN_MARKETPLACE_NAME}\n    Source: Directory (/old/local/figlets-mcp)\n`, stderr: "" };
+        }
+        if (args[0] === "plugin" && args[1] === "list") {
+          return { status: 0, stdout: `Installed plugins:\n  ❯ ${FIGLETS_PLUGIN_SPEC}\n`, stderr: "" };
+        }
+        if (args[0] === "mcp" && args[1] === "list") {
+          return { status: 0, stdout: "plugin:figlets:figlets: npx -y https://example/x.tgz - ✓ Connected\n", stderr: "" };
+        }
+        if (args[0] === "mcp" && args[1] === "remove") {
+          return { status: 1, stdout: "", stderr: "No MCP server found with name: figlets\n" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    const repoint = applied.targets[0].steps.find(s => s.step === "marketplace-repoint");
+    assert.ok(repoint, "should record a marketplace-repoint step when the source changed");
+    assert.strictEqual(repoint.status, "removed-stale");
+    const mpAdd = applied.targets[0].steps.find(s => s.step === "marketplace-add");
+    assert.strictEqual(mpAdd.status, "repointed");
+    assert.ok(
+      calls.some(c => c.args[0] === "plugin" && c.args[1] === "uninstall" && c.args[2] === FIGLETS_PLUGIN_SPEC),
+      "should uninstall the stale plugin (by spec) before re-adding"
+    );
+    assert.ok(calls.some(c => c.args[0] === "plugin" && c.args[1] === "marketplace" && c.args[2] === "remove"), "should remove the stale marketplace before re-adding");
+    assert.ok(calls.some(c => c.args[0] === "plugin" && c.args[1] === "marketplace" && c.args[2] === "add"), "should re-add the marketplace with the new source");
+  }
+
+  // Idempotent: same source already registered → marketplace refreshed, nothing removed.
   {
     const plan = getSetupPlan({
       homeDir: home,
@@ -366,6 +467,9 @@ try {
         if (args[0] === "plugin" && args[1] === "list") {
           return { status: 0, stdout: `Installed plugins:\n  ❯ ${FIGLETS_PLUGIN_SPEC}\n    Status: enabled\n`, stderr: "" };
         }
+        if (args[0] === "mcp" && args[1] === "list") {
+          return { status: 0, stdout: "plugin:figlets:figlets: npx -y https://example/x.tgz - ✓ Connected\n", stderr: "" };
+        }
         if (args[0] === "mcp" && args[1] === "remove") {
           return { status: 1, stdout: "", stderr: `No MCP server found with name: figlets\n` };
         }
@@ -373,10 +477,13 @@ try {
       },
     });
     assert.strictEqual(applied.targets[0].status, "unchanged");
-    const installSteps = applied.targets[0].steps.filter(step => step.step === "marketplace-add" || step.step === "plugin-install");
-    assert.ok(installSteps.every(step => step.status === "skipped"));
+    const mpAdd = applied.targets[0].steps.find(s => s.step === "marketplace-add");
+    assert.strictEqual(mpAdd.status, "refreshed", "same-source re-run refreshes the marketplace so new commits reach the user");
+    const pInstall = applied.targets[0].steps.find(s => s.step === "plugin-install");
+    assert.strictEqual(pInstall.status, "skipped");
     const removeSteps = applied.targets[0].steps.filter(step => step.step.startsWith("mcp-remove-"));
     assert.ok(removeSteps.every(step => step.status === "absent"), "no legacy figlets MCP entries should be removed when nothing to clean up");
+    assert.ok(calls.some(c => c.args[0] === "plugin" && c.args[1] === "marketplace" && c.args[2] === "update"), "should refresh the marketplace from source");
     const issuedSubcommands = calls.map(call => call.args.slice(0, 2).join(" "));
     assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin install")), "should not re-run plugin install when already present");
     assert.ok(!issuedSubcommands.some(cmd => cmd.startsWith("plugin marketplace add")), "should not re-add marketplace when already present");

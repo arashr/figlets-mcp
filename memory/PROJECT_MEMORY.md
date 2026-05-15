@@ -8,7 +8,9 @@ Active context for the project so future sessions can recover quickly without re
 
 **Active branch:** `codex/claude-code-plugin-package`.
 
-**Status:** Plugin packaging reworked to an npm-free, agent-agnostic-respecting design. Not merged to `main`. All 59 tests green (`npm test`). `claude plugin validate` passes on both the root marketplace and the plugin manifest.
+**Status:** Plugin packaging reworked to an npm-free, agent-agnostic-respecting design, then hardened against a code review (P0–P3 — see DECISIONS 2026-05-15). Not merged to `main`. All 59 tests green (`npm test`). `claude plugin validate` passes on both the root marketplace and the plugin manifest. The self-contained tarball was verified to boot outside the monorepo (extracted to /tmp; `detect-design-system`/`audit-tokens`/`inspect-component` load; MCP server exposes `figlets_start`).
+
+**Hardening landed (2026-05-15):** all server→figlets-core requires go through the `src/figlets-core.js` shim; `build-server-tarball.js` bundles `@figlets/core` into the tarball (hard-fails if not self-contained); legacy MCP cleanup is gated on a `claude mcp list` smoke check (won't break a working legacy setup); setup re-points the marketplace when its source changed and refreshes it (`marketplace update`) when unchanged so version-pinned plugins still get updates; `_isLocalPathSource` handles Windows/UNC/~ paths; displayed commands are shell-quoted. Pre-release local dev should use `--hosts=claude-code` (the plugin path can't boot its server until the release exists).
 
 **Architecture (current — supersedes earlier npm-publish design):**
 

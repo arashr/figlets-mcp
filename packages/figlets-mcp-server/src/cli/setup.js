@@ -30,8 +30,16 @@ function _marketplaceSource(options) {
   return FIGLETS_PLUGIN_GITHUB_SOURCE;
 }
 
+// A marketplace source is either a GitHub shorthand ("owner/repo"), a git/https
+// URL, or a local filesystem path. Treat it as local UNLESS it is unambiguously
+// a GitHub shorthand or a remote URL — this keeps Windows paths (C:\..., \\unc),
+// "~" paths, and POSIX paths from being mistaken for a GitHub slug and getting
+// the git-only --sparse flag.
 function _isLocalPathSource(source) {
-  return typeof source === "string" && (source.startsWith("/") || source.startsWith("./") || source.startsWith("../") || source.startsWith("."));
+  if (typeof source !== "string" || source.length === 0) return false;
+  if (/^(https?:|git@|git\+|ssh:|github:)/i.test(source)) return false;
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#[^\s]+)?$/.test(source)) return false; // owner/repo
+  return true;
 }
 
 function _nodePath(options) {
@@ -251,11 +259,45 @@ function planNativeCommand(target, options) {
   });
 }
 
+function _shellQuote(arg) {
+  const str = String(arg);
+  if (str.length > 0 && /^[A-Za-z0-9_./:@=-]+$/.test(str)) return str;
+  return "'" + str.replace(/'/g, "'\\''") + "'";
+}
+
 function _claudePluginInstallCommand(target) {
-  const addParts = ["claude plugin marketplace add", target.marketplaceSource]
+  const addParts = ["claude", "plugin", "marketplace", "add", target.marketplaceSource]
     .concat(target.marketplaceSparseArgs || [])
     .concat(["--scope", target.scope]);
-  return `${addParts.join(" ")} && claude plugin install ${target.pluginSpec} --scope ${target.scope}`;
+  const installParts = ["claude", "plugin", "install", target.pluginSpec, "--scope", target.scope];
+  return addParts.map(_shellQuote).join(" ") + " && " + installParts.map(_shellQuote).join(" ");
+}
+
+// Extract the "Source: ..." text for a named marketplace from `claude plugin
+// marketplace list` output. Returns null if the marketplace is not registered.
+function _extractMarketplaceSource(listOutput, marketplaceName) {
+  const lines = String(listOutput || "").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const nameRe = new RegExp("(^|[^\\w-])" + marketplaceName + "(\\b|$)");
+    if (nameRe.test(lines[i]) && !/^\s*Source:/i.test(lines[i])) {
+      for (let j = i + 1; j < lines.length && j < i + 6; j += 1) {
+        const m = lines[j].match(/^\s*Source:\s*(.+?)\s*$/i);
+        if (m) return m[1];
+        if (/^\s*\S/.test(lines[j]) && !/^\s*(Version|Status|Plugins?):/i.test(lines[j]) && j > i + 1) break;
+      }
+      return "";
+    }
+  }
+  return null;
+}
+
+// Whether the registered source string corresponds to the desired source. The
+// listed form is like "GitHub (owner/repo)" or "Directory (/abs/path)"; the
+// desired source is either a GitHub slug or a local path.
+function _marketplaceSourceMatches(registeredSource, desiredSource) {
+  if (!registeredSource || !desiredSource) return false;
+  const norm = s => String(s).replace(/\/+$/, "").trim();
+  return norm(registeredSource).indexOf(norm(desiredSource)) !== -1;
 }
 
 function planClaudePluginInstall(target, options) {
@@ -408,9 +450,23 @@ function applyClaudePluginInstall(plan, options) {
     return Object.assign({}, plan, { status: "blocked", reason: marketplaceList.error.message, steps });
   }
   const marketplaceListOutput = marketplaceList ? String((marketplaceList.stdout || "") + (marketplaceList.stderr || "")) : "";
-  const marketplaceRegistered = new RegExp("(^|\\n)\\s*[^\\n]*\\b" + plan.marketplaceName + "\\b", "i").test(marketplaceListOutput);
+  const registeredSource = _extractMarketplaceSource(marketplaceListOutput, plan.marketplaceName);
+  const marketplaceRegistered = registeredSource !== null;
+  const sourceMatches = marketplaceRegistered && _marketplaceSourceMatches(registeredSource, plan.marketplaceSource);
 
-  if (!marketplaceRegistered) {
+  if (!marketplaceRegistered || !sourceMatches) {
+    // Re-point a stale marketplace whose source changed (e.g. an earlier local
+    // path now superseded by the GitHub slug). Just re-adding would be a no-op
+    // and Claude Code would keep serving the old cached plugin, so remove the
+    // marketplace and uninstall the plugin first to drop the stale cache.
+    if (marketplaceRegistered && !sourceMatches) {
+      runner(executable, ["plugin", "uninstall", plan.pluginSpec], { encoding: "utf-8" });
+      const rmResult = runner(executable, ["plugin", "marketplace", "remove", plan.marketplaceName], { encoding: "utf-8" });
+      if (rmResult && rmResult.error) {
+        return Object.assign({}, plan, { status: "blocked", reason: rmResult.error.message, steps });
+      }
+      steps.push({ step: "marketplace-repoint", status: "removed-stale", from: registeredSource || "(unknown)", to: plan.marketplaceSource });
+    }
     const addArgs = ["plugin", "marketplace", "add", plan.marketplaceSource]
       .concat(plan.marketplaceSparseArgs || [])
       .concat(["--scope", plan.scope]);
@@ -424,9 +480,13 @@ function applyClaudePluginInstall(plan, options) {
     if (addStatus !== 0 && addStatus !== null && !alreadyExists) {
       return Object.assign({}, plan, { status: "blocked", reason: (addOutput || `marketplace add exited with ${addStatus}`).trim(), steps });
     }
-    steps.push({ step: "marketplace-add", status: alreadyExists ? "already" : "ok" });
+    steps.push({ step: "marketplace-add", status: (marketplaceRegistered && !sourceMatches) ? "repointed" : (alreadyExists ? "already" : "ok") });
   } else {
-    steps.push({ step: "marketplace-add", status: "skipped" });
+    // Same source already registered: refresh it so new commits on the source
+    // reach the user even when the plugin version is unchanged (Claude Code
+    // keys its plugin cache on the version).
+    runner(executable, ["plugin", "marketplace", "update", plan.marketplaceName], { encoding: "utf-8" });
+    steps.push({ step: "marketplace-add", status: "refreshed" });
   }
 
   const pluginList = runner(executable, ["plugin", "list"], { encoding: "utf-8" });
@@ -452,43 +512,61 @@ function applyClaudePluginInstall(plan, options) {
     steps.push({ step: "plugin-install", status: "skipped" });
   }
 
-  // Auto-clean legacy non-plugin figlets MCP registrations so the plugin's server isn't duplicated.
-  // A user who had previously run `claude mcp add ... figlets` (or the legacy claude-code target)
-  // would otherwise see two figlets entries — the plugin's and the user/project/local one — both
-  // exposing the same tools. The plugin install supersedes those, so we remove them.
-  const legacyScopes = ["user", "project", "local"];
-  for (const scope of legacyScopes) {
-    const removeResult = runner(executable, ["mcp", "remove", "--scope", scope, "figlets"], { encoding: "utf-8" });
-    const removeOutput = removeResult ? String((removeResult.stdout || "") + (removeResult.stderr || "")) : "";
-    const removeStatus = removeResult && typeof removeResult.status === "number" ? removeResult.status : null;
-    const notFound = /no .*mcp server found|no server.*found|not found/i.test(removeOutput);
-    if (removeResult && removeResult.error) {
-      steps.push({ step: `mcp-remove-${scope}`, status: "error", reason: removeResult.error.message });
-      continue;
-    }
-    if (removeStatus === 0 && !notFound) {
-      steps.push({ step: `mcp-remove-${scope}`, status: "removed" });
-    } else {
-      steps.push({ step: `mcp-remove-${scope}`, status: "absent" });
+  // Smoke check before touching any working legacy config: `claude plugin install`
+  // only validates the manifest, not whether the plugin's MCP server can actually
+  // start. Confirm the plugin server is reachable before removing legacy figlets MCP
+  // entries — otherwise a designer with a working legacy setup could be migrated into
+  // a broken plugin-only state (e.g. when the release tarball is not published yet).
+  const mcpList = runner(executable, ["mcp", "list"], { encoding: "utf-8" });
+  const mcpListOutput = mcpList ? String((mcpList.stdout || "") + (mcpList.stderr || "")) : "";
+  const pluginServerLine = mcpListOutput.split("\n").find(line => /plugin:figlets:figlets\b/.test(line)) || "";
+  const pluginServerConnected = /✓\s*connected/i.test(pluginServerLine) || /:\s*connected\b/i.test(pluginServerLine);
+  steps.push({ step: "smoke-check", status: pluginServerConnected ? "connected" : "unreachable" });
+
+  // Auto-clean legacy non-plugin figlets MCP registrations so the plugin's server isn't
+  // duplicated — but ONLY once the plugin server is proven reachable.
+  let removedAny = false;
+  if (pluginServerConnected) {
+    const legacyScopes = ["user", "project", "local"];
+    for (const scope of legacyScopes) {
+      const removeResult = runner(executable, ["mcp", "remove", "--scope", scope, "figlets"], { encoding: "utf-8" });
+      const removeOutput = removeResult ? String((removeResult.stdout || "") + (removeResult.stderr || "")) : "";
+      const removeStatus = removeResult && typeof removeResult.status === "number" ? removeResult.status : null;
+      const notFound = /no .*mcp server found|no server.*found|not found/i.test(removeOutput);
+      if (removeResult && removeResult.error) {
+        steps.push({ step: `mcp-remove-${scope}`, status: "error", reason: removeResult.error.message });
+        continue;
+      }
+      if (removeStatus === 0 && !notFound) {
+        steps.push({ step: `mcp-remove-${scope}`, status: "removed" });
+        removedAny = true;
+      } else {
+        steps.push({ step: `mcp-remove-${scope}`, status: "absent" });
+      }
     }
   }
 
+  // "refreshed" (a marketplace re-poll with no structural change) and "skipped"
+  // both count as "nothing changed" for the overall status.
+  const noChangeStatuses = { skipped: true, refreshed: true };
   const installSteps = steps.filter(step => step.step === "marketplace-add" || step.step === "plugin-install");
-  const everySkipped = installSteps.every(step => step.status === "skipped");
-  const removedAny = steps.some(step => step.step.startsWith("mcp-remove-") && step.status === "removed");
+  const everySkipped = installSteps.every(step => noChangeStatuses[step.status]);
   let resultStatus;
-  if (everySkipped && !removedAny) resultStatus = "unchanged";
+  if (everySkipped && !removedAny && pluginServerConnected) resultStatus = "unchanged";
   else resultStatus = "updated";
 
-  return Object.assign({}, plan, {
-    status: resultStatus,
-    steps,
-    reason: resultStatus === "unchanged"
-      ? "Marketplace and plugin already in place. Restart Claude Code if it was running before this changed."
-      : everySkipped
-        ? "Plugin already installed; removed legacy figlets MCP entries that the plugin supersedes. Restart Claude Code."
-        : "Marketplace added and Figlets plugin installed" + (removedAny ? " (and legacy figlets MCP entries removed)" : "") + ". Restart Claude Code, then type /figlets:start (or just describe your design system to trigger the figlets-designer skill).",
-  });
+  let reason;
+  if (!pluginServerConnected) {
+    reason = "Marketplace and plugin are installed, but the plugin's MCP server is not reachable yet (it may be that the GitHub release tarball is not published, or Claude Code needs a restart). Left any existing legacy figlets MCP config intact so you are not migrated into a broken state. Restart Claude Code and re-run setup; if it still fails, publish the release or apply the local-dev override in the plugin README.";
+  } else if (resultStatus === "unchanged") {
+    reason = "Marketplace and plugin already in place and the plugin server is reachable. Restart Claude Code if it was running before this changed.";
+  } else if (everySkipped) {
+    reason = "Plugin already installed and reachable; removed legacy figlets MCP entries that the plugin supersedes. Restart Claude Code.";
+  } else {
+    reason = "Marketplace added and Figlets plugin installed (server reachable" + (removedAny ? "; legacy figlets MCP entries removed" : "") + "). Restart Claude Code, then type /figlets:start (or just describe your design system to trigger the figlets-designer skill).";
+  }
+
+  return Object.assign({}, plan, { status: resultStatus, steps, reason });
 }
 
 function applySetupPlan(plan, options) {

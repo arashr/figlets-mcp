@@ -44,13 +44,13 @@ function _modeIdByName(collection, name) {
 }
 
 function _loadValidate() {
-  try { return require("@figlets/core").dsConfig.validateSemanticPairs; }
-  catch (e) { return require("../../../figlets-core/src/ds-config/index.js").validateSemanticPairs; }
+  try { return require("../figlets-core.js").dsConfig.validateSemanticPairs; }
+  catch (e) { return require("../figlets-core.js").dsConfig.validateSemanticPairs; }
 }
 
 function _loadReadDsConfig() {
-  try { return require("@figlets/core").dsConfig.readDsConfig; }
-  catch (e) { return require("../../../figlets-core/src/ds-config/index.js").readDsConfig; }
+  try { return require("../figlets-core.js").dsConfig.readDsConfig; }
+  catch (e) { return require("../figlets-core.js").dsConfig.readDsConfig; }
 }
 
 function loadDsConfigSafe(configPath) {

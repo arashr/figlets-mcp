@@ -4,6 +4,24 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-15] Release tarball is self-contained; install is migration-safe
+
+Code-review hardening of the GitHub-tarball distribution:
+
+**Self-contained tarball (P0 blocker fix):** The server reaches `@figlets/core` (a `private`, unpublished workspace package) through `../../../figlets-core/...` relative paths that only resolve inside the monorepo. The published tarball would install but expose a dead MCP server (`Cannot find module '../../../figlets-core/...'`). Fix: all 11 server files now require core through a single shim `packages/figlets-mcp-server/src/figlets-core.js` (`require("@figlets/core")` with a monorepo-source fallback), and `scripts/build-server-tarball.js` vendors `@figlets/core` into the staged package's `node_modules` and marks it a `bundleDependency` so `npm pack` ships it inside the tarball. The build script hard-fails if the tarball does not contain both `package/src/index.js` and bundled `@figlets/core`. **Rule: never add a new `../../../figlets-core` require — always go through the shim.** The committed server `package.json` stays clean (no `@figlets/core` dep, no bundle metadata); bundling is a build-time concern only, so the package stays agent-agnostic.
+
+**Migration-safe install (P1):** `claude plugin install` only validates the manifest, not that the `npx`-tarball MCP server can boot. So `applyClaudePluginInstall` now runs a `claude mcp list` smoke check and only removes legacy user/project/local `figlets` MCP entries if `plugin:figlets:figlets` is reported connected. If unreachable (e.g. release not published), it leaves existing config intact and explains why — a designer with a working legacy setup is never migrated into a broken plugin-only state.
+
+**Marketplace source drift (P1):** Setup parses the registered marketplace's `Source:` line. If it differs from the desired source (e.g. an earlier local path now superseded by the GitHub slug) it uninstalls the plugin + removes the marketplace + re-adds (`marketplace-add: repointed`) so Claude Code drops the stale cached plugin. If the source matches, it runs `claude plugin marketplace update` (`refreshed`) so users still get new commits even though the plugin `version` is pinned (Claude Code keys its plugin cache on the version).
+
+**Source classification + quoting (P3):** `_isLocalPathSource` now positively identifies GitHub shorthands (`owner/repo`) and git/https URLs; everything else (POSIX, Windows `C:\`, UNC `\\`, `~`) is treated as a local path so it never gets the git-only `--sparse`. Displayed install commands are shell-quoted (`_shellQuote`) so local paths with spaces are copy-pastable.
+
+**Pre-release local dev (P2):** A local `FIGLETS_MARKETPLACE_SOURCE` only changes where plugin *files* come from; the plugin still launches the pinned GitHub release tarball, so the MCP server can't start pre-release without a manual manifest override. Docs now direct everyday pre-release local development to the legacy `figlets-mcp setup --hosts=claude-code --yes` path (registers the local server directly, works immediately).
+
+Known cosmetic debt: the dual `try/catch` blocks around the old figlets-core requires now have identical branches (both call the shim). Correct but redundant; left as-is to keep the P0 fix mechanical and low-risk.
+
+---
+
 ## [2026-05-14] Claude Code plugin packaging lives under `plugins/claude-code/`
 
 **Decision:** Distribute the designer-facing Claude Code experience as a Claude Code plugin shipped from this monorepo at `plugins/claude-code/figlets/`. The plugin manifest registers the Figlets MCP server inline (`mcpServers.figlets`), ships a slash command `/figlets:start`, and bundles a `figlets-designer` skill so designer phrases auto-trigger Designer Mode without typing the slash command.

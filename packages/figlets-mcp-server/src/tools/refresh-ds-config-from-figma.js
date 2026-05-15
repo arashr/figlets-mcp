@@ -148,9 +148,9 @@ function _loadDefaultActiveSnapshot() {
 function _loadConfig(configPath) {
   let readDsConfig, writeDsConfig;
   try {
-    ({ readDsConfig, writeDsConfig } = require("@figlets/core").dsConfig);
+    ({ readDsConfig, writeDsConfig } = require("../figlets-core.js").dsConfig);
   } catch (e) {
-    ({ readDsConfig, writeDsConfig } = require("../../../figlets-core/src/ds-config/index.js"));
+    ({ readDsConfig, writeDsConfig } = require("../figlets-core.js").dsConfig);
   }
   return { readDsConfig, writeDsConfig, ds: readDsConfig(configPath) };
 }

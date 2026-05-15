@@ -1,5 +1,5 @@
 const fs = require("fs");
-const { auditTokens } = require("../../../figlets-core/src/index.js");
+const { auditTokens } = require("../figlets-core.js");
 const { FIGMA_DATA_PATH, DS_CONTEXT_PATH, getActiveFilePaths } = require("../utils/paths.js");
 
 const auditTokensTool = {

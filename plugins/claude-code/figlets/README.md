@@ -22,13 +22,10 @@ This plugin is **agent-agnostic-friendly**: the Figlets toolkit itself lives in 
 figlets-mcp setup --hosts=claude-code-plugin --yes
 ```
 
-That runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent, and removes any legacy `figlets` MCP entries the plugin supersedes. Restart Claude Code afterwards.
+That runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent, and — only after a smoke check confirms the plugin's MCP server is actually reachable — removes any legacy `figlets` MCP entries the plugin supersedes. If the server is not reachable (e.g. the release is not published yet), setup leaves your existing config untouched and tells you why. Restart Claude Code afterwards.
 
-For local development before the GitHub repo is pushed, point setup at the repo root instead:
-
-```
-FIGLETS_MARKETPLACE_SOURCE=/absolute/path/to/figlets-mcp figlets-mcp setup --hosts=claude-code-plugin --yes
-```
+> [!WARNING]
+> `FIGLETS_MARKETPLACE_SOURCE=/path/to/figlets-mcp` only changes where Claude Code fetches the plugin *files*. The plugin still launches its MCP server from the GitHub release tarball URL pinned in `plugin.json`. So a local-source install does **not** give you a working MCP server before the release exists — you would still need the *Local development override* below. For everyday local development before the release, the simplest working path is **not** the plugin: run `figlets-mcp setup --hosts=claude-code --yes`, which registers the local server directly and works immediately.
 
 ## Manual install
 

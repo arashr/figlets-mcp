@@ -43,13 +43,11 @@ For Claude Code, the recommended install is the Figlets plugin — it registers 
 figlets-mcp setup --hosts=claude-code-plugin --yes
 ```
 
-Behind the scenes that runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent on re-run, and also removes any pre-existing user/project/local-scope `figlets` MCP entries that the plugin supersedes so Claude Code does not end up with two `figlets` servers. After a session restart, designers can either type `/figlets:start` or just describe their design system.
+Behind the scenes that runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent on re-run, re-points the marketplace if its source changed, and — only after a smoke check confirms the plugin's MCP server is actually reachable — removes any pre-existing user/project/local-scope `figlets` MCP entries that the plugin supersedes. If the server is not reachable, setup leaves existing config intact and reports why, so a designer with a working setup is never migrated into a broken one. After a session restart, designers can either type `/figlets:start` or just describe their design system.
 
-The plugin is distributed from the public GitHub repo (`arashr/figlets-mcp`), and the plugin's MCP server runs via `npx -y <GitHub release tarball URL>` — no npm account or npm publish is involved. Before this works for anyone, the server tarball must be attached to a GitHub release: run `npm run build:server-tarball` from the repo root and follow the printed `gh release` step. For local development before the repo is pushed, point setup at the repo root instead:
+The plugin is distributed from the public GitHub repo (`arashr/figlets-mcp`), and the plugin's MCP server runs via `npx -y <GitHub release tarball URL>` — no npm account or npm publish is involved. Before this works for anyone, the server tarball must be attached to a GitHub release: run `npm run build:server-tarball` from the repo root and follow the printed `gh release` step.
 
-```bash
-FIGLETS_MARKETPLACE_SOURCE=/absolute/path/to/figlets-mcp figlets-mcp setup --hosts=claude-code-plugin --yes
-```
+> Local development before the release exists: `FIGLETS_MARKETPLACE_SOURCE=/path figlets-mcp setup --hosts=claude-code-plugin` only changes where Claude Code fetches the plugin *files* — the plugin still launches its MCP server from the pinned GitHub release tarball URL, so the server will not start until the release is published or the plugin manifest is manually overridden. For everyday pre-release local development, use the legacy path below (`figlets-mcp setup --hosts=claude-code --yes`); it registers the local server directly and works immediately.
 
 When `claude` is on `PATH`, this plugin path is also what the default `figlets-mcp setup --yes` runs for Claude Code — the legacy `claude mcp add` path below is dropped from defaults via supersession in that case.
 

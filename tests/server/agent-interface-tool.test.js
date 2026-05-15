@@ -104,8 +104,7 @@ try {
       route: handleFigletsRouteIntent({ intent: "export design.md" }),
       guide: handleFigletsWorkflowGuide({ workflow_id: "export-design-md" }),
     });
-    assert.ok(!/\/Users\/[^"\\]+/.test(publicPayload), "Agent Interface should not hardcode developer-local /Users paths");
-    assert.ok(!publicPayload.includes("/Users/arash"), "Agent Interface should not leak the development repo path");
+    assert.ok(!/\/(Users|home)\/[^"\\/]+/.test(publicPayload), "Agent Interface should not hardcode developer-local home paths");
   }
 
 } finally {

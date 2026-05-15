@@ -90,7 +90,7 @@ figlets-mcp setup --hosts=claude-code-plugin --yes   # or just figlets-mcp setup
 
 **Follow-up completed in the same working set:**
 
-- Removed hardcoded `/Users/arash/Projects/figlets-mcp` from the product-facing designer fix/export prompt bodies.
+- Removed the hardcoded developer-local repo path from the product-facing designer fix/export prompt bodies.
 - Added `packages/figlets-mcp-server/src/cli/setup.js`.
   - Dry-run by default.
   - Patches supported configs only with `--yes`.
@@ -147,7 +147,7 @@ Adapter docs now instruct agents to preserve `designerResponse` instead of inven
 
 This is intentionally less "portable-looking" in the config but more reliable for actual Claude Code launches. `npm test`: 57/57 passing.
 
-**Project-local Claude Code fallback:** User-scope Claude Code registration still did not expose `figlets_start` in the user's session. Added a `claude-code-project` setup target that writes an ignored repo-local `.mcp.json` with the current Node executable and local `figlets-mcp.js` path. `.mcp.json` is now in `.gitignore`. Generated `/Users/arash/Projects/figlets-mcp/.mcp.json` locally via `node packages/figlets-mcp-server/src/cli/setup.js --hosts=claude-code-project --yes --skip-doctor`. This is for local product testing and should not be committed. `npm test`: 57/57 passing.
+**Project-local Claude Code fallback:** User-scope Claude Code registration still did not expose `figlets_start` in the user's session. Added a `claude-code-project` setup target that writes an ignored repo-local `.mcp.json` with the current Node executable and local `figlets-mcp.js` path. `.mcp.json` is now in `.gitignore`. Generated the repo-local `.mcp.json` via `node packages/figlets-mcp-server/src/cli/setup.js --hosts=claude-code-project --yes --skip-doctor`. This is for local product testing and should not be committed. `npm test`: 57/57 passing.
 
 **Local launcher slice:** Added `figlets-mcp launch` as the option-2 local launcher for designer-experience testing without asking the designer to understand MCP plumbing. It:
 
@@ -1158,7 +1158,7 @@ These were chosen because they are useful across agents and are mostly determini
 
 ### [2026-04-21]
 
-- Created the new sibling repo at `/Users/arash/Projects/figlets-mcp`
+- Created the new `figlets-mcp` repo
 - Added the initial monorepo-style package layout
 - Added architecture and migration docs
 - Added a minimal MCP server skeleton with the first tool stub: `detect_design_system`

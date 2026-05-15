@@ -45,7 +45,7 @@ try {
     assert.strictEqual(pluginTarget.status, "manual");
     assert.ok(pluginTarget.reason && /not found on PATH/i.test(pluginTarget.reason), "manual reason should explain the missing claude binary");
     assert.ok(pluginTarget.reason.includes("arashr/figlets-mcp"), "manual reason should quote the GitHub marketplace source");
-    assert.ok(!JSON.stringify(plan).includes("/Users/arash"), "setup plan should not leak a developer-local repo path");
+    assert.ok(!JSON.stringify(plan).includes(os.homedir()), "setup plan should not leak the developer's real home directory");
   }
 
   {

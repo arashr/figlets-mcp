@@ -460,10 +460,34 @@ function applyClaudePluginInstall(plan, options) {
     // and Claude Code would keep serving the old cached plugin, so remove the
     // marketplace and uninstall the plugin first to drop the stale cache.
     if (marketplaceRegistered && !sourceMatches) {
-      runner(executable, ["plugin", "uninstall", plan.pluginSpec], { encoding: "utf-8" });
+      const unResult = runner(executable, ["plugin", "uninstall", plan.pluginSpec], { encoding: "utf-8" });
+      const unOutput = unResult ? String((unResult.stdout || "") + (unResult.stderr || "")) : "";
+      const unStatus = unResult && typeof unResult.status === "number" ? unResult.status : null;
+      const unNotInstalled = /not installed|no such plugin|not found/i.test(unOutput);
+      if (unResult && unResult.error) {
+        return Object.assign({}, plan, { status: "blocked", reason: `plugin uninstall failed: ${unResult.error.message}`, steps });
+      }
+      // A non-zero "not installed" is fine (nothing to drop); any other non-zero is a real failure.
+      if (unStatus !== 0 && unStatus !== null && !unNotInstalled) {
+        return Object.assign({}, plan, { status: "blocked", reason: (unOutput || `plugin uninstall exited with ${unStatus}`).trim(), steps });
+      }
+
       const rmResult = runner(executable, ["plugin", "marketplace", "remove", plan.marketplaceName], { encoding: "utf-8" });
+      const rmOutput = rmResult ? String((rmResult.stdout || "") + (rmResult.stderr || "")) : "";
+      const rmStatus = rmResult && typeof rmResult.status === "number" ? rmResult.status : null;
       if (rmResult && rmResult.error) {
-        return Object.assign({}, plan, { status: "blocked", reason: rmResult.error.message, steps });
+        return Object.assign({}, plan, { status: "blocked", reason: `marketplace remove failed: ${rmResult.error.message}`, steps });
+      }
+      // Removing the stale marketplace MUST succeed — otherwise the re-add below
+      // is a no-op and Claude Code keeps serving the stale-source cached plugin
+      // while we falsely report "repointed".
+      if (rmStatus !== 0 && rmStatus !== null) {
+        return Object.assign({}, plan, {
+          status: "blocked",
+          reason: (rmOutput || `marketplace remove exited with ${rmStatus}`).trim() +
+            ` — could not drop the stale '${plan.marketplaceName}' marketplace, so it was not re-pointed to ${plan.marketplaceSource}. Resolve this and re-run.`,
+          steps,
+        });
       }
       steps.push({ step: "marketplace-repoint", status: "removed-stale", from: registeredSource || "(unknown)", to: plan.marketplaceSource });
     }
@@ -482,10 +506,14 @@ function applyClaudePluginInstall(plan, options) {
     }
     steps.push({ step: "marketplace-add", status: (marketplaceRegistered && !sourceMatches) ? "repointed" : (alreadyExists ? "already" : "ok") });
   } else {
-    // Same source already registered: refresh it so new commits on the source
-    // reach the user even when the plugin version is unchanged (Claude Code
-    // keys its plugin cache on the version).
+    // Same source already registered. Refresh the marketplace metadata, then ask
+    // Claude Code to update the plugin. Claude Code keys its plugin cache on the
+    // plugin.json "version", so this only pulls new content when a release bumped
+    // that version (see the release discipline in DECISIONS / build-server-tarball
+    // version check). If the version is unchanged this is a harmless no-op — it
+    // does NOT magically deliver new commits.
     runner(executable, ["plugin", "marketplace", "update", plan.marketplaceName], { encoding: "utf-8" });
+    runner(executable, ["plugin", "update", plan.pluginSpec], { encoding: "utf-8" });
     steps.push({ step: "marketplace-add", status: "refreshed" });
   }
 

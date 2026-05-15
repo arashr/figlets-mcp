@@ -107,6 +107,23 @@ const manifestUrl = manifest.mcpServers && manifest.mcpServers.figlets && manife
   : "(unset)";
 const expectedUrl = `https://github.com/arashr/figlets-mcp/releases/download/${tag}/${tarballName}`;
 
+// Claude Code keys its plugin cache on plugin.json "version". A release that
+// does not bump it will NOT reach already-installed users no matter what
+// `claude plugin marketplace update` / `plugin update` does. So the plugin
+// version must track the server version on every release.
+const manifestVersion = manifest.version;
+const versionMatches = manifestVersion === version;
+const urlMatches = manifestUrl === expectedUrl;
+if (!versionMatches || !urlMatches) {
+  process.stderr.write(
+    "\nRelease pre-flight FAILED — update plugins/claude-code/figlets/.claude-plugin/plugin.json:\n" +
+    (versionMatches ? "" : `  - "version" is ${JSON.stringify(manifestVersion)}, expected ${JSON.stringify(version)} (it is the plugin cache key; unchanged = installed users get no update)\n`) +
+    (urlMatches ? "" : `  - mcpServers.figlets URL is ${manifestUrl}, expected ${expectedUrl}\n`) +
+    "The tarball was still built at dist/, but do NOT cut the release until plugin.json matches.\n"
+  );
+  process.exit(2);
+}
+
 process.stdout.write([
   "",
   `Built: dist/${tarballName} (self-contained: bundles @figlets/core)`,
@@ -120,11 +137,8 @@ process.stdout.write([
   "",
   `     (or upload dist/${tarballName} via the GitHub Releases web UI for tag ${tag}.)`,
   "",
-  "Manifest check:",
+  "Manifest pre-flight: OK",
+  `  plugin.json version: ${manifestVersion} (matches server)`,
   `  plugin.json server URL: ${manifestUrl}`,
-  `  expected for ${tag}:       ${expectedUrl}`,
-  manifestUrl === expectedUrl
-    ? "  OK - manifest URL matches this version."
-    : "  WARNING - manifest URL does not match. Update plugin.json before releasing.",
   "",
 ].join("\n"));

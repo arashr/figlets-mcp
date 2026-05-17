@@ -4,6 +4,78 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-17] Setup-gap repair is part of health-check QA, not a separate follow-up flow
+
+**Decision:** The designer-facing "Check my design system" workflow includes semantic setup QA and the approved repair continuation. After showing setup gaps, agents should ask which exact suggested repairs to apply in the same flow instead of offering to run a separate "fix setup gaps" flow.
+
+**Why:** Once the QA output already contains semantic gaps, icon contrast failures, and missing neighboring roles, a separate gap flow is redundant and makes the product feel like the agent is handing the designer from one menu item to another instead of completing the job.
+
+**Tooling contract:** `inspect_ds_setup_gaps` must emit deterministic repair data when Figlets can compute it, including icon `plannedReAlias` suggestions for WCAG non-text contrast failures. Agents must not run ad hoc scripts over `figma-data.json` or local snapshots to derive designer-facing fixes. If structured repair data is missing, the agent should say exactly what is missing and treat it as a tool/product gap.
+
+**Role repair planning:** For missing border/outline role findings, when the paired background resolves to a primitive ramp, `inspect_ds_setup_gaps` emits `plannedRoleRepair` with Light/Dark aliases using the standard passive border steps for that ramp (`200` in Light and `800` in Dark, or the nearest available step). This keeps agents from inventing primitive mappings while still making high-confidence outline repairs approvable in one flow.
+
+**Agent-ready apply payload:** `inspect_ds_setup_gaps` also emits `repairPlan.applyInput`, shaped for `apply_ds_setup_repairs`. Agents should use that object after approval instead of parsing Claude/Codex `tool-results`, MCP transcript files, or local snapshots to discover nested keys.
+
+**Response ordering:** Agent-actionable keys must come first in the `inspect_ds_setup_gaps` result: `message`, `summary`, `repairPlan`, then `topFindings`. Long diagnostic arrays come after those fields so MCP hosts that truncate, collapse, or externalize large tool results still show the repair path without requiring filesystem inspection.
+
+---
+
+## [2026-05-17] Health check must include semantic setup QA before all-clear
+
+**Decision:** The designer-facing "Check my design system" workflow must run `inspect_ds_setup_gaps` after sync/detect/token audit and before reporting the system healthy. High-confidence semantic gaps, icon contrast failures, and missing neighboring roles are surfaced before lower-signal token inventory or informational duplicate notes, regardless of token type.
+
+**Why:** `audit_tokens` is intentionally narrower after the primitive-inventory cleanup. A file can have clean token hygiene while still having high-confidence semantic setup issues such as failing icon contrast or missing neighboring outlines. Reporting "healthy" from token audit alone is confidently wrong.
+
+**Consequence:** Agents should not use a clean `audit_tokens` result as a design-system all-clear. "Healthy" means the combined health check has no high-confidence setup/accessibility gaps and no true token-hygiene findings.
+
+---
+
+## [2026-05-17] Visual showcase design changes require preview confirmation
+
+**Decision:** Do not implement new visual showcase layout/styling decisions directly from an issue report. First investigate the deterministic behavior, then provide an HTML or equivalent visual preview for designer confirmation. After confirmation, port the approved treatment into the Figma renderer.
+
+**Why:** The showcase is a designer-facing artifact. Small visual changes such as moving contrast labels, changing table structure, showing standalone roles, or changing badge typography can alter how designers interpret the system. Recent changes fixed mechanics but made unconfirmed presentation choices, which caused churn.
+
+**Still allowed without visual preview:** Deterministic correctness fixes, tool routing, local config generation, QA severity/classification, and tests can be implemented directly when the product rule is clear. Figma mutations still require explicit designer approval through the existing workflow contract.
+
+---
+
+## [2026-05-17] Token audit separates primitive inventory from real defects
+
+**Decision:** Raw primitive values are inventory, not "unaliased" defects. `audit_tokens` should count raw primitive variables separately and reserve `unaliased` findings for non-primitive tokens that probably should reference another token. Duplicate literal values are severity-ranked: same-group duplicates are findings, cross-domain numeric/color coincidences are informational.
+
+**Why:** Primitive collections are supposed to hold raw values. Reporting every primitive as an unaliased issue made healthy design systems look broken. Likewise, equal values across spacing, type sizes, shadow radii, and offsets are common scale coincidences, not automatically duplicate-token problems.
+
+**Naming policy:** Numeric leaves, numeric fraction leaves like `0_5`, and path-token leaves such as `neutral-variant` are valid generated/setup naming patterns and should not produce mixed-naming warnings. Mixed naming should focus on genuinely competing conventions such as camelCase beside path-token names.
+
+---
+
+## [2026-05-16] Missing file-scoped configs are generated from Figma snapshots
+
+**Decision:** A synced Figma file without `.local/<fileKey>/design-system.config.js` is no longer a degraded no-config mode. Figlets creates a file-scoped starter config from the active `figma-data.json` snapshot before designer-facing QA/showcase flows depend on config-backed semantics. The generated config is local only, records `figlets.source = "figma-snapshot-bootstrap"`, infers collection names, responsive modes, primitive ramps, brand seed, semantic bg/text pairs, and paired outline/icon companions. It does **not** mutate Figma.
+
+**Why:** External design systems will often be created outside Figlets. Requiring a pre-existing config made showcase, setup-gap QA, DESIGN.md export, and agent guidance behave differently across files. That repeatedly produced split semantic tables, missing icon QA, and confusing "config path exists" vs "config file exists" reports. The product rule is now: **if there is a synced active Figma snapshot and the config is missing, make the config from Figma; ask the designer only for unresolved decisions.**
+
+**Flow contract:** `sync_figma_data`, `figlets_start`, `inspect_ds_setup_gaps`, and `build_ds_showcase` may create the local starter config when the active snapshot exists. This is allowed during read-only designer workflows because it is local setup state, not a Figma write. Approved Figma mutation remains restricted to known Figlets mutation tools.
+
+**Showcase consequence:** `build_ds_showcase` should normally be config-backed for imported files too. The old heuristic/no-config branch remains only as a last-resort renderer when no active file key or synced snapshot is available; it should not be treated as the expected designer experience.
+
+**Accessibility consequence:** Icon semantic roles are checked separately with WCAG non-text contrast (3:1) regardless of the selected text contrast algorithm. APCA can remain the design-system text algorithm, but the showcase and QA must keep the WCAG result visible because WCAG is the legal accessibility baseline.
+
+**Supersedes:** The earlier showcase-freeze/no-config tolerance in the 2026-05-07/2026-05-10 showcase notes is superseded for this product behavior. Config-backed semantic rendering is now the stabilizing path, not the risky optional path.
+
+---
+
+## [2026-05-15] Active Figma file context is shared after sync
+
+**Decision:** Treat the file-scoped snapshot under `.local/<fileKey>/figma-data.json` as the canonical default once `active-file.json` names a saved/open Figma file. `detect_design_system`, setup-gap inspection, and config refresh should all resolve through the same active-file source before falling back to the legacy flat `.local/figma-data.json`.
+
+**Why:** A live designer run exposed a correctness bug: `figlets_start` advertised the previously active file, then `sync_figma_data` synced a different live file and repointed `active-file.json`. Downstream tools disagreed about which snapshot/config to use, causing confident analysis of the wrong file. The sync response now includes previous/current file keys, snapshot path, config path, and whether the active file changed so agents can surface that transition plainly.
+
+**Naming convention:** Setup-gap role suggestions preserve the file's existing border-family vocabulary. If the file uses `color/outline/*`, missing border-role suggestions should be `color/outline/info`, not `color/border/info`. Figlets can still model this as the `border` role internally; public suggestions should respect the designer's namespace.
+
+---
+
 ## [2026-05-15] Codex plugin package uses Codex local marketplace conventions
 
 **Decision:** Ship the Codex designer experience as a Codex plugin package under `plugins/codex/figlets/`, with repo-root `.agents/plugins/marketplace.json` as the local marketplace manifest. The plugin includes `.codex-plugin/plugin.json`, `.mcp.json`, a `figlets-designer` skill, and a `/start`-style command file that mirrors the Figlets Designer Mode contract.

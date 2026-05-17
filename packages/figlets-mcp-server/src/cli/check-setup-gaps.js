@@ -143,11 +143,33 @@ function _formatContrastFailure(item) {
   return lines;
 }
 
+function _formatIconContrastFailure(item) {
+  const lines = [
+    `"${item.icon}" on "${item.bg}" (${item.mode}) → ${item.score}:1, needs ${item.threshold}:1`
+  ];
+  if (item.bgPrimitive) lines.push(`    bg → ${item.bgPrimitive.name} ${_formatHex(item.bgPrimitive.rgb)}`);
+  if (item.iconPrimitive) lines.push(`    icon → ${item.iconPrimitive.name} ${_formatHex(item.iconPrimitive.rgb)}`);
+  if (item.plannedReAlias) {
+    lines.push(`    suggested fix: re-alias "${item.plannedReAlias.token}" (${item.plannedReAlias.mode}) → ${item.plannedReAlias.to}`);
+  } else {
+    lines.push("    no deterministic same-ramp fix found — ask the designer");
+  }
+  return lines;
+}
+
 function _formatMissingSemanticRole(item) {
   const lines = [
     `${item.confidence || "medium"} confidence: "${item.family}" is missing ${item.missingRole}`
   ];
   if (item.suggestedName) lines.push(`    possible token: "${item.suggestedName}"`);
+  if (item.plannedRoleRepair && item.plannedRoleRepair.aliases) {
+    const aliasPairs = Object.keys(item.plannedRoleRepair.aliases)
+      .sort()
+      .map(mode => `${mode} → ${item.plannedRoleRepair.aliases[mode]}`);
+    if (aliasPairs.length) {
+      lines.push(`    suggested aliases: ${aliasPairs.join(", ")}`);
+    }
+  }
   if (Array.isArray(item.evidence) && item.evidence.length) {
     lines.push(`    evidence: ${item.evidence.slice(0, 4).map(name => `"${name}"`).join(", ")}`);
   }
@@ -263,6 +285,7 @@ function formatCheckReport(state) {
       + (summary.missingBackgroundCount || 0)
       + (summary.incompleteModeCount || 0)
       + (summary.contrastFailureCount || 0)
+      + (summary.iconContrastFailureCount || 0)
       + (summary.brokenAliasCount || 0)
       + (summary.foundationRoleFindingCount || 0)
       + (summary.companionAdvisoryCount || 0);
@@ -301,7 +324,15 @@ function formatCheckReport(state) {
       _formatContrastFailure
     );
 
-    // 3. Likely family-level setup gaps
+    // 3. Icon contrast failures (WCAG non-text legal baseline)
+    _renderSection(
+      lines,
+      gaps.iconContrastFailures || [],
+      `Icon contrast failures: ${summary.iconContrastFailureCount || 0}${summary.iconContrastNearMissCount ? ` (${summary.iconContrastNearMissCount} near-miss)` : ""}`,
+      _formatIconContrastFailure
+    );
+
+    // 4. Likely family-level setup gaps
     _renderSection(
       lines,
       gaps.missingSemanticRoles || [],
@@ -309,7 +340,7 @@ function formatCheckReport(state) {
       _formatMissingSemanticRole
     );
 
-    // 4. Required/foundational semantic roles
+    // 5. Required/foundational semantic roles
     _renderSection(
       lines,
       gaps.foundationRoleFindings || [],
@@ -317,7 +348,7 @@ function formatCheckReport(state) {
       _formatFoundationRole
     );
 
-    // 5. Missing foregrounds
+    // 6. Missing foregrounds
     _renderSection(
       lines,
       gaps.semanticGaps || [],
@@ -325,7 +356,7 @@ function formatCheckReport(state) {
       _formatMissingFgGap
     );
 
-    // 6. Missing backgrounds
+    // 7. Missing backgrounds
     _renderSection(
       lines,
       gaps.missingBackgrounds || [],
@@ -333,7 +364,7 @@ function formatCheckReport(state) {
       (item) => `"${item.fg}" expects "${item.expectedBg}" — missing in Figma`
     );
 
-    // 7. Incomplete modes
+    // 8. Incomplete modes
     _renderSection(
       lines,
       gaps.incompleteModes || [],
@@ -341,7 +372,7 @@ function formatCheckReport(state) {
       (item) => `"${item.token}" missing value in: ${item.missingModes.join(", ")}`
     );
 
-    // 8. Companion advisories (and any DS-wide role suppression)
+    // 9. Companion advisories (and any DS-wide role suppression)
     if (Array.isArray(gaps.suppressedAdvisoryRoles) && gaps.suppressedAdvisoryRoles.length) {
       lines.push("");
       for (const s of gaps.suppressedAdvisoryRoles) {
@@ -368,6 +399,7 @@ function formatCheckReport(state) {
     + (summary.missingBackgroundCount || 0)
     + (summary.incompleteModeCount || 0)
     + (summary.contrastFailureCount || 0)
+    + (summary.iconContrastFailureCount || 0)
     + (summary.brokenAliasCount || 0)
     + (summary.foundationRoleFindingCount || 0)
     + (summary.companionAdvisoryCount || 0);
@@ -387,6 +419,10 @@ function formatCheckReport(state) {
       const detail = nearFails && realFails ? ` (${realFails} gross, ${nearFails} near-miss)` : nearFails ? " (all near-miss)" : "";
       const verb = summary.contrastFailureCount === 1 ? "fails" : "fail";
       lines.push(`- A11Y: ${summary.contrastFailureCount} pair${summary.contrastFailureCount === 1 ? "" : "s"} ${verb} the contrast threshold${detail}.`);
+    }
+    if (summary.iconContrastFailureCount) {
+      const verb = summary.iconContrastFailureCount === 1 ? "fails" : "fail";
+      lines.push(`- A11Y: ${summary.iconContrastFailureCount} icon role${summary.iconContrastFailureCount === 1 ? "" : "s"} ${verb} WCAG non-text contrast (3:1).`);
     }
     if (summary.missingSemanticRoleCount) {
       const high = summary.highConfidenceSemanticRoleGapCount || 0;

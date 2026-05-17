@@ -9,4 +9,8 @@ Preserve the capability-menu shape and do not offer developer-mode options (no r
 
 After the designer picks a goal, call `figlets_route_intent`, then `figlets_workflow_guide`, and follow the steps in that workflow. Inspect before changing anything, summarize in plain language, and ask for explicit approval before any Figma write.
 
+When QA shows setup gaps, continue with the approved repair steps from the same workflow. Do not offer a separate setup-gap flow after already reporting the gaps.
+
+Use `inspect_ds_setup_gaps.repairPlan.applyInput` for approved repairs. Do not parse Codex/Claude `tool-results`, local snapshots, or transcript files to build repair payloads.
+
 If `figlets_start` is not available in this session, stop and tell the user Figlets is not connected yet — do not approximate the flow with raw Figma tools. The fix is to run `figlets-mcp setup --hosts=codex-plugin --yes`, restart Codex, then ask again.

@@ -5,7 +5,7 @@ const { FIGMA_DATA_PATH, DS_CONTEXT_PATH, getActiveFilePaths } = require("../uti
 const auditTokensTool = {
   name: "audit_tokens",
   description:
-    "Analyzes the local Figma design system snapshot for token health issues: unaliased raw values (hardcoded colors/numbers that should reference tokens), duplicate values defined across multiple variables, and naming convention inconsistencies within collections. Run sync_figma_data and detect_design_system first to ensure the snapshot is current.",
+    "Analyzes the local Figma design system snapshot for token health issues: non-primitive raw values that should probably reference tokens, same-domain duplicate values, and naming convention inconsistencies within collections. Raw primitive values are counted as inventory, not defects. Run sync_figma_data and detect_design_system first to ensure the snapshot is current.",
   inputSchema: {
     type: "object",
     properties: {

@@ -36,6 +36,21 @@ try {
   }
 
   {
+    // no args: defaults to the active file-scoped snapshot written by sync_figma_data
+    const fileKey = "local_active_detect";
+    const fileDir = path.join(TEMP_DIR, fileKey);
+    fs.mkdirSync(fileDir, { recursive: true });
+    fs.writeFileSync(path.join(TEMP_DIR, "active-file.json"), JSON.stringify({ fileKey }), "utf8");
+    fs.writeFileSync(path.join(fileDir, "figma-data.json"), JSON.stringify(exampleFigmaData), "utf8");
+    const result = handleDetectDesignSystem({});
+    assert.ok(!result.error, "active file-scoped snapshot should be used by default");
+    assert.strictEqual(result.source.kind, "active-file-snapshot");
+    assert.strictEqual(result.source.fileKey, fileKey);
+    assert.strictEqual(result.saved, path.join(fileDir, "figma-ds-context.json"));
+    assert.ok(fs.existsSync(result.saved), "context should be saved beside the active snapshot");
+  }
+
+  {
     // command: collections parsed correctly
     const result = handleDetectDesignSystem({ figmaDataCommand: "cat " + fixturePath });
     const semantics = result.collections.find(c => c.name === "Semantics");

@@ -3,6 +3,8 @@ const {
   bootstrapDsFromSnapshot,
   buildRampsFromSnapshot,
   detectBrand,
+  inferCollectionsFromSnapshot,
+  inferSemanticsFromSnapshot,
 } = require("../../packages/figlets-mcp-server/src/utils/bootstrap-ds-from-figma.js");
 
 function makePrim(id, name, r, g, b) {
@@ -86,9 +88,44 @@ module.exports = (async () => {
     assert.strictEqual(ds.color.contrastAlgorithm, "wcag");
     assert.strictEqual(ds.color.brand[0].name, "primary");
     assert.strictEqual(ds.color.ramps.length, 2);
-    assert.deepStrictEqual(ds.color.semantics, { pairs: [] });
+    assert.deepStrictEqual(ds.color.semantics, { pairs: [], icons: [], unpaired: [] });
 
     const dsApca = bootstrapDsFromSnapshot(snapshot, { algorithm: "apca" });
     assert.strictEqual(dsApca.color.contrastAlgorithm, "apca");
+  }
+
+  // Imported design systems should get useful semantic config, not an empty shell.
+  {
+    const snapshot = {
+      fileKey: "file_imported",
+      fileName: "Imported DS",
+      collections: [
+        { id: "prim", name: "Primitives", modes: [{ modeId: "m", name: "Default" }], variableIds: ["n100", "n900"] },
+        { id: "color", name: "Color", modes: [{ modeId: "l", name: "Light" }, { modeId: "d", name: "Dark" }], variableIds: ["bg", "fg", "outline", "icon", "focus"] },
+      ],
+      variables: [
+        makePrim("n100", "color/neutral/100", 0.95, 0.95, 0.95),
+        makePrim("n900", "color/neutral/900", 0.05, 0.05, 0.05),
+        { id: "bg", name: "color/surface/brand", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n100" }, d: { type: "VARIABLE_ALIAS", id: "n900" } } },
+        { id: "fg", name: "color/on-surface/brand", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n900" }, d: { type: "VARIABLE_ALIAS", id: "n100" } } },
+        { id: "outline", name: "color/outline/brand", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n900" }, d: { type: "VARIABLE_ALIAS", id: "n100" } } },
+        { id: "icon", name: "color/icon/brand", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n900" }, d: { type: "VARIABLE_ALIAS", id: "n100" } } },
+        { id: "focus", name: "color/outline/focus", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n900" }, d: { type: "VARIABLE_ALIAS", id: "n100" } } },
+      ],
+    };
+    const collections = inferCollectionsFromSnapshot(snapshot);
+    assert.strictEqual(collections.primitives, "Primitives");
+    assert.strictEqual(collections.color, "Color");
+    const semantics = inferSemanticsFromSnapshot(snapshot);
+    assert.deepStrictEqual(semantics.pairs, [{
+      bg: "color/surface/brand",
+      text: "color/on-surface/brand",
+      border: "color/outline/brand",
+      icon: "color/icon/brand",
+    }]);
+    assert.deepStrictEqual(semantics.unpaired, [{ token: "color/outline/focus" }]);
+    const ds = bootstrapDsFromSnapshot(snapshot, { createdAt: "2026-05-16T00:00:00.000Z" });
+    assert.strictEqual(ds.figlets.source, "figma-snapshot-bootstrap");
+    assert.strictEqual(ds.color.semantics.pairs[0].icon, "color/icon/brand");
   }
 })();

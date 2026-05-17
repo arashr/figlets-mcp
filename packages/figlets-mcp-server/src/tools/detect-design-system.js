@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const {
   detectDesignSystem,
   detectDesignSystemFromFigmaData
@@ -61,19 +62,38 @@ function runAnalysis(input = {}) {
 
 // Public: save full context to disk, return only compact summary for the agent
 function handleDetectDesignSystem(input = {}) {
-  const result = runAnalysis(input);
+  const dataSource = input.snapshot ? null : loadFigmaDataSource(input);
+  const result = input.snapshot ? runAnalysis(input) : (dataSource
+    ? detectDesignSystemFromFigmaData({
+      ...dataSource.figmaData,
+      target: dataSource.target,
+      source: dataSource.kind,
+      sourceMeta: dataSource.meta !== undefined ? dataSource.meta : null
+    })
+    : runAnalysis(input));
 
   if (result.error) return result;
 
   // All analysis stays on the client machine — save full context for downstream tools
+  const contextPath = dataSource && dataSource.meta && dataSource.meta.dsContextPath
+    ? dataSource.meta.dsContextPath
+    : DS_CONTEXT_PATH;
   if (result.snapshot) {
+    const dir = path.dirname(contextPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     if (!fs.existsSync(LOCAL_DIR)) fs.mkdirSync(LOCAL_DIR, { recursive: true });
-    fs.writeFileSync(DS_CONTEXT_PATH, JSON.stringify(result.snapshot, null, 2));
+    fs.writeFileSync(contextPath, JSON.stringify(result.snapshot, null, 2));
   }
 
   // Agent receives only what it needs to reason and report
   return {
-    saved: DS_CONTEXT_PATH,
+    saved: contextPath,
+    source: dataSource ? {
+      kind: dataSource.kind,
+      target: dataSource.target,
+      fileKey: dataSource.meta && dataSource.meta.fileKey ? dataSource.meta.fileKey : null,
+      path: dataSource.meta && dataSource.meta.path ? dataSource.meta.path : null,
+    } : null,
     summary: result.summary,
     typographyStrategy: result.snapshot && result.snapshot.context
       ? result.snapshot.context.typographyStrategy

@@ -16,6 +16,7 @@ let pendingQaAuditRequest = null;
 let pendingUpdatePrimitivesRequest = null;
 let pendingSetupRepairsRequest = null;
 let pendingResetRequest = null;
+let pendingSyncPreviousFileKey = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
 let lastPluginSeenAt = 0;
@@ -138,6 +139,7 @@ const server = http.createServer((req, res) => {
   // 2. MCP Agent calls this to trigger a global sync
   if (req.method === 'POST' && pathname === '/request-sync') {
     if (pendingPollResponse) {
+      pendingSyncPreviousFileKey = lastFileKey || '';
       // Tell Figma to wake up and extract everything
       pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
       pendingPollResponse.end(JSON.stringify({ command: 'extract-all' }));
@@ -571,20 +573,30 @@ const server = http.createServer((req, res) => {
     });
     req.on('end', () => {
       const fp = _filePaths(_getFileKey(req));
+      const fileKey = _getFileKey(req);
       try {
         fs.mkdirSync(fp.dir, { recursive: true });
         fs.writeFileSync(fp.data, body);
         console.log('[success] Wrote payload to ' + fp.data);
 
-        _writeActiveFile(_getFileKey(req));
+        _writeActiveFile(fileKey);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
+        res.end(JSON.stringify({ success: true, fileKey: fileKey || null, dataPath: fp.data }));
 
         if (pendingSyncRequest) {
           pendingSyncRequest.writeHead(200, { 'Content-Type': 'application/json' });
-          pendingSyncRequest.end(JSON.stringify({ success: true, message: 'Sync complete', sessionId: _getSessionId(req) || null }));
+          pendingSyncRequest.end(JSON.stringify({
+            success: true,
+            message: 'Sync complete',
+            sessionId: _getSessionId(req) || null,
+            fileKey: fileKey || null,
+            previousFileKey: pendingSyncPreviousFileKey || null,
+            activeFileChanged: Boolean(pendingSyncPreviousFileKey && fileKey && pendingSyncPreviousFileKey !== fileKey),
+            dataPath: fp.data
+          }));
           pendingSyncRequest = null;
+          pendingSyncPreviousFileKey = null;
         }
       } catch (err) {
         console.error('[error] Failed to write file:', err);
@@ -595,6 +607,7 @@ const server = http.createServer((req, res) => {
           pendingSyncRequest.writeHead(500, { 'Content-Type': 'application/json' });
           pendingSyncRequest.end(JSON.stringify({ error: err.message }));
           pendingSyncRequest = null;
+          pendingSyncPreviousFileKey = null;
         }
       }
     });

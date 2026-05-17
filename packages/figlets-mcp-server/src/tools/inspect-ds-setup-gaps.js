@@ -1,13 +1,14 @@
 const fs = require("fs");
 const path = require("path");
-const { getActiveFileKey, getActiveFileConfigPath, getActiveFilePaths } = require("../utils/paths.js");
-const { loadFigmaDataSource } = require("../bridges/figma-data-source.js");
+const { getActiveFileConfigPath } = require("../utils/paths.js");
+const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { computePlannedAliases, loadDsConfigSafe } = require("../utils/accessible-repair-aliases.js");
+const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 
 const inspectDsSetupGapsTool = {
   name: "inspect_ds_setup_gaps",
   description:
-    "Read-only QA pass over the semantic color layer in the synced Figma snapshot. Reports missing foreground companions, missing backgrounds for on-* tokens, incomplete modes, contrast failures, broken aliases, and advisory missing border/icon companions. Never mutates Figma or config.",
+    "Read-only QA pass over the semantic color layer in the synced Figma snapshot. Reports missing foreground companions, missing backgrounds for on-* tokens, incomplete modes, contrast failures, icon contrast failures, broken aliases, and missing neighboring roles. Emits deterministic plannedReAlias/role suggestions when Figlets can compute them; agents must not parse figma-data.json or run ad hoc scripts to invent repairs. Never mutates Figma or config.",
   inputSchema: {
     type: "object",
     properties: {
@@ -36,6 +37,7 @@ const _FOUNDATION_ROLE_SPECS = [
 ];
 
 const _WCAG_THRESHOLD = 4.5;
+const _WCAG_ICON_THRESHOLD = 3;
 const _APCA_THRESHOLD = 75;
 // Hairline-failure tolerance: scores within this distance of the threshold are
 // flagged near-miss so a triage pass can prioritize gross failures first.
@@ -105,17 +107,18 @@ function _familyKeyForParts(parts, roleIndex) {
   return beforeRole.length ? beforeRole.join("/") : parts.slice(1).join("/");
 }
 
-function _candidateNameForRole(exampleName, role) {
+function _candidateNameForRole(exampleName, role, preferredFamilies) {
   const parts = String(exampleName || "").split("/");
   const info = _roleForParts(parts);
   if (!info) return null;
+  const preferred = preferredFamilies && preferredFamilies[role];
   const replacements = {
     foreground: info.role === "background" && _norm(parts[info.roleIndex]) === "surface" ? "on-surface" : "text",
     background: info.role === "foreground" && /^on-/.test(_norm(parts[info.roleIndex]))
       ? _norm(parts[info.roleIndex]).replace(/^on-/, "")
       : "bg",
     icon: "icon",
-    border: "border",
+    border: preferred || "border",
   };
   const replacement = replacements[role];
   if (!replacement) return null;
@@ -149,18 +152,40 @@ function _roleEvidence(cluster) {
   return names.sort();
 }
 
-function _missingRoleFinding(cluster, missingRole, exampleName, confidence, reason) {
+function _missingRoleFinding(cluster, missingRole, exampleName, confidence, reason, preferredFamilies) {
   return {
     kind: "missing-semantic-role",
     family: cluster.family,
     missingRole,
-    suggestedName: _candidateNameForRole(exampleName, missingRole),
+    suggestedName: _candidateNameForRole(exampleName, missingRole, preferredFamilies),
     evidence: _roleEvidence(cluster),
     confidence,
     basis: "semantic-family",
     agentAction: confidence === "high" ? "ask-designer" : "advisory-only",
     reason,
   };
+}
+
+function _preferredFamilyForRole(names, roleFamilies, fallback) {
+  const counts = new Map();
+  for (const name of names) {
+    const parts = String(name || "").split("/");
+    for (const part of parts) {
+      const normalized = _norm(part);
+      if (roleFamilies.indexOf(normalized) === -1) continue;
+      counts.set(normalized, (counts.get(normalized) || 0) + 1);
+    }
+  }
+  let best = fallback;
+  let bestCount = 0;
+  for (const family of roleFamilies) {
+    const count = counts.get(family) || 0;
+    if (count > bestCount) {
+      best = family;
+      bestCount = count;
+    }
+  }
+  return best;
 }
 
 function _roleFamilySeen(names, families) {
@@ -200,10 +225,14 @@ function _foundationRoleFindings(allNames, semanticContext) {
 function _semanticContextFromConfig(ds) {
   const semantics = ds && ds.color && ds.color.semantics ? ds.color.semantics : {};
   const pairTextByBg = new Map();
+  const pairIconByBg = new Map();
+  const pairBorderByBg = new Map();
   const unpairedTokens = new Set();
   if (Array.isArray(semantics.pairs)) {
     for (const pair of semantics.pairs) {
       if (pair && pair.bg && pair.text) pairTextByBg.set(pair.bg, pair.text);
+      if (pair && pair.bg && pair.icon) pairIconByBg.set(pair.bg, pair.icon);
+      if (pair && pair.bg && pair.border) pairBorderByBg.set(pair.bg, pair.border);
     }
   }
   if (Array.isArray(semantics.unpaired)) {
@@ -211,7 +240,7 @@ function _semanticContextFromConfig(ds) {
       if (item && item.token) unpairedTokens.add(item.token);
     }
   }
-  return { pairTextByBg, unpairedTokens };
+  return { pairTextByBg, pairIconByBg, pairBorderByBg, unpairedTokens };
 }
 
 // Pick fg target families in priority order. Preserves the existing convention
@@ -232,6 +261,28 @@ function _targetFamiliesFor(bgSegment, allNames) {
     if (leftSeen === rightSeen) return 0;
     return leftSeen ? -1 : 1;
   });
+}
+
+function _companionRoleCandidate(bgName, targetFamilies, allNames) {
+  const names = new Set(allNames);
+  const parts = String(bgName || "").split("/");
+  const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+  if (bgIndex < 0) return null;
+  const leaf = parts[parts.length - 1] || "";
+  const stem = _stripVariantSuffix(leaf);
+  const candidates = [];
+  for (const family of targetFamilies) {
+    const next = _swapSegment(parts, bgIndex, family);
+    candidates.push(next.join("/"));
+  }
+  if (stem !== leaf) {
+    for (const family of targetFamilies) {
+      const next = _swapSegment(parts, bgIndex, family);
+      next[next.length - 1] = stem;
+      candidates.push(next.join("/"));
+    }
+  }
+  return candidates.find(candidate => names.has(candidate)) || null;
 }
 
 function _collectionFor(variable, collections) {
@@ -311,6 +362,98 @@ function _apcaLc(txt, bg) {
   else            lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14;
   if (Math.abs(lc) < 0.1) return 0;
   return Math.round(lc > 0 ? lc * 100 - 2.7 : lc * 100 + 2.7);
+}
+
+function _primitiveInfo(name) {
+  if (!_isPrimitiveColorName(name)) return null;
+  const parts = String(name).split("/");
+  const step = Number(parts[2]);
+  if (!Number.isFinite(step)) return null;
+  return { name, ramp: parts[1], step };
+}
+
+function _planIconReAlias(bgTerm, iconTerm, modeName, colorVars, varsById, collections) {
+  const current = _primitiveInfo(iconTerm && iconTerm.name);
+  if (!bgTerm || !bgTerm.rgb || !current) return null;
+  const candidates = [];
+  for (const variable of colorVars) {
+    const info = _primitiveInfo(variable && variable.name);
+    if (!info || info.ramp !== current.ramp || info.name === current.name) continue;
+    const terminal = _resolveTerminalByModeName(variable, modeName, varsById, collections);
+    if (!terminal || !terminal.rgb) continue;
+    const ratio = _wcagRatio(bgTerm.rgb, terminal.rgb);
+    if (ratio < _WCAG_ICON_THRESHOLD) continue;
+    candidates.push({
+      name: info.name,
+      step: info.step,
+      distance: Math.abs(info.step - current.step),
+      ratio,
+    });
+  }
+  candidates.sort((a, b) =>
+    (a.distance - b.distance)
+    || (b.ratio - a.ratio)
+    || (a.step - b.step)
+    || a.name.localeCompare(b.name)
+  );
+  return candidates[0] ? candidates[0].name : null;
+}
+
+function _nearestPrimitiveOnRamp(colorVars, ramp, targetStep) {
+  const candidates = [];
+  for (const variable of colorVars) {
+    const info = _primitiveInfo(variable && variable.name);
+    if (!info || info.ramp !== ramp) continue;
+    candidates.push({
+      name: info.name,
+      distance: Math.abs(info.step - targetStep),
+      step: info.step,
+    });
+  }
+  candidates.sort((a, b) => (a.distance - b.distance) || (a.step - b.step) || a.name.localeCompare(b.name));
+  return candidates[0] ? candidates[0].name : null;
+}
+
+function _modeTargetStepForRole(role, modeName) {
+  const mode = _norm(modeName);
+  if (role === "border") return mode === "dark" ? 800 : 200;
+  return null;
+}
+
+function _planMissingRoleRepair(finding, byName, colorVars, varsById, collections) {
+  if (!finding || !finding.suggestedName) return null;
+  if (finding.missingRole !== "border") return null;
+  const evidence = Array.isArray(finding.evidence) ? finding.evidence : [];
+  const bgName = evidence.find(name => {
+    const variable = byName.get(name);
+    if (!variable) return false;
+    const role = _roleForParts(String(name).split("/"));
+    return role && role.role === "background";
+  });
+  if (!bgName) return null;
+  const bgVar = byName.get(bgName);
+  const coll = _collectionFor(bgVar, collections);
+  if (!coll || !Array.isArray(coll.modes) || !coll.modes.length) return null;
+
+  const aliases = {};
+  for (const mode of coll.modes) {
+    const targetStep = _modeTargetStepForRole(finding.missingRole, mode.name);
+    if (!targetStep) continue;
+    const bgTerm = _resolveTerminalByModeName(bgVar, mode.name, varsById, collections);
+    const info = _primitiveInfo(bgTerm && bgTerm.name);
+    if (!info) continue;
+    const alias = _nearestPrimitiveOnRamp(colorVars, info.ramp, targetStep);
+    if (alias) aliases[mode.name || mode.modeId] = alias;
+  }
+  if (!Object.keys(aliases).length) return null;
+  return {
+    name: finding.suggestedName,
+    role: finding.missingRole,
+    aliases,
+    source: bgName,
+    basis: "background-ramp",
+    reason: "Border/outline role aliases are planned from the paired background ramp using the standard passive border steps.",
+  };
 }
 
 function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
@@ -482,6 +625,65 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   }
   contrastFailures.sort((a, b) => a.bg.localeCompare(b.bg) || a.mode.localeCompare(b.mode));
 
+  // ── Icon contrast failures ─────────────────────────────────────────────────
+  // Icons are legal non-text contrast objects, so they always get a WCAG 3:1
+  // check even when the text-pair algorithm is APCA. Config-authored pair.icon
+  // wins; otherwise infer the companion by the same bg→icon naming pattern the
+  // showcase uses for paired semantic rows.
+  const iconContrastFailures = [];
+  for (const variable of semanticVars) {
+    const parts = variable.name.split("/");
+    const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+    if (bgIndex < 0) continue;
+    const configuredIcon = semanticContext.pairIconByBg.get(variable.name);
+    const iconName = (configuredIcon && byName.has(configuredIcon))
+      ? configuredIcon
+      : _companionRoleCandidate(variable.name, _ICON_FAMILIES, allColorNames);
+    if (!iconName || !byName.has(iconName)) continue;
+    const iconVar = byName.get(iconName);
+    const coll = _collectionFor(variable, collections);
+    if (!coll || !Array.isArray(coll.modes)) continue;
+
+    for (const mode of coll.modes) {
+      const bgTerm = _resolveTerminalByModeName(variable, mode.name, varsById, collections);
+      const iconTerm = _resolveTerminalByModeName(iconVar, mode.name, varsById, collections);
+      if (!bgTerm || !iconTerm) continue;
+      const ratio = _wcagRatio(bgTerm.rgb, iconTerm.rgb);
+      if (ratio >= _WCAG_ICON_THRESHOLD) continue;
+      const plannedIconAlias = _planIconReAlias(bgTerm, iconTerm, mode.name, colorVars, varsById, collections);
+      iconContrastFailures.push({
+        kind: "icon-contrast-failure",
+        bg: variable.name,
+        icon: iconVar.name,
+        mode: mode.name,
+        algorithm: "wcag-non-text",
+        score: Math.round(ratio * 10) / 10,
+        threshold: _WCAG_ICON_THRESHOLD,
+        nearMiss: (_WCAG_ICON_THRESHOLD - ratio) <= _WCAG_NEARMISS,
+        gap: Math.round((_WCAG_ICON_THRESHOLD - ratio) * 10) / 10,
+        bgPrimitive: { name: bgTerm.name, rgb: bgTerm.rgb },
+        iconPrimitive: { name: iconTerm.name, rgb: iconTerm.rgb },
+        plannedReAlias: plannedIconAlias ? {
+          token: iconVar.name,
+          mode: mode.name,
+          from: iconTerm.name,
+          to: plannedIconAlias,
+          expectedCurrentAlias: iconTerm.name,
+          newAliasTarget: plannedIconAlias,
+          threshold: _WCAG_ICON_THRESHOLD,
+        } : null,
+        reason: "Icon semantic role fails WCAG non-text contrast (3:1) on its paired surface.",
+      });
+    }
+  }
+  iconContrastFailures.sort((a, b) =>
+    (a.score - b.score)
+    || (b.gap - a.gap)
+    || a.bg.localeCompare(b.bg)
+    || a.icon.localeCompare(b.icon)
+    || a.mode.localeCompare(b.mode)
+  );
+
   // ── Broken aliases (semantic layer only) ───────────────────────────────────
   // Any semantic token whose VARIABLE_ALIAS points at a target id that's no
   // longer in the snapshot. No setup-vs-component classification — this tool
@@ -587,6 +789,10 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     }
   }
   const missingSemanticRoles = [];
+  const preferredFamilies = {
+    border: _preferredFamilyForRole(allColorNames, _BORDER_FAMILIES, "border"),
+    icon: _preferredFamilyForRole(allColorNames, _ICON_FAMILIES, "icon"),
+  };
   for (const cluster of semanticFamilies) {
     const hasBg = cluster.roles.background.length > 0;
     const hasFg = cluster.roles.foreground.length > 0;
@@ -611,7 +817,8 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
         "foreground",
         example,
         (hasIcon || hasBorder) ? "high" : "medium",
-        "This semantic family has a background role but no foreground/text role in Figma."
+        "This semantic family has a background role but no foreground/text role in Figma.",
+        preferredFamilies
       ));
     }
 
@@ -621,7 +828,8 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
         "background",
         example,
         "high",
-        "This semantic family has foreground/icon/border roles but no background role in Figma."
+        "This semantic family has foreground/icon/border roles but no background role in Figma.",
+        preferredFamilies
       ));
     }
 
@@ -631,7 +839,8 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
         "icon",
         example,
         hasBorder ? "high" : "medium",
-        "This semantic family has background and foreground roles, and this DS uses icon roles elsewhere."
+        "This semantic family has background and foreground roles, and this DS uses icon roles elsewhere.",
+        preferredFamilies
       ));
     }
 
@@ -641,13 +850,18 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
         "border",
         example,
         hasIcon ? "high" : "medium",
-        "This semantic family has background and foreground roles, and this DS uses border roles elsewhere."
+        "This semantic family has background and foreground roles, and this DS uses border roles elsewhere.",
+        preferredFamilies
       ));
     }
   }
+  for (const finding of missingSemanticRoles) {
+    const planned = _planMissingRoleRepair(finding, byName, colorVars, varsById, collections);
+    if (planned) finding.plannedRoleRepair = planned;
+  }
   missingSemanticRoles.sort((a, b) => {
     const order = { high: 0, medium: 1, low: 2 };
-    return (order[a.confidence] || 9) - (order[b.confidence] || 9)
+    return (order[a.confidence] ?? 9) - (order[b.confidence] ?? 9)
       || a.family.localeCompare(b.family)
       || a.missingRole.localeCompare(b.missingRole);
   });
@@ -662,6 +876,13 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     })
     .filter(adv => adv.missing.length);
 
+  const highConfidenceIssues = []
+    .concat(iconContrastFailures.map(item => Object.assign({ priority: "high" }, item)))
+    .concat(missingSemanticRoles.filter(gap => gap.confidence === "high").map(item => Object.assign({ priority: "high" }, item)))
+    .concat(contrastFailures.filter(f => !f.nearMiss).map(item => Object.assign({ priority: "high" }, item)))
+    .concat(foundationRoleFindings.map(item => Object.assign({ priority: "high" }, item)))
+    .slice(0, 12);
+
   return {
     semanticGaps,
     semanticFamilies,
@@ -669,6 +890,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     missingBackgrounds,
     incompleteModes,
     contrastFailures,
+    iconContrastFailures,
     brokenAliases,
     foundationRoleFindings,
     companionAdvisories,
@@ -678,6 +900,11 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       semanticVariables: semanticVars.length,
       completePairs: totalCompletePairs,
       semanticFamilies: semanticFamilies.length,
+    },
+    topFindings: {
+      highConfidenceIssues,
+      iconContrastFailures: iconContrastFailures.slice(0, 8),
+      highConfidenceMissingRoles: missingSemanticRoles.filter(gap => gap.confidence === "high").slice(0, 8),
     },
     summary: {
       missingSemanticRoleCount: missingSemanticRoles.length,
@@ -689,22 +916,13 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       incompleteModeCount: incompleteModes.length,
       contrastFailureCount: contrastFailures.length,
       contrastNearMissCount: contrastFailures.filter(f => f.nearMiss).length,
+      iconContrastFailureCount: iconContrastFailures.length,
+      iconContrastNearMissCount: iconContrastFailures.filter(f => f.nearMiss).length,
       brokenAliasCount: brokenAliases.length,
       foundationRoleFindingCount: foundationRoleFindings.length,
       companionAdvisoryCount: companionAdvisories.length,
       suppressedAdvisoryRoleCount: suppressedRoles.length,
     },
-  };
-}
-
-function _loadDefaultActiveSnapshot() {
-  const activePaths = getActiveFilePaths();
-  if (!fs.existsSync(activePaths.data)) return null;
-  return {
-    kind: "active-file-snapshot",
-    target: getActiveFileKey() || activePaths.data,
-    figmaData: JSON.parse(fs.readFileSync(activePaths.data, "utf8")),
-    meta: { path: activePaths.data }
   };
 }
 
@@ -730,7 +948,7 @@ function _activeConfigPath() {
 function handleInspectDsSetupGaps(input = {}) {
   const dataSource = input.figmaDataPath
     ? loadFigmaDataSource({ figmaDataPath: input.figmaDataPath })
-    : (_loadDefaultActiveSnapshot() || loadFigmaDataSource(input));
+    : (loadActiveFigmaDataSource(input) || loadFigmaDataSource(input));
 
   if (!dataSource) {
     return {
@@ -739,7 +957,10 @@ function handleInspectDsSetupGaps(input = {}) {
     };
   }
 
-  const configPath = input.config_path ? path.resolve(input.config_path) : _activeConfigPath();
+  const configStatus = input.config_path
+    ? { configPath: path.resolve(input.config_path), configExists: fs.existsSync(path.resolve(input.config_path)), created: false }
+    : ensureActiveDsConfig({ dataSource, reason: "inspect-ds-setup-gaps", refreshGenerated: true });
+  const configPath = configStatus.configPath || _activeConfigPath();
   const existingDs = loadDsConfigSafe(configPath);
   const answers = (input.answers && typeof input.answers === "object") ? input.answers : {};
   const algorithm = answers.algorithm === "apca"
@@ -747,6 +968,14 @@ function handleInspectDsSetupGaps(input = {}) {
     : (existingDs && existingDs.color && existingDs.color.contrastAlgorithm === "apca" ? "apca" : "wcag");
 
   const result = inspectDsSetupGapsFromFigmaData(dataSource.figmaData, { algorithm, existingDs });
+  result.config = {
+    path: configPath,
+    exists: Boolean(existingDs),
+    created: Boolean(configStatus.created),
+    refreshed: Boolean(configStatus.refreshed),
+    sourceMode: existingDs ? "config-backed" : "snapshot-only",
+    message: configStatus.message || null,
+  };
 
   // Compute per-mode primitive aliases the designer would actually get if they
   // approved a missing-fg repair. Forwarded verbatim by apply_ds_setup_repairs
@@ -811,21 +1040,113 @@ function handleInspectDsSetupGaps(input = {}) {
     ? dataSource.figmaData.variables.length : 0;
   const collectionCount = Array.isArray(dataSource.figmaData && dataSource.figmaData.collections)
     ? dataSource.figmaData.collections.length : 0;
+  const repairPlan = _buildRepairPlan(result);
 
-  return Object.assign({}, result, {
-    source: {
+  const source = {
       kind: dataSource.kind,
       target: dataSource.target,
       path: sourcePath,
-    },
-    snapshot: {
+    };
+  const snapshot = {
       path: sourcePath,
       syncedAt,
       variableCount,
       collectionCount,
+    };
+  const message = _composeMessage(result.summary);
+
+  return {
+    // Keep the agent-actionable fields first. Some MCP hosts truncate or hide
+    // long tool results behind local files; the repair payload must remain
+    // visible without asking the agent to parse tool-results from disk.
+    message,
+    summary: result.summary,
+    repairPlan,
+    topFindings: result.topFindings,
+    config: result.config,
+    source,
+    snapshot,
+    semanticGaps: result.semanticGaps,
+    missingSemanticRoles: result.missingSemanticRoles,
+    contrastFailures: result.contrastFailures,
+    iconContrastFailures: result.iconContrastFailures,
+    missingBackgrounds: result.missingBackgrounds,
+    incompleteModes: result.incompleteModes,
+    brokenAliases: result.brokenAliases,
+    foundationRoleFindings: result.foundationRoleFindings,
+    companionAdvisories: result.companionAdvisories,
+    suppressedAdvisoryRoles: result.suppressedAdvisoryRoles,
+    semanticFamilies: result.semanticFamilies,
+    contrastAlgorithm: result.contrastAlgorithm,
+    counts: result.counts,
+  };
+}
+
+function _buildRepairPlan(result) {
+  const repairs = [];
+  const aliasUpdates = [];
+  const roleRepairs = [];
+  const seenAlias = new Set();
+  const seenRole = new Set();
+
+  for (const gap of result.semanticGaps || []) {
+    if (gap.status !== "proposed" || !gap.source || !gap.plannedAliases) continue;
+    repairs.push({
+      bg: gap.bg,
+      recommended: gap.recommended,
+      name: gap.recommended,
+      source: gap.source,
+      aliases: gap.plannedAliases,
+    });
+  }
+
+  const collectAlias = (item) => {
+    if (!item || !item.plannedReAlias) return;
+    const update = item.plannedReAlias;
+    const key = `${update.token}|${update.mode}`;
+    if (seenAlias.has(key)) return;
+    seenAlias.add(key);
+    aliasUpdates.push({
+      token: update.token,
+      mode: update.mode,
+      newAliasTarget: update.newAliasTarget || update.to,
+      expectedCurrentAlias: update.expectedCurrentAlias || update.from || undefined,
+    });
+  };
+  for (const item of result.contrastFailures || []) collectAlias(item);
+  for (const item of result.iconContrastFailures || []) collectAlias(item);
+
+  for (const gap of result.missingSemanticRoles || []) {
+    if (gap.confidence !== "high" || !gap.plannedRoleRepair) continue;
+    const repair = gap.plannedRoleRepair;
+    if (!repair.name || !repair.role || !repair.aliases) continue;
+    if (seenRole.has(repair.name)) continue;
+    seenRole.add(repair.name);
+    roleRepairs.push({
+      name: repair.name,
+      role: repair.role,
+      aliases: repair.aliases,
+    });
+  }
+
+  const total = repairs.length + aliasUpdates.length + roleRepairs.length;
+  return {
+    tool: "apply_ds_setup_repairs",
+    approvalRequired: true,
+    applyInput: { repairs, aliasUpdates, roleRepairs },
+    counts: {
+      repairs: repairs.length,
+      aliasUpdates: aliasUpdates.length,
+      roleRepairs: roleRepairs.length,
+      total,
     },
-    message: _composeMessage(result.summary),
-  });
+    designerSummary: total
+      ? `Figlets has ${total} structured repair suggestion${total === 1 ? "" : "s"} ready for designer approval.`
+      : "Figlets has no deterministic repair payload for the current QA findings.",
+    agentInstruction: total
+      ? "Show these exact repairs in plain language and ask the designer which to apply. If approved, pass repairPlan.applyInput to apply_ds_setup_repairs; do not parse local tool-results files."
+      : "Do not invent repairs or parse local tool-results files. Explain which findings need a product/tooling follow-up or designer decision.",
+  };
 }
 
 function _composeMessage(s) {
@@ -835,6 +1156,7 @@ function _composeMessage(s) {
   if (s.missingBackgroundCount) parts.push(`${s.missingBackgroundCount} fg without bg`);
   if (s.incompleteModeCount) parts.push(`${s.incompleteModeCount} token${s.incompleteModeCount === 1 ? "" : "s"} with incomplete modes`);
   if (s.contrastFailureCount) parts.push(`${s.contrastFailureCount} contrast failure${s.contrastFailureCount === 1 ? "" : "s"}`);
+  if (s.iconContrastFailureCount) parts.push(`${s.iconContrastFailureCount} icon contrast failure${s.iconContrastFailureCount === 1 ? "" : "s"}`);
   if (s.brokenAliasCount) parts.push(`${s.brokenAliasCount} broken alias${s.brokenAliasCount === 1 ? "" : "es"}`);
   if (s.foundationRoleFindingCount) parts.push(`${s.foundationRoleFindingCount} foundation role gap${s.foundationRoleFindingCount === 1 ? "" : "s"}`);
   if (s.companionAdvisoryCount) parts.push(`${s.companionAdvisoryCount} pair${s.companionAdvisoryCount === 1 ? "" : "s"} missing border/icon (advisory)`);
@@ -846,4 +1168,5 @@ module.exports = {
   inspectDsSetupGapsTool,
   handleInspectDsSetupGaps,
   inspectDsSetupGapsFromFigmaData,
+  _buildRepairPlan,
 };

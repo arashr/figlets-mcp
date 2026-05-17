@@ -140,6 +140,21 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("function _configStandaloneRows(items, kind)") &&
+    code.includes("_configSemantics.unpaired") &&
+    code.includes("_configSemantics.icons") &&
+    code.includes("Standalone Outline Roles") &&
+    code.includes("Standalone Icon Roles"),
+  "Config-backed showcase must render standalone semantic outline/icon roles deterministically instead of dropping them"
+);
+
+assert.ok(
+  code.includes("const selectedPass = _showcaseContrastAlgorithm === 'wcag' ? ratio >= 4.5 : lcAbs >= 75;") &&
+    code.includes("const secondaryText = _tDS(secondaryLabel, 12, _subColor, false, _V.textSub);"),
+  "Semantic contrast cells must mark selected-metric pass/fail and keep contrast values at the same font size"
+);
+
+assert.ok(
   code.includes("_V.textSub = _findVar(") &&
     code.includes("'color/text/subtle'") &&
     code.includes("'color/text/muted'") &&

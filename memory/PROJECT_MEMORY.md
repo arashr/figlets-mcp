@@ -4,6 +4,101 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-17 — Gap repair folded into health-check QA]
+
+**Issue found:** After the health check correctly showed semantic setup gaps, agents still offered to run the separate setup-gap flow. That was redundant because the QA output had already done the read-only inspection. Claude also attempted to run a raw Node script over `.local/<fileKey>/figma-data.json` because icon contrast failures did not expose a concrete re-alias plan.
+
+**Fix:** Health check now contains the approval, `apply_ds_setup_repairs`, and verify steps directly. The public capability menu no longer shows "Fix setup gaps" as a separate designer option. "Fix contrast/setup gaps" intents route into the health-check QA workflow. `inspect_ds_setup_gaps` now emits deterministic `plannedReAlias` suggestions for icon WCAG non-text contrast failures when a same-ramp primitive can satisfy 3:1, and `topFindings.highConfidenceIssues` merges high-confidence issues across types.
+
+**Follow-up fix:** Missing border/outline role findings now include `plannedRoleRepair` when the paired background resolves to a primitive ramp. On Peach this gives:
+- `color/outline/info`: Light `color/blue/200`, Dark `color/blue/800`
+- `color/outline/success`: Light `color/green/200`, Dark `color/green/800`
+- `color/outline/warning`: Light `color/yellow/200`, Dark `color/yellow/800`
+
+**Latest follow-up:** `inspect_ds_setup_gaps` now emits `repairPlan.applyInput`, already shaped for `apply_ds_setup_repairs` with `repairs`, `aliasUpdates`, and `roleRepairs`. Agents should use this top-level plan after approval instead of writing scripts to inspect Claude/Codex `tool-results` files or local snapshots.
+
+**Truncation-safety follow-up:** `handleInspectDsSetupGaps` now returns `message`, `summary`, `repairPlan`, and `topFindings` before any long diagnostic arrays. This specifically prevents Claude from needing to inspect `.claude/.../tool-results/*.json` just to discover the top-level keys or repair payload.
+
+**Agent rule:** Agents must not run ad hoc scripts over `figma-data.json`, local snapshots, Claude/Codex `tool-results`, or MCP transcript files to derive designer-facing repairs. They should use structured Figlets tool output; if that output is insufficient, report the missing tool capability plainly.
+
+---
+
+### [2026-05-17 — Health check includes semantic setup QA]
+
+**Issue found:** The agent-facing "Full Design System Health Check" workflow only called `sync_figma_data`, `detect_design_system`, and `audit_tokens`. After token audit became correctly quieter, agents could see a clean token audit and wrongly say the design system was healthy, even when `inspect_ds_setup_gaps` would report icon contrast failures and high-confidence missing neighboring outlines.
+
+**Fix:** The health-check workflow now calls `inspect_ds_setup_gaps` as a read-only step before any all-clear. Adapter instructions for Claude/Codex now say to report high-confidence semantic gaps and accessibility failures first, then token issues, then capabilities/inventory. A clean `audit_tokens` result is no longer enough to call a design system healthy.
+
+---
+
+### [2026-05-17 — Showcase visual changes require preview confirmation]
+
+**Rule from user:** Do not make new designer-facing showcase visual/layout decisions without confirmation. For this class of work, investigate first, then create an HTML or equivalent preview suggestion. Only after confirmation should the Figma renderer be changed.
+
+**Current investigation notes:**
+
+- Peach config is deterministic and currently contains 12 semantic pairs.
+- Standalone roles are present in config (`color/outline/focus`, `color/outline/strong`, `color/outline/subtle`; `color/icon/inverse`, `color/icon/subtle`), but the config-backed showcase branch renders only `DS.color.semantics.pairs`, so standalone outlines/icons disappear from the showcase.
+- Local setup-gap QA reports 9 icon contrast failures and high-confidence missing neighboring outlines for `color/outline/info`, `color/outline/success`, and `color/outline/warning`; if an agent did not surface them, the presentation/workflow summary needs tightening.
+- Audit-token output is too noisy: raw primitive values should be inventory, not negative "unaliased" findings; duplicate numeric values across domains such as spacing/type/shadow should be treated as low-signal/informational.
+
+**Implemented QA cleanup in this slice:**
+
+- `audit_tokens` now separates `rawPrimitiveCount` from `unaliasedCount`; Peach now reports `rawPrimitiveCount: 176` and `unaliasedCount: 0`.
+- Cross-domain duplicate literal values now report as `informationalDuplicates` instead of issue-level duplicate groups; Peach's 11 previous duplicate groups are informational.
+- Generated/setup naming patterns like numeric leaves, `0_5`, and `neutral-variant` no longer create mixed-naming warnings.
+- CLI setup-gap reports now include icon contrast failures in totals, detail sections, and the "What this means" summary.
+- Follow-up fix: high-confidence neighboring-outline gaps now sort before medium variant advisories, and `topFindings.highConfidenceMissingRoles` / `topFindings.iconContrastFailures` make those issues hard for agents to miss in summaries.
+
+---
+
+### [2026-05-16 — Imported Figma files now get generated local configs]
+
+**Active branch:** `main`.
+
+**Status:** Follow-up from Peach showcase review. The recurring "no design-system.config.js" issue is now treated as a product bug, not an acceptable fallback state.
+
+**Decision implemented:**
+
+- When an active synced Figma file has no file-scoped config, Figlets creates `.local/<fileKey>/design-system.config.js` from the snapshot.
+- The generated config is local setup state only. It does not mutate Figma and does not bypass approval for any Figma write.
+- The bootstrap infers collection names, responsive modes, primitive color ramps, brand seed, semantic bg/text pairs, paired outline/icon companions, and standalone unpaired outline/icon roles.
+- `sync_figma_data`, `figlets_start`, `inspect_ds_setup_gaps`, and `build_ds_showcase` now surface whether config was created or already existed.
+- `build_ds_showcase` reports `config.sourceMode` so agents can tell whether the run was config-backed.
+
+**Showcase fixes started/completed:**
+
+- Semantic color rows now have columns that match their content: roles, preview, selected contrast metric, and WCAG.
+- WCAG remains visible even when APCA is the chosen text contrast algorithm.
+- Imported files should normally render via config-backed semantic pairs, so paired status icons/outlines are merged into semantic rows instead of being duplicated in separate icon/outline tables.
+
+**QA fixes started/completed:**
+
+- `inspect_ds_setup_gaps` now reports `iconContrastFailures` using WCAG non-text contrast at 3:1 regardless of APCA/WCAG text algorithm choice.
+- This directly addresses the Peach case where icon roles could look visually wrong but were not flagged by setup-gap QA.
+
+**Decision-log cleanup:** The older "showcase frozen/no-config tolerated" reading is superseded. Config-backed semantic rendering is now the stabilizing path for both Figlets-created and externally-created design systems.
+
+---
+
+### [2026-05-15 — Active-file context consistency fix started]
+
+**Active branch:** `main`.
+
+**Status:** Follow-up after live Claude/Figlets run on Peach. The plugin packaging branch was merged, then investigation confirmed the reported issues were shared runtime/product bugs rather than Claude/Codex packaging bugs.
+
+**Fixes in progress/completed in this slice:**
+
+- `loadFigmaDataSource({})` now prefers the active file-scoped snapshot `.local/<fileKey>/figma-data.json` before the legacy flat `.local/figma-data.json`.
+- `detect_design_system({})` now uses that active snapshot by default and saves `figma-ds-context.json` beside the active file snapshot.
+- `sync_figma_data` now returns JSON including previous/current file keys, snapshot path, config path, and `changed` so agents can warn when the live sync moved to a different file than `figlets_start` advertised.
+- The bridge receiver includes `fileKey`, `previousFileKey`, `activeFileChanged`, and `dataPath` in sync responses.
+- `inspect_ds_setup_gaps` role suggestions preserve the existing role-family vocabulary. On Peach, missing border-role suggestions now use `color/outline/info|success|warning` instead of `color/border/*`.
+
+**Still intentionally deferred:** showcase contrast/mode rendering. The generated showcase currently has APCA/WCAG/mode-story issues, but the user asked to discuss that before implementation.
+
+---
+
 ### [2026-05-15 — Codex plugin-style package added]
 
 **Active branch:** `codex/claude-code-plugin-package`.

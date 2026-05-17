@@ -42,7 +42,7 @@ try {
     assert.strictEqual(start.responseContract.mode, "designer-facing");
     assert.ok(start.designerResponse.includes("| What you can ask for | What I'll do |"));
     assert.ok(start.designerResponse.includes("Check my design system"));
-    assert.ok(start.designerResponse.includes("Fix setup gaps"));
+    assert.ok(!start.designerResponse.includes("Fix setup gaps"));
     assert.ok(!start.designerResponse.includes("Plugin / MCP server code"));
     assert.ok(!start.designerResponse.includes("Edit repo files"));
     assert.ok(start.designerResponse.includes("I'll inspect first"));
@@ -53,18 +53,36 @@ try {
     assert.ok(start.scope.figletsDoesNotMean.some(item => item.includes("generic Figma create")));
     assert.ok(start.scope.figletsDoesNotMean.some(item => item.includes("plugin code")));
     assert.ok(start.scope.figletsDoesNotMean.some(item => item.includes("figma-console")));
-    assert.ok(start.capabilities.some(item => item.id === "setup-gap-qa"));
+    assert.ok(!start.capabilities.some(item => item.id === "setup-gap-qa"));
   }
 
   {
     const route = routeIntent("Can you fix contrast issues in my semantic colors?");
-    assert.strictEqual(route.workflow.id, "setup-gap-qa");
+    assert.strictEqual(route.workflow.id, "health-check");
     assert.ok(route.message.includes("Start read-only"));
   }
 
   {
     const route = routeIntent("Please generate docs for this Button component.");
     assert.strictEqual(route.workflow.id, "component-docs");
+  }
+
+  {
+    const guide = getWorkflowGuide("health-check");
+    const tools = guide.steps.map(step => step.tool).filter(Boolean);
+    assert.deepStrictEqual(tools, [
+      "sync_figma_data",
+      "detect_design_system",
+      "audit_tokens",
+      "inspect_ds_setup_gaps",
+      "apply_ds_setup_repairs",
+      "inspect_ds_setup_gaps",
+    ]);
+    assert.ok(guide.summary.includes("semantic setup"));
+    assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation"));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true));
+    assert.ok(!guide.next.includes("setup-gap-qa"));
   }
 
   {

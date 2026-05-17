@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const { getActiveFileConfigPath } = require("../utils/paths.js");
+const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 
 const buildShowcaseTool = {
   name: "build_ds_showcase",
@@ -28,9 +29,10 @@ const buildShowcaseTool = {
 function handleBuildShowcase(args = {}) {
   const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
   let dsPayload = null;
+  const configStatus = ensureActiveDsConfig({ reason: "build-showcase", refreshGenerated: true });
   try {
     const vm = require("vm");
-    const configPath = getActiveFileConfigPath();
+    const configPath = configStatus.configPath || getActiveFileConfigPath();
     if (configPath && fs.existsSync(configPath)) {
       const src = fs.readFileSync(configPath, "utf8")
         .replace(/^\s*(const|let|var)\s+DS\s*=/m, "DS =");
@@ -85,6 +87,13 @@ function handleBuildShowcase(args = {}) {
                   sections: result.sections || [],
                   layout: result.layout || "horizontal",
                   bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
+                  config: {
+                    path: configStatus.configPath || null,
+                    created: Boolean(configStatus.created),
+                    refreshed: Boolean(configStatus.refreshed),
+                    sourceMode: dsPayload ? "config-backed" : "inferred-from-figma",
+                    message: configStatus.message || null,
+                  },
                   message: `Showcase built — ${(result.sections || []).length} section(s) rendered on page '00 · Tokens'.`,
                 }, null, 2)
               }]

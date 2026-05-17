@@ -63,6 +63,7 @@ const makeRow = new Function(
   'const _V = { outlineSubtle: { name: "color/outline/subtle" }, surfaceDefault: { name: "color/surface/default" }, text: { name: "color/text/default" }, textSub: { name: "color/text/subtle" } };\n' +
   'const _textColor = { r: 0, g: 0, b: 0 };\n' +
   'const _subColor = { r: 0.3, g: 0.3, b: 0.3 };\n' +
+  'const _showcaseContrastAlgorithm = "apca";\n' +
   'const figma = {\n' +
   '  createFrame: function() { return createNode("FRAME", "Frame"); },\n' +
   '  createNodeFromSvg: function() { return { name: "SvgIcon", strokes: [{}], children: [{ name: "SvgPath", strokes: [{}], children: [] }] }; }\n' +
@@ -151,6 +152,19 @@ assert.deepStrictEqual(
   'semantic preview border width should be bound through the border variable picker'
 );
 assert.strictEqual(findByName(fullPreview, 'Icon').length, 1, 'preview swatch must include the resolved icon glyph');
+assert.strictEqual(findByName(fullPreview, 'DiagSide').length, 0, 'semantic row preview should not duplicate contrast diagnostics inside the swatch');
+assert.strictEqual(findByName(fullRow, 'ContrastCell').length, 1, 'paired rows must render a real contrast column cell');
+const contrastTexts = findByName(fullRow, 'ContrastCell')[0].children.filter(child => child.type === 'TEXT');
+assert.deepStrictEqual(
+  contrastTexts.map(node => node.characters),
+  ['✓ Lc 78', '4.56:1'],
+  'contrast cell must mark passing selected metric and keep the secondary value visible'
+);
+assert.deepStrictEqual(
+  contrastTexts.map(node => node.fontSize),
+  [12, 12],
+  'contrast values must use the same font size'
+);
 assert.strictEqual(findByName(fullRow, 'WcagCell').length, 1, 'paired rows must render the WCAG pill cell');
 
 const plainRow = makeRow(

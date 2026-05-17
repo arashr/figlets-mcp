@@ -9,7 +9,7 @@ const mockData = {
     { id: "col:2", name: "Semantics", variableIds: ["var:4", "var:5", "var:6"] }
   ],
   variables: [
-    // col:1 — raw primitive colors (should be unaliased, consistent kebab-case)
+    // col:1 — raw non-primitive colors (should be unaliased, consistent path tokens)
     {
       id: "var:1",
       name: "color/brand/primary",
@@ -84,6 +84,25 @@ const mockData = {
   const result = auditTokens(mockData);
   assert.strictEqual(result.summary.unaliasedCount, 3); // var:1, var:2, var:3 are all raw
   assert.ok(result.summary.duplicateValueGroups >= 1);
+}
+
+{
+  // Test 6: numeric primitive ramps are inventory, not unaliased defects.
+  const primitiveRamp = {
+    collections: [{ id: "p", name: "Primitives", variableIds: ["p1", "p2", "s1", "t1"] }],
+    variables: [
+      { id: "p1", name: "color/neutral/100", resolvedType: "COLOR", valuesByMode: { m: { r: 1, g: 1, b: 1, a: 1 } } },
+      { id: "p2", name: "color/neutral-variant/100", resolvedType: "COLOR", valuesByMode: { m: { r: 1, g: 1, b: 1, a: 1 } } },
+      { id: "s1", name: "space/0_5", resolvedType: "FLOAT", valuesByMode: { m: 2 } },
+      { id: "t1", name: "type/size/md", resolvedType: "FLOAT", valuesByMode: { m: 16 } },
+    ]
+  };
+  const result = auditTokens(primitiveRamp);
+  assert.strictEqual(result.summary.unaliasedCount, 0);
+  assert.strictEqual(result.summary.rawPrimitiveCount, 4);
+  assert.strictEqual(result.summary.collectionNamingIssues, 0, "numeric leaves and kebab path segments should not look like mixed naming");
+  assert.strictEqual(result.summary.duplicateValueGroups, 0, "cross-ramp primitive coincidences should not be issue duplicates");
+  assert.ok(result.summary.informationalDuplicateValueGroups >= 1, "cross-ramp primitive coincidences remain available as info");
 }
 
 {

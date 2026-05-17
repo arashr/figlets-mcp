@@ -5,6 +5,7 @@ const {
   getActiveFileKey,
   getActiveFileConfigPath,
 } = require("../utils/paths.js");
+const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 
 const MUTATING_TOOLS = new Set([
   "apply_ds_setup",
@@ -39,14 +40,26 @@ const WORKFLOWS = [
         designerMessage: "What are you trying to do today?",
       },
     ],
-    next: ["health-check", "new-ds-setup", "setup-gap-qa", "build-showcase", "component-docs", "export-design-md"],
+    next: ["health-check", "new-ds-setup", "build-showcase", "component-docs", "export-design-md"],
     errors: [],
   },
   {
     id: "health-check",
     title: "Full Design System Health Check",
-    summary: "Sync the current Figma file, detect design-system capabilities, and audit token health.",
-    intents: ["check my design system", "health check", "what is in this file", "is my ds healthy", "audit tokens"],
+    summary: "Sync the current Figma file, detect design-system capabilities, audit token health, and surface high-confidence semantic setup issues.",
+    intents: [
+      "check my design system",
+      "health check",
+      "what is in this file",
+      "is my ds healthy",
+      "audit tokens",
+      "fix semantic colors",
+      "fix contrast",
+      "find missing color roles",
+      "setup gaps",
+      "repair color setup",
+      "missing foreground",
+    ],
     prerequisites: ["Figma Desktop is open", "Figlets Bridge plugin is open"],
     steps: [
       {
@@ -67,15 +80,40 @@ const WORKFLOWS = [
         tool: "audit_tokens",
         designerMessage: "I'll look for token health issues and summarize the highest-impact ones.",
       },
+      {
+        id: "semantic-setup-qa",
+        kind: "read",
+        tool: "inspect_ds_setup_gaps",
+        designerMessage: "I'll check semantic setup gaps, icon contrast, and missing neighboring roles before calling the system healthy.",
+      },
+      {
+        id: "approve-repairs",
+        kind: "confirmation",
+        designerMessage: "If the QA found high-confidence setup gaps, I'll ask which exact repairs you want applied.",
+      },
+      {
+        id: "apply-approved-repairs",
+        kind: "write",
+        tool: "apply_ds_setup_repairs",
+        requiresApproval: true,
+        designerMessage: "I'll apply only the exact repairs you approved from the QA output.",
+      },
+      {
+        id: "verify-repairs",
+        kind: "read",
+        tool: "inspect_ds_setup_gaps",
+        designerMessage: "I'll re-check the same QA findings after the approved changes.",
+      },
     ],
-    next: ["setup-gap-qa", "build-showcase", "component-docs", "export-design-md"],
+    next: ["build-showcase", "component-docs", "export-design-md"],
     errors: ["If the bridge is unavailable, ask the designer to open the Figlets Bridge plugin in Figma Desktop."],
   },
   {
     id: "setup-gap-qa",
     title: "Setup Gap QA + Approved Repair",
-    summary: "Check semantic color setup and apply only designer-approved repairs.",
-    intents: ["fix semantic colors", "fix contrast", "find missing color roles", "setup gaps", "repair color setup", "missing foreground"],
+    summary: "Legacy alias for the repair portion of Full Design System Health Check. Prefer health-check for designer-facing QA.",
+    designerVisible: false,
+    intents: ["legacy setup gap qa", "legacy setup repair flow"],
     prerequisites: ["Figma Desktop is open", "Figlets Bridge plugin is open"],
     steps: [
       {
@@ -116,7 +154,7 @@ const WORKFLOWS = [
         designerMessage: "I'll re-check the semantic setup after the approved changes.",
       },
     ],
-    next: ["build-showcase", "export-design-md", "health-check"],
+    next: ["health-check", "build-showcase", "export-design-md"],
     errors: ["If a suggested repair is ambiguous, ask the designer instead of applying it from confidence alone."],
   },
   {
@@ -157,7 +195,7 @@ const WORKFLOWS = [
         designerMessage: "I'll create the approved variable collections in Figma.",
       },
     ],
-    next: ["build-showcase", "setup-gap-qa", "export-design-md"],
+    next: ["build-showcase", "health-check", "export-design-md"],
     errors: ["If prepare_ds_config reports contrast failures, fix or confirm the config before running apply_ds_setup."],
   },
   {
@@ -186,7 +224,7 @@ const WORKFLOWS = [
         designerMessage: "I'll build the visual token showcase in Figma.",
       },
     ],
-    next: ["setup-gap-qa", "export-design-md"],
+    next: ["health-check", "export-design-md"],
     errors: ["If numeric chrome bindings are missing, only use fallback options after the designer explicitly opts in."],
   },
   {
@@ -351,20 +389,18 @@ function getWorkflowGuide(workflowId) {
 
 function getStartGuide() {
   const activeFileKey = getActiveFileKey();
-  const configPath = activeFileKey ? getActiveFileConfigPath() : null;
+  const configStatus = activeFileKey
+    ? ensureActiveDsConfig({ reason: "figlets-start", refreshGenerated: true })
+    : { configPath: null, configExists: false, created: false };
+  const configPath = configStatus.configPath || (activeFileKey ? getActiveFileConfigPath() : null);
   const capabilities = WORKFLOWS
-    .filter(workflow => workflow.id !== "start")
+    .filter(workflow => workflow.id !== "start" && workflow.designerVisible !== false)
     .map(workflow => ({ id: workflow.id, title: workflow.title, summary: workflow.summary }));
   const capabilityMenu = [
     {
       label: "Check my design system",
       workflowId: "health-check",
-      description: "See what tokens, styles, and health issues are in the file.",
-    },
-    {
-      label: "Fix setup gaps",
-      workflowId: "setup-gap-qa",
-      description: "Find semantic color gaps, contrast issues, and missing roles before approving fixes.",
+      description: "See tokens, styles, semantic setup gaps, contrast issues, and health status.",
     },
     {
       label: "Set up a new design system",
@@ -447,6 +483,10 @@ function getStartGuide() {
       activeFileKnown: Boolean(activeFileKey),
       activeFileKey,
       configPath,
+      configExists: Boolean(configStatus.configExists),
+      configCreated: Boolean(configStatus.created),
+      configRefreshed: Boolean(configStatus.refreshed),
+      configMessage: configStatus.message || null,
     },
     capabilities,
     nextQuestion: "What are you trying to do today?",
@@ -454,7 +494,7 @@ function getStartGuide() {
 }
 
 function listWorkflows() {
-  return clone(WORKFLOWS);
+  return clone(WORKFLOWS.filter(workflow => workflow.designerVisible !== false));
 }
 
 module.exports = {

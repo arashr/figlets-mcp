@@ -1,10 +1,8 @@
 const fs = require("fs");
 const path = require("path");
-const { loadFigmaDataSource } = require("../bridges/figma-data-source.js");
+const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const {
   getActiveFileConfigPath,
-  getActiveFileKey,
-  getActiveFilePaths,
   getConfigPathGuardError,
 } = require("../utils/paths.js");
 
@@ -134,17 +132,6 @@ function _refreshSemanticModeAliases(rows, varsByName, varsById, collections, ch
   }
 }
 
-function _loadDefaultActiveSnapshot() {
-  const activePaths = getActiveFilePaths();
-  if (!fs.existsSync(activePaths.data)) return null;
-  return {
-    kind: "active-file-snapshot",
-    target: getActiveFileKey() || activePaths.data,
-    figmaData: JSON.parse(fs.readFileSync(activePaths.data, "utf8")),
-    meta: { path: activePaths.data }
-  };
-}
-
 function _loadConfig(configPath) {
   let readDsConfig, writeDsConfig;
   try {
@@ -265,7 +252,7 @@ function handleRefreshDsConfigFromFigma(args = {}) {
 
   const dataSource = args.figmaDataPath
     ? loadFigmaDataSource({ figmaDataPath: args.figmaDataPath })
-    : (_loadDefaultActiveSnapshot() || loadFigmaDataSource(args));
+    : (loadActiveFigmaDataSource(args) || loadFigmaDataSource(args));
   if (!dataSource) {
     return { error: "No synced Figma snapshot found.", hint: "Run sync_figma_data first." };
   }

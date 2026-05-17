@@ -2311,7 +2311,7 @@ async function _buildShowcase(opts) {
     heading.counterAxisAlignItems = 'CENTER';
     for (const col of cols) {
       const cell = _f('Th', 'HORIZONTAL');
-      cell.primaryAxisAlignItems = col.center ? 'CENTER' : 'MIN';
+      cell.primaryAxisAlignItems = col.align === 'END' ? 'MAX' : (col.center ? 'CENTER' : 'MIN');
       cell.counterAxisAlignItems = 'CENTER';
       const headText = _tDS(col.text.toUpperCase(), 12, _textColor, true, _V.text);
       cell.appendChild(headText);
@@ -2637,7 +2637,7 @@ async function _buildShowcase(opts) {
     return row;
   }
 
-  // Option A row: pair box (left) | preview swatch (middle) | WCAG pill (right).
+  // Semantic row: role kit (left) | preview swatch | selected contrast | WCAG.
   // Pair box stacks one line per role (bg, fg, plus optional bd/ic/fl) so the
   // full token kit reads as a single block. Lc + ratio overlay inside the
   // preview swatch in the foreground color so the eye stays in one place.
@@ -2698,14 +2698,35 @@ async function _buildShowcase(opts) {
       fgRGB: fgRGB, fgVar: fgVar,
       borderRGB: borderRGB, borderVar: borderVar,
       iconRGB: iconRGB, iconVar: iconVar,
-      lc: lcAbs, ratio: ratio
+      lc: lcAbs, ratio: ratio,
+      showDiagnostics: false
     });
     row.appendChild(swatch);
     swatch.layoutSizingHorizontal = 'FILL';
     swatch.layoutSizingVertical   = 'FIXED';
 
-    // ── RIGHT: WCAG pill ────────────────────────────────────────────────────
+    // ── RIGHT: selected contrast + always-on WCAG pill ──────────────────────
     if (hasPairing) {
+      const contrastCell = _f('ContrastCell', 'VERTICAL');
+      contrastCell.primaryAxisAlignItems = 'CENTER';
+      contrastCell.counterAxisAlignItems = 'CENTER';
+      contrastCell.itemSpacing = 2;
+      const selectedPass = _showcaseContrastAlgorithm === 'wcag' ? ratio >= 4.5 : lcAbs >= 75;
+      const selectedLabel = (selectedPass ? '✓ ' : '✗ ') + (_showcaseContrastAlgorithm === 'wcag'
+        ? ((Math.round(ratio * 100) / 100).toFixed(2) + ':1')
+        : ('Lc ' + Math.round(lcAbs)));
+      const secondaryLabel = _showcaseContrastAlgorithm === 'wcag'
+        ? ('Lc ' + Math.round(lcAbs))
+        : ((Math.round(ratio * 100) / 100).toFixed(2) + ':1');
+      const selectedText = _tDS(selectedLabel, 12, _textColor, true, _V.text);
+      const secondaryText = _tDS(secondaryLabel, 12, _subColor, false, _V.textSub);
+      contrastCell.appendChild(selectedText);
+      contrastCell.appendChild(secondaryText);
+      row.appendChild(contrastCell);
+      contrastCell.layoutSizingHorizontal = 'FIXED';
+      contrastCell.resize(112, 1);
+      contrastCell.layoutSizingVertical = 'FILL';
+
       const wcagCell = _f('WcagCell', 'HORIZONTAL');
       wcagCell.primaryAxisAlignItems = 'CENTER';
       wcagCell.counterAxisAlignItems = 'CENTER';
@@ -2796,20 +2817,21 @@ async function _buildShowcase(opts) {
     sample.name = 'Sample';
     left.appendChild(sample);
 
-    const right = _f('DiagSide', 'HORIZONTAL');
-    right.itemSpacing = 12;
-    right.counterAxisAlignItems = 'CENTER';
-    var lcLabel = 'Lc ' + Math.round(o.lc);
-    var ratioLabel = (Math.round(o.ratio * 100) / 100).toFixed(2) + ':1';
-    const lcText = _tDS(lcLabel, 11, o.fgRGB, false, o.fgVar);
-    const rtText = _tDS(ratioLabel, 11, o.fgRGB, false, o.fgVar);
-    lcText.opacity = 0.78;
-    rtText.opacity = 0.78;
-    right.appendChild(lcText);
-    right.appendChild(rtText);
-
     frame.appendChild(left);
-    frame.appendChild(right);
+    if (o.showDiagnostics !== false) {
+      const right = _f('DiagSide', 'HORIZONTAL');
+      right.itemSpacing = 12;
+      right.counterAxisAlignItems = 'CENTER';
+      var lcLabel = 'Lc ' + Math.round(o.lc);
+      var ratioLabel = (Math.round(o.ratio * 100) / 100).toFixed(2) + ':1';
+      const lcText = _tDS(lcLabel, 11, o.fgRGB, false, o.fgVar);
+      const rtText = _tDS(ratioLabel, 11, o.fgRGB, false, o.fgVar);
+      lcText.opacity = 0.78;
+      rtText.opacity = 0.78;
+      right.appendChild(lcText);
+      right.appendChild(rtText);
+      frame.appendChild(right);
+    }
     return frame;
   }
 
@@ -3483,7 +3505,47 @@ async function _buildShowcase(opts) {
         return { borderRef: borderRef, iconRef: iconRef, fillRef: '' };
       }
 
-      if (_configSemanticPairs.length) {
+      function _configStandaloneRows(items, kind) {
+        const rows = [];
+        if (!Array.isArray(items)) return rows;
+        const seen = {};
+        for (const item of items) {
+          const tokenName = item && item.token ? item.token : null;
+          if (!tokenName || seen[tokenName]) continue;
+          seen[tokenName] = true;
+          const v = varByName[tokenName] || null;
+          if (!v || v.resolvedType !== 'COLOR') continue;
+          const raw = resolveVarValue(v);
+          if (!raw || !('r' in raw)) continue;
+          const rgb = { r: raw.r, g: raw.g, b: raw.b };
+          if (kind === 'outline') {
+            rows.push(_buildOutlineRow(_tokenLabel(tokenName), _tokenDesc(tokenName), rgb, v));
+          } else if (kind === 'icon') {
+            var defSurfaceVar = _V.surfaceDefault || _V.bg || null;
+            var defSurfaceRaw = defSurfaceVar ? resolveVarValue(defSurfaceVar) : null;
+            var surfaceRGB = defSurfaceRaw && 'r' in defSurfaceRaw
+              ? { r: defSurfaceRaw.r, g: defSurfaceRaw.g, b: defSurfaceRaw.b }
+              : _bgColor;
+            var surfaceLabel = defSurfaceVar && defSurfaceVar.name ? _tokenLabel(defSurfaceVar.name) : 'surface/default';
+            rows.push(_buildSemColorRow(
+              _tokenLabel(tokenName),
+              (_tokenDesc(tokenName) || '') + ' Shown on ' + surfaceLabel + '.',
+              surfaceRGB,
+              rgb,
+              defSurfaceVar,
+              {
+                isIcon: true,
+                fgVar: v,
+                hasPairing: true,
+                roleNames: { bg: surfaceLabel, fg: _tokenLabel(tokenName) }
+              }
+            ));
+          }
+        }
+        return rows;
+      }
+
+	      if (_configSemanticPairs.length) {
         // Group label heuristic — strip subtle/variant/strong suffix and
         // collapse default/subtle/muted into "Neutral".
         function _semGroupLabel(bgRef) {
@@ -3507,9 +3569,10 @@ async function _buildShowcase(opts) {
 
         const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
         const _semHeading = _buildTableHeading([
-          { text: 'Pair',    flex: true },
-          { text: 'Preview', flex: true },
-          { text: 'WCAG',    width: 96, center: true },
+          { text: 'Roles',    flex: true },
+          { text: 'Preview',  flex: true },
+          { text: _showcaseContrastAlgorithm === 'wcag' ? 'Contrast' : 'APCA', width: 112, center: true },
+          { text: 'WCAG',     width: 96, center: true },
         ], 16);
         _semTable.appendChild(_semHeading);
         _semHeading.layoutSizingHorizontal = 'FILL';
@@ -3623,6 +3686,47 @@ async function _buildShowcase(opts) {
         }
 
         _appendFill(_semTable, _colorsFrame);
+
+        const _configSemantics = opts.DS && opts.DS.color && opts.DS.color.semantics
+          ? opts.DS.color.semantics
+          : {};
+        const _standaloneOutlineRows = _configStandaloneRows(_configSemantics.unpaired, 'outline');
+        if (_standaloneOutlineRows.length) {
+          const _outlineTable = _buildTable('Standalone Outline Roles', 'Foundation and interaction outline roles that are not paired to one semantic surface.');
+          const _outlineHeading = _buildTableHeading([
+            { text: 'Token',   flex: true },
+            { text: 'Example', flex: true },
+          ], 16);
+          _outlineTable.appendChild(_outlineHeading);
+          _outlineHeading.layoutSizingHorizontal = 'FILL';
+          _addTableDivider(_outlineTable);
+          for (const row of _standaloneOutlineRows) {
+            _outlineTable.appendChild(row);
+            row.layoutSizingHorizontal = 'FILL';
+            _addTableDivider(_outlineTable);
+          }
+          _appendFill(_outlineTable, _colorsFrame);
+        }
+
+        const _standaloneIconRows = _configStandaloneRows(_configSemantics.icons, 'icon');
+        if (_standaloneIconRows.length) {
+          const _iconTable = _buildTable('Standalone Icon Roles', 'Icon roles that are not paired to one semantic surface.');
+          const _iconHeading = _buildTableHeading([
+            { text: 'Roles',    flex: true },
+            { text: 'Preview',  flex: true },
+            { text: _showcaseContrastAlgorithm === 'wcag' ? 'Contrast' : 'APCA', width: 112, center: true },
+            { text: 'WCAG',     width: 96, center: true },
+          ], 16);
+          _iconTable.appendChild(_iconHeading);
+          _iconHeading.layoutSizingHorizontal = 'FILL';
+          _addTableDivider(_iconTable);
+          for (const row of _standaloneIconRows) {
+            _iconTable.appendChild(row);
+            row.layoutSizingHorizontal = 'FILL';
+            _addTableDivider(_iconTable);
+          }
+          _appendFill(_iconTable, _colorsFrame);
+        }
       } else {
       function _findFgPair(bgVarName) {
         const parts = bgVarName.split('/');
@@ -3817,10 +3921,10 @@ async function _buildShowcase(opts) {
       if (_mainGroups.length) {
         const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
         const _semHeading = _buildTableHeading([
-          { text: 'Token',    flex: true },
-          { text: 'Example',  flex: true },
-          { text: 'Contrast', width: 128, center: true },
-          { text: 'WCAG',     width: 128, center: true },
+          { text: 'Roles',    flex: true },
+          { text: 'Preview',  flex: true },
+          { text: _showcaseContrastAlgorithm === 'wcag' ? 'Contrast' : 'APCA', width: 112, center: true },
+          { text: 'WCAG',     width: 96, center: true },
         ], 16);
         _semTable.appendChild(_semHeading);
         _semHeading.layoutSizingHorizontal = 'FILL';

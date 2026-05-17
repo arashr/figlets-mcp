@@ -44,7 +44,7 @@ const figletsWorkflowGuideTool = {
     properties: {
       workflow_id: {
         type: "string",
-        description: "Workflow id returned by figlets_start or figlets_route_intent, e.g. setup-gap-qa, build-showcase, component-docs.",
+        description: "Workflow id returned by figlets_start or figlets_route_intent, e.g. health-check, build-showcase, component-docs.",
       },
     },
     required: ["workflow_id"],

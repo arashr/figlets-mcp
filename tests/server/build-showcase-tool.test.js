@@ -11,6 +11,18 @@ async function runTests() {
   const localDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-showcase-tool-"));
   process.env.FIGLETS_LOCAL_DIR = localDir;
 
+  function freshBuildShowcase() {
+    for (const mod of [
+      "../../packages/figlets-mcp-server/src/tools/build-showcase.js",
+      "../../packages/figlets-mcp-server/src/utils/ensure-ds-config.js",
+      "../../packages/figlets-mcp-server/src/utils/paths.js",
+      "../../packages/figlets-mcp-server/src/bridges/figma-data-source.js",
+    ]) {
+      try { delete require.cache[require.resolve(mod)]; } catch (_) {}
+    }
+    return require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+  }
+
   // Test 1: 200 → compact sections response
   await (async () => {
     const mockServer = http.createServer((req, res) => {
@@ -36,8 +48,7 @@ async function runTests() {
     process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
 
     try {
-      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/tools/build-showcase.js")];
-      const { handleBuildShowcase } = require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+      const { handleBuildShowcase } = freshBuildShowcase();
       const result = await handleBuildShowcase();
       assert.ok(!result.isError, "should succeed");
       const data = JSON.parse(result.content[0].text);
@@ -71,8 +82,7 @@ async function runTests() {
     process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
 
     try {
-      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/tools/build-showcase.js")];
-      const { handleBuildShowcase } = require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+      const { handleBuildShowcase } = freshBuildShowcase();
       const result = await handleBuildShowcase({ numericFallback: expectedFallback });
       assert.ok(!result.isError, "should succeed");
       const data = JSON.parse(result.content[0].text);
@@ -121,11 +131,66 @@ async function runTests() {
     process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
 
     try {
-      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/tools/build-showcase.js")];
-      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/utils/paths.js")];
-      const { handleBuildShowcase } = require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+      const { handleBuildShowcase } = freshBuildShowcase();
       const result = await handleBuildShowcase();
       assert.ok(!result.isError, "should succeed");
+    } finally {
+      await new Promise(resolve => mockServer.close(resolve));
+    }
+  })();
+
+  // Test 1d: missing active config is bootstrapped from the synced snapshot before showcase.
+  await (async () => {
+    const fileKey = "file_imported";
+    const scopedDir = path.join(localDir, fileKey);
+    fs.mkdirSync(scopedDir, { recursive: true });
+    fs.writeFileSync(path.join(localDir, "active-file.json"), JSON.stringify({ fileKey, updatedAt: "now" }));
+    fs.writeFileSync(path.join(scopedDir, "figma-data.json"), JSON.stringify({
+      fileKey,
+      fileName: "Imported DS",
+      collections: [
+        { id: "prim", name: "Primitives", modes: [{ modeId: "m", name: "Default" }], variableIds: ["n100", "n900"] },
+        { id: "color", name: "Color", modes: [{ modeId: "l", name: "Light" }, { modeId: "d", name: "Dark" }], variableIds: ["bg", "fg", "icon"] },
+      ],
+      variables: [
+        { id: "n100", name: "color/neutral/100", resolvedType: "COLOR", variableCollectionId: "prim", valuesByMode: { m: { r: 0.95, g: 0.95, b: 0.95 } } },
+        { id: "n900", name: "color/neutral/900", resolvedType: "COLOR", variableCollectionId: "prim", valuesByMode: { m: { r: 0.05, g: 0.05, b: 0.05 } } },
+        { id: "bg", name: "color/surface/brand", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n100" }, d: { type: "VARIABLE_ALIAS", id: "n900" } } },
+        { id: "fg", name: "color/on-surface/brand", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n900" }, d: { type: "VARIABLE_ALIAS", id: "n100" } } },
+        { id: "icon", name: "color/icon/brand", resolvedType: "COLOR", variableCollectionId: "color", valuesByMode: { l: { type: "VARIABLE_ALIAS", id: "n900" }, d: { type: "VARIABLE_ALIAS", id: "n100" } } },
+      ],
+    }, null, 2));
+
+    const mockServer = http.createServer((req, res) => {
+      if (req.method === "POST" && req.url === "/request-showcase") {
+        let body = "";
+        req.on("data", chunk => { body += chunk.toString(); });
+        req.on("end", () => {
+          const parsed = JSON.parse(body);
+          assert.strictEqual(parsed.DS.collections.color, "Color");
+          assert.strictEqual(parsed.DS.color.semantics.pairs[0].bg, "color/surface/brand");
+          assert.strictEqual(parsed.DS.color.semantics.pairs[0].icon, "color/icon/brand");
+          assert.ok(fs.existsSync(path.join(scopedDir, "design-system.config.js")));
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, result: { sections: ["Colors"] } }));
+        });
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    await new Promise(resolve => mockServer.listen(0, resolve));
+    const { port } = mockServer.address();
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+
+    try {
+      const { handleBuildShowcase } = freshBuildShowcase();
+      const result = await handleBuildShowcase();
+      assert.ok(!result.isError, "should succeed");
+      const data = JSON.parse(result.content[0].text);
+      assert.strictEqual(data.config.created, true);
+      assert.strictEqual(data.config.sourceMode, "config-backed");
     } finally {
       await new Promise(resolve => mockServer.close(resolve));
     }
@@ -143,8 +208,7 @@ async function runTests() {
     process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
 
     try {
-      delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/tools/build-showcase.js")];
-      const { handleBuildShowcase } = require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+      const { handleBuildShowcase } = freshBuildShowcase();
       const result = await handleBuildShowcase();
       assert.ok(result.isError, "should be an error");
       assert.ok(result.content[0].text.includes("plugin is not connected"), "should mention plugin");
@@ -156,8 +220,7 @@ async function runTests() {
   // Test 3: ECONNREFUSED → receiver not running
   await (async () => {
     process.env.FIGLETS_RECEIVER_URL = "http://localhost:19999";
-    delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/tools/build-showcase.js")];
-    const { handleBuildShowcase } = require("../../packages/figlets-mcp-server/src/tools/build-showcase.js");
+    const { handleBuildShowcase } = freshBuildShowcase();
     try {
       await handleBuildShowcase();
       assert.fail("should have thrown");

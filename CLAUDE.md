@@ -31,7 +31,6 @@ Do not offer to proceed with raw `figma-console`, generic Figma MCP tools, repo 
 The designer-facing menu must stay limited to Figlets workflows:
 
 - Check my design system
-- Fix setup gaps
 - Set up a new design system
 - Build a token showcase
 - Document a component

@@ -13,6 +13,7 @@ function emptySummary(extra) {
     highConfidenceSemanticRoleGapCount: 0,
     incompleteModeCount: 0,
     contrastFailureCount: 0,
+    iconContrastFailureCount: 0,
     brokenAliasCount: 0,
     foundationRoleFindingCount: 0,
     companionAdvisoryCount: 0,
@@ -150,6 +151,9 @@ module.exports = (async () => {
         contrastFailures: [
           { kind: "contrast-failure", bg: "color/surface/warning", fg: "color/on-surface/warning", mode: "Light", algorithm: "wcag", score: 2.1, threshold: 4.5 },
         ],
+        iconContrastFailures: [
+          { kind: "icon-contrast-failure", bg: "color/surface/danger", icon: "color/icon/danger", mode: "Light", algorithm: "wcag-non-text", score: 1, threshold: 3 },
+        ],
         brokenAliases: [
           { kind: "broken-alias", holder: "color/surface/danger", mode: "Dark", missingTargetId: "deleted-id" },
         ],
@@ -170,6 +174,7 @@ module.exports = (async () => {
           semanticGapCount: 2, proposedCount: 1, unresolvedCount: 1,
           missingSemanticRoleCount: 1, highConfidenceSemanticRoleGapCount: 1,
           missingBackgroundCount: 1, incompleteModeCount: 1, contrastFailureCount: 1,
+          iconContrastFailureCount: 1,
           brokenAliasCount: 1, foundationRoleFindingCount: 1, companionAdvisoryCount: 1,
         }),
       },
@@ -178,12 +183,13 @@ module.exports = (async () => {
     assert.ok(out.includes('Brand "Primary" step 500'));
 
     // Header summarizes total findings + algorithm
-    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 9 findings (contrast checked with WCAG ratio)"));
+    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 10 findings (contrast checked with WCAG ratio)"));
 
     // Severity ordering: broken aliases first, then contrast, then missing fg/bg, modes, advisories
     const orderTokens = [
       "Broken aliases in the semantic layer:",
       "Contrast failures:",
+      "Icon contrast failures:",
       "Likely semantic-family gaps:",
       "Foundational role gaps:",
       "Possible naming gaps:",
@@ -227,6 +233,8 @@ module.exports = (async () => {
     // Contrast failures: hex + primitive + near-miss tag
     assert.ok(out.includes("Contrast failures: 1"));
     assert.ok(out.includes('"color/surface/warning" + "color/on-surface/warning" (Light) → 2.1:1 (needs ≥ 4.5:1)'));
+    assert.ok(out.includes("Icon contrast failures: 1"));
+    assert.ok(out.includes('"color/icon/danger" on "color/surface/danger" (Light) → 1:1, needs 3:1'));
 
     // Broken aliases
     assert.ok(out.includes("Broken aliases in the semantic layer: 1"));
@@ -235,6 +243,7 @@ module.exports = (async () => {
     // What this means — severity-ordered
     assert.ok(out.includes("URGENT: 1 semantic token references variables that were deleted"));
     assert.ok(out.includes("A11Y: 1 pair fails the contrast threshold") || out.includes("A11Y: 1 pairs fail"));
+    assert.ok(out.includes("A11Y: 1 icon role fails WCAG non-text contrast (3:1)."));
     assert.ok(out.includes("1 semantic family looks incomplete (1 high-confidence). Ask before repairing."));
     assert.ok(out.includes("1 foundational semantic role missing."));
     assert.ok(out.includes("2 backgrounds missing a foreground companion"));
@@ -242,6 +251,34 @@ module.exports = (async () => {
     assert.ok(out.includes("Side note: your local config is out of date in 2 places"));
     assert.ok(out.includes("This is a QA report — nothing was changed"));
     assert.ok(out.trim().endsWith(NO_CHANGES));
+  }
+
+  // High-confidence neighboring-outline gaps should not be hidden behind medium variant advisories.
+  {
+    const out = formatCheckReport({
+      receiverUrl: "http://127.0.0.1:1337",
+      receiverRunning: true,
+      pluginConnected: true,
+      activeFileKey: "abc123",
+      sync: { ok: true },
+      refresh: { dryRun: true, changes: [], skipped: [], summary: { changedCount: 0, skippedCount: 0 } },
+      gaps: {
+        semanticGaps: [], missingBackgrounds: [], incompleteModes: [], contrastFailures: [], iconContrastFailures: [], brokenAliases: [], foundationRoleFindings: [], companionAdvisories: [],
+        missingSemanticRoles: [
+          { kind: "missing-semantic-role", family: "info", missingRole: "border", suggestedName: "color/outline/info", evidence: ["color/surface/info"], confidence: "high" },
+          { kind: "missing-semantic-role", family: "success", missingRole: "border", suggestedName: "color/outline/success", evidence: ["color/surface/success"], confidence: "high" },
+          { kind: "missing-semantic-role", family: "warning", missingRole: "border", suggestedName: "color/outline/warning", evidence: ["color/surface/warning"], confidence: "high" },
+          { kind: "missing-semantic-role", family: "brand-variant", missingRole: "border", suggestedName: "color/outline/brand-variant", evidence: ["color/surface/brand-variant"], confidence: "medium" },
+        ],
+        contrastAlgorithm: "wcag",
+        summary: emptySummary({ missingSemanticRoleCount: 4, highConfidenceSemanticRoleGapCount: 3 }),
+      },
+    });
+    const infoIdx = out.indexOf('possible token: "color/outline/info"');
+    const brandIdx = out.indexOf('possible token: "color/outline/brand-variant"');
+    assert.ok(infoIdx >= 0, "high-confidence info outline should be visible");
+    assert.ok(brandIdx >= 0, "medium variant advisory should still be visible when room allows");
+    assert.ok(infoIdx < brandIdx, "high-confidence neighboring outlines should render before medium advisories");
   }
 
   // APCA-mode label propagates + near-miss tag + hex render + snapshot

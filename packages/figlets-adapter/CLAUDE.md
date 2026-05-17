@@ -22,12 +22,12 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `sync_figma_data` | Triggers the bridge plugin to extract the full DS snapshot and save it to `.local/figma-data.json` | Before any analysis when the user wants fresh data from Figma |
 | `detect_design_system` | Analyzes the snapshot: collections, variables, styles, inferred capabilities | After syncing, or when a snapshot already exists on disk |
 | `inspect_component` | Extracts layout, variants, and properties of the currently selected Figma node | When the user wants to inspect a specific component or frame |
-| `audit_tokens` | Reports unaliased values, duplicate tokens, and naming violations in the snapshot | When the user wants a token health check |
+| `audit_tokens` | Reports token inventory plus real raw-value, duplicate, and naming issues in the snapshot. Primitive values are inventory, not defects. | When the user wants token hygiene checked as part of broader DS QA |
 | `qa_binding_audit` | Audits the current Figma selection/page for raw unbound layer properties and optional safe binding fixes | When the user wants QA on designed frames/components, especially before documentation |
 | `build_ds_showcase` | Renders a full token showcase in Figma — colors, typography, spacing, elevation, scrims | When the user wants a visual overview of the design system rendered as Figma frames |
 | `refresh_ds_config_from_figma` | Refreshes existing config entries from the synced Figma snapshot without creating new config tokens or mutating Figma | Before config-backed setup/update/showcase work when Figma may have changed since the config was written |
-| `inspect_ds_setup_gaps` | Reports setup repair gaps from the synced Figma snapshot without mutating Figma or config | Before asking the designer to approve additive setup repairs, such as missing semantic foreground companions |
-| `apply_ds_setup_repairs` | Applies only designer-approved setup repairs by creating explicit missing semantic variables and updating the file-scoped config | After `inspect_ds_setup_gaps` and explicit designer confirmation |
+| `inspect_ds_setup_gaps` | Reports semantic setup/accessibility gaps and deterministic repair suggestions from the synced Figma snapshot without mutating Figma or config | Inside the design-system health check, before asking the designer to approve any repair |
+| `apply_ds_setup_repairs` | Applies only designer-approved setup repairs, alias updates, and missing role creations, then updates the file-scoped config after Figma succeeds | After `inspect_ds_setup_gaps` and explicit designer confirmation |
 | `create_ds_config_from_design_md` | Creates a starter `design-system.config.js` from an existing Google DESIGN.md file | At the start of setup when the designer already has DESIGN.md and wants to skip answered intake questions |
 | `export_design_md` | Syncs the Figma file, refreshes `design-system.config.js` from the latest snapshot, and writes a portable `DESIGN.md` next to the config (or to a custom path) | When the designer wants a fresh DESIGN.md handover artifact without re-running the full setup flow. Supports `dry_run` for preview. |
 | `prepare_ds_config` | Runs the computation pipeline on a design-system.config.js: color ramps, contrast validation (APCA or WCAG), spacing scale | After intake and before building collections — validates everything before touching Figma |
@@ -44,7 +44,7 @@ Designers should be able to ask in natural language. Route their intent to MCP t
 | Designer says... | Agent should... |
 |---|---|
 | "Build a showcase of my design system" | Explain that you'll check what the file contains, ask them to keep the Figlets Bridge plugin open, then run the showcase workflow. |
-| "Check my design system" | Run a health check workflow: sync if needed, detect the system, audit tokens, and summarize the highest-impact issues. |
+| "Check my design system" | Run the full QA workflow: sync if needed, detect the system, audit tokens, inspect semantic setup gaps, summarize the highest-confidence issues first, then ask whether to apply the exact suggested repairs. |
 | "QA this frame/component" | Ask them to select the target in Figma, run `qa_binding_audit` without fixes, then summarize raw/unbound values. |
 | "Fix the binding gaps" | Confirm they want automatic safe fixes, then run `qa_binding_audit` with `fix: true`. |
 | "Set up a design system" | Walk through setup intake in plain language, show previews, then use `prepare_ds_config` and `apply_ds_setup`. |
@@ -77,8 +77,8 @@ Never offer "Plugin / MCP server code", repo editing, plugin editing, or arbitra
 1. Ask: "Sync fresh data first, or audit the existing snapshot?"
 2. If fresh: call `sync_figma_data`
 3. Call `audit_tokens`
-4. Report violations by type: unaliased values → duplicate tokens → naming inconsistencies
-5. Surface the highest-impact fixes first
+4. Report true issues by severity, then mention primitive/raw-value inventory separately and neutrally
+5. Do not describe primitive collections as unhealthy just because they intentionally hold literal values
 
 ### QA binding audit
 1. Ask the user to select the frame/component to QA, or confirm that auditing the current page is intended.
@@ -156,7 +156,11 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 1. Call `sync_figma_data`
 2. Call `detect_design_system`
 3. Call `audit_tokens`
-4. Deliver one combined summary: capabilities detected, variable and style counts, violation breakdown, recommended next steps
+4. Call `inspect_ds_setup_gaps`
+5. Deliver one combined summary: high-confidence semantic gaps and accessibility failures first, then token issues, then capabilities and inventory. Do not report "healthy" unless both token audit and setup-gap QA have no high-confidence issues.
+6. If there are approved repair suggestions in the QA output (`plannedAliases`, `plannedReAlias`, or `plannedRoleRepair` on high-confidence `missingSemanticRoles`), ask the designer which exact repairs to apply in the same QA flow. Do not offer to run a separate setup-gap flow after already showing those gaps.
+7. Prefer `inspect_ds_setup_gaps.repairPlan.applyInput` as the source for approved repairs. If the designer approves all suggested repairs, pass that object directly to `apply_ds_setup_repairs`; if they approve only some, filter that object without deriving new aliases.
+8. If approved, call `apply_ds_setup_repairs` with only the approved structured repairs, then call `inspect_ds_setup_gaps` again to verify.
 
 ---
 
@@ -167,7 +171,7 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 | `sync_figma_data` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `inspect_component` returns empty selection | Nothing selected in Figma | "Select a component or frame in Figma, then try again." |
 | `detect_design_system` returns no collections | No snapshot on disk | "Run a sync first to pull data from Figma." |
-| `audit_tokens` returns no violations | Clean token set or no snapshot | Confirm snapshot exists; if it does, report the all-clear to the user |
+| `audit_tokens` returns no violations | Token hygiene is clean or no snapshot exists | Confirm snapshot exists, then still run `inspect_ds_setup_gaps` before reporting the design system healthy |
 | `qa_binding_audit` returns violations with no suggestion | The selected layer uses a value/role not covered by existing variables or typography styles | Tell the user the binding policy could not find a matching DS variable/style; the DS may need a new token or the layer role may need adjustment |
 | `qa_binding_audit` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `build_ds_showcase` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
@@ -192,6 +196,7 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 - Never call `inspect_component` without first confirming the user has selected a node in Figma
 - Never call `detect_design_system` or `audit_tokens` without checking whether a sync is needed first
 - Never present raw JSON tool output directly — always summarize into plain language
+- Never run ad hoc scripts over `figma-data.json`, local snapshots, Claude/Codex `tool-results`, or MCP transcript files to derive designer-facing fixes. Use `inspect_ds_setup_gaps.repairPlan`; if it does not emit enough structured repair data, say what is missing and ask for a product/tooling follow-up instead of inventing a parallel parser.
 - Treat the shared binding resolver as the binding authority. Color and scalar bindings are variable-first; typography may prefer text styles because they can bundle variable-backed type decisions. Never invent hex or nearest-color auto-binding.
 - Never add agent reasoning steps to `build_ds_showcase` unless the user explicitly opts into a supported parameter such as `numericFallback`. Showcase descriptions are deterministic by default; agent-enriched description polish is post-MVP and should only run when the user asks for it.
 - Never call `apply_ds_setup` until `prepare_ds_config` returns `readyToBuild === true` — building with failing pairs will produce inaccessible tokens

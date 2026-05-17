@@ -43,6 +43,8 @@ const semantics = [
   // Pair where fg fails contrast in Light: bg=neutral/50 (very light) vs fg=neutral/300 (also light).
   sem("contrastBg", "color/surface/danger", alias("n50"), alias("n950")),
   sem("contrastFg", "color/on-surface/danger", alias("n300"), alias("n0")),
+  // Icon companion also fails legal non-text contrast on the paired surface in both modes.
+  sem("contrastIcon", "color/icon/danger", alias("n50"), alias("n950")),
 
   // Orphan fg: on-surface/info exists but no surface/info.
   sem("orphanFg", "color/on-surface/info", alias("n950"), alias("n50")),
@@ -84,6 +86,24 @@ module.exports = (() => {
   assert.strictEqual(typeof failures[0].nearMiss, "boolean");
   assert.strictEqual(typeof failures[0].gap, "number");
 
+  // ── Icon contrast: always WCAG non-text 3:1, regardless of selected text algorithm ──
+  const iconFailures = result.iconContrastFailures.filter(f => f.bg === "color/surface/danger");
+  assert.strictEqual(iconFailures.length, 2, "icon/danger should fail on both Light and Dark paired surfaces");
+  assert.ok(iconFailures.every(f => f.algorithm === "wcag-non-text"));
+  assert.ok(iconFailures.every(f => f.threshold === 3));
+  const lightIconFailure = iconFailures.find(f => f.mode === "Light");
+  assert.ok(lightIconFailure.plannedReAlias, "icon contrast failures should carry a deterministic re-alias suggestion when one exists");
+  assert.strictEqual(lightIconFailure.plannedReAlias.token, "color/icon/danger");
+  assert.strictEqual(lightIconFailure.plannedReAlias.mode, "Light");
+  assert.strictEqual(lightIconFailure.plannedReAlias.from, "color/neutral/50");
+  assert.strictEqual(lightIconFailure.plannedReAlias.to, "color/neutral/950");
+  assert.strictEqual(lightIconFailure.plannedReAlias.threshold, 3);
+  assert.strictEqual(result.summary.iconContrastFailureCount, iconFailures.length);
+  assert.ok(
+    result.topFindings.highConfidenceIssues.some(item => item.kind === "icon-contrast-failure"),
+    "topFindings.highConfidenceIssues should lead with high-confidence findings across types"
+  );
+
   // ── Broken alias: warning Dark points at ghost-id ──
   assert.strictEqual(result.brokenAliases.length, 1);
   assert.strictEqual(result.brokenAliases[0].holder, "color/surface/warning");
@@ -122,6 +142,7 @@ module.exports = (() => {
     assert.strictEqual(f.algorithm, "apca");
     assert.strictEqual(f.threshold, 75);
   }
+  assert.ok(apcaResult.iconContrastFailures.every(f => f.algorithm === "wcag-non-text"));
 
   // ── Advisory suppression: when ≥3 complete pairs are all missing the same
   // role, the inspector reports it once via suppressedAdvisoryRoles instead of
@@ -174,6 +195,27 @@ module.exports = (() => {
       assert.strictEqual(dangerLight.plannedReAlias.to, "color/neutral/950");
       assert.strictEqual(dangerLight.plannedReAlias.expectedCurrentAlias, "color/neutral/300");
       assert.strictEqual(dangerLight.plannedReAlias.newAliasTarget, "color/neutral/950");
+      assert.ok(handlerResult.repairPlan, "handler should expose an agent-ready repair plan");
+      const topKeys = Object.keys(handlerResult).slice(0, 4);
+      assert.deepStrictEqual(
+        topKeys,
+        ["message", "summary", "repairPlan", "topFindings"],
+        "agent-actionable keys must appear before long diagnostic arrays"
+      );
+      assert.strictEqual(handlerResult.repairPlan.tool, "apply_ds_setup_repairs");
+      assert.strictEqual(handlerResult.repairPlan.approvalRequired, true);
+      assert.ok(
+        handlerResult.repairPlan.agentInstruction.includes("do not parse local tool-results files"),
+        "repair plan should explicitly forbid local tool-result scraping"
+      );
+      assert.ok(
+        handlerResult.repairPlan.applyInput.aliasUpdates.some(update =>
+          update.token === "color/on-surface/danger"
+          && update.mode === "Light"
+          && update.newAliasTarget === "color/neutral/950"
+        ),
+        "repair plan should collect contrast plannedReAlias updates for direct apply"
+      );
     } finally {
       if (prevLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevLocal;
       else delete process.env.FIGLETS_LOCAL_DIR;

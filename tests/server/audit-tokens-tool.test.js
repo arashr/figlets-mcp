@@ -47,10 +47,11 @@ try {
     const result = handleAuditTokens({});
     const data = JSON.parse(result.content[0].text);
     assert.strictEqual(data.summary.totalVariables, 4, "should count all variables");
-    // v1 is unaliased COLOR, v3 and v4 are unaliased FLOATs
-    assert.strictEqual(data.summary.unaliasedCount, 3, "should count unaliased variables");
-    // v3 and v4 share the same float value — one duplicate group
-    assert.strictEqual(data.summary.duplicateValueGroups, 1, "should detect duplicate value group");
+    // primitive raw values are inventory, not unaliased defects
+    assert.strictEqual(data.summary.unaliasedCount, 1, "semantic raw float should count as unaliased");
+    assert.strictEqual(data.summary.rawPrimitiveCount, 2, "primitive color and numeric spacing are inventory");
+    // space/4 and space/md share the same value in one domain — review, not cross-domain info
+    assert.strictEqual(data.summary.duplicateValueGroups, 1, "should detect same-domain duplicate value group");
     assert.ok(data.duplicates[0].variables.includes("space/4"), "should name duplicate variables");
     assert.ok(data.duplicates[0].variables.includes("space/md"), "should name duplicate variables");
     // v2 is aliased — must NOT appear in unaliased list

@@ -149,11 +149,12 @@ assert.ok(
 );
 
 assert.ok(
-  code.includes("function _configStandaloneRows(items, kind, modeName)") &&
+  code.includes("function _configStandaloneRows(items, kind, modeName, pairedRoleNames)") &&
     code.includes("_configSemantics.unpaired") &&
+    code.includes("const _pairedOutlineNames = _pairedOutlineRoleNames(_configSemanticPairs);") &&
     code.includes("Standalone Outline Roles") &&
     !code.includes("Standalone Icon Roles"),
-  "Config-backed showcase must render standalone outline roles and omit standalone icon tables"
+  "Config-backed showcase must render only truly standalone outline roles and omit standalone icon tables"
 );
 
 assert.ok(

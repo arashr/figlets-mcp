@@ -47,11 +47,38 @@ const inferSrc = extractFunction(code, '_inferSemPairExtras');
 const _inferSemPairExtras = new Function(inferSrc + '; return _inferSemPairExtras;')();
 assert.strictEqual(typeof _inferSemPairExtras, 'function', 'extracted helper must be a function');
 
+const standaloneOutlineSrc = extractFunction(code, '_isStandaloneOutlineRoleName');
+// eslint-disable-next-line no-new-func
+const _isStandaloneOutlineRoleName = new Function(standaloneOutlineSrc + '; return _isStandaloneOutlineRoleName;')();
+assert.strictEqual(typeof _isStandaloneOutlineRoleName, 'function', 'extracted standalone outline helper must be a function');
+
+const textRoleScoreSrc = extractFunction(code, '_scoreShowcaseTextRoleName');
+// eslint-disable-next-line no-new-func
+const _scoreShowcaseTextRoleName = new Function(textRoleScoreSrc + '; return _scoreShowcaseTextRoleName;')();
+assert.strictEqual(typeof _scoreShowcaseTextRoleName, 'function', 'extracted text role scoring helper must be a function');
+
+const pairedOutlineSrc = extractFunction(code, '_pairedOutlineRoleNames');
+
 function makeVbn(names) {
   const out = {};
   for (let i = 0; i < names.length; i++) out[names[i]] = { name: names[i], resolvedType: 'COLOR' };
   return out;
 }
+
+const pairedOutlineVbn = makeVbn([
+  'color/border/default',
+  'color/border/brand',
+  'color/border/focus',
+  'color/border/warning'
+]);
+// eslint-disable-next-line no-new-func
+const _pairedOutlineRoleNames = new Function(
+  'varByName',
+  '_inferSemPairExtras',
+  '_isStandaloneOutlineRoleName',
+  pairedOutlineSrc + '; return _pairedOutlineRoleNames;'
+)(pairedOutlineVbn, _inferSemPairExtras, _isStandaloneOutlineRoleName);
+assert.strictEqual(typeof _pairedOutlineRoleNames, 'function', 'extracted paired outline helper must be a function');
 
 function assertResult(actual, expected, label) {
   assert.deepStrictEqual(actual, expected, label + ' — got ' + JSON.stringify(actual));
@@ -333,6 +360,50 @@ assertResult(
   '24. text/on-brand foreground prefers icon/on-brand over icon/brand'
 );
 
+// Standalone outline rendering must not treat the broader config unpaired list
+// as a generic catch-all table.
+assert.strictEqual(_isStandaloneOutlineRoleName('color/border/default'), true, 'border roles count as standalone outline roles');
+assert.strictEqual(_isStandaloneOutlineRoleName('color/outline/focus'), true, 'outline roles count as standalone outline roles');
+assert.strictEqual(_isStandaloneOutlineRoleName('color/stroke/focus'), true, 'stroke roles count as standalone outline roles');
+assert.strictEqual(_isStandaloneOutlineRoleName('color/text/disabled'), false, 'disabled text must not render in standalone outline roles');
+assert.strictEqual(_isStandaloneOutlineRoleName('color/surface/default'), false, 'surface roles must not render in standalone outline roles');
+assert.strictEqual(_isStandaloneOutlineRoleName('color/scrim/overlay'), false, 'scrim roles must not render in standalone outline roles');
+assert.strictEqual(_isStandaloneOutlineRoleName('color/shadow/key'), false, 'shadow roles must not render in standalone outline roles');
+assert.deepStrictEqual(
+  _pairedOutlineRoleNames([
+    { bg: 'color/bg/default', text: 'color/text/default' },
+    { bg: 'color/bg/brand', text: 'color/text/on-brand', border: 'color/border/brand' },
+    { bg: 'color/bg/missing', text: 'color/text/missing' }
+  ]),
+  {
+    'color/border/default': true,
+    'color/border/brand': true
+  },
+  'paired outline map must include explicit and inferred semantic border companions only'
+);
+assert.strictEqual(
+  _pairedOutlineRoleNames([{ bg: 'color/bg/default', text: 'color/text/default' }])['color/border/focus'],
+  undefined,
+  'unattached focus borders must remain eligible for the standalone outline table'
+);
+
+// Showcase chrome text should prefer text semantics and never bind ordinary
+// labels to icon/status roles just because those values are dark.
+assert.ok(
+  _scoreShowcaseTextRoleName('color/text/default') > _scoreShowcaseTextRoleName('color/text/subtle'),
+  'generic text/default should outrank lower-emphasis text roles'
+);
+assert.strictEqual(
+  _scoreShowcaseTextRoleName('color/icon/on-warning'),
+  0,
+  'icon/on-warning must not be a chrome text candidate'
+);
+assert.strictEqual(
+  _scoreShowcaseTextRoleName('color/bg/default'),
+  0,
+  'background roles must not be chrome text candidates'
+);
+
 // ── Integration assertions on the assembly source ────────────────────────────
 
 // Pin that the config-pairs branch uses the explicit-wins pattern for border
@@ -403,4 +474,4 @@ assert.strictEqual(
   'Helper must not call any substitution targeting "fill" as a destination role'
 );
 
-console.log('semantic-pair-extras-inference: 24 cases + 8 integration assertions passed.');
+console.log('semantic-pair-extras-inference: 24 cases + outline/text binding policy assertions passed.');

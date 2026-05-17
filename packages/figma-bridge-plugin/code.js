@@ -1569,10 +1569,28 @@ async function _buildShowcase(opts) {
     if (named) return { v: named };
     return _semRoleVars.map(v => ({ v, l: _resolvedRGB(v) ? _lum(_resolvedRGB(v)) : 0 })).sort((a, b) => b.l - a.l)[0];
   })();
+  function _scoreShowcaseTextRoleName(name) {
+    var n = String(name || '').toLowerCase();
+    if (/(?:^|\/)(?:icon|bg|background|surface|fill|border|outline|stroke)(?:\/|$)/.test(n)) return 0;
+    if (/^(?:color\/)?text\/default$/.test(n)) return 100;
+    if (/^(?:color\/)?(?:fg|foreground)\/default$/.test(n)) return 95;
+    if (/^(?:color\/)?on[-_]surface\/default$/.test(n)) return 90;
+    if (/(?:^|\/)(?:text|fg|foreground|on[-_]surface)(?:\/|$)/.test(n) &&
+        /(?:^|\/)(?:default|primary|base)(?:\/|$)/.test(n)) return 80;
+    if (/(?:^|\/)(?:text|fg|foreground|on[-_]surface)(?:\/|$)/.test(n) &&
+        !/(?:^|\/)(?:brand|danger|error|success|warning|info|on[-_](?:brand|danger|error|success|warning|info))(?:\/|$)/.test(n)) return 40;
+    return 0;
+  }
+
   const _textRaw = (() => {
-    const named = _semRoleVars.find(v => /(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(v.name));
-    if (named) return { v: named };
-    return _semRoleVars.map(v => ({ v, l: _resolvedRGB(v) ? _lum(_resolvedRGB(v)) : 1 })).sort((a, b) => a.l - b.l)[0];
+    const named = _semRoleVars
+      .map(v => ({ v, score: _scoreShowcaseTextRoleName(v.name) }))
+      .filter(entry => entry.score > 0)
+      .sort((a, b) => b.score - a.score || a.v.name.localeCompare(b.v.name))[0];
+    if (named) return { v: named.v };
+    const textLike = _semRoleVars.filter(v => /(?:^|\/)(?:text|fg|foreground|on[-_]surface)(?:\/|$)/i.test(v.name));
+    const candidates = textLike.length ? textLike : _semRoleVars;
+    return candidates.map(v => ({ v, l: _resolvedRGB(v) ? _lum(_resolvedRGB(v)) : 1 })).sort((a, b) => a.l - b.l)[0];
   })();
   const _accRaw  = _semRoleVars.map(v => ({ v, s: _resolvedRGB(v) ? _sat(_resolvedRGB(v)) : 0 })).sort((a, b) => b.s - a.s)[0];
 
@@ -3270,6 +3288,7 @@ async function _buildShowcase(opts) {
     _existingShowcases[_oldShowcaseIndex].remove();
   }
   let _sectionX = 0;
+  const _showcaseSectionPairs = [];
 
   function _makeShowcaseFrame(name) {
     const f = figma.createFrame();
@@ -3313,8 +3332,19 @@ async function _buildShowcase(opts) {
     container.x = posX;
     container.y = 0;
     container.resizeWithoutConstraints(frame.width, frame.height);
+    _showcaseSectionPairs.push({ container: container, frame: frame });
     _sectionX = posX + frame.width + _SECTION_GAP;
     return container;
+  }
+
+  function _syncShowcaseSectionSizes() {
+    for (var _ssi = 0; _ssi < _showcaseSectionPairs.length; _ssi++) {
+      var pair = _showcaseSectionPairs[_ssi];
+      if (!pair || !pair.container || !pair.frame) continue;
+      try {
+        pair.container.resizeWithoutConstraints(pair.frame.width, pair.frame.height);
+      } catch (_) {}
+    }
   }
 
   function _applyExplicitVariableModes(node, applications) {
@@ -3621,14 +3651,17 @@ async function _buildShowcase(opts) {
         return { borderRef: borderRef, iconRef: iconRef, fillRef: '' };
       }
 
-      function _configStandaloneRows(items, kind, modeName) {
+      function _configStandaloneRows(items, kind, modeName, pairedRoleNames) {
         const rows = [];
+        pairedRoleNames = pairedRoleNames || {};
         if (!Array.isArray(items)) return rows;
         const seen = {};
         for (const item of items) {
           const tokenName = item && item.token ? item.token : null;
           if (!tokenName || seen[tokenName]) continue;
           seen[tokenName] = true;
+          if (kind === 'outline' && !_isStandaloneOutlineRoleName(tokenName)) continue;
+          if (kind === 'outline' && pairedRoleNames[String(tokenName).toLowerCase()]) continue;
           const v = varByName[tokenName] || null;
           if (!v || v.resolvedType !== 'COLOR') continue;
           const raw = modeName ? resolveVarValueForMode(v, modeName) : resolveVarValue(v);
@@ -3639,6 +3672,26 @@ async function _buildShowcase(opts) {
           }
         }
         return rows;
+      }
+
+      function _isStandaloneOutlineRoleName(name) {
+        return /(?:^|\/)(?:outline|border|stroke)(?:\/|$)/i.test(String(name || ''));
+      }
+
+      function _pairedOutlineRoleNames(pairs) {
+        var paired = {};
+        if (!Array.isArray(pairs)) return paired;
+        for (var _pori = 0; _pori < pairs.length; _pori++) {
+          var pair = pairs[_pori];
+          if (!pair) continue;
+          var explicitRef = pair.border || pair.outline || pair.stroke || '';
+          var extras = _inferSemPairExtras(pair.bg, pair.text, varByName);
+          var borderRef = explicitRef || extras.borderRef || '';
+          if (borderRef && _isStandaloneOutlineRoleName(borderRef)) {
+            paired[String(borderRef).toLowerCase()] = true;
+          }
+        }
+        return paired;
       }
 
 	      if (_configSemanticPairs.length) {
@@ -3666,6 +3719,7 @@ async function _buildShowcase(opts) {
         const _configSemantics = opts.DS && opts.DS.color && opts.DS.color.semantics
           ? opts.DS.color.semantics
           : {};
+        const _pairedOutlineNames = _pairedOutlineRoleNames(_configSemanticPairs);
 
         for (const _modeEntry of _semanticModeEntries) {
           const _modeName = _modeEntry.name;
@@ -3801,7 +3855,7 @@ async function _buildShowcase(opts) {
 
           _appendFill(_semTable, _modeFrame);
 
-          const _standaloneOutlineRows = _configStandaloneRows(_configSemantics.unpaired, 'outline', _modeName);
+          const _standaloneOutlineRows = _configStandaloneRows(_configSemantics.unpaired, 'outline', _modeName, _pairedOutlineNames);
           if (_standaloneOutlineRows.length) {
             const _outlineTable = _buildTable('Standalone Outline Roles', 'Foundation and interaction outline roles that are not paired to one semantic surface.');
             const _outlineHeading = _buildTableHeading([
@@ -4431,6 +4485,7 @@ async function _buildShowcase(opts) {
     _bindShowcaseNodeProperties(_showcaseNode);
   }
   await new Promise(function(resolve) { setTimeout(resolve, 0); });
+  _syncShowcaseSectionSizes();
   for (const _showcaseNode of _showcaseNodes) {
     _bindShowcaseNodeProperties(_showcaseNode);
   }

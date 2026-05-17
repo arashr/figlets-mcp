@@ -152,6 +152,21 @@ assert.deepStrictEqual(
   'semantic preview border width should be bound through the border variable picker'
 );
 assert.strictEqual(findByName(fullPreview, 'Icon').length, 1, 'preview swatch must include the resolved icon glyph');
+assert.strictEqual(
+  findByName(fullPreview, 'Sample')[0].varRef.name,
+  'color/text/brand',
+  'preview sample text must bind to the foreground text semantic, not the icon semantic'
+);
+assert.strictEqual(
+  findByName(fullPreview, 'Icon')[0].strokes[0].varRef.name,
+  'color/icon/brand',
+  'preview icon glyph must bind to the icon semantic'
+);
+assert.strictEqual(
+  findByName(fullPreview, 'Icon')[0].children[0].strokes[0].varRef.name,
+  'color/icon/brand',
+  'preview icon child strokes must keep the icon semantic binding'
+);
 assert.strictEqual(findByName(fullPreview, 'DiagSide').length, 0, 'semantic row preview should not duplicate contrast diagnostics inside the swatch');
 assert.strictEqual(findByName(fullRow, 'ContrastCell').length, 1, 'paired rows must render a real contrast column cell');
 const contrastTexts = findByName(fullRow, 'ContrastCell')[0].children.filter(child => child.type === 'TEXT');

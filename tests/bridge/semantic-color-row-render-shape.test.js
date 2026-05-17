@@ -157,13 +157,18 @@ assert.strictEqual(findByName(fullRow, 'ContrastCell').length, 1, 'paired rows m
 const contrastTexts = findByName(fullRow, 'ContrastCell')[0].children.filter(child => child.type === 'TEXT');
 assert.deepStrictEqual(
   contrastTexts.map(node => node.characters),
-  ['✓ Lc 78', '4.56:1'],
-  'contrast cell must mark passing selected metric and keep the secondary value visible'
+  ['✓ Lc 78', '✓ 4.56:1'],
+  'contrast cell must mark passing APCA and WCAG metrics'
 );
 assert.deepStrictEqual(
   contrastTexts.map(node => node.fontSize),
   [12, 12],
   'contrast values must use the same font size'
+);
+assert.deepStrictEqual(
+  contrastTexts.map(node => node.color),
+  [{ r: 0, g: 0, b: 0 }, { r: 0, g: 0, b: 0 }],
+  'contrast values must use the same text color'
 );
 assert.strictEqual(findByName(fullRow, 'WcagCell').length, 1, 'paired rows must render the WCAG pill cell');
 

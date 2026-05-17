@@ -1312,6 +1312,12 @@ async function _buildShowcase(opts) {
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(v => [v.name, v])
   );
+  const _collectionByVariableId = new Map();
+  for (const _modeColl of _dsStruct_allColls) {
+    for (const _modeVarId of _modeColl.variableIds) {
+      _collectionByVariableId.set(_modeVarId, _modeColl);
+    }
+  }
 
   function resolveVarValue(v, _depth) {
     if (!v) return null;
@@ -1323,6 +1329,40 @@ async function _buildShowcase(opts) {
     if (typeof val === 'object' && val.type === 'VARIABLE_ALIAS') {
       const aliased = figma.variables.getVariableById(val.id);
       return aliased ? resolveVarValue(aliased, _depth + 1) : null;
+    }
+    return val;
+  }
+
+  function _modeIdForVariable(v, modeName) {
+    if (!v || !v.valuesByMode) return null;
+    const keys = Object.keys(v.valuesByMode);
+    if (!keys.length) return null;
+    if (!modeName) return keys[0];
+    const coll = _collectionByVariableId.get(v.id) || null;
+    if (!coll || !Array.isArray(coll.modes)) return keys[0];
+    var normalized = String(modeName).toLowerCase();
+    var exact = coll.modes.find(function(m) { return String(m.name).toLowerCase() === normalized; });
+    if (exact && v.valuesByMode.hasOwnProperty(exact.modeId)) return exact.modeId;
+    var family = /dark|night|dim/i.test(modeName)
+      ? /dark|night|dim/i
+      : (/light|day|bright/i.test(modeName) ? /light|day|bright/i : null);
+    if (family) {
+      var familyMode = coll.modes.find(function(m) { return family.test(m.name); });
+      if (familyMode && v.valuesByMode.hasOwnProperty(familyMode.modeId)) return familyMode.modeId;
+    }
+    return keys[0];
+  }
+
+  function resolveVarValueForMode(v, modeName, _depth) {
+    if (!v) return null;
+    if (_depth === undefined) _depth = 0;
+    if (_depth > 8) return null;
+    const modeId = _modeIdForVariable(v, modeName);
+    const val = modeId ? v.valuesByMode[modeId] : null;
+    if (!val && val !== 0) return null;
+    if (typeof val === 'object' && val.type === 'VARIABLE_ALIAS') {
+      const aliased = figma.variables.getVariableById(val.id);
+      return aliased ? resolveVarValueForMode(aliased, modeName, _depth + 1) : null;
     }
     return val;
   }
@@ -1414,6 +1454,8 @@ async function _buildShowcase(opts) {
         hasLightDark,
         hasNumericSteps,
         hasMultipleModes: coll.modes.length > 1,
+        collection: coll,
+        modes: coll.modes,
         vars,
         colorGroups,
         groups: groupByPath(vars),
@@ -2711,15 +2753,14 @@ async function _buildShowcase(opts) {
       contrastCell.primaryAxisAlignItems = 'CENTER';
       contrastCell.counterAxisAlignItems = 'CENTER';
       contrastCell.itemSpacing = 2;
-      const selectedPass = _showcaseContrastAlgorithm === 'wcag' ? ratio >= 4.5 : lcAbs >= 75;
-      const selectedLabel = (selectedPass ? '✓ ' : '✗ ') + (_showcaseContrastAlgorithm === 'wcag'
-        ? ((Math.round(ratio * 100) / 100).toFixed(2) + ':1')
-        : ('Lc ' + Math.round(lcAbs)));
+      const lcLabel = (lcAbs >= 75 ? '✓ ' : '✗ ') + 'Lc ' + Math.round(lcAbs);
+      const ratioLabel = (ratio >= 4.5 ? '✓ ' : '✗ ') + ((Math.round(ratio * 100) / 100).toFixed(2) + ':1');
+      const selectedLabel = _showcaseContrastAlgorithm === 'wcag' ? ratioLabel : lcLabel;
       const secondaryLabel = _showcaseContrastAlgorithm === 'wcag'
-        ? ('Lc ' + Math.round(lcAbs))
-        : ((Math.round(ratio * 100) / 100).toFixed(2) + ':1');
+        ? lcLabel
+        : ratioLabel;
       const selectedText = _tDS(selectedLabel, 12, _textColor, true, _V.text);
-      const secondaryText = _tDS(secondaryLabel, 12, _subColor, false, _V.textSub);
+      const secondaryText = _tDS(secondaryLabel, 12, _textColor, false, _V.text);
       contrastCell.appendChild(selectedText);
       contrastCell.appendChild(secondaryText);
       row.appendChild(contrastCell);
@@ -3225,9 +3266,10 @@ async function _buildShowcase(opts) {
   const _existingShowcases = _page.children.filter(
     n => (n.type === 'FRAME' || n.type === 'SECTION') && n.name.startsWith('Token Showcase')
   );
-  let _sectionX = _existingShowcases.length > 0
-    ? Math.max(..._existingShowcases.map(n => n.x + n.width)) + _SECTION_GAP
-    : 0;
+  for (var _oldShowcaseIndex = 0; _oldShowcaseIndex < _existingShowcases.length; _oldShowcaseIndex++) {
+    _existingShowcases[_oldShowcaseIndex].remove();
+  }
+  let _sectionX = 0;
 
   function _makeShowcaseFrame(name) {
     const f = figma.createFrame();
@@ -3273,6 +3315,31 @@ async function _buildShowcase(opts) {
     container.resizeWithoutConstraints(frame.width, frame.height);
     _sectionX = posX + frame.width + _SECTION_GAP;
     return container;
+  }
+
+  function _applyExplicitVariableModes(node, applications) {
+    if (!node || !Array.isArray(applications) || !applications.length) return;
+    for (var _ami = 0; _ami < applications.length; _ami++) {
+      var app = applications[_ami];
+      if (!app || !app.collection || !app.modeId) continue;
+      try {
+        if (typeof node.setExplicitVariableModeForCollection === 'function') {
+          node.setExplicitVariableModeForCollection(app.collection, app.modeId);
+          continue;
+        }
+      } catch (_) {}
+      try {
+        if (typeof node.setExplicitVariableModeForCollection === 'function') {
+          node.setExplicitVariableModeForCollection(app.collection.id, app.modeId);
+          continue;
+        }
+      } catch (_) {}
+      try {
+        if (node.explicitVariableModes) {
+          node.explicitVariableModes[app.collection.id] = app.modeId;
+        }
+      } catch (_) {}
+    }
   }
 
   // ── Colors section ───────────────────────────────────────────────────────────
@@ -3333,17 +3400,12 @@ async function _buildShowcase(opts) {
     });
   }
 
-  const _prevColors = _page.children.find(n =>
-    (n.type === 'FRAME' || n.type === 'SECTION') && n.name === 'Token Showcase — Colors'
-  );
-  const _myColorsX = _prevColors ? _prevColors.x : _sectionX;
+  const _myColorsX = _sectionX;
 
   if (_primColls.length || _semanticColls.length) {
-    if (_prevColors) _prevColors.remove();
-    const _colorsFrame = _makeShowcaseFrame('Colors');
-    _addToFrame(_buildSectionHeader('Colors', 'Primitive ramps and their semantic surface / foreground pairs.'), _colorsFrame);
-
     if (_primColls.length) {
+      const _primitiveColorsFrame = _makeShowcaseFrame('Primitive Colors');
+      _addToFrame(_buildSectionHeader('Primitive Colors', 'Primitive ramp values used to construct semantic color roles and visual states.'), _primitiveColorsFrame);
       const _primTable = _buildTable('Primitives', _PRIMITIVE_COLOR_DESC);
 
       for (const coll of _primColls) {
@@ -3370,7 +3432,8 @@ async function _buildShowcase(opts) {
         }
       }
 
-      _appendFill(_primTable, _colorsFrame);
+      _appendFill(_primTable, _primitiveColorsFrame);
+      _placeShowcaseSection('Primitive Colors', _primitiveColorsFrame, _myColorsX);
     }
 
     if (_semanticColls.length) {
@@ -3388,15 +3451,68 @@ async function _buildShowcase(opts) {
         opts.DS.color.semantics &&
         Array.isArray(opts.DS.color.semantics.pairs)
       ) ? opts.DS.color.semantics.pairs : [];
+      const _semanticModeNames = (function() {
+        const names = [];
+        const seen = {};
+        for (const coll of _semanticColls) {
+          const collNames = Array.isArray(coll.modeNames) ? coll.modeNames : [];
+          for (var mi = 0; mi < collNames.length; mi++) {
+            var modeName = collNames[mi];
+            if (!modeName || seen[modeName]) continue;
+            seen[modeName] = true;
+            names.push(modeName);
+          }
+        }
+        var hasLight = names.some(function(n) { return /light|day|bright/i.test(n); });
+        var hasDark = names.some(function(n) { return /dark|night|dim/i.test(n); });
+        if (hasLight && hasDark) {
+          return names
+            .filter(function(n) { return /light|day|bright|dark|night|dim/i.test(n); })
+            .sort(function(a, b) {
+              var ar = /dark|night|dim/i.test(a) ? 1 : 0;
+              var br = /dark|night|dim/i.test(b) ? 1 : 0;
+              return ar !== br ? ar - br : a.localeCompare(b);
+            });
+        }
+        return names.length ? [names[0]] : [null];
+      })();
+      function _modeIdForCollectionMode(coll, modeName) {
+        if (!coll || !Array.isArray(coll.modes) || !coll.modes.length) return null;
+        if (!modeName) return coll.modes[0].modeId;
+        var normalized = String(modeName).toLowerCase();
+        var exact = coll.modes.find(function(m) { return String(m.name).toLowerCase() === normalized; });
+        if (exact) return exact.modeId;
+        var family = /dark|night|dim/i.test(modeName)
+          ? /dark|night|dim/i
+          : (/light|day|bright/i.test(modeName) ? /light|day|bright/i : null);
+        if (family) {
+          var familyMode = coll.modes.find(function(m) { return family.test(m.name); });
+          if (familyMode) return familyMode.modeId;
+        }
+        return coll.modes[0].modeId;
+      }
+      const _semanticModeEntries = _semanticModeNames.map(function(modeName) {
+        return {
+          name: modeName,
+          applications: _semanticColls
+            .map(function(coll) {
+              return {
+                collection: coll.collection,
+                modeId: _modeIdForCollectionMode(coll, modeName)
+              };
+            })
+            .filter(function(app) { return app.collection && app.modeId; })
+        };
+      });
 
       // Resolve a token reference to { rgb, varRef }. Supports the optional
       // border / icon / fill keys on a pair entry, or any path the inference
       // helper proposes. Returns null when the ref is empty or unresolvable.
-      function _resolveSemRef(ref) {
+      function _resolveSemRef(ref, modeName) {
         if (!ref) return null;
         var v = varByName[ref] || null;
         if (!v) return null;
-        var raw = resolveVarValue(v);
+        var raw = modeName ? resolveVarValueForMode(v, modeName) : resolveVarValue(v);
         if (!raw || !('r' in raw)) return null;
         return { rgb: { r: raw.r, g: raw.g, b: raw.b }, varRef: v };
       }
@@ -3505,7 +3621,7 @@ async function _buildShowcase(opts) {
         return { borderRef: borderRef, iconRef: iconRef, fillRef: '' };
       }
 
-      function _configStandaloneRows(items, kind) {
+      function _configStandaloneRows(items, kind, modeName) {
         const rows = [];
         if (!Array.isArray(items)) return rows;
         const seen = {};
@@ -3515,31 +3631,11 @@ async function _buildShowcase(opts) {
           seen[tokenName] = true;
           const v = varByName[tokenName] || null;
           if (!v || v.resolvedType !== 'COLOR') continue;
-          const raw = resolveVarValue(v);
+          const raw = modeName ? resolveVarValueForMode(v, modeName) : resolveVarValue(v);
           if (!raw || !('r' in raw)) continue;
           const rgb = { r: raw.r, g: raw.g, b: raw.b };
           if (kind === 'outline') {
             rows.push(_buildOutlineRow(_tokenLabel(tokenName), _tokenDesc(tokenName), rgb, v));
-          } else if (kind === 'icon') {
-            var defSurfaceVar = _V.surfaceDefault || _V.bg || null;
-            var defSurfaceRaw = defSurfaceVar ? resolveVarValue(defSurfaceVar) : null;
-            var surfaceRGB = defSurfaceRaw && 'r' in defSurfaceRaw
-              ? { r: defSurfaceRaw.r, g: defSurfaceRaw.g, b: defSurfaceRaw.b }
-              : _bgColor;
-            var surfaceLabel = defSurfaceVar && defSurfaceVar.name ? _tokenLabel(defSurfaceVar.name) : 'surface/default';
-            rows.push(_buildSemColorRow(
-              _tokenLabel(tokenName),
-              (_tokenDesc(tokenName) || '') + ' Shown on ' + surfaceLabel + '.',
-              surfaceRGB,
-              rgb,
-              defSurfaceVar,
-              {
-                isIcon: true,
-                fgVar: v,
-                hasPairing: true,
-                roleNames: { bg: surfaceLabel, fg: _tokenLabel(tokenName) }
-              }
-            ));
           }
         }
         return rows;
@@ -3567,167 +3663,168 @@ async function _buildShowcase(opts) {
           if (pair.bg) _seenConfigBgRefs[pair.bg] = true;
         }
 
-        const _semTable = _buildTable('Semantic Colors', _SEMANTIC_COLOR_DESC);
-        const _semHeading = _buildTableHeading([
-          { text: 'Roles',    flex: true },
-          { text: 'Preview',  flex: true },
-          { text: _showcaseContrastAlgorithm === 'wcag' ? 'Contrast' : 'APCA', width: 112, center: true },
-          { text: 'WCAG',     width: 96, center: true },
-        ], 16);
-        _semTable.appendChild(_semHeading);
-        _semHeading.layoutSizingHorizontal = 'FILL';
-        _addTableDivider(_semTable);
-
-        for (const _gLabel of _groupOrder) {
-          const _items = _grouped[_gLabel];
-          if (!_items || !_items.length) continue;
-
-          const groupHeader = _buildGroupHeader(_gLabel, _items.length);
-          _semTable.appendChild(groupHeader);
-          groupHeader.layoutSizingHorizontal = 'FILL';
-          _addTableDivider(_semTable);
-
-          for (const pair of _items) {
-            const bgVar = varByName[pair.bg] || null;
-            const fgVar = varByName[pair.text] || null;
-            const bgRaw = bgVar ? resolveVarValue(bgVar) : null;
-            const fgRaw = fgVar ? resolveVarValue(fgVar) : null;
-            if (!bgRaw || !fgRaw || !('r' in bgRaw) || !('r' in fgRaw)) continue;
-            const bgRGB = { r: bgRaw.r, g: bgRaw.g, b: bgRaw.b };
-            const fgRGB = { r: fgRaw.r, g: fgRaw.g, b: fgRaw.b };
-
-            // Explicit-wins for border/icon: a user-set pair.border/pair.icon
-            // short-circuits inference. Empty/missing keys fall through to
-            // the DS-agnostic helper. pair.fill is honored as-is — this
-            // helper does not infer fill (visual-noise rationale in helper).
-            const _extras    = _inferSemPairExtras(pair.bg, pair.text, varByName);
-            const _borderRef = pair.border || _extras.borderRef;
-            const _iconRef   = pair.icon   || _extras.iconRef;
-
-            const bdInfo = _resolveSemRef(_borderRef);
-            const icInfo = _resolveSemRef(_iconRef);
-            const flInfo = _resolveSemRef(pair.fill);
-
-            const bgLabel = _tokenLabel(pair.bg);
-            const fgLabel = _tokenLabel(pair.text);
-            const row = _buildSemColorRow(
-              bgLabel + ' + ' + fgLabel,
-              null,
-              bgRGB, fgRGB, bgVar,
-              {
-                fgVar:     fgVar,
-                hasPairing: true,
-                roleNames: {
-                  bg:     bgLabel,
-                  fg:     fgLabel,
-                  border: _borderRef ? _tokenLabel(_borderRef) : '',
-                  icon:   _iconRef   ? _tokenLabel(_iconRef)   : '',
-                  fill:   pair.fill  ? _tokenLabel(pair.fill)  : ''
-                },
-                borderRGB: bdInfo ? bdInfo.rgb    : null,
-                borderVar: bdInfo ? bdInfo.varRef : null,
-                iconRGB:   icInfo ? icInfo.rgb    : null,
-                iconVar:   icInfo ? icInfo.varRef : null,
-                fillRGB:   flInfo ? flInfo.rgb    : null,
-                fillVar:   flInfo ? flInfo.varRef : null
-              }
-            );
-            _semTable.appendChild(row);
-            row.layoutSizingHorizontal = 'FILL';
-            _addTableDivider(_semTable);
-          }
-        }
-
-        const _extraBgGroups = {};
-        const _extraBgOrder = [];
-        for (const coll of _semanticColls) {
-          for (const v of coll.vars.filter(v => v.resolvedType === 'COLOR')) {
-            if (_seenConfigBgRefs[v.name]) continue;
-            if (/(?:^|\/)on[-_]/i.test(v.name)) continue;
-            if (!/(?:^|\/)(?:surface|bg|background|base|page|fill)(?:\/|$)/i.test(v.name)) continue;
-            const raw = resolveVarValue(v);
-            if (!raw || !('r' in raw)) continue;
-            if (raw.a !== undefined && raw.a < 0.95) continue;
-            var extraLabel = _semGroupLabel(v.name);
-            if (!_extraBgGroups[extraLabel]) { _extraBgGroups[extraLabel] = []; _extraBgOrder.push(extraLabel); }
-            _extraBgGroups[extraLabel].push(v);
-          }
-        }
-
-        for (const _extraLabel of _extraBgOrder) {
-          const _extraItems = _extraBgGroups[_extraLabel];
-          if (!_extraItems || !_extraItems.length) continue;
-          const groupHeader = _buildGroupHeader(_extraLabel, _extraItems.length);
-          _semTable.appendChild(groupHeader);
-          groupHeader.layoutSizingHorizontal = 'FILL';
-          _addTableDivider(_semTable);
-          for (const v of _extraItems) {
-            const raw = resolveVarValue(v);
-            if (!raw || !('r' in raw)) continue;
-            const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
-            var effectiveFg = (function() {
-              var ind = _swatchIndicator(bgRGB);
-              return ind.show ? ind.fg : _textColor;
-            })();
-            const defaultFgRef = varByName['color/text/default']
-              ? 'color/text/default'
-              : (varByName['color/on-surface/default'] ? 'color/on-surface/default' : '');
-            const defaultFgInfo = _resolveSemRef(defaultFgRef);
-            if (defaultFgInfo) effectiveFg = defaultFgInfo.rgb;
-            const row = _buildSemColorRow(_tokenLabel(v.name), _tokenDesc(v.name), bgRGB, effectiveFg, v, {
-              fgVar: defaultFgInfo ? defaultFgInfo.varRef : null,
-              hasPairing: !!defaultFgInfo,
-              roleNames: { bg: _tokenLabel(v.name), fg: defaultFgInfo ? _tokenLabel(defaultFgRef) : '' }
-            });
-            _semTable.appendChild(row);
-            row.layoutSizingHorizontal = 'FILL';
-            _addTableDivider(_semTable);
-          }
-        }
-
-        _appendFill(_semTable, _colorsFrame);
-
         const _configSemantics = opts.DS && opts.DS.color && opts.DS.color.semantics
           ? opts.DS.color.semantics
           : {};
-        const _standaloneOutlineRows = _configStandaloneRows(_configSemantics.unpaired, 'outline');
-        if (_standaloneOutlineRows.length) {
-          const _outlineTable = _buildTable('Standalone Outline Roles', 'Foundation and interaction outline roles that are not paired to one semantic surface.');
-          const _outlineHeading = _buildTableHeading([
-            { text: 'Token',   flex: true },
-            { text: 'Example', flex: true },
-          ], 16);
-          _outlineTable.appendChild(_outlineHeading);
-          _outlineHeading.layoutSizingHorizontal = 'FILL';
-          _addTableDivider(_outlineTable);
-          for (const row of _standaloneOutlineRows) {
-            _outlineTable.appendChild(row);
-            row.layoutSizingHorizontal = 'FILL';
-            _addTableDivider(_outlineTable);
-          }
-          _appendFill(_outlineTable, _colorsFrame);
-        }
 
-        const _standaloneIconRows = _configStandaloneRows(_configSemantics.icons, 'icon');
-        if (_standaloneIconRows.length) {
-          const _iconTable = _buildTable('Standalone Icon Roles', 'Icon roles that are not paired to one semantic surface.');
-          const _iconHeading = _buildTableHeading([
+        for (const _modeEntry of _semanticModeEntries) {
+          const _modeName = _modeEntry.name;
+          const _modeLabel = _modeName || 'Default';
+          const _modeSectionName = /dark|night|dim/i.test(_modeLabel)
+            ? 'Dark Semantics'
+            : (/light|day|bright/i.test(_modeLabel) ? 'Light Semantics' : 'Semantic Colors');
+          const _modeFrame = _makeShowcaseFrame(_modeSectionName);
+          _addToFrame(_buildSectionHeader(_modeSectionName, 'Semantic color tokens mapped to UI roles, foreground pairings, and accessibility checks.'), _modeFrame);
+          _applyExplicitVariableModes(_modeFrame, _modeEntry.applications);
+
+          const _modeTitle = _semanticModeNames.length > 1 ? (_modeLabel + ' Semantic Colors') : 'Semantic Colors';
+          const _modeDesc = _semanticModeNames.length > 1
+            ? (_SEMANTIC_COLOR_DESC + ' Values and contrast are resolved in the ' + _modeLabel + ' variable mode.')
+            : _SEMANTIC_COLOR_DESC;
+          const _semTable = _buildTable(_modeTitle, _modeDesc);
+          const _semHeading = _buildTableHeading([
             { text: 'Roles',    flex: true },
             { text: 'Preview',  flex: true },
             { text: _showcaseContrastAlgorithm === 'wcag' ? 'Contrast' : 'APCA', width: 112, center: true },
             { text: 'WCAG',     width: 96, center: true },
           ], 16);
-          _iconTable.appendChild(_iconHeading);
-          _iconHeading.layoutSizingHorizontal = 'FILL';
-          _addTableDivider(_iconTable);
-          for (const row of _standaloneIconRows) {
-            _iconTable.appendChild(row);
-            row.layoutSizingHorizontal = 'FILL';
-            _addTableDivider(_iconTable);
+          _semTable.appendChild(_semHeading);
+          _semHeading.layoutSizingHorizontal = 'FILL';
+          _addTableDivider(_semTable);
+
+          for (const _gLabel of _groupOrder) {
+            const _items = _grouped[_gLabel];
+            if (!_items || !_items.length) continue;
+
+            const groupHeader = _buildGroupHeader(_gLabel, _items.length);
+            _semTable.appendChild(groupHeader);
+            groupHeader.layoutSizingHorizontal = 'FILL';
+            _addTableDivider(_semTable);
+
+            for (const pair of _items) {
+              const bgVar = varByName[pair.bg] || null;
+              const fgVar = varByName[pair.text] || null;
+              const bgRaw = bgVar ? resolveVarValueForMode(bgVar, _modeName) : null;
+              const fgRaw = fgVar ? resolveVarValueForMode(fgVar, _modeName) : null;
+              if (!bgRaw || !fgRaw || !('r' in bgRaw) || !('r' in fgRaw)) continue;
+              const bgRGB = { r: bgRaw.r, g: bgRaw.g, b: bgRaw.b };
+              const fgRGB = { r: fgRaw.r, g: fgRaw.g, b: fgRaw.b };
+
+              // Explicit-wins for border/icon: a user-set pair.border/pair.icon
+              // short-circuits inference. Empty/missing keys fall through to
+              // the DS-agnostic helper. pair.fill is honored as-is — this
+              // helper does not infer fill (visual-noise rationale in helper).
+              const _extras    = _inferSemPairExtras(pair.bg, pair.text, varByName);
+              const _borderRef = pair.border || _extras.borderRef;
+              const _iconRef   = pair.icon   || _extras.iconRef;
+
+              const bdInfo = _resolveSemRef(_borderRef, _modeName);
+              const icInfo = _resolveSemRef(_iconRef, _modeName);
+              const flInfo = _resolveSemRef(pair.fill, _modeName);
+
+              const bgLabel = _tokenLabel(pair.bg);
+              const fgLabel = _tokenLabel(pair.text);
+              const row = _buildSemColorRow(
+                bgLabel + ' + ' + fgLabel,
+                null,
+                bgRGB, fgRGB, bgVar,
+                {
+                  fgVar:     fgVar,
+                  hasPairing: true,
+                  roleNames: {
+                    bg:     bgLabel,
+                    fg:     fgLabel,
+                    border: _borderRef ? _tokenLabel(_borderRef) : '',
+                    icon:   _iconRef   ? _tokenLabel(_iconRef)   : '',
+                    fill:   pair.fill  ? _tokenLabel(pair.fill)  : ''
+                  },
+                  borderRGB: bdInfo ? bdInfo.rgb    : null,
+                  borderVar: bdInfo ? bdInfo.varRef : null,
+                  iconRGB:   icInfo ? icInfo.rgb    : null,
+                  iconVar:   icInfo ? icInfo.varRef : null,
+                  fillRGB:   flInfo ? flInfo.rgb    : null,
+                  fillVar:   flInfo ? flInfo.varRef : null
+                }
+              );
+              _semTable.appendChild(row);
+              row.layoutSizingHorizontal = 'FILL';
+              _addTableDivider(_semTable);
+            }
           }
-          _appendFill(_iconTable, _colorsFrame);
+
+          const _extraBgGroups = {};
+          const _extraBgOrder = [];
+          for (const coll of _semanticColls) {
+            for (const v of coll.vars.filter(v => v.resolvedType === 'COLOR')) {
+              if (_seenConfigBgRefs[v.name]) continue;
+              if (/(?:^|\/)on[-_]/i.test(v.name)) continue;
+              if (!/(?:^|\/)(?:surface|bg|background|base|page|fill)(?:\/|$)/i.test(v.name)) continue;
+              const raw = resolveVarValueForMode(v, _modeName);
+              if (!raw || !('r' in raw)) continue;
+              if (raw.a !== undefined && raw.a < 0.95) continue;
+              var extraLabel = _semGroupLabel(v.name);
+              if (!_extraBgGroups[extraLabel]) { _extraBgGroups[extraLabel] = []; _extraBgOrder.push(extraLabel); }
+              _extraBgGroups[extraLabel].push(v);
+            }
+          }
+
+          for (const _extraLabel of _extraBgOrder) {
+            const _extraItems = _extraBgGroups[_extraLabel];
+            if (!_extraItems || !_extraItems.length) continue;
+            const groupHeader = _buildGroupHeader(_extraLabel, _extraItems.length);
+            _semTable.appendChild(groupHeader);
+            groupHeader.layoutSizingHorizontal = 'FILL';
+            _addTableDivider(_semTable);
+            for (const v of _extraItems) {
+              const raw = resolveVarValueForMode(v, _modeName);
+              if (!raw || !('r' in raw)) continue;
+              const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
+              var effectiveFg = (function() {
+                var ind = _swatchIndicator(bgRGB);
+                return ind.show ? ind.fg : _textColor;
+              })();
+              const defaultFgRef = varByName['color/text/default']
+                ? 'color/text/default'
+                : (varByName['color/on-surface/default'] ? 'color/on-surface/default' : '');
+              const defaultFgInfo = _resolveSemRef(defaultFgRef, _modeName);
+              if (defaultFgInfo) effectiveFg = defaultFgInfo.rgb;
+              const row = _buildSemColorRow(_tokenLabel(v.name), _tokenDesc(v.name), bgRGB, effectiveFg, v, {
+                fgVar: defaultFgInfo ? defaultFgInfo.varRef : null,
+                hasPairing: !!defaultFgInfo,
+                roleNames: { bg: _tokenLabel(v.name), fg: defaultFgInfo ? _tokenLabel(defaultFgRef) : '' }
+              });
+              _semTable.appendChild(row);
+              row.layoutSizingHorizontal = 'FILL';
+              _addTableDivider(_semTable);
+            }
+          }
+
+          _appendFill(_semTable, _modeFrame);
+
+          const _standaloneOutlineRows = _configStandaloneRows(_configSemantics.unpaired, 'outline', _modeName);
+          if (_standaloneOutlineRows.length) {
+            const _outlineTable = _buildTable('Standalone Outline Roles', 'Foundation and interaction outline roles that are not paired to one semantic surface.');
+            const _outlineHeading = _buildTableHeading([
+              { text: 'Token',   flex: true },
+              { text: 'Example', flex: true },
+            ], 16);
+            _outlineTable.appendChild(_outlineHeading);
+            _outlineHeading.layoutSizingHorizontal = 'FILL';
+            _addTableDivider(_outlineTable);
+            for (const row of _standaloneOutlineRows) {
+              _outlineTable.appendChild(row);
+              row.layoutSizingHorizontal = 'FILL';
+              _addTableDivider(_outlineTable);
+            }
+            _appendFill(_outlineTable, _modeFrame);
+          }
+
+          const _placedModeSection = _placeShowcaseSection(_modeSectionName, _modeFrame, null);
+          _applyExplicitVariableModes(_placedModeSection, _modeEntry.applications);
         }
       } else {
+      const _semanticColorsFrame = _makeShowcaseFrame('Semantic Colors');
+      _addToFrame(_buildSectionHeader('Semantic Colors', 'Semantic color tokens mapped to UI roles, foreground pairings, and accessibility checks.'), _semanticColorsFrame);
       function _findFgPair(bgVarName) {
         const parts = bgVarName.split('/');
         for (let i = parts.length - 1; i >= 0; i--) {
@@ -3770,70 +3867,7 @@ async function _buildShowcase(opts) {
             const row = _buildOutlineRow(tokenLabel, desc, outlineRGB, v);
             bgUnpairedRows.push(row);
           } else if (isIcon) {
-            // Icons are foreground colors — find the best surface to show them on.
-            // Priority 1: semantic pairing (replace 'icon' with 'surface' in the path),
-            //   e.g. color/icon/inverse → color/surface/inverse (a dark surface).
-            //   Use if it gives ≥ 3:1 contrast against the icon color.
-            // Priority 2: default surface (the neutral page background).
-            //   Use when no semantic pairing exists or its contrast is poor.
-            var iconRGB = { r: raw.r, g: raw.g, b: raw.b };
-            var iconPathParts = v.name.split('/');
-            var iconSegIdx    = iconPathParts.findIndex(function(p) { return /^icon$/i.test(p); });
-            var semSurfacePath = iconSegIdx >= 0
-              ? iconPathParts.map(function(p, i) { return i === iconSegIdx ? 'surface' : p; }).join('/')
-              : null;
-            var semSurfaceRaw = semSurfacePath ? (_semVarRGB.get(semSurfacePath) || null) : null;
-            var semSurfaceVar = semSurfacePath ? (varByName[semSurfacePath] || null) : null;
-            var semContrast   = semSurfaceRaw ? _contrastRatio(iconRGB, semSurfaceRaw) : 0;
-
-            var defSurfaceVar = _V.surfaceDefault || _V.bg || null;
-            var defSurfaceRaw = defSurfaceVar ? resolveVarValue(defSurfaceVar) : null;
-            var defSurfaceRGB = defSurfaceRaw && 'r' in defSurfaceRaw
-              ? { r: defSurfaceRaw.r, g: defSurfaceRaw.g, b: defSurfaceRaw.b }
-              : _bgColor;
-            var defContrast   = _contrastRatio(iconRGB, defSurfaceRGB);
-
-            // Use semantic surface if it gives meaningfully better contrast; otherwise default.
-            var useSemanticPair = semSurfaceRaw && semContrast >= 3 && semContrast >= defContrast * 0.8;
-            var iconSurfaceRGB = useSemanticPair ? semSurfaceRaw : defSurfaceRGB;
-            var iconSurfaceVar = useSemanticPair ? semSurfaceVar : defSurfaceVar;
-
-            // Luminance-based fallback for light icons (e.g. icon/inverse, icon/on-dark).
-            // If the icon is very light and neither the semantic surface nor the default
-            // surface provides good contrast, scan for the darkest available surface variable.
-            if (!useSemanticPair && _lum(iconRGB) > 0.6) {
-              var _darkestVar = null, _darkestLum = Infinity;
-              var _allVarValues = Object.values(varByName);
-              for (var _di = 0; _di < _allVarValues.length; _di++) {
-                var _dv = _allVarValues[_di];
-                if (_dv.resolvedType !== 'COLOR') continue;
-                if (!/(?:surface|background|base|page)/i.test(_dv.name)) continue;
-                if (/(?:^|\/)on[-_]/i.test(_dv.name)) continue; // exclude on-surface, on-background, etc.
-                var _dRaw = resolveVarValue(_dv);
-                if (!_dRaw || !('r' in _dRaw)) continue;
-                var _dLum = _lum({ r: _dRaw.r, g: _dRaw.g, b: _dRaw.b });
-                if (_dLum < _darkestLum) { _darkestLum = _dLum; _darkestVar = { v: _dv, raw: _dRaw }; }
-              }
-              if (_darkestVar) {
-                var _darkRGB = { r: _darkestVar.raw.r, g: _darkestVar.raw.g, b: _darkestVar.raw.b };
-                if (_contrastRatio(iconRGB, _darkRGB) > _contrastRatio(iconRGB, iconSurfaceRGB)) {
-                  iconSurfaceRGB = _darkRGB;
-                  iconSurfaceVar = _darkestVar.v;
-                }
-              }
-            }
-
-            var iconSurfaceLabel = iconSurfaceVar ? _tokenLabel(iconSurfaceVar.name) : null;
-            var iconDesc = desc ? desc : '';
-            if (iconSurfaceLabel) iconDesc = (iconDesc ? iconDesc + ' ' : '') + 'Shown on ' + iconSurfaceLabel + '.';
-            fgRows.push(_buildSemColorRow(
-              tokenLabel, iconDesc || null,
-              iconSurfaceRGB, iconRGB,
-              iconSurfaceVar, {
-                isIcon: true, fgVar: v, hasPairing: true, previewText: tokenLeaf,
-                roleNames: { bg: iconSurfaceLabel || '', fg: tokenLabel }
-              }
-            ));
+            continue;
           } else {
             const bgRGB = { r: raw.r, g: raw.g, b: raw.b };
             // Try to find the fg pairing both as RGB and as a variable.
@@ -3941,7 +3975,7 @@ async function _buildShowcase(opts) {
             _addTableDivider(_semTable);
           }
         }
-        _appendFill(_semTable, _colorsFrame);
+        _appendFill(_semTable, _semanticColorsFrame);
       }
 
       for (const { label, rows } of _sortSemanticGroups(_bottomGroups)) {
@@ -3958,12 +3992,11 @@ async function _buildShowcase(opts) {
           row.layoutSizingHorizontal = 'FILL';
           _addTableDivider(_btTable);
         }
-        _appendFill(_btTable, _colorsFrame);
+        _appendFill(_btTable, _semanticColorsFrame);
       }
+      _placeShowcaseSection('Semantic Colors', _semanticColorsFrame, _primColls.length ? null : _myColorsX);
       }
     }
-
-    _placeShowcaseSection('Colors', _colorsFrame, _myColorsX);
   }
 
   // ── Typography section ───────────────────────────────────────────────────────
@@ -4188,14 +4221,14 @@ async function _buildShowcase(opts) {
     _addToFrame(_buildSectionHeader('Elevation', 'Drop shadows for layering depth.'), _elevFrame);
 
     const _elevTable = _buildTable('Elevation', 'Shadow styles for layered surfaces, popovers, and raised UI.');
-    _elevTable.clipsContent = false;
+    _elevTable.clipsContent = true;
     const _elevHeading = _buildTableHeading([
-      { text: 'Token',    flex: true },
-      { text: 'Preview',  width: 96  },
-      { text: 'Offset Y', width: 96  },
-      { text: 'Blur',     width: 96  },
-      { text: 'Spread',   width: 96  },
-    ], 8);
+      { text: 'Roles',    flex: true },
+      { text: 'Preview',  flex: true },
+      { text: 'Offset Y', width: 96, center: true },
+      { text: 'Blur',     width: 96, center: true },
+      { text: 'Spread',   width: 96, center: true },
+    ], 16);
     _elevTable.appendChild(_elevHeading);
     _elevHeading.layoutSizingHorizontal = 'FILL';
     _addTableDivider(_elevTable);
@@ -4206,11 +4239,9 @@ async function _buildShowcase(opts) {
       row.fills    = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
       row.paddingLeft = 16; row.paddingRight  = 16;
       row.paddingTop  = 16; row.paddingBottom = 16;
-      row.itemSpacing = 8;
+      row.itemSpacing = 16;
 
       const tokenCell = _f('TokenCell', 'VERTICAL');
-      tokenCell.paddingLeft = 12; tokenCell.paddingRight  = 12;
-      tokenCell.paddingTop  = 12; tokenCell.paddingBottom = 12;
       tokenCell.itemSpacing = 8;
       tokenCell.counterAxisAlignItems = 'MIN';
       tokenCell.primaryAxisAlignItems = 'CENTER';
@@ -4230,6 +4261,9 @@ async function _buildShowcase(opts) {
       card.clipsContent = false;
       card.cornerRadius = 8;
       card.fills = [_paint(_bgColor, _V.bg)];
+      card.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
+      card.strokeWeight = 0.5;
+      card.strokeAlign = 'INSIDE';
       card.effectStyleId = style.id;
       const previewCell = _f('Visual', 'HORIZONTAL');
       previewCell.clipsContent = false;
@@ -4238,9 +4272,10 @@ async function _buildShowcase(opts) {
       previewCell.primaryAxisAlignItems = 'CENTER';
       previewCell.counterAxisAlignItems = 'CENTER';
       previewCell.appendChild(card);
+      card.layoutSizingHorizontal = 'FILL';
+      card.layoutSizingVertical = 'FIXED';
       row.appendChild(previewCell);
-      previewCell.layoutSizingHorizontal = 'FIXED';
-      previewCell.resize(96, 1);
+      previewCell.layoutSizingHorizontal = 'FILL';
       previewCell.layoutSizingVertical   = 'FILL';
 
       const offsetY = shadow ? `${shadow.offset.y}px`   : '—';
@@ -4289,10 +4324,10 @@ async function _buildShowcase(opts) {
 
     const _scrimTable = _buildTable('Overlays & Scrims', _SCRIM_TABLE_DESC);
     const _scrimHeading = _buildTableHeading([
-      { text: 'Token',   flex: true },
-      { text: 'Preview', width: 96  },
+      { text: 'Roles',   flex: true },
+      { text: 'Preview', flex: true },
       { text: 'Opacity', width: 96, center: true },
-    ], 8);
+    ], 16);
     _scrimTable.appendChild(_scrimHeading);
     _scrimHeading.layoutSizingHorizontal = 'FILL';
     _addTableDivider(_scrimTable);
@@ -4325,11 +4360,9 @@ async function _buildShowcase(opts) {
         row.fills    = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
         row.paddingLeft = 16; row.paddingRight  = 16;
         row.paddingTop  = 16; row.paddingBottom = 16;
-        row.itemSpacing = 8;
+        row.itemSpacing = 16;
 
         const tokenCell = _f('TokenCell', 'VERTICAL');
-        tokenCell.paddingLeft = 12; tokenCell.paddingRight  = 12;
-        tokenCell.paddingTop  = 12; tokenCell.paddingBottom = 12;
         tokenCell.itemSpacing = 8;
         tokenCell.counterAxisAlignItems = 'MIN';
         tokenCell.primaryAxisAlignItems = 'CENTER';
@@ -4349,6 +4382,9 @@ async function _buildShowcase(opts) {
         demo.resize(56, 40);
         demo.layoutMode = 'NONE';
         demo.cornerRadius = 4;
+        demo.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
+        demo.strokeWeight = 0.5;
+        demo.strokeAlign = 'INSIDE';
         demo.fills = [
           _paint(_bgColor, _V.bg),
           figma.variables.setBoundVariableForPaint(
@@ -4363,9 +4399,10 @@ async function _buildShowcase(opts) {
         demoCell.primaryAxisAlignItems = 'CENTER';
         demoCell.counterAxisAlignItems = 'CENTER';
         demoCell.appendChild(demo);
+        demo.layoutSizingHorizontal = 'FILL';
+        demo.layoutSizingVertical = 'FIXED';
         row.appendChild(demoCell);
-        demoCell.layoutSizingHorizontal = 'FIXED';
-        demoCell.resize(96, 1);
+        demoCell.layoutSizingHorizontal = 'FILL';
         demoCell.layoutSizingVertical   = 'FILL';
 
         const opacityCell = _metaCell(`${Math.round(scrimAlpha * 100)}%`);

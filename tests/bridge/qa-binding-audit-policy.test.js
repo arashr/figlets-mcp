@@ -127,6 +127,15 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("for (var _oldShowcaseIndex = 0; _oldShowcaseIndex < _existingShowcases.length; _oldShowcaseIndex++)") &&
+    code.includes("let _sectionX = 0;") &&
+    code.includes("_placeShowcaseSection('Primitive Colors', _primitiveColorsFrame, _myColorsX);") &&
+    code.includes("'Light Semantics'") &&
+    code.includes("'Dark Semantics'"),
+  "Showcase rebuild must place primitive colors first, then light/dark semantic sections before the remaining sections"
+);
+
+assert.ok(
   code.includes("const _configSemanticPairs = (") &&
     code.includes("Array.isArray(opts.DS.color.semantics.pairs)") &&
     code.includes("for (const pair of _configSemanticPairs)") &&
@@ -140,18 +149,18 @@ assert.ok(
 );
 
 assert.ok(
-  code.includes("function _configStandaloneRows(items, kind)") &&
+  code.includes("function _configStandaloneRows(items, kind, modeName)") &&
     code.includes("_configSemantics.unpaired") &&
-    code.includes("_configSemantics.icons") &&
     code.includes("Standalone Outline Roles") &&
-    code.includes("Standalone Icon Roles"),
-  "Config-backed showcase must render standalone semantic outline/icon roles deterministically instead of dropping them"
+    !code.includes("Standalone Icon Roles"),
+  "Config-backed showcase must render standalone outline roles and omit standalone icon tables"
 );
 
 assert.ok(
-  code.includes("const selectedPass = _showcaseContrastAlgorithm === 'wcag' ? ratio >= 4.5 : lcAbs >= 75;") &&
-    code.includes("const secondaryText = _tDS(secondaryLabel, 12, _subColor, false, _V.textSub);"),
-  "Semantic contrast cells must mark selected-metric pass/fail and keep contrast values at the same font size"
+  code.includes("const lcLabel = (lcAbs >= 75 ? '✓ ' : '✗ ') + 'Lc ' + Math.round(lcAbs);") &&
+    code.includes("const ratioLabel = (ratio >= 4.5 ? '✓ ' : '✗ ') + ((Math.round(ratio * 100) / 100).toFixed(2) + ':1');") &&
+    code.includes("const secondaryText = _tDS(secondaryLabel, 12, _textColor, false, _V.text);"),
+  "Semantic contrast cells must mark APCA and WCAG independently and use the same color for both values"
 );
 
 assert.ok(
@@ -259,10 +268,30 @@ assert.ok(
 );
 
 assert.ok(
-  code.includes("_elevTable.clipsContent = false;") &&
+  code.includes("_elevTable.clipsContent = true;") &&
     code.includes("previewCell.clipsContent = false;") &&
-    code.includes("card.clipsContent = false;"),
-  "Elevation preview must not clip shadow content"
+    code.includes("card.clipsContent = false;") &&
+    code.includes("card.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];") &&
+    code.includes("card.layoutSizingHorizontal = 'FILL';"),
+  "Elevation table clips for its border while preview children stay unclipped and fill the preview column"
+);
+
+assert.ok(
+  code.includes("const _elevHeading = _buildTableHeading([") &&
+    code.includes("{ text: 'Roles',    flex: true }") &&
+    code.includes("{ text: 'Preview',  flex: true }") &&
+    code.includes("{ text: 'Offset Y', width: 96, center: true }") &&
+    code.includes("], 16);") &&
+    code.includes("row.itemSpacing = 16;") &&
+    !code.includes("tokenCell.paddingLeft = 12; tokenCell.paddingRight  = 12;") &&
+    code.includes("previewCell.layoutSizingHorizontal = 'FILL';") &&
+    code.includes("const _scrimHeading = _buildTableHeading([") &&
+    code.includes("{ text: 'Roles',   flex: true }") &&
+    code.includes("{ text: 'Preview', flex: true }") &&
+    code.includes("demoCell.layoutSizingHorizontal = 'FILL';") &&
+    code.includes("demo.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];") &&
+    code.includes("demo.layoutSizingHorizontal = 'FILL';"),
+  "Elevation and scrim headers must match semantic table header treatment"
 );
 
 assert.ok(

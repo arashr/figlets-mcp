@@ -345,8 +345,35 @@ assert.ok(
 
 // Pin that pair.fill is still resolved directly (no inference layer for fill).
 assert.ok(
-  code.includes('const flInfo = _resolveSemRef(pair.fill);'),
+  code.includes('const flInfo = _resolveSemRef(pair.fill, _modeName);'),
   'Config-pairs assembly must resolve pair.fill directly (no fill inference)'
+);
+
+// Pin that configured semantic pairs are resolved per variable mode, so the
+// Dark table uses Dark aliases and contrast values instead of the first mode.
+assert.ok(
+  code.includes('for (const _modeEntry of _semanticModeEntries)') &&
+    code.includes('const _modeName = _modeEntry.name;') &&
+    code.includes('resolveVarValueForMode(bgVar, _modeName)') &&
+    code.includes('resolveVarValueForMode(fgVar, _modeName)'),
+  'Config-pairs assembly must render semantic rows per variable mode'
+);
+
+// Pin that Light and Dark semantics render as separate showcase sections, and
+// the corresponding Figma variable mode is applied to those sections.
+assert.ok(
+  code.includes("'Light Semantics'") &&
+    code.includes("'Dark Semantics'") &&
+    code.includes('_applyExplicitVariableModes(_modeFrame, _modeEntry.applications)') &&
+    code.includes('_applyExplicitVariableModes(_placedModeSection, _modeEntry.applications)'),
+  'Configured semantic modes must become separate sections with explicit variable modes applied'
+);
+
+// Standalone icon roles should not render as their own showcase table; they
+// are expected to appear as paired role lines or be checked against default bg.
+assert.ok(
+  !code.includes('Standalone Icon Roles'),
+  'Showcase must not render a standalone icon roles table'
 );
 
 // Pin that the legacy non-config bg-row branch also calls the helper.
@@ -376,4 +403,4 @@ assert.strictEqual(
   'Helper must not call any substitution targeting "fill" as a destination role'
 );
 
-console.log('semantic-pair-extras-inference: 24 cases + 5 integration assertions passed.');
+console.log('semantic-pair-extras-inference: 24 cases + 8 integration assertions passed.');

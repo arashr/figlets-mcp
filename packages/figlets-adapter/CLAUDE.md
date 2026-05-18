@@ -58,6 +58,8 @@ Do not broaden the Figlets introduction with generic Figma authoring capabilitie
 
 Never offer "Plugin / MCP server code", repo editing, plugin editing, or arbitrary Figma create/delete/move actions in the designer-facing menu. Those are developer tasks, not Figlets designer workflow options.
 
+Bulk design-system updates are part of Figlets when the change can be expressed as a structured, designer-approved payload. Use the workflow's bulk-capable tools and data: `inspect_ds_setup_gaps.repairPlan.applyInput` with `apply_ds_setup_repairs`, `update_ds_primitives`, and `qa_binding_audit({ fix: true })`. If a designer asks for a bulk repair that Figlets cannot yet plan or apply, call that out as a Figlets product/tool gap or proposed feature scope instead of saying the gaps cannot be fixed. Do not write custom scripts to fill that gap in Designer Mode.
+
 ---
 
 ## Workflows

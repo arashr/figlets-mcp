@@ -48,6 +48,8 @@ assert.ok(body.includes("selectionPrompt"), "start.md must support structured se
 assert.ok(/Use `figlets_start\.designerResponse` only for generic help\/start requests/i.test(body), "start.md must reserve the generic menu for generic help");
 assert.ok(/design-system review[\s\S]*Figlets MCP tools\/scripts/i.test(body), "start.md must require Figlets tools/scripts for designer review");
 assert.ok(/Do not create custom scripts/i.test(body), "start.md must forbid ad hoc scripts for designer review");
+assert.ok(/bulk design-system updates as Figlets scope/i.test(body), "start.md must keep bulk DS updates in Figlets scope");
+assert.ok(/do not end at "the gaps cannot be fixed"/i.test(body), "start.md must avoid dead-end bulk repair wording");
 assert.ok(/explicitly ask.*go out of bounds/i.test(body), "start.md must allow out-of-bounds work only when explicitly requested");
 assert.ok(/not approximate.*raw Figma/i.test(body), "start.md must forbid raw-Figma-tool fallback when Figlets is unavailable");
 assert.ok(!/repo edit|plugin edit|developer/i.test(body) || /not.*developer-mode/i.test(body), "start.md must not offer developer-mode options");
@@ -73,6 +75,8 @@ assert.ok(/Only use `figlets_start\.designerResponse` verbatim for generic help\
 assert.ok(/workflow guide is mandatory/i.test(skillBody), "skill body must make the workflow guide mandatory for designer review");
 assert.ok(/do not write custom scripts/i.test(skillBody), "skill body must forbid ad hoc scripts for designer review");
 assert.ok(/product\/tool gap/i.test(skillBody), "skill body must report missing Figlets data as a product/tool gap");
+assert.ok(/bulk design-system updates as Figlets scope/i.test(skillBody), "skill body must keep bulk DS updates in Figlets scope");
+assert.ok(/gaps cannot be fixed as a dead end/i.test(skillBody), "skill body must avoid dead-end bulk repair wording");
 assert.ok(!/repo edit|plugin edit/i.test(skillBody) || /not.*developer-mode|do not offer developer-mode/i.test(skillBody), "skill body must not offer developer-mode options");
 
 // Plugin README sanity.

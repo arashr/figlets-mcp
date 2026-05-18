@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-18] Bulk design-system repairs are Figlets scope when structured
+
+**Decision:** Agents should treat bulk design-system updates as in-scope for Figlets when the operation can be represented as a structured, designer-approved payload. Existing bulk-capable surfaces include `inspect_ds_setup_gaps.repairPlan.applyInput` passed to `apply_ds_setup_repairs`, `update_ds_primitives` for config-backed primitive/color-semantic updates, and `qa_binding_audit({ fix: true })` for high-confidence binding fixes.
+
+**Why:** The designer experience should not stop at "here are the gaps, but we can't fix them" when the repair is deterministic and suitable for a Figlets tool. Figlets should own safe bulk repair planning/application for design-system operations, while avoiding a generic arbitrary Figma-authoring promise.
+
+**Missing capability behavior:** If a requested bulk repair cannot yet be planned or applied by Figlets, agents should say this is a Figlets product/tool gap or proposed Figlets feature scope. They should not write ad hoc scripts over snapshots/tool-results/raw Figma APIs to compensate, and they should not present the gap as impossible to fix.
+
+**Icon role bulk repairs:** Missing icon roles are not treated like passive optional border advisories. When a semantic family has a background + foreground pair but no icon role, `inspect_ds_setup_gaps` should emit an approval-ready icon `plannedRoleRepair` whenever Figlets can derive accessible aliases from the paired foreground. If every complete pair is missing icons, that becomes a bulk repair payload, not `suppressedAdvisoryRoles`. Passive border/outline absence can still be suppressed as a DS-wide convention when appropriate.
+
+---
+
 ## [2026-05-18] Initial designer response routes concrete goals instead of always showing the menu
 
 **Decision:** `figlets_start.designerResponse` is now the generic help/start screen only. If the designer's first message already contains a concrete goal, agents should call `figlets_route_intent`, then `figlets_workflow_guide`, and use the routed `designerResponse` instead of showing the capability table or asking what the designer wants to do. If routing is ambiguous, `figlets_route_intent` returns a structured `selectionPrompt` that hosts with selection UI can render as choices; plain-text hosts can render the prompt message.

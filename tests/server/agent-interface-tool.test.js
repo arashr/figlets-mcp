@@ -51,12 +51,19 @@ try {
     assert.ok(start.responseContract.useVerbatimWhenPossible.includes("generic help"));
     assert.strictEqual(start.responseContract.mode, "designer-facing");
     assert.ok(start.responseContract.designSystemReviewRule.includes("Use Figlets workflow tools/scripts only"));
+    assert.ok(start.responseContract.bulkUpdateRule.includes("Bulk design-system updates"));
+    assert.ok(start.responseContract.bulkUpdateRule.includes("product/tool gap"));
     assert.ok(start.responseContract.nextAction.includes("For a concrete initial goal, route it before replying"));
     assert.strictEqual(start.hardRules.reviewMustUseFigletsWorkflow, true);
+    assert.strictEqual(start.hardRules.bulkDesignSystemUpdatesAreInScope, true);
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_setup_repairs")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_primitives")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("qa_binding_audit")));
     assert.ok(start.hardRules.appliesTo.includes("design-system review"));
     assert.ok(start.hardRules.forbiddenUnlessDesignerExplicitlyAsksOutOfBounds.some(item => item.includes("custom scripts")));
     assert.ok(start.hardRules.forbiddenUnlessDesignerExplicitlyAsksOutOfBounds.some(item => item.includes("figma-data.json")));
     assert.ok(start.safety.some(item => item.includes("must use the Figlets workflow")));
+    assert.ok(start.safety.some(item => item.includes("bulk design-system repairs")));
     assert.ok(start.designerResponse.startsWith("# Figlets"));
     assert.ok(start.designerResponse.includes("A focused toolkit for checking, repairing, showcasing, documenting, and exporting Figma design systems."));
     assert.ok(!start.designerResponse.includes("Hi, I'm Figlets"));
@@ -71,6 +78,7 @@ try {
     assert.ok(start.forbiddenDesignerMenuItems.includes("Plugin / MCP server code"));
     assert.ok(start.forbiddenDesignerMenuItems.includes("Edit repo files"));
     assert.ok(start.scope.figletsDoesNotMean.some(item => item.includes("generic Figma create")));
+    assert.ok(start.scope.figletsDoes.some(item => item.includes("Structured bulk design-system updates")));
     assert.ok(start.scope.figletsDoesNotMean.some(item => item.includes("plugin code")));
     assert.ok(start.scope.figletsDoesNotMean.some(item => item.includes("figma-console")));
     assert.ok(!start.capabilities.some(item => item.id === "setup-gap-qa"));
@@ -117,8 +125,8 @@ try {
     ]);
     assert.ok(guide.summary.includes("semantic setup"));
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
-    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation"));
-    assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("bulk repair plan")));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("bulk-safe")));
     assert.ok(!guide.next.includes("setup-gap-qa"));
   }
 
@@ -130,7 +138,9 @@ try {
     );
     const handled = handleFigletsWorkflowGuide({ workflow_id: "health-check" });
     assert.strictEqual(handled.hardRules.reviewMustUseFigletsWorkflow, true);
+    assert.strictEqual(handled.hardRules.bulkDesignSystemUpdatesAreInScope, true);
     assert.ok(handled.message.includes("use the named Figlets tools/scripts only"));
+    assert.ok(handled.message.includes("structured bulk repair payloads"));
   }
 
   {

@@ -105,12 +105,17 @@ module.exports = (() => {
 
   // ── Companion advisories ─────────────────────────────────────────────────
   // `color/surface/brand-variant` + `color/on-surface/brand-variant` exist as
-  // a complete pair but no border/icon companions are present.
+  // a complete pair but no border/icon companions are present. Icons are now
+  // promoted to structured role gaps; passive borders remain advisory here.
   assert.strictEqual(result.summary.companionAdvisoryCount, 1);
   assert.strictEqual(result.companionAdvisories[0].bg, "color/surface/brand-variant");
   assert.strictEqual(result.companionAdvisories[0].fg, "color/on-surface/brand-variant");
   const advisoryRoles = result.companionAdvisories[0].missing.map(m => m.role).sort();
-  assert.deepStrictEqual(advisoryRoles, ["border", "icon"]);
+  assert.deepStrictEqual(advisoryRoles, ["border"]);
+  assert.ok(
+    result.missingSemanticRoles.some(gap => gap.family === "brand-variant" && gap.missingRole === "icon"),
+    "missing icon roles should be semantic role gaps, not plain companion advisories"
+  );
 
   // ── No false positives for the categories not exercised by this fixture ──
   assert.strictEqual(result.summary.brokenAliasCount, 0, "all aliases resolve in this fixture");

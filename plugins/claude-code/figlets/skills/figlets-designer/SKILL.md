@@ -21,4 +21,6 @@ When QA shows setup gaps, continue with the approved repair steps from the same 
 
 Use `inspect_ds_setup_gaps.repairPlan.applyInput` for approved repairs. Do not parse Claude `tool-results`, local snapshots, or transcript files to build repair payloads.
 
+Treat bulk design-system updates as Figlets scope when they can be represented as structured, designer-approved tool payloads. Use Figlets bulk-capable surfaces from the workflow, including `inspect_ds_setup_gaps.repairPlan.applyInput` with `apply_ds_setup_repairs`, `update_ds_primitives`, and `qa_binding_audit({ fix: true })`. If the requested bulk update needs a planner/apply surface Figlets does not expose yet, say that is a Figlets product/tool gap or proposed Figlets feature scope; do not tell the designer the gaps cannot be fixed as a dead end, and do not write ad hoc scripts to compensate.
+
 If `figlets_start` is not available in this session, stop and tell the user Figlets is not connected yet — do not approximate the flow with raw Figma tools. The fix is to install the Figlets Claude Code plugin (see the plugin README) or run `figlets-mcp setup --hosts=claude-code-plugin --yes`, then restart Claude Code.

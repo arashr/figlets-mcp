@@ -18,6 +18,7 @@ const MUTATING_TOOLS = new Set([
 
 const DESIGNER_FLOW_HARD_RULES = {
   reviewMustUseFigletsWorkflow: true,
+  bulkDesignSystemUpdatesAreInScope: true,
   appliesTo: [
     "design-system review",
     "design-system check",
@@ -38,7 +39,12 @@ const DESIGNER_FLOW_HARD_RULES = {
     "reading .local/<fileKey>/figma-data.json to perform designer-facing review",
     "raw Figma APIs or generic Figma tools for Figlets review",
   ],
-  missingCapabilityResponse: "If the Figlets workflow output does not expose the needed information, say this is a Figlets product/tool gap instead of inventing a script.",
+  supportedBulkUpdateSurfaces: [
+    "inspect_ds_setup_gaps.repairPlan.applyInput → apply_ds_setup_repairs for approved setup repairs, alias updates, and missing role creations",
+    "update_ds_primitives for config-backed primitive value and color-semantic alias updates",
+    "qa_binding_audit({ fix: true }) for high-confidence binding fixes",
+  ],
+  missingCapabilityResponse: "If the Figlets workflow output does not expose the needed planner or apply payload, say this is a Figlets product/tool gap or proposed Figlets bulk-update scope instead of inventing a script or saying the gaps cannot be fixed.",
 };
 
 const WORKFLOWS = [
@@ -117,14 +123,14 @@ const WORKFLOWS = [
       {
         id: "approve-repairs",
         kind: "confirmation",
-        designerMessage: "If the QA found high-confidence setup gaps, I'll ask which exact repairs you want applied.",
+        designerMessage: "If the QA found high-confidence setup gaps, I'll ask which exact structured repairs or bulk repair plan you want applied.",
       },
       {
         id: "apply-approved-repairs",
         kind: "write",
         tool: "apply_ds_setup_repairs",
         requiresApproval: true,
-        designerMessage: "I'll apply only the exact repairs you approved from the QA output.",
+        designerMessage: "I'll apply only the exact approved repairs from the QA output, including bulk-safe repair payloads when Figlets provides them.",
       },
       {
         id: "verify-repairs",
@@ -582,6 +588,7 @@ function getStartGuide() {
       doNotAddCapabilitiesOutside: "capabilityMenu",
       doNotOfferMenuItems: "forbiddenDesignerMenuItems",
       designSystemReviewRule: "Use Figlets workflow tools/scripts only. Do not write custom scripts or inspect local snapshots/tool-results unless the designer explicitly asks to go out of bounds.",
+      bulkUpdateRule: "Bulk design-system updates are in Figlets scope when they are represented as structured, designer-approved tool payloads. If a needed bulk planner is missing, report a Figlets product/tool gap instead of saying the gaps cannot be fixed.",
       mode: "designer-facing",
       nextAction: "For a concrete initial goal, route it before replying. For ambiguous routing, use selectionPrompt. For generic help, show designerResponse.",
     },
@@ -592,6 +599,7 @@ function getStartGuide() {
     safety: [
       "Inspection comes before mutation.",
       "Figma writes require explicit designer approval.",
+      "Supported bulk design-system repairs should use structured Figlets payloads, such as repairPlan.applyInput, not agent-authored scripts.",
       "The agent should summarize tool results in plain language instead of dumping JSON.",
       "Design-system reviews, checks, audits, setup-gap investigations, and contrast investigations must use the Figlets workflow and the Figlets MCP tools/scripts named by figlets_workflow_guide.",
       "Do not write custom scripts, inspect local snapshots or tool-results, read MCP transcript files, or use raw Figma APIs for designer-facing Figlets review unless the designer explicitly asks to go out of bounds.",
@@ -602,6 +610,7 @@ function getStartGuide() {
         "Design-system setup, QA, repair, showcase, documentation, and DESIGN.md export workflows.",
         "Deterministic checks through Figlets MCP tools and the Figlets Bridge plugin.",
         "Designer-approved Figma writes only through Figlets tools that are part of a workflow guide.",
+        "Structured bulk design-system updates when Figlets can plan or receive an explicit approved payload.",
       ],
       figletsDoesNotMean: [
         "Do not advertise generic Figma create, delete, move, resize, or arbitrary edit powers as Figlets capabilities.",

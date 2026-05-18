@@ -501,16 +501,96 @@ function _modeTargetStepForRole(role, modeName, bgRgb) {
   return null;
 }
 
+function _evidenceNameForRole(evidence, byName, roleName) {
+  for (const name of evidence || []) {
+    const variable = byName.get(name);
+    if (!variable) continue;
+    const role = _roleForParts(String(name).split("/"));
+    if (role && role.role === roleName) return name;
+  }
+  return null;
+}
+
+function _planMissingIconRepairFromForeground(finding, byName, colorVars, varsById, collections) {
+  const evidence = Array.isArray(finding.evidence) ? finding.evidence : [];
+  const bgName = _evidenceNameForRole(evidence, byName, "background");
+  const fgName = _evidenceNameForRole(evidence, byName, "foreground");
+  if (!bgName || !fgName) return null;
+
+  const bgVar = byName.get(bgName);
+  const fgVar = byName.get(fgName);
+  const coll = _collectionFor(bgVar, collections);
+  if (!coll || !Array.isArray(coll.modes) || !coll.modes.length) return null;
+
+  const aliases = {};
+  const contrast = {};
+  for (const mode of coll.modes) {
+    const modeName = mode.name || mode.modeId;
+    const bgTerm = _resolveTerminalByModeName(bgVar, mode.name, varsById, collections);
+    const fgTerm = _resolveTerminalByModeName(fgVar, mode.name, varsById, collections);
+    const fgInfo = _primitiveInfo(fgTerm && fgTerm.name);
+    if (!bgTerm || !bgTerm.rgb || !fgTerm || !fgTerm.rgb || !fgInfo) return null;
+
+    const fgRatio = _wcagRatio(bgTerm.rgb, fgTerm.rgb);
+    let candidate = {
+      name: fgTerm.name,
+      rgb: fgTerm.rgb,
+      ratio: fgRatio,
+      source: "foreground-alias",
+    };
+
+    if (fgRatio < _WCAG_ICON_THRESHOLD) {
+      const upgraded = _nearestAccessiblePrimitiveOnRamp(
+        colorVars,
+        fgInfo.ramp,
+        fgInfo.step,
+        bgTerm.rgb,
+        varsById,
+        collections,
+        mode.name,
+        _WCAG_ICON_THRESHOLD
+      );
+      if (!upgraded) return null;
+      candidate = Object.assign({ source: "nearest-accessible-foreground-ramp" }, upgraded);
+    }
+
+    aliases[modeName] = candidate.name;
+    contrast[modeName] = {
+      background: bgName,
+      backgroundAlias: bgTerm.name,
+      backgroundHex: _hex(bgTerm.rgb),
+      foreground: fgName,
+      foregroundAlias: fgTerm.name,
+      foregroundHex: _hex(fgTerm.rgb),
+      alias: candidate.name,
+      aliasHex: _hex(candidate.rgb),
+      aliasSource: candidate.source,
+      wcagRatio: Math.round(candidate.ratio * 10) / 10,
+      threshold: _WCAG_ICON_THRESHOLD,
+      pass: true,
+    };
+  }
+
+  if (!Object.keys(aliases).length) return null;
+  return {
+    name: finding.suggestedName,
+    role: "icon",
+    aliases,
+    source: bgName,
+    basis: "foreground-alias",
+    reason: "Icon role aliases are planned from the paired foreground aliases and pre-checked against WCAG non-text contrast before being suggested.",
+    contrast,
+  };
+}
+
 function _planMissingRoleRepair(finding, byName, colorVars, varsById, collections) {
   if (!finding || !finding.suggestedName) return null;
   if (finding.missingRole !== "border" && finding.missingRole !== "icon") return null;
+  if (finding.missingRole === "icon") {
+    return _planMissingIconRepairFromForeground(finding, byName, colorVars, varsById, collections);
+  }
   const evidence = Array.isArray(finding.evidence) ? finding.evidence : [];
-  const bgName = evidence.find(name => {
-    const variable = byName.get(name);
-    if (!variable) return false;
-    const role = _roleForParts(String(name).split("/"));
-    return role && role.role === "background";
-  });
+  const bgName = _evidenceNameForRole(evidence, byName, "background");
   if (!bgName) return null;
   const bgVar = byName.get(bgName);
   const coll = _collectionFor(bgVar, collections);
@@ -824,7 +904,9 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   // Pairs that have bg + fg but no border or icon companion. Advisory only.
   // If a role is missing in EVERY complete pair (and there are at least
   // _ADVISORY_SUPPRESS_MIN_PAIRS pairs), that's a property of the DS, not N
-  // findings — suppress the role and report it once via suppressedRoles.
+  // findings — suppress passive border/outline roles and report them once via
+  // suppressedRoles. Icons are not suppressed here because they can be planned
+  // as structured bulk repairs from the paired foreground token.
   const _RAW_ROLES = [
     { name: "border", families: _BORDER_FAMILIES },
     { name: "icon", families: _ICON_FAMILIES },
@@ -875,6 +957,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   }
   const suppressedRoles = [];
   for (const role of _RAW_ROLES) {
+    if (role.name === "icon") continue;
     const count = roleMissingCounts[role.name] || 0;
     if (totalCompletePairs >= _ADVISORY_SUPPRESS_MIN_PAIRS && count === totalCompletePairs) {
       suppressedRoles.push({ role: role.name, suppressedCount: count });
@@ -946,13 +1029,13 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       ));
     }
 
-    if (rolePresence.icon >= _ADVISORY_SUPPRESS_MIN_PAIRS && hasBg && hasFg && !hasIcon && evidenceCount >= 2 && (!hasPairContext || backgroundConfiguredInCluster)) {
+    if (hasBg && hasFg && !hasIcon && evidenceCount >= 2 && (!hasPairContext || backgroundConfiguredInCluster)) {
       missingSemanticRoles.push(_missingRoleFinding(
         cluster,
         "icon",
         example,
-        hasBorder ? "high" : "medium",
-        "This semantic family has background and foreground roles, and this DS uses icon roles elsewhere.",
+        "high",
+        "This semantic family has background and foreground roles, so Figlets can bulk-create an icon role from the paired foreground after approval.",
         preferredFamilies
       ));
     }

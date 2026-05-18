@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-18 — Bulk repair posture added to agent contract]
+
+**User direction:** The agent should understand that bulk design-system updates are part of Figlets when needed. The designer-facing experience should not be "here are the gaps, but we can't fix them" for deterministic setup/alias/binding repairs.
+
+**Rule added:** Bulk design-system updates are in Figlets scope when they can be represented as structured, designer-approved payloads. Agents should use existing bulk-capable surfaces such as `inspect_ds_setup_gaps.repairPlan.applyInput` → `apply_ds_setup_repairs`, `update_ds_primitives`, and `qa_binding_audit({ fix: true })`. If the requested bulk update needs a planner/apply surface Figlets does not expose yet, agents must call it a Figlets product/tool gap or proposed Figlets feature scope instead of claiming the gaps cannot be fixed or writing ad hoc scripts.
+
+**Implementation:** The posture is now present in root `AGENTS.md`/`CLAUDE.md`, adapter docs, Claude/Codex plugin commands and skills, and the Agent Interface hard rules/response contract/safety payload. Tests pin the behavior in root entrypoint, plugin, and Agent Interface coverage.
+
+**Concrete icon fix:** `inspect_ds_setup_gaps` now treats missing icon roles for complete background+foreground semantic families as bulk-repairable role gaps. It derives Light/Dark icon aliases from the paired foreground token, upgrades on the same foreground ramp only when needed to pass WCAG non-text 3:1, and lifts the planned icon creations into `repairPlan.applyInput.roleRepairs`. DS-wide passive border/outline absence may still be suppressed, but DS-wide icon absence should no longer become a dead-end `suppressedAdvisoryRoles` message.
+
+---
+
 ### [2026-05-18 — Initial interaction routing refinement]
 
 **User-approved UX change:** The generic Figlets menu should not appear after the designer already gave a concrete request such as "review my design system using Figlets." The first visible response should acknowledge the chosen workflow and begin the read-only flow. The generic help screen should use `# Figlets` with a one-line about statement, not a cheesy greeting.

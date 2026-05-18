@@ -12,6 +12,7 @@ const path = require("path");
 const {
   inspectDsSetupGapsFromFigmaData,
   handleInspectDsSetupGaps,
+  _buildRepairPlan,
 } = require("../../packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js");
 
 function prim(id, name, r, g, b) {
@@ -120,11 +121,15 @@ module.exports = (() => {
   assert.ok(orphan, "on-surface/info should be reported as missing its surface");
   assert.strictEqual(orphan.expectedBg, "color/surface/info");
 
-  // ── Companion advisory for brand-variant pair (no border/icon) ──
+  // ── Companion advisory + icon bulk gap for brand-variant pair ──
   const advisory = result.companionAdvisories.find(a => a.bg === "color/surface/brand-variant");
-  assert.ok(advisory, "complete brand-variant pair without border/icon should advise");
+  assert.ok(advisory, "complete brand-variant pair without border should advise");
   const roles = advisory.missing.map(m => m.role).sort();
-  assert.deepStrictEqual(roles, ["border", "icon"]);
+  assert.deepStrictEqual(roles, ["border"]);
+  assert.ok(
+    result.missingSemanticRoles.some(gap => gap.family === "brand-variant" && gap.missingRole === "icon"),
+    "missing icon roles should be promoted to semantic role gaps instead of staying as advisories"
+  );
 
   // ── Summary aggregates ──
   // contrastFailureCount counts failures across ALL pairs, not just surface/danger.
@@ -144,9 +149,10 @@ module.exports = (() => {
   }
   assert.ok(apcaResult.iconContrastFailures.every(f => f.algorithm === "wcag-non-text"));
 
-  // ── Advisory suppression: when ≥3 complete pairs are all missing the same
-  // role, the inspector reports it once via suppressedAdvisoryRoles instead of
-  // emitting an advisory per pair.
+  // ── Advisory suppression vs bulk icon repair: when ≥3 complete pairs are
+  // all missing passive borders, the inspector suppresses that as DS-wide
+  // absence. Missing icons are different: they can be planned as structured
+  // bulk repairs from the paired foreground aliases.
   const pairs = [];
   for (const role of ["alpha", "beta", "gamma", "delta"]) {
     pairs.push({ id: `bg-${role}`, name: `color/surface/${role}`, resolvedType: "COLOR", variableCollectionId: "semColl",
@@ -164,8 +170,19 @@ module.exports = (() => {
   const universal = inspectDsSetupGapsFromFigmaData(universalSnapshot);
   assert.strictEqual(universal.counts.completePairs, 4, "fixture should produce 4 complete pairs");
   const suppressedRoles = universal.suppressedAdvisoryRoles.map(s => s.role).sort();
-  assert.deepStrictEqual(suppressedRoles, ["border", "icon"], "DS-wide absence should suppress both roles");
-  assert.strictEqual(universal.companionAdvisories.length, 0, "no per-pair advisories survive when both roles are suppressed");
+  assert.deepStrictEqual(suppressedRoles, ["border"], "DS-wide absence should still suppress passive border advisories");
+  assert.strictEqual(universal.companionAdvisories.length, 0, "planned icon role gaps and suppressed borders should not leave duplicate advisories");
+  const universalIconGaps = universal.missingSemanticRoles.filter(gap => gap.missingRole === "icon");
+  assert.strictEqual(universalIconGaps.length, 4, "universal missing icons should become bulk-repairable role gaps");
+  assert.ok(
+    universalIconGaps.every(gap => gap.confidence === "high" && gap.plannedRoleRepair && gap.plannedRoleRepair.role === "icon"),
+    "bulk icon gaps should carry high-confidence planned role repairs"
+  );
+  assert.deepStrictEqual(
+    _buildRepairPlan(universal).applyInput.roleRepairs.map(repair => repair.name).sort(),
+    ["color/icon/alpha", "color/icon/beta", "color/icon/delta", "color/icon/gamma"],
+    "repairPlan should expose all missing icon creations for direct approved apply"
+  );
 
   // ── plannedReAlias: contrast failures should carry the picker's upgrade ──
   // The handler-level path is the one that attaches plannedReAlias, since the

@@ -14,6 +14,9 @@ for (const file of files) {
   assert.ok(content.includes("selectionPrompt"), `${file} should support structured selection prompts`);
   assert.ok(content.includes("Hard rule for reviews/checks/audits"), `${file} should make Figlets scripts mandatory for designer review`);
   assert.ok(content.includes("use the Figlets workflow and the Figlets MCP tools/scripts"), `${file} should forbid ad hoc design-system review paths`);
+  assert.ok(content.includes("Bulk repair/update posture"), `${file} should define Figlets bulk repair posture`);
+  assert.ok(content.includes("bulk design-system updates are in Figlets scope"), `${file} should keep bulk DS updates in Figlets scope`);
+  assert.ok(content.includes("do not tell the designer the gaps cannot be fixed"), `${file} should avoid dead-end gap reporting`);
   assert.ok(content.includes("Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds"), `${file} should preserve an explicit out-of-bounds escape hatch`);
   assert.ok(content.includes("If `figlets_start` is not available"), `${file} should define missing-MCP behavior`);
   assert.ok(content.includes("I should not approximate this flow with raw Figma tools"), `${file} should reject raw-tool fallback`);

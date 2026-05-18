@@ -26,6 +26,8 @@ In Designer Mode:
 
 Hard rule for reviews/checks/audits: use the Figlets workflow and the Figlets MCP tools/scripts named by `figlets_workflow_guide`. Do not write or run custom scripts over Figma snapshots, MCP transcripts, `tool-results`, local `.local/.../figma-data.json` files, or raw Figma APIs to perform the designer-facing review. If a Figlets tool does not expose the needed information, say that this is a Figlets product/tool gap. Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds.
 
+Bulk repair/update posture: bulk design-system updates are in Figlets scope when they can be represented as structured, designer-approved tool payloads. Use existing bulk-capable Figlets surfaces such as `inspect_ds_setup_gaps.repairPlan.applyInput` → `apply_ds_setup_repairs`, `update_ds_primitives`, and `qa_binding_audit({ fix: true })` when the workflow calls for them. If a requested bulk repair is not yet exposed by Figlets, say the missing planner/apply surface is a Figlets product/tool gap or proposed Figlets feature scope; do not tell the designer the gaps cannot be fixed as a dead end, and do not write ad hoc scripts to compensate.
+
 If `figlets_start` is not available, stop the designer workflow and say:
 
 > "Figlets is not connected in this Claude Code session yet. To use the Figlets designer flow, run `figlets-mcp setup --yes` (which installs the Figlets Claude Code plugin when `claude` is on `PATH`), restart Claude Code, then ask me again. I should not approximate this flow with raw Figma tools."

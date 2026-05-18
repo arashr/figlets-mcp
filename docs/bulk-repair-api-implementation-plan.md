@@ -1,0 +1,738 @@
+# Bulk Repair API Implementation Plan
+
+## Status
+
+Planning artifact for the next implementation pass. This document is intentionally explicit so a less capable agent can implement the feature from 0 to 1 without inventing new product rules.
+
+Current baseline for this plan:
+
+- Branch: `main`
+- Latest committed baseline before this thread: `2d899da Harden Figlets designer review workflow`
+- In-progress local work already teaches agents that structured bulk updates are Figlets scope.
+- In-progress local work already promotes missing `color/icon/<family>` roles into approval-ready `inspect_ds_setup_gaps.repairPlan.applyInput.roleRepairs` when Figlets can derive accessible aliases.
+
+Do not treat this document as a public designer guide. It is an internal implementation plan.
+
+## Product Goal
+
+Figlets should let designers talk naturally to an MCP-speaking agent while deterministic Figlets tools do the real design-system work. Agents should not need to write local scripts in tight situations when the requested operation is deterministic enough to express as structured arguments.
+
+The target behavior is:
+
+1. The agent runs the Figlets workflow.
+2. Figlets emits a read-only inspection result with agent-actionable repair payloads.
+3. The agent explains the exact proposed changes in plain language.
+4. The designer approves all or a subset of the payload.
+5. The agent calls the approved Figlets mutation tool with arguments copied or filtered from the Figlets output.
+6. The agent reruns read-only QA to verify.
+
+The target is not a generic arbitrary Figma automation API. Do not recreate Figma native MCP. Build narrow, product-owned, design-system-safe operations.
+
+## Non-Negotiable Guardrails
+
+- Designer Mode must call `figlets_start` first.
+- Concrete designer goals should route through `figlets_route_intent` and `figlets_workflow_guide`.
+- Designer-facing reviews, audits, setup-gap checks, contrast checks, token math, and approved repairs must use Figlets workflows and named Figlets tools.
+- Do not write custom scripts over `.local/<fileKey>/figma-data.json`, MCP transcripts, `tool-results`, local snapshots, raw Figma APIs, or generic Figma tools for designer-facing repair planning.
+- If Figlets cannot plan or apply a requested bulk repair, the agent must say that the missing planner/apply surface is a Figlets product/tool gap.
+- Do not say "the gaps cannot be fixed" as a dead end when a deterministic Figlets feature can be added.
+- Figma writes require explicit designer approval.
+- Suggestion-time accessibility checks belong in the planner for Figlets-generated suggestions. Do not block explicitly approved designer payloads inside the apply tool unless the payload is malformed or unsafe to execute.
+- Do not add direct `../../../figlets-core` imports in MCP server files. Use `packages/figlets-mcp-server/src/figlets-core.js`.
+- Do not add broad arbitrary mutation payloads such as "set any node property by id". Keep payloads domain-specific.
+
+## Current Bulk-Capable Surfaces
+
+Use this table before adding anything new.
+
+| Surface | Current job | Mutates Figma | Current limits |
+|---|---|---:|---|
+| `inspect_ds_setup_gaps` | Read-only semantic color setup QA, contrast QA, missing role planning, and `repairPlan.applyInput` generation | No | Focused on color semantics. Does not cover typography, spacing, radius, border-width, or elevation completeness. |
+| `apply_ds_setup_repairs` | Applies approved missing foreground repairs, alias updates, and missing color role creations | Yes | Color-only. Current schema describes border/icon roles, though the implementation can create any approved color role with aliases. |
+| `update_ds_primitives` | Updates config-backed primitive color and primitive spacing values, and color semantic aliases, preserving variable IDs | Yes | Name is narrow and implementation assumes primitive collection except `color-semantics`. It does not handle typography, semantic spacing/radius/border-width, or elevation. |
+| `qa_binding_audit` | Audits selected/page nodes for raw unbound values and can fix high-confidence bindings | Optional | Binds to existing variables/styles only. It does not create missing tokens. Typography suggestions are conservative and may not be fixed automatically. |
+| `apply_ds_setup` | Creates or merges the configured design-system collections and styles | Yes | Broad setup tool, not a narrow repair planner. It has no dry-run merge-only contract. Use carefully after designer approval. |
+
+## Recommended Implementation Order
+
+Implement in these slices. Do not jump to the non-color token system before finishing the color-role repair slice, because that is the direct class of bug the user saw.
+
+### Phase 0 - Make Existing Bulk Capacity Hard To Miss
+
+Goal: Less capable agents should understand what Figlets can already do before any new runtime capability lands.
+
+Files to inspect first:
+
+- `packages/figlets-mcp-server/src/agent-interface/workflows.js`
+- `packages/figlets-mcp-server/src/tools/agent-interface.js`
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js`
+- `packages/figlets-mcp-server/src/tools/update-ds-primitives.js`
+- `packages/figlets-adapter/AGENTS.md`
+- `packages/figlets-adapter/CLAUDE.md`
+- `plugins/claude-code/figlets/skills/figlets-designer/SKILL.md`
+- `plugins/codex/figlets/skills/figlets-designer/SKILL.md`
+
+Tasks:
+
+1. Add a concise bulk capability map to the Agent Interface payload.
+   - Include `inspect_ds_setup_gaps.repairPlan.applyInput -> apply_ds_setup_repairs`.
+   - Include `update_ds_primitives` with categories `color`, `spacing`, and `color-semantics`.
+   - Include `qa_binding_audit({ fix: true })` for high-confidence binding fixes.
+   - State that missing planner/apply surfaces are product gaps, not impossible tasks.
+
+2. Fix stale adapter wording for `update_ds_primitives`.
+   - Current adapter docs may mention only `color` and `spacing`.
+   - The code supports `color-semantics` too.
+   - Update root and plugin docs if they repeat the stale wording.
+
+3. Add tests that less-capable-agent guidance survives future edits.
+   - `tests/server/agent-interface-tool.test.js`
+   - `tests/docs/root-agent-entrypoint.test.js`
+   - `tests/plugins/claude-code-plugin.test.js`
+   - `tests/plugins/codex-plugin.test.js`
+
+Acceptance criteria:
+
+- Agent Interface output names the existing bulk-capable surfaces.
+- Adapter/plugin docs explicitly tell agents to use structured payloads instead of scripts.
+- Tests fail if `update_ds_primitives` is described without `color-semantics`.
+
+Suggested verification:
+
+```sh
+node tests/server/agent-interface-tool.test.js
+node tests/docs/root-agent-entrypoint.test.js
+node tests/plugins/claude-code-plugin.test.js
+node tests/plugins/codex-plugin.test.js
+git diff --check
+```
+
+### Phase 1 - Finish Color Semantic Bulk Repairs
+
+Goal: Color semantic gaps should not dead-end when Figlets can safely plan the repair.
+
+Relevant files:
+
+- `packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js`
+- `packages/figlets-mcp-server/src/tools/apply-ds-setup-repairs.js`
+- `packages/figlets-mcp-server/src/index.js`
+- `packages/figma-bridge-plugin/code.js`
+- `tests/server/inspect-ds-setup-gaps-tool.test.js`
+- `tests/server/inspect-ds-setup-gaps-qa.test.js`
+- `tests/server/inspect-ds-setup-gaps-naming-variants.test.js`
+- `tests/server/apply-ds-setup-repairs-tool.test.js`
+- `tests/server/check-setup-gaps-cli.test.js`
+
+#### Phase 1A - Keep Icon Role Repairs Stable
+
+This is already in progress. Do not regress it.
+
+Expected behavior:
+
+- A complete semantic family with background + foreground but no icon role should produce a high-confidence `missingSemanticRoles` item.
+- If Figlets can derive aliases that pass WCAG non-text contrast at 3:1, the item should include `plannedRoleRepair`.
+- `_buildRepairPlan(result).applyInput.roleRepairs` should include the approved apply shape:
+
+```js
+{
+  name: "color/icon/success",
+  role: "icon",
+  aliases: {
+    Light: "color/green/700",
+    Dark: "color/green/200"
+  }
+}
+```
+
+Required tests:
+
+- Universal missing icons are not suppressed as DS-wide advisories.
+- Planned icon aliases carry contrast metadata for display.
+- Inaccessible icon aliases remain findings but are not apply-ready.
+- `repairPlan.applyInput.roleRepairs` includes all high-confidence planned icon repairs.
+
+#### Phase 1B - Expose Optional DS-Wide Border/Outline/Stroke Bulk Creation
+
+Problem:
+
+Passive border/outline/stroke roles are intentionally optional. Today, when every complete semantic pair lacks a passive border-like role, Figlets may suppress this as a DS-wide convention. That is reasonable for an automatic health-check all-clear, but it leaves no structured path when the designer says "yes, create outline roles for all families."
+
+Target behavior:
+
+- Keep passive DS-wide absence out of the default high-confidence `repairPlan.applyInput`.
+- Also expose a clearly optional bulk payload so the agent can say: "Figlets can create these outline roles if you want."
+- The optional payload must still be deterministic and approval-gated.
+
+Recommended output shape:
+
+```js
+repairPlan: {
+  tool: "apply_ds_setup_repairs",
+  approvalRequired: true,
+  applyInput: {
+    repairs: [],
+    aliasUpdates: [],
+    roleRepairs: []
+  },
+  optionalApplyInput: {
+    repairs: [],
+    aliasUpdates: [],
+    roleRepairs: [
+      {
+        name: "color/outline/info",
+        role: "border",
+        aliases: {
+          Light: "color/blue/200",
+          Dark: "color/blue/800"
+        }
+      }
+    ]
+  },
+  counts: {
+    repairs: 0,
+    aliasUpdates: 0,
+    roleRepairs: 0,
+    optionalRoleRepairs: 1,
+    total: 0,
+    optionalTotal: 1
+  }
+}
+```
+
+Implementation notes:
+
+- Use the existing `_BORDER_FAMILIES = ["border", "outline", "stroke"]`.
+- Preserve naming conventions with `_preferredFamilyForRole`.
+- Use `_planMissingRoleRepair` for passive border aliases.
+- Passive border aliases should continue to use standard passive ramp steps, not contrast search:
+  - Light: nearest `200`
+  - Dark: nearest `800`
+- Do not mark optional DS-wide border repairs as high-confidence health issues by default.
+- Add an `optional: true` or `repairTier: "optional"` marker to display-only findings if needed, but keep `apply_ds_setup_repairs` input clean.
+
+Required tests:
+
+- A DS with three or more complete pairs and zero border roles still reports suppressed passive border absence for health-check purposes.
+- The same result includes `repairPlan.optionalApplyInput.roleRepairs` for those border roles.
+- Optional role names preserve `outline` or `stroke` conventions when those are present in config or neighboring variables.
+- Optional role aliases use passive ramp steps and do not include contrast metadata.
+- Agents are instructed to ask a designer before applying `optionalApplyInput`.
+
+#### Phase 1C - Add Apply-Ready Focus Border Repairs When Safe
+
+Problem:
+
+`foundationRoleFindings` can flag missing focus border roles, but those findings do not currently become an apply-ready payload.
+
+Target behavior:
+
+- If a DS already uses border/outline/stroke semantics and has no focus indicator role, Figlets should continue to flag the missing foundation role.
+- When Figlets can derive a safe alias, add a `plannedRoleRepair` to the foundation finding.
+- `_buildRepairPlan` should lift planned foundation role repairs into `repairPlan.applyInput.roleRepairs`.
+
+Recommended planner function:
+
+```js
+function _planFoundationRoleRepair(finding, byName, colorVars, varsById, collections, options) {
+  // returns null or:
+  return {
+    name: "color/outline/focus",
+    role: "focus-border",
+    aliases: {
+      Light: "color/brand/500",
+      Dark: "color/brand/400"
+    },
+    reason: "Focus border aliases were checked against the default surface/background where available."
+  };
+}
+```
+
+Deterministic alias strategy:
+
+1. Prefer config-defined focus aliases if the active config already has a focus token row.
+2. Otherwise pick the first available ramp in this order:
+   - `color/brand`
+   - `color/primary`
+   - `color/accent`
+   - `color/blue`
+3. Use Light step `500` and Dark step `400`, or nearest available numeric step in that ramp.
+4. If `color/surface/default`, `color/bg/default`, or `color/background/default` exists, verify non-text 3:1 contrast against that background in the matching mode.
+5. If no adjacent background can be resolved, emit the finding but do not produce `plannedRoleRepair` unless the source was explicit config.
+
+Reasoning:
+
+- Focus rings are meaningful non-text indicators, so contrast applies when the adjacent background is known.
+- If the planner cannot verify enough context, the agent should ask the designer rather than applying a guess.
+
+Required tests:
+
+- A DS with `color/border/*` roles but no focus role flags `focus-border`.
+- If a brand/primary/accent/blue primitive ramp and default surface/background exist, the finding includes `plannedRoleRepair`.
+- The repair is included in `repairPlan.applyInput.roleRepairs`.
+- If no safe ramp or background exists, the finding remains high-confidence but has no apply payload.
+- Naming convention is preserved: `color/outline/focus` for outline systems, `color/stroke/focus` for stroke systems, `color/border/focus` otherwise.
+
+#### Phase 1D - Keep Missing Backgrounds Conservative
+
+Problem:
+
+`inspect_ds_setup_gaps` can detect foreground/icon/border roles without a background role. Creating the missing background is more ambiguous than creating an icon from a foreground or a passive border from a background ramp.
+
+Target behavior for 0 to 1:
+
+- Do not bulk-create missing backgrounds by default.
+- Add explicit `agentAction: "ask-designer"` and a clear reason.
+- If config explicitly defines the background token and aliases, future work may add an apply payload. Do not infer background aliases only from foreground/icon tokens.
+
+Required tests:
+
+- Missing background findings never produce `plannedRoleRepair` without explicit config evidence.
+- `repairPlan.agentInstruction` tells agents not to invent repairs when no payload exists.
+
+### Phase 2 - Standardize Repair Plan Shape
+
+Goal: Every read-only planner should make it obvious what is ready to apply, what is optional, and what remains a product gap.
+
+Use this shape for `inspect_ds_setup_gaps` first, then reuse it for later tools.
+
+```js
+{
+  message: "...",
+  summary: {},
+  repairPlan: {
+    tool: "apply_ds_setup_repairs",
+    approvalRequired: true,
+    applyInput: {
+      repairs: [],
+      aliasUpdates: [],
+      roleRepairs: []
+    },
+    optionalApplyInput: {
+      repairs: [],
+      aliasUpdates: [],
+      roleRepairs: []
+    },
+    counts: {
+      repairs: 0,
+      aliasUpdates: 0,
+      roleRepairs: 0,
+      optionalRoleRepairs: 0,
+      total: 0,
+      optionalTotal: 0
+    },
+    designerSummary: "...",
+    optionalDesignerSummary: "...",
+    agentInstruction: "...",
+    missingCapabilityNotes: []
+  },
+  topFindings: {}
+}
+```
+
+Rules:
+
+- `message`, `summary`, `repairPlan`, and `topFindings` must stay first in handler output.
+- `applyInput` is for deterministic default repairs.
+- `optionalApplyInput` is for convention-level or designer-choice repairs.
+- `missingCapabilityNotes` is for findings that Figlets can name but cannot yet plan or apply.
+- Do not make agents parse long arrays to construct payloads.
+
+Tests:
+
+- `Object.keys(handlerResult).slice(0, 4)` is exactly `["message", "summary", "repairPlan", "topFindings"]`.
+- `repairPlan.applyInput` is always present.
+- `repairPlan.optionalApplyInput` is always present once this phase lands.
+- Empty plans still tell agents not to invent repairs.
+
+### Phase 3 - Add Config-Backed Token Completion For Non-Color Tokens
+
+Goal: If the active config defines tokens or styles that are missing from Figma, Figlets should expose a read-only plan and an approved apply path for creating/updating them.
+
+Important boundary:
+
+- This phase is config-backed only.
+- Do not infer new typography, spacing, radius, border-width, or elevation tokens from arbitrary page usage in the first version.
+- Raw page usage should continue through `qa_binding_audit`, which binds to existing tokens/styles.
+
+#### Recommended New Tools
+
+Add a read-only planner:
+
+```text
+inspect_ds_token_gaps
+```
+
+Add an apply/update tool:
+
+```text
+update_ds_tokens
+```
+
+Why new tools:
+
+- `inspect_ds_setup_gaps` is color semantic/accessibility QA. Expanding it to all token domains will make the output muddy.
+- `update_ds_primitives` is named and implemented around primitives. It should stay as a compatibility surface or thin wrapper.
+- Non-color work touches multiple collections and styles, not just the Primitives collection.
+
+#### `inspect_ds_token_gaps` Contract
+
+Input:
+
+```js
+{
+  config_path?: string,
+  categories?: string[],
+  include_existing_updates?: boolean
+}
+```
+
+Default categories:
+
+```js
+[
+  "primitive-color",
+  "primitive-spacing",
+  "primitive-typography",
+  "primitive-shadow",
+  "color-semantics",
+  "spacing-semantics",
+  "radius",
+  "border-width",
+  "typography",
+  "elevation"
+]
+```
+
+Output:
+
+```js
+{
+  message: "Figlets found 18 config-backed token gaps.",
+  summary: {
+    missingVariableCount: 0,
+    staleVariableCount: 0,
+    missingStyleCount: 0,
+    staleStyleCount: 0,
+    unsupportedCategoryCount: 0
+  },
+  repairPlan: {
+    tool: "update_ds_tokens",
+    approvalRequired: true,
+    previewInput: {
+      config_path: "/path/design-system.config.js",
+      categories: ["typography", "radius"],
+      create_missing: true,
+      dry_run: true
+    },
+    applyInput: {
+      config_path: "/path/design-system.config.js",
+      categories: ["typography", "radius"],
+      create_missing: true,
+      dry_run: false
+    },
+    counts: {},
+    agentInstruction: "Run update_ds_tokens with previewInput, show the dry-run report, ask for approval, then run applyInput."
+  },
+  topFindings: {},
+  tokenGaps: []
+}
+```
+
+Notes:
+
+- The planner can use the active Figma snapshot. It should not require the Figma bridge to be listening.
+- The apply tool will require the bridge plugin.
+- If a category is unsupported, list it under `missingCapabilityNotes`.
+
+#### `update_ds_tokens` Contract
+
+Input:
+
+```js
+{
+  config_path: string,
+  categories?: string[],
+  create_missing?: boolean,
+  dry_run?: boolean,
+  prune?: {
+    off_scale_color_steps?: boolean,
+    unused_color_ramps?: boolean
+  }
+}
+```
+
+Output:
+
+```js
+{
+  dryRun: true,
+  categories: ["typography"],
+  report: {
+    typography: {
+      entries: 12,
+      wouldCreateVariables: [],
+      createdVariables: [],
+      wouldUpdateVariables: [],
+      updatedVariables: [],
+      wouldCreateStyles: [],
+      createdStyles: [],
+      wouldRefreshStyles: [],
+      refreshedStyles: [],
+      unmatched: [],
+      typeMismatch: [],
+      fontLoadFailures: []
+    }
+  },
+  message: "typography: 4 would create, 8 unchanged",
+  configPath: "/path/design-system.config.js"
+}
+```
+
+Rules:
+
+- `dry_run: true` must not mutate Figma.
+- `create_missing: false` must report missing variables/styles but not create them.
+- Existing variable and style IDs must be preserved.
+- No deletes/prunes by default.
+- Unknown categories must be reported, not silently ignored.
+- If the bridge plugin does not advertise the new capability, return a clear reload message.
+
+#### Category Definitions
+
+Use this table exactly for the first version.
+
+| Category | Source in config | Figma target | Create/update behavior |
+|---|---|---|---|
+| `primitive-color` | `DS.color.ramps` | `DS.collections.primitives` | Create/update `COLOR` variables like `color/blue/500`. Existing `update_ds_primitives` already covers this. |
+| `primitive-spacing` | `DS.primitives.spacing` | `DS.collections.primitives` | Create/update `FLOAT` variables like `space/16`. Existing `update_ds_primitives` already covers this. |
+| `primitive-typography` | `DS.typography.scale`, `DS.typography.families`, primitive generator output | `DS.collections.primitives` | Create/update `type/size/*`, `type/weight/*`, `type/tracking/*`, and `font/*` variables. |
+| `primitive-shadow` | generated shadow primitive data | `DS.collections.primitives` | Create/update `shadow/*/offset-y`, `shadow/*/radius`, and ambient shadow primitive variables. |
+| `color-semantics` | `DS.color.semantics` | `DS.collections.color` | Create/update semantic color variables and aliases. Existing `update_ds_primitives` has a special path for this. |
+| `spacing-semantics` | `DS.spacing.semantic` | `DS.collections.spacing` | Create/update responsive `space/<semantic>` variables with aliases to primitive spacing when possible. |
+| `radius` | `DS.spacing.radius` | `DS.collections.spacing` | Create/update `space/radius/<name>` variables. |
+| `border-width` | `DS.spacing.border` | `DS.collections.spacing` | Create/update `space/border/<name>` variables. |
+| `typography` | `DS.typography.scale` and `DS.naming.textStyle` | `DS.collections.typography` and local text styles | Create/update `type/<role>/{size,line-height,weight,tracking,family}` variables and create/refresh text styles. |
+| `elevation` | generated elevation scale and shadow semantic colors | `DS.collections.elevation` and local effect styles | Create/update `elevation/<key>/{offset-y,radius}` variables and create/refresh `elevation/*` effect styles. |
+
+Implementation warning:
+
+- `apply_ds_setup` already contains merge logic for some of these categories. Do not copy-paste large blocks blindly.
+- Prefer extracting small helper functions inside `packages/figma-bridge-plugin/code.js` when practical.
+- Keep the plugin compatible with the Figma sandbox. Avoid `??`, `?.`, `**`, top-level `await`, or Node-only APIs in plugin code.
+
+#### Server Files For Phase 3
+
+Add:
+
+- `packages/figlets-mcp-server/src/tools/inspect-ds-token-gaps.js`
+- `packages/figlets-mcp-server/src/tools/update-ds-tokens.js`
+
+Modify:
+
+- `packages/figlets-mcp-server/src/index.js`
+- `packages/figlets-mcp-server/src/tools/update-ds-primitives.js`
+- `packages/figma-bridge-plugin/code.js`
+- `packages/figlets-mcp-server/src/agent-interface/workflows.js`
+- Adapter/plugin docs and tests
+
+Compatibility:
+
+- Keep `update_ds_primitives` working.
+- Option A: leave `update_ds_primitives` as-is and document it as the legacy primitive/color-semantic updater.
+- Option B: make it call the new `update_ds_tokens` handler with category mapping:
+  - `color` -> `primitive-color`
+  - `spacing` -> `primitive-spacing`
+  - `color-semantics` -> `color-semantics`
+- If choosing Option B, add regression tests that the old argument names and result shape remain stable.
+
+#### Plugin Endpoint Work
+
+Follow the existing bridge pattern:
+
+- Add a receiver endpoint similar to `/request-update-primitives`.
+- Add a plugin message type similar to `update-primitives`.
+- Advertise the capability so stale bridge sessions return a helpful 409 instead of hanging.
+- Implement `_updateDsTokens(payload)` in `packages/figma-bridge-plugin/code.js`.
+
+Result fields should include:
+
+- `dryRun`
+- `categories`
+- `unknownCategories`
+- `report`
+- `message`
+- `error`
+
+Each category report should include enough information for an agent to show a designer exactly what will happen.
+
+#### Tests For Phase 3
+
+MCP schema and handler tests:
+
+- Add `tests/server/inspect-ds-token-gaps-tool.test.js`.
+- Add `tests/server/update-ds-tokens-tool.test.js`.
+- Verify missing `config_path` behavior.
+- Verify config path guard behavior.
+- Verify server forwards `dry_run`, `create_missing`, `categories`, and prune options.
+- Mock receiver responses for success, 409, 503, 504, and unknown status.
+
+Planner tests:
+
+- Fixture config defines typography, spacing, radius, border width, and elevation.
+- Fixture snapshot has some variables missing.
+- `inspect_ds_token_gaps` returns top-level `message`, `summary`, `repairPlan`, `topFindings`.
+- `repairPlan.previewInput` uses `dry_run: true`.
+- `repairPlan.applyInput` uses `dry_run: false`.
+- Unsupported categories become `missingCapabilityNotes`.
+
+Compatibility tests:
+
+- Existing `tests/server/update-ds-primitives-tool.test.js` must still pass.
+- If wrapping old tool into new tool, assert old categories map correctly.
+
+Agent Interface tests:
+
+- `figlets_start` and `figlets_workflow_guide` mention `inspect_ds_token_gaps` / `update_ds_tokens` only after the tools are registered.
+- Health-check guidance says non-color config-backed token completion is available when the planner emits a payload.
+- Agents are still told not to write custom scripts.
+
+Suggested verification:
+
+```sh
+node tests/server/inspect-ds-token-gaps-tool.test.js
+node tests/server/update-ds-tokens-tool.test.js
+node tests/server/update-ds-primitives-tool.test.js
+node tests/server/agent-interface-tool.test.js
+npm test
+git diff --check
+```
+
+### Phase 4 - Improve `qa_binding_audit` Bulk Fix Clarity
+
+Goal: Agents should know when Figlets can bulk-bind raw node properties and when token creation is needed first.
+
+Current behavior:
+
+- `qa_binding_audit` can bind high-confidence suggestions with `fix: true`.
+- Color, spacing, radius, and border-width can be high confidence when exact variables exist.
+- Typography prefers text styles or typography variables, but suggestions are conservative.
+- The audit does not create missing variables/styles.
+
+Tasks:
+
+1. Make output distinguish:
+   - `fixableNow`
+   - `needsExistingToken`
+   - `needsDesignerDecision`
+   - `unsupported`
+
+2. Add a top-level apply plan:
+
+```js
+repairPlan: {
+  tool: "qa_binding_audit",
+  approvalRequired: true,
+  applyInput: { fix: true },
+  counts: {
+    fixableNow: 0,
+    needsExistingToken: 0
+  },
+  agentInstruction: "Ask before applying fixable bindings. Do not create tokens from audit findings unless a Figlets token-completion planner exists."
+}
+```
+
+3. Review typography confidence:
+   - If a text node has an exact existing text style match by font family, weight, size, line height, and tracking, allow a high-confidence text style fix.
+   - If the match is role/name-based only, keep it medium and do not auto-fix.
+   - Add a reason string the agent can quote.
+
+Tests:
+
+- A raw fill with a semantic color variable is `fixableNow`.
+- A raw spacing value with exact variable is `fixableNow`.
+- A raw spacing value with no exact variable is `needsExistingToken`.
+- A raw text node with an exact text style match is fixable if the implementation supports it.
+- A role-only text style suggestion stays non-fixable.
+- `fix: true` applies only `fixableNow`.
+
+### Phase 5 - Update Workflow Guidance
+
+Goal: The public designer experience should expose capability without tool-name dumping.
+
+Files:
+
+- `packages/figlets-mcp-server/src/agent-interface/workflows.js`
+- `packages/figlets-mcp-server/src/tools/agent-interface.js`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `packages/figlets-adapter/AGENTS.md`
+- `packages/figlets-adapter/CLAUDE.md`
+- `plugins/claude-code/figlets/commands/start.md`
+- `plugins/claude-code/figlets/skills/figlets-designer/SKILL.md`
+- `plugins/codex/figlets/commands/start.md`
+- `plugins/codex/figlets/skills/figlets-designer/SKILL.md`
+
+Required guidance:
+
+- For setup/health checks, agents should inspect first.
+- If `repairPlan.applyInput` is non-empty, agents should ask approval and pass it to the named tool.
+- If `repairPlan.optionalApplyInput` is non-empty, agents should present it as optional bulk creation.
+- If a designer asks for non-color token completion, agents should use `inspect_ds_token_gaps` then `update_ds_tokens`.
+- If only `qa_binding_audit` violations exist, agents should use `qa_binding_audit({ fix: true })` for fixable bindings after approval.
+- If no Figlets payload exists, agents should say what Figlets cannot yet plan or apply.
+
+Tests:
+
+- Root and plugin instructions mention structured bulk payloads.
+- Instructions forbid custom scripts over local snapshots/tool-results.
+- Agent Interface tests pin the workflow order and approval boundaries.
+
+### Phase 6 - End-To-End Verification Checklist
+
+Run focused tests as each phase lands, then run full verification:
+
+```sh
+node tests/server/inspect-ds-setup-gaps-tool.test.js
+node tests/server/inspect-ds-setup-gaps-qa.test.js
+node tests/server/inspect-ds-setup-gaps-naming-variants.test.js
+node tests/server/apply-ds-setup-repairs-tool.test.js
+node tests/server/update-ds-primitives-tool.test.js
+node tests/server/qa-binding-audit-tool.test.js
+node tests/server/agent-interface-tool.test.js
+node tests/docs/root-agent-entrypoint.test.js
+node tests/plugins/claude-code-plugin.test.js
+node tests/plugins/codex-plugin.test.js
+npm test
+git diff --check
+```
+
+If release packaging changes or plugin manifests change, also run:
+
+```sh
+npm run build:server-tarball
+```
+
+## Definition Of Done
+
+The implementation is done when:
+
+- Existing icon role bulk repair remains green.
+- Passive DS-wide border/outline/stroke creation is available as optional structured payload, not a dead end.
+- Safe focus-border repairs become apply-ready when Figlets can verify the alias.
+- The repair plan shape clearly separates default, optional, and missing-capability cases.
+- Non-color config-backed token completion has a read-only planner and an approved apply tool, or this is explicitly deferred with tests/docs that prevent agents from claiming impossible.
+- `qa_binding_audit` tells agents what is fixable now versus what needs token creation.
+- Agent Interface, root docs, and plugin skills explain these capabilities to less capable agents.
+- Tests cover schemas, handler output order, apply payload shapes, docs, plugin instructions, and compatibility.
+- `npm test` and `git diff --check` pass.
+
+## Things Not To Do
+
+- Do not implement a generic "run arbitrary Figma command" MCP tool.
+- Do not let agents pass raw node IDs and arbitrary property names for broad mutation.
+- Do not make `apply_ds_setup_repairs` silently accept unknown non-color repair shapes.
+- Do not create missing typography/spacing/elevation tokens from page usage in the first version.
+- Do not auto-apply optional border/outline/stroke conventions as health-check fixes.
+- Do not hide long apply payloads only in nested arrays; keep agent-actionable payloads near the top.
+- Do not weaken designer approval boundaries to make tests easier.
+

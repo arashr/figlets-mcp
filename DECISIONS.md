@@ -4,6 +4,38 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-18] Initial designer response routes concrete goals instead of always showing the menu
+
+**Decision:** `figlets_start.designerResponse` is now the generic help/start screen only. If the designer's first message already contains a concrete goal, agents should call `figlets_route_intent`, then `figlets_workflow_guide`, and use the routed `designerResponse` instead of showing the capability table or asking what the designer wants to do. If routing is ambiguous, `figlets_route_intent` returns a structured `selectionPrompt` that hosts with selection UI can render as choices; plain-text hosts can render the prompt message.
+
+**Why:** Showing the capability menu after "review my design system using Figlets" makes the agent feel inattentive. The designer already stated the job, so Figlets should acknowledge the chosen workflow and begin the read-only path.
+
+**Generic screen:** The generic help screen uses a simple `# Figlets` title plus a one-line about statement and the curated menu. The cheesy greeting was removed.
+
+---
+
+## [2026-05-18] Figlets-generated token suggestions are accessibility-checked before approval
+
+**Decision:** Accessibility is a suggestion-time safeguard, not a write-time blocker. When Figlets computes token-gap fixes or setup suggestions itself, it must pre-check the suggested aliases against the relevant contrast rule before showing them as deterministic repairs. For text/foreground repairs this means the setup pair validator's selected text algorithm. For icon role repairs this means WCAG non-text contrast at 3:1 against the paired background. Passive border, outline, and stroke role repairs are not contrast-gated because they are often low-emphasis structure rather than meaningful non-text content; they continue to use standard passive border steps. Suggestions that cannot be made accessible where a contrast rule applies should remain findings that need a designer/product decision, not apply-ready repair payloads.
+
+**Why:** Designers should not approve Figlets-generated fixes and then discover in the showcase that those same fixes are inaccessible. The setup and repair-planning flow should make Figlets output as clean as possible before asking for approval.
+
+**Write behavior:** `apply_ds_setup_repairs` should not block designer-supplied payloads solely because contrast is imperfect. The guardrail belongs where Figlets generates suggestions; an explicit designer choice can still go through the approved write path.
+
+**Designer display:** Repair suggestions should carry enough structured color/contrast metadata for agents to show token names, hex values, and pass/fail scores. Plain Markdown cannot reliably render native color chips across all hosts, but hex values plus optional host-rendered swatches give agents a portable fallback.
+
+---
+
+## [2026-05-18] Designer review must use Figlets workflows, not ad hoc scripts
+
+**Decision:** In Designer Mode, any design-system review/check/audit, setup-gap investigation, or contrast investigation must run through the Figlets Agent Interface (`figlets_start` → `figlets_route_intent` → `figlets_workflow_guide`) and then the Figlets MCP tools/scripts named by that workflow. Agents must not write custom scripts over snapshots, MCP transcripts, `tool-results`, `.local/<fileKey>/figma-data.json`, raw Figma APIs, or generic Figma tools to perform the designer-facing review.
+
+**Why:** Less reliable agents were still trying to compensate for missing confidence by scripting against local artifacts. That breaks the product contract: designers should talk naturally while deterministic Figlets tools handle QA, token math, semantic gap detection, contrast checks, and approved fixes.
+
+**Escape hatch:** The only allowed exception is when the designer explicitly asks the agent to go out of bounds. If the Figlets output is missing information needed for the review, the agent should say that this is a Figlets product/tool gap instead of inventing a script.
+
+---
+
 ## [2026-05-17] Setup-gap repair is part of health-check QA, not a separate follow-up flow
 
 **Decision:** The designer-facing "Check my design system" workflow includes semantic setup QA and the approved repair continuation. After showing setup gaps, agents should ask which exact suggested repairs to apply in the same flow instead of offering to run a separate "fix setup gaps" flow.

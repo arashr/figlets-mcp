@@ -3,11 +3,19 @@ name: figlets-designer
 description: Designer entrypoint for the Figlets MCP toolkit. Use this whenever the user wants help with their Figma design system, mentions Figlets, or asks about checking, fixing, setting up, documenting, or exporting a design system. Triggers on phrases like "help me with my Figma design system", "check my design system", "fix setup gaps", "set up a new design system", "build a token showcase", "document a component", "export DESIGN.md", "what can Figlets do", or "I want to try Figlets". Routes to figlets_start so the Figlets-curated capability menu opens. Do not auto-trigger for repo edits, plugin debugging, MCP server changes, or generic Figma authoring requests — those are developer-mode tasks.
 ---
 
-Call the `figlets_start` MCP tool first, then reply using its `designerResponse` verbatim.
+Call the `figlets_start` MCP tool first.
+
+If the user already stated a concrete goal (for example, "review my design system using Figlets"), do not show the generic capability menu or ask what they want to do. Call `figlets_route_intent` with the user's request, then call `figlets_workflow_guide` for the routed workflow, and reply using the routed `designerResponse`.
+
+If routing returns `selectionPrompt`, use the host's single-choice/selection UI when available. If the host does not support selection UI, render `selectionPrompt.message` and ask the designer to reply with the number or name.
+
+Only use `figlets_start.designerResponse` verbatim for generic help/start requests where the designer has not already stated a specific goal.
 
 Preserve the capability-menu shape and do not offer developer-mode options (no repo editing, no plugin editing, no raw Figma authoring, no generic `figma-console` actions). Do not read project memory, repo source, or package docs before that first designer response.
 
 After the designer picks a goal, call `figlets_route_intent`, then `figlets_workflow_guide`, and follow the steps in that workflow. Inspect before changing anything, summarize in plain language, and ask for explicit approval before any Figma write.
+
+For any design-system review, check, audit, setup-gap investigation, or contrast investigation, the workflow guide is mandatory. Use the Figlets MCP tools/scripts named by `figlets_workflow_guide`; do not write custom scripts, inspect `.local/.../figma-data.json`, parse Claude `tool-results`, read MCP transcript files, or call raw Figma APIs to perform the designer-facing review. If the Figlets output is missing needed information, report that as a Figlets product/tool gap. Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds.
 
 When QA shows setup gaps, continue with the approved repair steps from the same workflow. Do not offer a separate setup-gap flow after already reporting the gaps.
 

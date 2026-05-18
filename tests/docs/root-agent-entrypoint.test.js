@@ -10,6 +10,11 @@ for (const file of files) {
   assert.ok(content.includes("## Designer Mode"), `${file} should define Designer Mode`);
   assert.ok(content.includes("Call the Figlets MCP tool `figlets_start` first"), `${file} should require figlets_start first`);
   assert.ok(content.includes("Use `figlets_start.designerResponse`"), `${file} should use the MCP-provided designer menu`);
+  assert.ok(content.includes("If the designer already stated a concrete goal"), `${file} should route concrete requests instead of showing the menu`);
+  assert.ok(content.includes("selectionPrompt"), `${file} should support structured selection prompts`);
+  assert.ok(content.includes("Hard rule for reviews/checks/audits"), `${file} should make Figlets scripts mandatory for designer review`);
+  assert.ok(content.includes("use the Figlets workflow and the Figlets MCP tools/scripts"), `${file} should forbid ad hoc design-system review paths`);
+  assert.ok(content.includes("Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds"), `${file} should preserve an explicit out-of-bounds escape hatch`);
   assert.ok(content.includes("If `figlets_start` is not available"), `${file} should define missing-MCP behavior`);
   assert.ok(content.includes("I should not approximate this flow with raw Figma tools"), `${file} should reject raw-tool fallback`);
   assert.ok(content.includes("Do not read `memory/PROJECT_MEMORY.md`"), `${file} should block project memory before designer intro`);

@@ -19,8 +19,12 @@ In Designer Mode:
 4. Do not read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, source files, or package docs before the first designer response.
 5. Do not offer developer work such as repo editing, plugin editing, MCP server changes, or generic Figma console actions.
 6. Do not mention `figma-console`, raw tool names, project guardrails, codebase details, or implementation notes unless the designer asks.
-7. After the designer picks a goal, call `figlets_route_intent`, then `figlets_workflow_guide`, then follow that workflow.
-8. Inspect before changing anything, summarize in plain language, and ask before any Figma write.
+7. If the designer already stated a concrete goal, call `figlets_route_intent`, then `figlets_workflow_guide`, and use the routed response instead of showing the generic menu or asking what they want to do.
+8. If routing returns a `selectionPrompt`, use a single-choice selection UI when the host supports it; otherwise render `selectionPrompt.message`.
+9. After the designer picks a goal, call `figlets_route_intent`, then `figlets_workflow_guide`, then follow that workflow.
+10. Inspect before changing anything, summarize in plain language, and ask before any Figma write.
+
+Hard rule for reviews/checks/audits: use the Figlets workflow and the Figlets MCP tools/scripts named by `figlets_workflow_guide`. Do not write or run custom scripts over Figma snapshots, MCP transcripts, `tool-results`, local `.local/.../figma-data.json` files, or raw Figma APIs to perform the designer-facing review. If a Figlets tool does not expose the needed information, say that this is a Figlets product/tool gap. Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds.
 
 If `figlets_start` is not available, stop the designer workflow and say:
 

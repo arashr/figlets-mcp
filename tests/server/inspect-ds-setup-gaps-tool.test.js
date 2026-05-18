@@ -123,7 +123,17 @@ module.exports = (() => {
       name,
       resolvedType: "COLOR",
       variableCollectionId: "prim-coll",
-      valuesByMode: { value: { r: 0, g: 0, b: 0 } },
+      valuesByMode: { value: ({
+        "color/blue/200": { r: 0.76, g: 0.86, b: 1 },
+        "color/blue/600": { r: 0.05, g: 0.24, b: 0.72 },
+        "color/blue/800": { r: 0.02, g: 0.08, b: 0.28 },
+        "color/green/200": { r: 0.74, g: 0.95, b: 0.76 },
+        "color/green/600": { r: 0.08, g: 0.46, b: 0.18 },
+        "color/green/800": { r: 0.02, g: 0.18, b: 0.06 },
+        "color/yellow/200": { r: 1, g: 0.92, b: 0.36 },
+        "color/yellow/600": { r: 0.52, g: 0.40, b: 0 },
+        "color/yellow/800": { r: 0.18, g: 0.12, b: 0 },
+      })[name] || { r: 0, g: 0, b: 0 } },
     });
     const alias = id => ({ type: "VARIABLE_ALIAS", id });
     const outlineConventionData = {
@@ -137,13 +147,13 @@ module.exports = (() => {
         prim("yellow-200", "color/yellow/200"),
         prim("yellow-600", "color/yellow/600"),
         prim("yellow-800", "color/yellow/800"),
-        colorVar("surface-info", "color/surface/info", { light: alias("blue-600"), dark: alias("blue-600") }),
+        colorVar("surface-info", "color/surface/info", { light: alias("blue-600"), dark: alias("blue-200") }),
         colorVar("on-info", "color/on-surface/info"),
         colorVar("icon-info", "color/icon/info"),
-        colorVar("surface-success", "color/surface/success", { light: alias("green-600"), dark: alias("green-600") }),
+        colorVar("surface-success", "color/surface/success", { light: alias("green-600"), dark: alias("green-200") }),
         colorVar("on-success", "color/on-surface/success"),
         colorVar("icon-success", "color/icon/success"),
-        colorVar("surface-warning", "color/surface/warning", { light: alias("yellow-600"), dark: alias("yellow-600") }),
+        colorVar("surface-warning", "color/surface/warning", { light: alias("yellow-600"), dark: alias("yellow-200") }),
         colorVar("on-warning", "color/on-surface/warning"),
         colorVar("icon-warning", "color/icon/warning"),
         colorVar("outline-default", "color/outline/default"),
@@ -183,7 +193,7 @@ module.exports = (() => {
         basis: "background-ramp",
         reason: "Border/outline role aliases are planned from the paired background ramp using the standard passive border steps.",
       },
-      "missing outline roles should include deterministic aliases when the background ramp is resolvable"
+      "missing outline roles should include deterministic passive aliases when the background ramp is resolvable"
     );
     const repairPlan = _buildRepairPlan(outlineResult);
     assert.deepStrictEqual(
@@ -199,6 +209,152 @@ module.exports = (() => {
     assert.ok(
       outlineResult.topFindings.highConfidenceMissingRoles.some(gap => gap.suggestedName === "color/outline/info"),
       "topFindings should expose high-confidence missing neighboring outlines for agent summaries"
+    );
+  }
+
+  {
+    const prim = (id, name, rgb) => ({
+      id,
+      name,
+      resolvedType: "COLOR",
+      variableCollectionId: "prim-coll",
+      valuesByMode: { value: rgb },
+    });
+    const semantic = (id, name, valuesByMode = {}) => ({
+      id,
+      name,
+      resolvedType: "COLOR",
+      variableCollectionId: "sem-coll",
+      valuesByMode,
+    });
+    const alias = id => ({ type: "VARIABLE_ALIAS", id });
+    const inaccessibleRoleData = {
+      variables: [
+        prim("gray-500", "color/gray/500", { r: 0.45, g: 0.45, b: 0.45 }),
+        prim("gray-600", "color/gray/600", { r: 0.40, g: 0.40, b: 0.40 }),
+        semantic("bg-muted", "color/bg/muted", { light: alias("gray-500"), dark: alias("gray-500") }),
+        semantic("text-muted", "color/text/muted"),
+        semantic("border-default", "color/border/default"),
+        semantic("border-subtle", "color/border/subtle"),
+        semantic("border-strong", "color/border/strong"),
+        semantic("icon-default", "color/icon/default"),
+        semantic("icon-subtle", "color/icon/subtle"),
+        semantic("icon-strong", "color/icon/strong"),
+      ],
+      collections: [
+        { id: "prim-coll", name: "Primitives", modes: [{ modeId: "value", name: "Value" }] },
+        { id: "sem-coll", name: "Color / Semantics", modes: [{ modeId: "light", name: "Light" }, { modeId: "dark", name: "Dark" }] },
+      ],
+    };
+    const inaccessibleResult = inspectDsSetupGapsFromFigmaData(inaccessibleRoleData);
+    const mutedIcon = inaccessibleResult.missingSemanticRoles.find(gap =>
+      gap.family === "muted" && gap.missingRole === "icon"
+    );
+    const mutedBorder = inaccessibleResult.missingSemanticRoles.find(gap =>
+      gap.family === "muted" && gap.missingRole === "border"
+    );
+    assert.ok(mutedBorder, "muted family should still report the border role gap");
+    assert.ok(
+      mutedBorder.plannedRoleRepair,
+      "passive border suggestions should still be deterministic even when they are not contrast-gated"
+    );
+    assert.deepStrictEqual(
+      mutedBorder.plannedRoleRepair.aliases,
+      { Light: "color/gray/500", Dark: "color/gray/600" },
+      "border repair should use standard passive ramp steps/nearest available steps, not a contrast search"
+    );
+    assert.strictEqual(
+      mutedBorder.plannedRoleRepair.contrast,
+      undefined,
+      "border repairs should not carry contrast-gate metadata"
+    );
+    assert.ok(mutedIcon, "muted family should still report the icon role gap");
+    assert.strictEqual(
+      mutedIcon.plannedRoleRepair,
+      undefined,
+      "Figlets should not emit a deterministic icon repair suggestion when no accessible alias exists"
+    );
+    assert.ok(
+      !_buildRepairPlan(inaccessibleResult).applyInput.roleRepairs.some(repair => repair.name === "color/icon/muted"),
+      "inaccessible Figlets-generated icon suggestions must not reach the agent-ready apply payload"
+    );
+  }
+
+  {
+    const prim = (id, name) => ({
+      id,
+      name,
+      resolvedType: "COLOR",
+      variableCollectionId: "prim-coll",
+      valuesByMode: { value: ({
+        "color/purple/200": { r: 0.84, g: 0.76, b: 1 },
+        "color/purple/600": { r: 0.34, g: 0.12, b: 0.72 },
+        "color/purple/800": { r: 0.12, g: 0.04, b: 0.32 },
+      })[name] || { r: 0, g: 0, b: 0 } },
+    });
+    const semantic = (id, name, valuesByMode = {}) => ({
+      id,
+      name,
+      resolvedType: "COLOR",
+      variableCollectionId: "sem-coll",
+      valuesByMode,
+    });
+    const legacy = (id, name) => ({
+      id,
+      name,
+      resolvedType: "COLOR",
+      variableCollectionId: "legacy-coll",
+      valuesByMode: { value: { r: 0, g: 0, b: 0 } },
+    });
+    const alias = id => ({ type: "VARIABLE_ALIAS", id });
+    const borderConventionData = {
+      variables: [
+        prim("purple-200", "color/purple/200"),
+        prim("purple-600", "color/purple/600"),
+        prim("purple-800", "color/purple/800"),
+        semantic("bg-brand-variant", "color/bg/brand-variant", { light: alias("purple-600"), dark: alias("purple-200") }),
+        semantic("text-brand-variant", "color/text/brand-variant"),
+        semantic("icon-brand-variant", "color/icon/brand-variant"),
+        semantic("border-default", "color/border/default"),
+        semantic("border-brand", "color/border/brand"),
+        semantic("border-info", "color/border/info"),
+        legacy("outline-default", "color/outline/default"),
+        legacy("outline-subtle", "color/outline/subtle"),
+        legacy("outline-strong", "color/outline/strong"),
+        legacy("outline-focus", "color/outline/focus"),
+      ],
+      collections: [
+        {
+          id: "prim-coll",
+          name: "Primitives",
+          modes: [{ modeId: "value", name: "Value" }],
+        },
+        {
+          id: "sem-coll",
+          name: "Color / Semantics",
+          modes: [{ modeId: "light", name: "Light" }, { modeId: "dark", name: "Dark" }],
+        },
+        {
+          id: "legacy-coll",
+          name: "Legacy Color Tokens",
+          modes: [{ modeId: "value", name: "Value" }],
+        },
+      ],
+    };
+    const borderResult = inspectDsSetupGapsFromFigmaData(borderConventionData);
+    const brandVariantBorder = borderResult.missingSemanticRoles.find(gap =>
+      gap.family === "brand-variant" && gap.missingRole === "border"
+    );
+    assert.ok(brandVariantBorder, "brand-variant should report a missing border role");
+    assert.strictEqual(
+      brandVariantBorder.suggestedName,
+      "color/border/brand-variant",
+      "missing border suggestions should use the active semantic collection's border naming convention"
+    );
+    assert.strictEqual(
+      brandVariantBorder.plannedRoleRepair.name,
+      "color/border/brand-variant",
+      "planned role repairs should use the same convention-preserving suggested name"
     );
   }
 

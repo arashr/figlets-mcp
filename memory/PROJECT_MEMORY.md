@@ -4,6 +4,34 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-18 — Initial interaction routing refinement]
+
+**User-approved UX change:** The generic Figlets menu should not appear after the designer already gave a concrete request such as "review my design system using Figlets." The first visible response should acknowledge the chosen workflow and begin the read-only flow. The generic help screen should use `# Figlets` with a one-line about statement, not a cheesy greeting.
+
+**Implementation:** `figlets_start.designerResponse` is now reserved for generic help/start. `figlets_route_intent` now returns a routed `designerResponse` for specific goals and a structured `selectionPrompt` for ambiguous/generic routing, so hosts that support selection UI can use it and text-only hosts can render the prompt. Claude/Codex plugin skills and start commands now tell agents to route concrete initial goals before replying instead of always showing the menu.
+
+---
+
+### [2026-05-18 — Suggestion-time accessibility gate]
+
+**Rule from user:** Do not block designer-approved writes just because a payload might be intentionally imperfect. Instead, make Figlets-generated suggestions safe before they are shown. This applies broadly to token-gap fixes and setup output, not only icons.
+
+**Implementation:** `inspect_ds_setup_gaps` now pre-checks planned missing icon role repairs against WCAG non-text contrast at 3:1 before adding `plannedRoleRepair` or lifting it into `repairPlan.applyInput`. If no accessible icon alias can be found on the paired background ramp, the gap remains a finding but no deterministic apply-ready repair is emitted. Passive border/outline/stroke role repairs are not contrast-gated; they use the standard passive border steps because those roles are often low-emphasis structure rather than meaningful non-text content. Planned icon repairs include per-mode contrast metadata with token names, hex values, ratio, threshold, and pass state so agents can present color-aware suggestions. Existing setup generation already validates text pairs and setup-generated icons before `prepare_ds_config` reports ready.
+
+**Design note:** Plain Markdown does not guarantee actual color swatches in every host. Figlets should expose structured hex/contrast data; agents can render Markdown tables everywhere and add HTML/color chips only when the host supports it.
+
+---
+
+### [2026-05-18 — Designer review script hard rule]
+
+**Issue found:** Less capable agents could still treat "review my design system" as permission to write their own local scripts over `.local/<fileKey>/figma-data.json`, MCP transcripts, or `tool-results`, even though the product contract says deterministic Figlets tools should own the review.
+
+**Rule added:** Designer Mode now says reviews/checks/audits, setup-gap investigations, and contrast investigations must use `figlets_start` → `figlets_route_intent` → `figlets_workflow_guide`, then the Figlets MCP tools/scripts named by the workflow. Agents must not write custom scripts, inspect local snapshots/tool-result files, or use raw Figma APIs for designer-facing review unless the designer explicitly asks to go out of bounds.
+
+**Implementation:** The hard rule is now duplicated in the root `AGENTS.md`/`CLAUDE.md`, Claude and Codex plugin start commands, Claude and Codex `figlets-designer` skills, and the Agent Interface payload (`responseContract`, `safety`, `hardRules`, route/guide messages). Tests pin the rule so future prompt/package changes do not soften it accidentally.
+
+---
+
 ### [2026-05-17 — Gap repair folded into health-check QA]
 
 **Issue found:** After the health check correctly showed semantic setup gaps, agents still offered to run the separate setup-gap flow. That was redundant because the QA output had already done the read-only inspection. Claude also attempted to run a raw Node script over `.local/<fileKey>/figma-data.json` because icon contrast failures did not expose a concrete re-alias plan.

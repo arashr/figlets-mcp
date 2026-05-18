@@ -298,6 +298,16 @@ module.exports = (() => {
   assert.ok(missingSuccessIcon.evidence.includes("color/bg/success"));
   assert.ok(missingSuccessIcon.evidence.includes("color/text/success"));
   assert.ok(missingSuccessIcon.evidence.includes("color/border/success"));
+  assert.ok(
+    missingSuccessIcon.plannedRoleRepair,
+    "Figlets-created missing icon suggestions should include an accessibility-checked repair plan"
+  );
+  assert.strictEqual(missingSuccessIcon.plannedRoleRepair.role, "icon");
+  assert.ok(missingSuccessIcon.plannedRoleRepair.reason.includes("pre-checked against WCAG non-text contrast"));
+  assert.ok(missingSuccessIcon.plannedRoleRepair.contrast.Light.pass);
+  assert.ok(missingSuccessIcon.plannedRoleRepair.contrast.Light.wcagRatio >= 3);
+  assert.ok(missingSuccessIcon.plannedRoleRepair.contrast.Dark.pass);
+  assert.ok(missingSuccessIcon.plannedRoleRepair.contrast.Dark.wcagRatio >= 3);
 
   const missingWarningText = familyResult.missingSemanticRoles.find(
     gap => gap.family === "warning" && gap.missingRole === "foreground"

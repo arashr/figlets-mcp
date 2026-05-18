@@ -14,6 +14,7 @@ const toClear = [
 toClear.forEach(m => { try { delete require.cache[require.resolve(m)]; } catch {} });
 
 const {
+  DESIGNER_FLOW_HARD_RULES,
   WORKFLOWS,
   MUTATING_TOOLS,
   getStartGuide,
@@ -22,6 +23,9 @@ const {
 } = require("../../packages/figlets-mcp-server/src/agent-interface/workflows.js");
 
 const {
+  figletsStartTool,
+  figletsRouteIntentTool,
+  figletsWorkflowGuideTool,
   handleFigletsStart,
   handleFigletsRouteIntent,
   handleFigletsWorkflowGuide,
@@ -33,20 +37,36 @@ function allSteps() {
 
 try {
   {
+    assert.ok(figletsStartTool.description.includes("not custom scripts"));
+    assert.ok(figletsRouteIntentTool.description.includes("before any design-system review scripting"));
+    assert.ok(figletsWorkflowGuideTool.description.includes("named Figlets tools/scripts only"));
+  }
+
+  {
     const start = getStartGuide();
     assert.strictEqual(start.environment.command, "figlets-mcp");
     assert.strictEqual(start.environment.localDir, TEMP_DIR);
     assert.strictEqual(start.environment.activeFileKnown, false);
     assert.strictEqual(start.responseContract.openingFormat, "capability-menu");
-    assert.strictEqual(start.responseContract.useVerbatimWhenPossible, "designerResponse");
+    assert.ok(start.responseContract.useVerbatimWhenPossible.includes("generic help"));
     assert.strictEqual(start.responseContract.mode, "designer-facing");
+    assert.ok(start.responseContract.designSystemReviewRule.includes("Use Figlets workflow tools/scripts only"));
+    assert.ok(start.responseContract.nextAction.includes("For a concrete initial goal, route it before replying"));
+    assert.strictEqual(start.hardRules.reviewMustUseFigletsWorkflow, true);
+    assert.ok(start.hardRules.appliesTo.includes("design-system review"));
+    assert.ok(start.hardRules.forbiddenUnlessDesignerExplicitlyAsksOutOfBounds.some(item => item.includes("custom scripts")));
+    assert.ok(start.hardRules.forbiddenUnlessDesignerExplicitlyAsksOutOfBounds.some(item => item.includes("figma-data.json")));
+    assert.ok(start.safety.some(item => item.includes("must use the Figlets workflow")));
+    assert.ok(start.designerResponse.startsWith("# Figlets"));
+    assert.ok(start.designerResponse.includes("A focused toolkit for checking, repairing, showcasing, documenting, and exporting Figma design systems."));
+    assert.ok(!start.designerResponse.includes("Hi, I'm Figlets"));
     assert.ok(start.designerResponse.includes("| What you can ask for | What I'll do |"));
     assert.ok(start.designerResponse.includes("Check my design system"));
     assert.ok(!start.designerResponse.includes("Fix setup gaps"));
     assert.ok(!start.designerResponse.includes("Plugin / MCP server code"));
     assert.ok(!start.designerResponse.includes("Edit repo files"));
     assert.ok(start.designerResponse.includes("I'll inspect first"));
-    assert.ok(start.designerResponse.includes("What would you like to do first?"));
+    assert.ok(!start.designerResponse.includes("What would you like to do first?"));
     assert.ok(start.capabilityMenu.every(item => item.workflowId && item.label && item.description));
     assert.ok(start.forbiddenDesignerMenuItems.includes("Plugin / MCP server code"));
     assert.ok(start.forbiddenDesignerMenuItems.includes("Edit repo files"));
@@ -57,9 +77,26 @@ try {
   }
 
   {
-    const route = routeIntent("Can you fix contrast issues in my semantic colors?");
+    const route = routeIntent("review my design system using Figlets");
     assert.strictEqual(route.workflow.id, "health-check");
-    assert.ok(route.message.includes("Start read-only"));
+    assert.ok(route.message.includes("Use Figlets workflow tools/scripts only"));
+    assert.strictEqual(route.hardRules.reviewMustUseFigletsWorkflow, true);
+    assert.strictEqual(route.selectionPrompt, null);
+    assert.ok(route.designerResponse.startsWith("# Figlets"));
+    assert.ok(route.designerResponse.includes("I'll review your design system using the Figlets health check."));
+    assert.ok(route.designerResponse.includes("1. Sync the current Figma file"));
+    assert.ok(!route.designerResponse.includes("| What you can ask for |"));
+  }
+
+  {
+    const route = routeIntent("help me choose what to do");
+    assert.ok(route.selectionPrompt, "ambiguous or generic requests should expose a structured selection prompt");
+    assert.strictEqual(route.selectionPrompt.type, "single-choice");
+    assert.ok(route.selectionPrompt.choices.length >= 3);
+    assert.ok(route.selectionPrompt.choices.some(choice => choice.id === "health-check"));
+    assert.ok(route.selectionPrompt.choices.some(choice => choice.id === "build-showcase"));
+    assert.ok(route.selectionPrompt.message.includes("Choose one:"));
+    assert.strictEqual(route.designerResponse, route.selectionPrompt.message);
   }
 
   {
@@ -83,6 +120,17 @@ try {
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation"));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true));
     assert.ok(!guide.next.includes("setup-gap-qa"));
+  }
+
+  {
+    assert.strictEqual(DESIGNER_FLOW_HARD_RULES.reviewMustUseFigletsWorkflow, true);
+    assert.ok(
+      DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("product/tool gap"),
+      "hard rules should tell weaker agents not to invent a script when Figlets output is missing data"
+    );
+    const handled = handleFigletsWorkflowGuide({ workflow_id: "health-check" });
+    assert.strictEqual(handled.hardRules.reviewMustUseFigletsWorkflow, true);
+    assert.ok(handled.message.includes("use the named Figlets tools/scripts only"));
   }
 
   {

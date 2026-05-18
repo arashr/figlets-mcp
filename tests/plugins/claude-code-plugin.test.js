@@ -43,6 +43,12 @@ const [, frontmatter, body] = frontmatterMatch;
 assert.ok(/description:/.test(frontmatter), "start.md frontmatter must include a description");
 assert.ok(body.includes("figlets_start"), "start.md must instruct the agent to call figlets_start");
 assert.ok(body.includes("designerResponse"), "start.md must direct the agent to use figlets_start.designerResponse");
+assert.ok(body.includes("figlets_route_intent"), "start.md must route concrete initial goals instead of showing the menu");
+assert.ok(body.includes("selectionPrompt"), "start.md must support structured selection prompts for ambiguous goals");
+assert.ok(/Use `figlets_start\.designerResponse` only for generic help\/start requests/i.test(body), "start.md must reserve the generic menu for generic help");
+assert.ok(/design-system review[\s\S]*Figlets MCP tools\/scripts/i.test(body), "start.md must require Figlets tools/scripts for designer review");
+assert.ok(/Do not create custom scripts/i.test(body), "start.md must forbid ad hoc scripts for designer review");
+assert.ok(/explicitly ask.*go out of bounds/i.test(body), "start.md must allow out-of-bounds work only when explicitly requested");
 assert.ok(/not approximate.*raw Figma/i.test(body), "start.md must forbid raw-Figma-tool fallback when Figlets is unavailable");
 assert.ok(!/repo edit|plugin edit|developer/i.test(body) || /not.*developer-mode/i.test(body), "start.md must not offer developer-mode options");
 
@@ -61,6 +67,12 @@ assert.ok(/Figma design system/i.test(description), "skill description must ment
 assert.ok(/figlets_start/.test(description), "skill description must mention routing to figlets_start so the agent knows the entrypoint");
 assert.ok(skillBody.includes("figlets_start"), "skill body must instruct calling figlets_start");
 assert.ok(skillBody.includes("designerResponse"), "skill body must direct the agent to use figlets_start.designerResponse");
+assert.ok(skillBody.includes("figlets_route_intent"), "skill body must route concrete initial goals");
+assert.ok(skillBody.includes("selectionPrompt"), "skill body must support structured selection prompts");
+assert.ok(/Only use `figlets_start\.designerResponse` verbatim for generic help\/start requests/i.test(skillBody), "skill body must not show the generic menu for concrete goals");
+assert.ok(/workflow guide is mandatory/i.test(skillBody), "skill body must make the workflow guide mandatory for designer review");
+assert.ok(/do not write custom scripts/i.test(skillBody), "skill body must forbid ad hoc scripts for designer review");
+assert.ok(/product\/tool gap/i.test(skillBody), "skill body must report missing Figlets data as a product/tool gap");
 assert.ok(!/repo edit|plugin edit/i.test(skillBody) || /not.*developer-mode|do not offer developer-mode/i.test(skillBody), "skill body must not offer developer-mode options");
 
 // Plugin README sanity.

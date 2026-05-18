@@ -16,6 +16,31 @@ const MUTATING_TOOLS = new Set([
   "update_ds_primitives",
 ]);
 
+const DESIGNER_FLOW_HARD_RULES = {
+  reviewMustUseFigletsWorkflow: true,
+  appliesTo: [
+    "design-system review",
+    "design-system check",
+    "design-system audit",
+    "setup-gap investigation",
+    "contrast investigation",
+  ],
+  requiredSequence: [
+    "figlets_start",
+    "figlets_route_intent",
+    "figlets_workflow_guide",
+    "workflow tools named by figlets_workflow_guide",
+  ],
+  forbiddenUnlessDesignerExplicitlyAsksOutOfBounds: [
+    "custom scripts over Figma snapshots",
+    "custom scripts over MCP transcripts",
+    "custom scripts over Claude/Codex tool-results",
+    "reading .local/<fileKey>/figma-data.json to perform designer-facing review",
+    "raw Figma APIs or generic Figma tools for Figlets review",
+  ],
+  missingCapabilityResponse: "If the Figlets workflow output does not expose the needed information, say this is a Figlets product/tool gap instead of inventing a script.",
+};
+
 const WORKFLOWS = [
   {
     id: "start",
@@ -52,6 +77,9 @@ const WORKFLOWS = [
       "health check",
       "what is in this file",
       "is my ds healthy",
+      "review my design system",
+      "review design system",
+      "design system review",
       "audit tokens",
       "fix semantic colors",
       "fix contrast",
@@ -339,6 +367,78 @@ function normalizeText(value) {
   return String(value == null ? "" : value).toLowerCase();
 }
 
+const ROUTE_STOPWORDS = new Set(["what", "this", "that", "with", "using", "help", "figlets", "design", "system"]);
+
+function _workflowStartResponse(workflow) {
+  if (!workflow || workflow.id === "start") return null;
+  if (workflow.id === "health-check") {
+    return [
+      "# Figlets",
+      "",
+      "I'll review your design system using the Figlets health check.",
+      "",
+      "I'll start read-only:",
+      "1. Sync the current Figma file",
+      "2. Detect design-system structure",
+      "3. Audit token health",
+      "4. Check semantic setup gaps, icon contrast, and missing roles",
+      "",
+      "I'll summarize the findings in plain language before suggesting any repairs. If a write is needed, I'll ask before changing Figma.",
+      "",
+      "Please make sure the Figlets Bridge plugin is open in Figma, then I'll begin.",
+    ].join("\n");
+  }
+  const readSteps = (workflow.steps || []).filter(step => step.kind === "read" && step.tool);
+  const writeSteps = (workflow.steps || []).filter(step => step.kind === "write" || step.kind === "write-local");
+  const lines = [
+    "# Figlets",
+    "",
+    `I'll use the Figlets ${workflow.title.toLowerCase()} workflow.`,
+    "",
+  ];
+  if (readSteps.length) {
+    lines.push("I'll start read-only:");
+    readSteps.slice(0, 4).forEach((step, index) => {
+      lines.push(`${index + 1}. ${step.designerMessage || step.tool}`);
+    });
+    lines.push("");
+  }
+  lines.push(writeSteps.length
+    ? "If a write is needed, I'll ask before changing Figma."
+    : "I'll summarize the result in plain language.");
+  return lines.join("\n");
+}
+
+function _selectionPrompt(candidates, capabilityMenu) {
+  const choices = (candidates && candidates.length ? candidates : capabilityMenu)
+    .slice(0, 5)
+    .map((item, index) => ({
+      id: item.workflowId || item.id,
+      label: item.label || item.title,
+      description: item.description || item.summary || "",
+      index: index + 1,
+    }));
+  const lines = [
+    "# Figlets",
+    "",
+    "I can help, but this could mean a few different workflows.",
+    "",
+    "Choose one:",
+    "",
+  ];
+  for (const choice of choices) {
+    lines.push(`${choice.index}. **${choice.label}**`);
+    if (choice.description) lines.push(`   ${choice.description}`);
+    lines.push("");
+  }
+  lines.push("Reply with the number or name.");
+  return {
+    type: "single-choice",
+    message: lines.join("\n"),
+    choices,
+  };
+}
+
 function routeIntent(intent) {
   const text = normalizeText(intent);
   const candidates = WORKFLOWS
@@ -354,7 +454,7 @@ function routeIntent(intent) {
           matchedIntents.push(phrase);
           continue;
         }
-        const words = normalized.split(/\s+/).filter(Boolean);
+        const words = normalized.split(/\s+/).filter(word => word && !ROUTE_STOPWORDS.has(word));
         if (words.some(word => word.length >= 4 && text.indexOf(word) !== -1)) {
           score += 1;
           matchedIntents.push(phrase);
@@ -371,14 +471,44 @@ function routeIntent(intent) {
     score: 0,
     matchedIntents: [],
   };
+  const bestWorkflow = getWorkflowGuide(best.workflowId);
+  const ambiguous = candidates.length > 1 && candidates[0].score === candidates[1].score;
+  const fallbackChoices = [
+    {
+      label: "Check my design system",
+      workflowId: "health-check",
+      description: "Review tokens, semantic setup, contrast, and missing roles.",
+    },
+    {
+      label: "Build a token showcase",
+      workflowId: "build-showcase",
+      description: "Render the visual overview in Figma.",
+    },
+    {
+      label: "Export DESIGN.md",
+      workflowId: "export-design-md",
+      description: "Create a portable handoff for coding agents.",
+    },
+  ];
+  const selectionPrompt = best.workflowId === "start"
+    ? _selectionPrompt([], fallbackChoices)
+    : ambiguous
+      ? _selectionPrompt(candidates.map(candidate => {
+        const workflow = getWorkflowGuide(candidate.workflowId);
+        return { id: workflow.id, title: workflow.title, summary: workflow.summary };
+      }), fallbackChoices)
+      : null;
 
   return {
     intent: String(intent == null ? "" : intent),
-    workflow: getWorkflowGuide(best.workflowId),
+    workflow: bestWorkflow,
     candidates,
+    selectionPrompt,
+    designerResponse: selectionPrompt ? selectionPrompt.message : _workflowStartResponse(bestWorkflow),
+    hardRules: clone(DESIGNER_FLOW_HARD_RULES),
     message: best.workflowId === "start"
-      ? "I am not sure which Figlets workflow fits yet. Start with the capability menu and ask one plain-language question."
-      : `Recommended workflow: ${best.title}. Start read-only, summarize plainly, and ask before any Figma write.`,
+      ? "I am not sure which Figlets workflow fits yet. Use selectionPrompt if the host supports choices; otherwise ask with its message."
+      : `Recommended workflow: ${best.title}. Use Figlets workflow tools/scripts only, start read-only, summarize plainly, and ask before any Figma write.`,
   };
 }
 
@@ -433,26 +563,27 @@ function getStartGuide() {
     "Raw Figma console tools",
   ];
   const designerResponse = [
-    "Hi, I'm Figlets. I can help with your Figma design system in a few focused ways:",
+    "# Figlets",
+    "",
+    "A focused toolkit for checking, repairing, showcasing, documenting, and exporting Figma design systems.",
     "",
     "| What you can ask for | What I'll do |",
     "|---|---|",
   ].concat(capabilityMenu.map(item => `| ${item.label} | ${item.description} |`)).concat([
     "",
     "I'll inspect first, explain results in plain language, and ask before changing Figma.",
-    "",
-    "What would you like to do first?",
   ]).join("\n");
 
   return {
-    message: "Use designerResponse as the opening response. Do not broaden Figlets into generic Figma editing capabilities.",
+    message: "Use designerResponse only for generic help/start requests. If the designer already stated a concrete goal, call figlets_route_intent and figlets_workflow_guide, then use the routed designerResponse instead of showing the menu.",
     responseContract: {
       openingFormat: "capability-menu",
-      useVerbatimWhenPossible: "designerResponse",
+      useVerbatimWhenPossible: "designerResponse for generic help only; routed designerResponse for specific goals",
       doNotAddCapabilitiesOutside: "capabilityMenu",
       doNotOfferMenuItems: "forbiddenDesignerMenuItems",
+      designSystemReviewRule: "Use Figlets workflow tools/scripts only. Do not write custom scripts or inspect local snapshots/tool-results unless the designer explicitly asks to go out of bounds.",
       mode: "designer-facing",
-      nextAction: "Ask the designer which menu item or natural-language goal they want.",
+      nextAction: "For a concrete initial goal, route it before replying. For ambiguous routing, use selectionPrompt. For generic help, show designerResponse.",
     },
     designerIntro: designerResponse,
     designerResponse,
@@ -462,7 +593,10 @@ function getStartGuide() {
       "Inspection comes before mutation.",
       "Figma writes require explicit designer approval.",
       "The agent should summarize tool results in plain language instead of dumping JSON.",
+      "Design-system reviews, checks, audits, setup-gap investigations, and contrast investigations must use the Figlets workflow and the Figlets MCP tools/scripts named by figlets_workflow_guide.",
+      "Do not write custom scripts, inspect local snapshots or tool-results, read MCP transcript files, or use raw Figma APIs for designer-facing Figlets review unless the designer explicitly asks to go out of bounds.",
     ],
+    hardRules: clone(DESIGNER_FLOW_HARD_RULES),
     scope: {
       figletsDoes: [
         "Design-system setup, QA, repair, showcase, documentation, and DESIGN.md export workflows.",
@@ -498,6 +632,7 @@ function listWorkflows() {
 }
 
 module.exports = {
+  DESIGNER_FLOW_HARD_RULES,
   MUTATING_TOOLS,
   WORKFLOWS,
   getStartGuide,

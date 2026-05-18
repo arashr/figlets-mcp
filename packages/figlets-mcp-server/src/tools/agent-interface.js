@@ -72,6 +72,7 @@ function handleFigletsWorkflowGuide(args) {
     workflow,
     hardRules: DESIGNER_FLOW_HARD_RULES,
     availableWorkflows: listWorkflows().map(item => ({ id: item.id, title: item.title })),
+    presentationRule: "For inspect_ds_setup_gaps, prefer repairPlan.designerPresentation for the designer-facing response. Avoid technical verification matrices, JSON key inventories, and raw payload dumps unless the designer asks for exact details.",
     message: `Workflow guide: ${workflow.title}. Follow the steps in order, use the named Figlets tools/scripts only, use structured bulk repair payloads when Figlets provides them, summarize tool output in plain language, and ask for approval before any write step.`,
   };
 }

@@ -41,9 +41,13 @@ const DESIGNER_FLOW_HARD_RULES = {
   ],
   supportedBulkUpdateSurfaces: [
     "inspect_ds_setup_gaps.repairPlan.applyInput → apply_ds_setup_repairs for approved setup repairs, alias updates, and missing role creations",
+    "inspect_ds_setup_gaps.repairPlan.optionalApplyInput → apply_ds_setup_repairs for separately approved optional convention-level role creation",
+    "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "update_ds_primitives for config-backed primitive value and color-semantic alias updates",
     "qa_binding_audit({ fix: true }) for high-confidence binding fixes",
   ],
+  designerPresentationRule:
+    "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
   missingCapabilityResponse: "If the Figlets workflow output does not expose the needed planner or apply payload, say this is a Figlets product/tool gap or proposed Figlets bulk-update scope instead of inventing a script or saying the gaps cannot be fixed.",
 };
 
@@ -123,7 +127,7 @@ const WORKFLOWS = [
       {
         id: "approve-repairs",
         kind: "confirmation",
-        designerMessage: "If the QA found high-confidence setup gaps, I'll ask which exact structured repairs or bulk repair plan you want applied.",
+        designerMessage: "If the QA found setup gaps, I'll summarize them in designer-friendly language, separate required fixes from optional convention choices, and ask which exact repair payload you want applied.",
       },
       {
         id: "apply-approved-repairs",

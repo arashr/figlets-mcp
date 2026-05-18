@@ -57,6 +57,8 @@ try {
     assert.strictEqual(start.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(start.hardRules.bulkDesignSystemUpdatesAreInScope, true);
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_setup_repairs")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("optionalApplyInput")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("missingCapabilityNotes")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_primitives")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("qa_binding_audit")));
     assert.ok(start.hardRules.appliesTo.includes("design-system review"));
@@ -125,7 +127,7 @@ try {
     ]);
     assert.ok(guide.summary.includes("semantic setup"));
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
-    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("bulk repair plan")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("designer-friendly language")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("bulk-safe")));
     assert.ok(!guide.next.includes("setup-gap-qa"));
   }
@@ -136,11 +138,17 @@ try {
       DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("product/tool gap"),
       "hard rules should tell weaker agents not to invent a script when Figlets output is missing data"
     );
+    assert.ok(
+      DESIGNER_FLOW_HARD_RULES.designerPresentationRule.includes("repairPlan.designerPresentation"),
+      "hard rules should keep designer-facing summaries human-readable"
+    );
     const handled = handleFigletsWorkflowGuide({ workflow_id: "health-check" });
     assert.strictEqual(handled.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(handled.hardRules.bulkDesignSystemUpdatesAreInScope, true);
     assert.ok(handled.message.includes("use the named Figlets tools/scripts only"));
     assert.ok(handled.message.includes("structured bulk repair payloads"));
+    assert.ok(handled.presentationRule.includes("designerPresentation"));
+    assert.ok(handled.presentationRule.includes("Avoid technical verification matrices"));
   }
 
   {

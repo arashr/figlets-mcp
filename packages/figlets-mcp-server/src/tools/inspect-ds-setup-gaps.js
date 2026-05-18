@@ -228,6 +228,7 @@ function _semanticContextFromConfig(ds) {
   const pairIconByBg = new Map();
   const pairBorderByBg = new Map();
   const unpairedTokens = new Set();
+  const unpairedRows = [];
   if (Array.isArray(semantics.pairs)) {
     for (const pair of semantics.pairs) {
       if (pair && pair.bg && pair.text) pairTextByBg.set(pair.bg, pair.text);
@@ -237,10 +238,13 @@ function _semanticContextFromConfig(ds) {
   }
   if (Array.isArray(semantics.unpaired)) {
     for (const item of semantics.unpaired) {
-      if (item && item.token) unpairedTokens.add(item.token);
+      if (item && item.token) {
+        unpairedTokens.add(item.token);
+        unpairedRows.push(item);
+      }
     }
   }
-  return { pairTextByBg, pairIconByBg, pairBorderByBg, unpairedTokens };
+  return { pairTextByBg, pairIconByBg, pairBorderByBg, unpairedTokens, unpairedRows };
 }
 
 // Pick fg target families in priority order. Preserves the existing convention
@@ -319,10 +323,28 @@ function _semanticConventionNames(colorVars, collections, existingDs) {
     }
   }
 
+  const configNames = [];
+  const semantics = existingDs && existingDs.color && existingDs.color.semantics
+    ? existingDs.color.semantics
+    : {};
+  if (Array.isArray(semantics.pairs)) {
+    for (const pair of semantics.pairs) {
+      if (pair && pair.bg) configNames.push(pair.bg);
+      if (pair && pair.text) configNames.push(pair.text);
+      if (pair && pair.icon) configNames.push(pair.icon);
+      if (pair && pair.border) configNames.push(pair.border);
+    }
+  }
+  if (Array.isArray(semantics.unpaired)) {
+    for (const item of semantics.unpaired) {
+      if (item && item.token) configNames.push(item.token);
+    }
+  }
+
   const fallback = colorVars
     .map(v => v.name)
     .filter(name => _isSemanticColorName(name));
-  if (!selected.length) return fallback;
+  if (!selected.length) return fallback.concat(configNames);
 
   const selectedIds = new Set(selected.map(collection => collection && collection.id).filter(Boolean));
   const names = colorVars
@@ -333,7 +355,7 @@ function _semanticConventionNames(colorVars, collections, existingDs) {
     })
     .map(variable => variable.name);
 
-  return names.length ? names : fallback;
+  return names.length ? names.concat(configNames) : fallback.concat(configNames);
 }
 
 function _modeNameFor(collection, modeId) {
@@ -498,6 +520,7 @@ function _modeTargetStepForRole(role, modeName, bgRgb) {
   const mode = _norm(modeName);
   if (role === "border") return mode === "dark" ? 800 : 200;
   if (role === "icon") return _luminance(bgRgb) >= 0.35 ? 700 : 300;
+  if (role === "focus-border") return mode === "dark" ? 400 : 500;
   return null;
 }
 
@@ -648,6 +671,162 @@ function _planMissingRoleRepair(finding, byName, colorVars, varsById, collection
   return repair;
 }
 
+function _cleanConfigAliases(row) {
+  const aliases = {};
+  if (!row || typeof row !== "object") return aliases;
+  for (const key of Object.keys(row)) {
+    if (key === "token") continue;
+    const value = row[key];
+    if (typeof value === "string" && /^color\//.test(value)) aliases[key] = value;
+  }
+  return aliases;
+}
+
+function _foundationNameForRole(finding, preferredFamilies) {
+  if (!finding || !Array.isArray(finding.suggestedNames)) return null;
+  const preferred = preferredFamilies && preferredFamilies.border ? preferredFamilies.border : "border";
+  const exact = finding.suggestedNames.find(name => {
+    const parts = String(name || "").split("/");
+    return parts.some(part => _norm(part) === preferred);
+  });
+  return exact || finding.suggestedNames[0] || null;
+}
+
+function _findDefaultBackground(byName) {
+  for (const family of ["surface", "bg", "background"]) {
+    const name = `color/${family}/default`;
+    if (byName.has(name)) return byName.get(name);
+  }
+  return null;
+}
+
+function _primitiveByName(colorVars) {
+  const out = new Map();
+  for (const variable of colorVars) {
+    if (_primitiveInfo(variable && variable.name)) out.set(variable.name, variable);
+  }
+  return out;
+}
+
+function _focusConfigRow(focusName, semanticContext) {
+  const rows = semanticContext && Array.isArray(semanticContext.unpairedRows)
+    ? semanticContext.unpairedRows
+    : [];
+  for (const row of rows) {
+    if (row && row.token === focusName) return row;
+  }
+  return null;
+}
+
+function _focusContrastForAliases(focusName, aliases, bgVar, byName, colorVars, varsById, collections) {
+  if (!bgVar) return null;
+  const coll = _collectionFor(bgVar, collections);
+  if (!coll || !Array.isArray(coll.modes) || !coll.modes.length) return null;
+  const primitives = _primitiveByName(colorVars);
+  const contrast = {};
+  for (const mode of coll.modes) {
+    const modeName = mode.name || mode.modeId;
+    const aliasName = aliases[modeName];
+    if (!aliasName) return null;
+    const aliasVar = byName.get(aliasName) || primitives.get(aliasName);
+    if (!aliasVar) return null;
+    const bgTerm = _resolveTerminalByModeName(bgVar, mode.name, varsById, collections);
+    const aliasTerm = _resolveTerminalByModeName(aliasVar, mode.name, varsById, collections);
+    if (!bgTerm || !bgTerm.rgb || !aliasTerm || !aliasTerm.rgb) return null;
+    const ratio = _wcagRatio(bgTerm.rgb, aliasTerm.rgb);
+    if (ratio < _WCAG_ICON_THRESHOLD) return null;
+    contrast[modeName] = {
+      background: bgVar.name,
+      backgroundAlias: bgTerm.name,
+      backgroundHex: _hex(bgTerm.rgb),
+      alias: aliasName,
+      aliasHex: _hex(aliasTerm.rgb),
+      wcagRatio: Math.round(ratio * 10) / 10,
+      threshold: _WCAG_ICON_THRESHOLD,
+      pass: true,
+    };
+  }
+  return contrast;
+}
+
+function _planFoundationRoleRepair(finding, byName, colorVars, varsById, collections, semanticContext, preferredFamilies) {
+  if (!finding || finding.role !== "focus-border") return null;
+  const name = _foundationNameForRole(finding, preferredFamilies);
+  if (!name) return null;
+
+  const bgVar = _findDefaultBackground(byName);
+  const configRow = _focusConfigRow(name, semanticContext);
+  if (configRow) {
+    const aliases = _cleanConfigAliases(configRow);
+    if (!Object.keys(aliases).length) return null;
+    const contrast = _focusContrastForAliases(name, aliases, bgVar, byName, colorVars, varsById, collections);
+    if (bgVar && !contrast) return null;
+    const repair = {
+      name,
+      role: "focus-border",
+      aliases,
+      source: "config",
+      basis: "config-focus-role",
+      reason: bgVar
+        ? "Focus border aliases come from the active config and were checked against the default surface/background."
+        : "Focus border aliases come from the active config; no default surface/background was available for contrast verification.",
+    };
+    if (contrast) repair.contrast = contrast;
+    return repair;
+  }
+
+  if (!bgVar) return null;
+  const coll = _collectionFor(bgVar, collections);
+  if (!coll || !Array.isArray(coll.modes) || !coll.modes.length) return null;
+
+  const aliases = {};
+  const contrast = {};
+  for (const mode of coll.modes) {
+    const bgTerm = _resolveTerminalByModeName(bgVar, mode.name, varsById, collections);
+    if (!bgTerm || !bgTerm.rgb) return null;
+    const targetStep = _modeTargetStepForRole("focus-border", mode.name, bgTerm.rgb);
+    if (!targetStep) return null;
+    let candidate = null;
+    for (const ramp of ["brand", "primary", "accent", "blue"]) {
+      candidate = _nearestAccessiblePrimitiveOnRamp(
+        colorVars,
+        ramp,
+        targetStep,
+        bgTerm.rgb,
+        varsById,
+        collections,
+        mode.name,
+        _WCAG_ICON_THRESHOLD
+      );
+      if (candidate) break;
+    }
+    if (!candidate) return null;
+    const modeName = mode.name || mode.modeId;
+    aliases[modeName] = candidate.name;
+    contrast[modeName] = {
+      background: bgVar.name,
+      backgroundAlias: bgTerm.name,
+      backgroundHex: _hex(bgTerm.rgb),
+      alias: candidate.name,
+      aliasHex: _hex(candidate.rgb),
+      wcagRatio: Math.round(candidate.ratio * 10) / 10,
+      threshold: _WCAG_ICON_THRESHOLD,
+      pass: true,
+    };
+  }
+
+  if (!Object.keys(aliases).length) return null;
+  return {
+    name,
+    role: "focus-border",
+    aliases,
+    source: bgVar.name,
+    basis: "default-background-ramp",
+    reason: "Focus border aliases were selected from brand/primary/accent/blue ramps and checked against the default surface/background.",
+    contrast,
+  };
+}
+
 function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   const variables = Array.isArray(figmaData.variables) ? figmaData.variables : [];
   const collections = Array.isArray(figmaData.collections) ? figmaData.collections : [];
@@ -725,7 +904,9 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       kind: "missing-background-for-foreground",
       fg: variable.name,
       expectedBg,
-      reason: "Foreground (on-*) semantic token has no matching background.",
+      confidence: "high",
+      agentAction: "ask-designer",
+      reason: "Foreground (on-*) semantic token has no matching background. Figlets does not infer background aliases from foreground/icon/border roles; ask the designer what surface this role belongs on.",
     });
   }
   missingBackgrounds.sort((left, right) => left.fg.localeCompare(right.fg));
@@ -989,6 +1170,18 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     border: _preferredFamilyForRole(semanticConventionNames, _BORDER_FAMILIES, "border"),
     icon: _preferredFamilyForRole(semanticConventionNames, _ICON_FAMILIES, "icon"),
   };
+  for (const finding of foundationRoleFindings) {
+    const planned = _planFoundationRoleRepair(
+      finding,
+      byName,
+      colorVars,
+      varsById,
+      collections,
+      semanticContext,
+      preferredFamilies
+    );
+    if (planned) finding.plannedRoleRepair = planned;
+  }
   for (const cluster of semanticFamilies) {
     const hasBg = cluster.roles.background.length > 0;
     const hasFg = cluster.roles.foreground.length > 0;
@@ -1055,9 +1248,47 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const planned = _planMissingRoleRepair(finding, byName, colorVars, varsById, collections);
     if (planned) finding.plannedRoleRepair = planned;
   }
+  const optionalSemanticRoleFindings = [];
+  if (suppressedRoleNames.has("border")) {
+    const reported = new Set(missingSemanticRoles.map(gap => `${gap.family}:${gap.missingRole}`));
+    for (const cluster of semanticFamilies) {
+      const hasBg = cluster.roles.background.length > 0;
+      const hasFg = cluster.roles.foreground.length > 0;
+      const hasBorder = cluster.roles.border.length > 0;
+      const evidenceCount = _roleEvidence(cluster).length;
+      const example = (cluster.roles.background[0] || cluster.roles.foreground[0] || cluster.roles.icon[0] || cluster.roles.border[0]);
+      const backgroundConfiguredInCluster = cluster.roles.background.some(name => {
+        const configuredText = semanticContext.pairTextByBg.get(name);
+        return configuredText && cluster.roles.foreground.indexOf(configuredText) !== -1;
+      });
+      const hasPairContext = semanticContext.pairTextByBg.size > 0;
+      if (!hasBg || !hasFg || hasBorder || evidenceCount < 2) continue;
+      if (hasPairContext && !backgroundConfiguredInCluster) continue;
+      if (reported.has(`${cluster.family}:border`)) continue;
+      const finding = _missingRoleFinding(
+        cluster,
+        "border",
+        example,
+        "medium",
+        "This design system appears to omit passive border/outline/stroke roles by convention; Figlets can bulk-create them if the designer wants that convention.",
+        preferredFamilies
+      );
+      finding.optional = true;
+      finding.repairTier = "optional";
+      finding.agentAction = "optional-ask-designer";
+      const planned = _planMissingRoleRepair(finding, byName, colorVars, varsById, collections);
+      if (planned) finding.plannedRoleRepair = planned;
+      optionalSemanticRoleFindings.push(finding);
+    }
+  }
+  optionalSemanticRoleFindings.sort((a, b) =>
+    a.family.localeCompare(b.family) || a.missingRole.localeCompare(b.missingRole)
+  );
   missingSemanticRoles.sort((a, b) => {
     const order = { high: 0, medium: 1, low: 2 };
-    return (order[a.confidence] ?? 9) - (order[b.confidence] ?? 9)
+    const leftOrder = Object.prototype.hasOwnProperty.call(order, a.confidence) ? order[a.confidence] : 9;
+    const rightOrder = Object.prototype.hasOwnProperty.call(order, b.confidence) ? order[b.confidence] : 9;
+    return leftOrder - rightOrder
       || a.family.localeCompare(b.family)
       || a.missingRole.localeCompare(b.missingRole);
   });
@@ -1089,6 +1320,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     iconContrastFailures,
     brokenAliases,
     foundationRoleFindings,
+    optionalSemanticRoleFindings,
     companionAdvisories,
     suppressedAdvisoryRoles: suppressedRoles,
     contrastAlgorithm: algorithm,
@@ -1101,6 +1333,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       highConfidenceIssues,
       iconContrastFailures: iconContrastFailures.slice(0, 8),
       highConfidenceMissingRoles: missingSemanticRoles.filter(gap => gap.confidence === "high").slice(0, 8),
+      optionalRoleRepairs: optionalSemanticRoleFindings.filter(gap => gap.plannedRoleRepair).slice(0, 8),
     },
     summary: {
       missingSemanticRoleCount: missingSemanticRoles.length,
@@ -1118,6 +1351,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       foundationRoleFindingCount: foundationRoleFindings.length,
       companionAdvisoryCount: companionAdvisories.length,
       suppressedAdvisoryRoleCount: suppressedRoles.length,
+      optionalSemanticRoleRepairCount: optionalSemanticRoleFindings.filter(gap => gap.plannedRoleRepair).length,
     },
   };
 }
@@ -1270,6 +1504,7 @@ function handleInspectDsSetupGaps(input = {}) {
     incompleteModes: result.incompleteModes,
     brokenAliases: result.brokenAliases,
     foundationRoleFindings: result.foundationRoleFindings,
+    optionalSemanticRoleFindings: result.optionalSemanticRoleFindings,
     companionAdvisories: result.companionAdvisories,
     suppressedAdvisoryRoles: result.suppressedAdvisoryRoles,
     semanticFamilies: result.semanticFamilies,
@@ -1282,8 +1517,10 @@ function _buildRepairPlan(result) {
   const repairs = [];
   const aliasUpdates = [];
   const roleRepairs = [];
+  const optionalRoleRepairs = [];
   const seenAlias = new Set();
   const seenRole = new Set();
+  const seenOptionalRole = new Set();
 
   for (const gap of result.semanticGaps || []) {
     if (gap.status !== "proposed" || !gap.source || !gap.plannedAliases) continue;
@@ -1324,24 +1561,188 @@ function _buildRepairPlan(result) {
       aliases: repair.aliases,
     });
   }
+  for (const gap of result.missingSemanticRoles || []) {
+    if (gap.confidence === "high" || gap.missingRole !== "border" || !gap.plannedRoleRepair) continue;
+    const repair = gap.plannedRoleRepair;
+    if (!repair.name || !repair.role || !repair.aliases) continue;
+    if (seenRole.has(repair.name) || seenOptionalRole.has(repair.name)) continue;
+    seenOptionalRole.add(repair.name);
+    optionalRoleRepairs.push({
+      name: repair.name,
+      role: repair.role,
+      aliases: repair.aliases,
+    });
+  }
+  for (const finding of result.foundationRoleFindings || []) {
+    if (finding.confidence !== "high" || !finding.plannedRoleRepair) continue;
+    const repair = finding.plannedRoleRepair;
+    if (!repair.name || !repair.role || !repair.aliases) continue;
+    if (seenRole.has(repair.name)) continue;
+    seenRole.add(repair.name);
+    roleRepairs.push({
+      name: repair.name,
+      role: repair.role,
+      aliases: repair.aliases,
+    });
+  }
+  for (const gap of result.optionalSemanticRoleFindings || []) {
+    if (!gap.plannedRoleRepair) continue;
+    const repair = gap.plannedRoleRepair;
+    if (!repair.name || !repair.role || !repair.aliases) continue;
+    if (seenRole.has(repair.name) || seenOptionalRole.has(repair.name)) continue;
+    seenOptionalRole.add(repair.name);
+    optionalRoleRepairs.push({
+      name: repair.name,
+      role: repair.role,
+      aliases: repair.aliases,
+    });
+  }
 
   const total = repairs.length + aliasUpdates.length + roleRepairs.length;
+  const optionalTotal = optionalRoleRepairs.length;
+  const missingCapabilityNotes = [];
+  for (const item of result.missingBackgrounds || []) {
+    missingCapabilityNotes.push({
+      kind: "missing-background",
+      token: item.fg,
+      expectedBg: item.expectedBg,
+      reason: "Figlets found a foreground without a matching background, but background aliases are ambiguous and are not inferred from foreground/icon/border usage.",
+      agentAction: "ask-designer",
+    });
+  }
+  for (const gap of result.missingSemanticRoles || []) {
+    if (gap.missingRole !== "background") continue;
+    missingCapabilityNotes.push({
+      kind: "missing-background",
+      family: gap.family,
+      suggestedName: gap.suggestedName,
+      evidence: gap.evidence,
+      reason: "Figlets found semantic roles without a background, but does not bulk-create missing backgrounds unless a future config-backed planner provides explicit aliases.",
+      agentAction: "ask-designer",
+    });
+  }
+  const designerPresentation = _buildDesignerPresentation({
+    total,
+    optionalTotal,
+    repairs,
+    aliasUpdates,
+    roleRepairs,
+    optionalRoleRepairs,
+    missingCapabilityNotes,
+    result,
+  });
   return {
     tool: "apply_ds_setup_repairs",
     approvalRequired: true,
     applyInput: { repairs, aliasUpdates, roleRepairs },
+    optionalApplyInput: { repairs: [], aliasUpdates: [], roleRepairs: optionalRoleRepairs },
     counts: {
       repairs: repairs.length,
       aliasUpdates: aliasUpdates.length,
       roleRepairs: roleRepairs.length,
+      optionalRoleRepairs: optionalRoleRepairs.length,
       total,
+      optionalTotal,
     },
     designerSummary: total
       ? `Figlets has ${total} accessibility-checked structured repair suggestion${total === 1 ? "" : "s"} ready for designer approval.`
       : "Figlets has no deterministic repair payload for the current QA findings.",
+    optionalDesignerSummary: optionalTotal
+      ? `Figlets also has ${optionalTotal} optional passive border/outline/stroke role creation${optionalTotal === 1 ? "" : "s"} available if the designer wants that convention.`
+      : "No optional convention-level bulk repairs are available.",
+    missingCapabilityNotes,
+    designerPresentation,
     agentInstruction: total
-      ? "Show these exact repairs in plain language and ask the designer which to apply. If approved, pass repairPlan.applyInput to apply_ds_setup_repairs; do not parse local tool-results files."
-      : "Do not invent repairs or parse local tool-results files. Explain which findings need a product/tooling follow-up or designer decision.",
+      ? "Show these exact repairs in plain language and ask the designer which to apply. If approved, pass repairPlan.applyInput to apply_ds_setup_repairs; do not parse local tool-results files. Optional convention-level repairs in repairPlan.optionalApplyInput require separate designer approval before applying. Do not infer or create missing backgrounds unless Figlets provides an explicit background repair payload."
+      : optionalTotal
+        ? "Do not treat optional convention-level repairs as health-check failures. Explain repairPlan.optionalApplyInput in plain language, ask whether the designer wants those roles created, and only pass that payload to apply_ds_setup_repairs after explicit approval. Do not infer or create missing backgrounds unless Figlets provides an explicit background repair payload."
+        : "Do not invent repairs or parse local tool-results files. Explain which findings need a product/tooling follow-up or designer decision, especially missing backgrounds with no explicit repair payload.",
+  };
+}
+
+function _plainRoleList(items) {
+  return (items || []).slice(0, 6).map(item => item.name).filter(Boolean);
+}
+
+function _buildDesignerPresentation(context) {
+  const result = context.result || {};
+  const summary = result.summary || {};
+  const lines = [];
+  const sections = [];
+
+  if (context.total > 0) {
+    const roleNames = _plainRoleList(context.roleRepairs);
+    lines.push(`I found ${context.total} safe repair${context.total === 1 ? "" : "s"} Figlets can apply after you approve.`);
+    if (roleNames.length) {
+      sections.push({
+        title: "Ready to fix",
+        message: `Figlets can create or update these semantic roles: ${roleNames.join(", ")}${context.roleRepairs.length > roleNames.length ? ", and more" : ""}.`,
+      });
+    }
+    if ((context.aliasUpdates || []).length) {
+      sections.push({
+        title: "Contrast aliases",
+        message: `Figlets can update ${(context.aliasUpdates || []).length} alias${context.aliasUpdates.length === 1 ? "" : "es"} that failed contrast checks.`,
+      });
+    }
+  } else {
+    lines.push("I do not see any required one-click setup repairs for Figlets to apply right now.");
+  }
+
+  if (context.optionalTotal > 0) {
+    const optionalNames = _plainRoleList(context.optionalRoleRepairs);
+    lines.push(`There ${context.optionalTotal === 1 ? "is" : "are"} also ${context.optionalTotal} optional passive border/outline/stroke role${context.optionalTotal === 1 ? "" : "s"} Figlets can create if you want that convention.`);
+    sections.push({
+      title: "Optional convention",
+      message: `These are not health-check failures. They are available as an optional bulk setup choice${optionalNames.length ? `: ${optionalNames.join(", ")}${context.optionalRoleRepairs.length > optionalNames.length ? ", and more" : ""}.` : "."}`,
+    });
+  }
+
+  if ((context.missingCapabilityNotes || []).length) {
+    const missingBg = context.missingCapabilityNotes.filter(note => note.kind === "missing-background");
+    if (missingBg.length) {
+      lines.push(`${missingBg.length} background role${missingBg.length === 1 ? " needs" : "s need"} your design decision before Figlets can create anything.`);
+      sections.push({
+        title: "Needs your call",
+        message: "Figlets found foreground/icon/border roles without a paired background. It will not guess those background aliases from usage.",
+      });
+    }
+  }
+
+  if (!context.total && !context.optionalTotal && !(context.missingCapabilityNotes || []).length) {
+    lines[0] = "The semantic color setup looks clean from this QA pass.";
+  }
+
+  return {
+    audience: "designer",
+    tone: "plain-language",
+    sayToDesigner: lines,
+    sections,
+    approvalPrompt: context.total > 0
+      ? "Do you want me to apply the ready-to-fix payload now?"
+      : context.optionalTotal > 0
+        ? "Do you want Figlets to create the optional passive border/outline/stroke roles?"
+        : null,
+    avoid: [
+      "Do not present this as a verification checklist.",
+      "Do not dump repairPlan JSON unless the designer asks for exact payload details.",
+      "Do not describe absent optional payloads as failures.",
+    ],
+    sourceFields: [
+      "repairPlan.applyInput",
+      "repairPlan.optionalApplyInput",
+      "repairPlan.missingCapabilityNotes",
+    ],
+    summaryCounts: {
+      readyRepairs: context.total,
+      optionalRepairs: context.optionalTotal,
+      missingBackgroundDecisions: (context.missingCapabilityNotes || []).filter(note => note.kind === "missing-background").length,
+      findings: {
+        missingBackgrounds: summary.missingBackgroundCount || 0,
+        semanticRoleGaps: summary.missingSemanticRoleCount || 0,
+        iconContrastFailures: summary.iconContrastFailureCount || 0,
+      },
+    },
   };
 }
 

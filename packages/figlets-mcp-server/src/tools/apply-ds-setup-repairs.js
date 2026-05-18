@@ -11,7 +11,7 @@ const {
 const applyDsSetupRepairsTool = {
   name: "apply_ds_setup_repairs",
   description:
-    "Apply designer-approved setup changes to Figma. Repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode; `roleRepairs` creates approved missing border/icon semantic role variables. Updates the file-scoped config only after Figma succeeds.",
+    "Apply designer-approved setup changes to Figma. Repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode; `roleRepairs` creates approved missing border/icon/focus-border semantic role variables. Updates the file-scoped config only after Figma succeeds.",
   inputSchema: {
     type: "object",
     properties: {
@@ -59,8 +59,8 @@ const applyDsSetupRepairsTool = {
         items: {
           type: "object",
           properties: {
-            name: { type: "string", description: "Semantic role variable to create, e.g. color/border/info or color/icon/success." },
-            role: { type: "string", description: "Role type, usually border or icon." },
+            name: { type: "string", description: "Semantic role variable to create, e.g. color/border/info, color/icon/success, or color/outline/focus." },
+            role: { type: "string", description: "Role type, usually border, icon, or focus-border." },
             aliases: {
               type: "object",
               description: "Per-mode primitive variable names approved by the designer.",
@@ -73,7 +73,7 @@ const applyDsSetupRepairsTool = {
           },
           required: ["name", "role", "aliases"]
         },
-        description: "Designer-approved missing border/icon semantic role variables. Does not run unless the designer explicitly approves these role repairs."
+        description: "Designer-approved missing border/icon/focus-border semantic role variables. Does not run unless the designer explicitly approves these role repairs."
       },
       config_path: {
         type: "string",

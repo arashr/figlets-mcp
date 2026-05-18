@@ -2,14 +2,19 @@
 
 ## Status
 
-Planning artifact for the next implementation pass. This document is intentionally explicit so a less capable agent can implement the feature from 0 to 1 without inventing new product rules.
+Planning artifact and roadmap for bulk-repair API work. This document is intentionally explicit so a less capable agent can continue the feature without inventing new product rules.
 
-Current baseline for this plan:
+Current status as of 2026-05-18:
 
 - Branch: `main`
-- Latest committed baseline before this thread: `2d899da Harden Figlets designer review workflow`
-- In-progress local work already teaches agents that structured bulk updates are Figlets scope.
-- In-progress local work already promotes missing `color/icon/<family>` roles into approval-ready `inspect_ds_setup_gaps.repairPlan.applyInput.roleRepairs` when Figlets can derive accessible aliases.
+- Latest checkpoint before the current commit: color semantic bulk repair planner implemented through Phase 2.
+- Phase 0 is complete: agents are taught that structured bulk updates are Figlets scope and missing planner/apply surfaces are product gaps.
+- Phase 1A is complete: missing icon roles for complete bg+foreground families can become apply-ready when Figlets derives accessible aliases.
+- Phase 1B is complete: passive border/outline/stroke repairs are exposed through `repairPlan.optionalApplyInput` when optional, including DS-wide suppressed cases and single advisory planned repairs.
+- Phase 1C is complete: missing focus-border foundation roles become apply-ready only when safe aliases can be derived or config provides aliases.
+- Phase 1D is complete: missing backgrounds remain designer decisions and are surfaced in `missingCapabilityNotes`, not apply payloads.
+- Phase 2 is complete for `inspect_ds_setup_gaps`: `repairPlan` has stable required, optional, missing-capability, and designer-presentation channels.
+- Latest verification before commit: `npm test` passed 62/62 and `git diff --check` was clean.
 
 Do not treat this document as a public designer guide. It is an internal implementation plan.
 
@@ -47,8 +52,8 @@ Use this table before adding anything new.
 
 | Surface | Current job | Mutates Figma | Current limits |
 |---|---|---:|---|
-| `inspect_ds_setup_gaps` | Read-only semantic color setup QA, contrast QA, missing role planning, and `repairPlan.applyInput` generation | No | Focused on color semantics. Does not cover typography, spacing, radius, border-width, or elevation completeness. |
-| `apply_ds_setup_repairs` | Applies approved missing foreground repairs, alias updates, and missing color role creations | Yes | Color-only. Current schema describes border/icon roles, though the implementation can create any approved color role with aliases. |
+| `inspect_ds_setup_gaps` | Read-only semantic color setup QA, contrast QA, missing role planning, standardized `repairPlan.applyInput`, `repairPlan.optionalApplyInput`, `repairPlan.missingCapabilityNotes`, and `repairPlan.designerPresentation` generation | No | Focused on color semantics. Does not cover typography, spacing, radius, border-width, or elevation completeness. |
+| `apply_ds_setup_repairs` | Applies approved missing foreground repairs, alias updates, and missing color role creations including icon, passive border/outline/stroke, and focus-border roles | Yes | Color-only. It applies explicit approved payloads and does not independently discover or plan repairs. |
 | `update_ds_primitives` | Updates config-backed primitive color and primitive spacing values, and color semantic aliases, preserving variable IDs | Yes | Name is narrow and implementation assumes primitive collection except `color-semantics`. It does not handle typography, semantic spacing/radius/border-width, or elevation. |
 | `qa_binding_audit` | Audits selected/page nodes for raw unbound values and can fix high-confidence bindings | Optional | Binds to existing variables/styles only. It does not create missing tokens. Typography suggestions are conservative and may not be fixed automatically. |
 | `apply_ds_setup` | Creates or merges the configured design-system collections and styles | Yes | Broad setup tool, not a narrow repair planner. It has no dry-run merge-only contract. Use carefully after designer approval. |
@@ -57,7 +62,17 @@ Use this table before adding anything new.
 
 Implement in these slices. Do not jump to the non-color token system before finishing the color-role repair slice, because that is the direct class of bug the user saw.
 
-### Phase 0 - Make Existing Bulk Capacity Hard To Miss
+Current roadmap:
+
+1. **Done:** Phase 0 through Phase 2 for color semantic setup repairs.
+2. **Next:** Phase 3A - add a read-only `inspect_ds_token_gaps` planner for config-backed non-color token gaps.
+3. **Then:** Phase 3B - add `update_ds_tokens` dry-run preview for the first supported categories.
+4. **Then:** Phase 3C - add approved apply support in the bridge/plugin for those categories.
+5. **Later:** Expand category support beyond the first safe subset and decide whether `update_ds_primitives` becomes a compatibility wrapper.
+
+For Phase 3, start with read-only planning and missing-capability reporting. Do not begin by creating broad mutation support.
+
+### Phase 0 - Make Existing Bulk Capacity Hard To Miss (Done)
 
 Goal: Less capable agents should understand what Figlets can already do before any new runtime capability lands.
 
@@ -107,7 +122,7 @@ node tests/plugins/codex-plugin.test.js
 git diff --check
 ```
 
-### Phase 1 - Finish Color Semantic Bulk Repairs
+### Phase 1 - Finish Color Semantic Bulk Repairs (Done)
 
 Goal: Color semantic gaps should not dead-end when Figlets can safely plan the repair.
 
@@ -123,7 +138,7 @@ Relevant files:
 - `tests/server/apply-ds-setup-repairs-tool.test.js`
 - `tests/server/check-setup-gaps-cli.test.js`
 
-#### Phase 1A - Keep Icon Role Repairs Stable
+#### Phase 1A - Keep Icon Role Repairs Stable (Done)
 
 This is already in progress. Do not regress it.
 
@@ -151,7 +166,7 @@ Required tests:
 - Inaccessible icon aliases remain findings but are not apply-ready.
 - `repairPlan.applyInput.roleRepairs` includes all high-confidence planned icon repairs.
 
-#### Phase 1B - Expose Optional DS-Wide Border/Outline/Stroke Bulk Creation
+#### Phase 1B - Expose Optional DS-Wide Border/Outline/Stroke Bulk Creation (Done)
 
 Problem:
 
@@ -218,7 +233,9 @@ Required tests:
 - Optional role aliases use passive ramp steps and do not include contrast metadata.
 - Agents are instructed to ask a designer before applying `optionalApplyInput`.
 
-#### Phase 1C - Add Apply-Ready Focus Border Repairs When Safe
+Implemented note: optional passive role repairs now cover both DS-wide suppressed passive absence and single advisory passive `plannedRoleRepair` cases. This prevents agents from hand-assembling role repairs from nested findings.
+
+#### Phase 1C - Add Apply-Ready Focus Border Repairs When Safe (Done)
 
 Problem:
 
@@ -272,7 +289,9 @@ Required tests:
 - If no safe ramp or background exists, the finding remains high-confidence but has no apply payload.
 - Naming convention is preserved: `color/outline/focus` for outline systems, `color/stroke/focus` for stroke systems, `color/border/focus` otherwise.
 
-#### Phase 1D - Keep Missing Backgrounds Conservative
+Implemented note: config-backed focus aliases are cleaned before they enter apply payloads, so descriptive fields like `note` do not leak into `aliases`.
+
+#### Phase 1D - Keep Missing Backgrounds Conservative (Done)
 
 Problem:
 
@@ -289,7 +308,7 @@ Required tests:
 - Missing background findings never produce `plannedRoleRepair` without explicit config evidence.
 - `repairPlan.agentInstruction` tells agents not to invent repairs when no payload exists.
 
-### Phase 2 - Standardize Repair Plan Shape
+### Phase 2 - Standardize Repair Plan Shape (Done For `inspect_ds_setup_gaps`)
 
 Goal: Every read-only planner should make it obvious what is ready to apply, what is optional, and what remains a product gap.
 
@@ -344,7 +363,16 @@ Tests:
 - `repairPlan.optionalApplyInput` is always present once this phase lands.
 - Empty plans still tell agents not to invent repairs.
 
-### Phase 3 - Add Config-Backed Token Completion For Non-Color Tokens
+Implemented note: `repairPlan.designerPresentation` was added as an extra designer-facing shape beyond the original Phase 2 contract. Agents should prefer it for summaries and avoid technical verification matrices unless the designer asks for exact details.
+
+### Phase 3 - Add Config-Backed Token Completion For Non-Color Tokens (Next)
+
+Recommended checkpointing:
+
+- **Phase 3A:** Add read-only `inspect_ds_token_gaps` with stable planner output and no bridge writes.
+- **Phase 3B:** Add `update_ds_tokens({ dry_run: true })` preview for a small supported category set.
+- **Phase 3C:** Add approved apply support for those categories through the bridge.
+- **Phase 3D:** Expand supported categories and decide the compatibility relationship with `update_ds_primitives`.
 
 Goal: If the active config defines tokens or styles that are missing from Figma, Figlets should expose a read-only plan and an approved apply path for creating/updating them.
 
@@ -735,4 +763,3 @@ The implementation is done when:
 - Do not auto-apply optional border/outline/stroke conventions as health-check fixes.
 - Do not hide long apply payloads only in nested arrays; keep agent-actionable payloads near the top.
 - Do not weaken designer approval boundaries to make tests easier.
-

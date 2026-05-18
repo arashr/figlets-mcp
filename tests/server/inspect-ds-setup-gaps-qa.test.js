@@ -70,6 +70,35 @@ const figmaData = {
 };
 
 module.exports = (() => {
+  {
+    const emptyResult = inspectDsSetupGapsFromFigmaData({ variables: [], collections: [] });
+    const emptyPlan = _buildRepairPlan(emptyResult);
+    assert.deepStrictEqual(
+      Object.keys(emptyPlan).slice(0, 6),
+      ["tool", "approvalRequired", "applyInput", "optionalApplyInput", "counts", "designerSummary"],
+      "repairPlan should keep apply-ready fields before explanatory text"
+    );
+    assert.deepStrictEqual(emptyPlan.applyInput, { repairs: [], aliasUpdates: [], roleRepairs: [] });
+    assert.deepStrictEqual(emptyPlan.optionalApplyInput, { repairs: [], aliasUpdates: [], roleRepairs: [] });
+    assert.deepStrictEqual(emptyPlan.counts, {
+      repairs: 0,
+      aliasUpdates: 0,
+      roleRepairs: 0,
+      optionalRoleRepairs: 0,
+      total: 0,
+      optionalTotal: 0,
+    });
+    assert.deepStrictEqual(emptyPlan.missingCapabilityNotes, []);
+    assert.ok(
+      emptyPlan.agentInstruction.includes("Do not invent repairs"),
+      "empty repair plans should explicitly tell agents not to invent repairs"
+    );
+    assert.ok(
+      emptyPlan.designerPresentation.sayToDesigner[0].includes("semantic color setup looks clean"),
+      "empty repair plans should still include a designer-facing presentation"
+    );
+  }
+
   const result = inspectDsSetupGapsFromFigmaData(figmaData);
 
   // ── Contrast failure: surface/danger Light pair fails WCAG ──
@@ -120,6 +149,34 @@ module.exports = (() => {
   const orphan = result.missingBackgrounds.find(m => m.fg === "color/on-surface/info");
   assert.ok(orphan, "on-surface/info should be reported as missing its surface");
   assert.strictEqual(orphan.expectedBg, "color/surface/info");
+  assert.strictEqual(orphan.agentAction, "ask-designer");
+  assert.ok(
+    orphan.reason.includes("does not infer background aliases"),
+    "missing background findings should tell agents not to infer aliases from foreground usage"
+  );
+  const planWithMissingBg = _buildRepairPlan(result);
+  assert.ok(
+    planWithMissingBg.missingCapabilityNotes.some(note =>
+      note.kind === "missing-background" &&
+      note.token === "color/on-surface/info" &&
+      note.expectedBg === "color/surface/info"
+    ),
+    "repair plan should expose missing background limitations near the apply payload"
+  );
+  assert.ok(
+    planWithMissingBg.agentInstruction.includes("Do not infer or create missing backgrounds"),
+    "repair plan should explicitly prevent ad hoc background creation"
+  );
+  assert.ok(
+    planWithMissingBg.designerPresentation.sayToDesigner.some(line =>
+      line.includes("background role") && line.includes("design decision")
+    ),
+    "repair plan should include a human-readable missing-background summary"
+  );
+  assert.ok(
+    planWithMissingBg.designerPresentation.avoid.some(line => line.includes("verification checklist")),
+    "designer presentation should steer agents away from technical verification tables"
+  );
 
   // ── Companion advisory + icon bulk gap for brand-variant pair ──
   const advisory = result.companionAdvisories.find(a => a.bg === "color/surface/brand-variant");
@@ -183,6 +240,40 @@ module.exports = (() => {
     ["color/icon/alpha", "color/icon/beta", "color/icon/delta", "color/icon/gamma"],
     "repairPlan should expose all missing icon creations for direct approved apply"
   );
+  const universalPlan = _buildRepairPlan(universal);
+  assert.deepStrictEqual(
+    universalPlan.applyInput.roleRepairs.filter(repair => repair.role === "border"),
+    [],
+    "suppressed DS-wide passive borders should not enter the default health-check repair payload"
+  );
+  assert.deepStrictEqual(
+    universalPlan.optionalApplyInput.roleRepairs.map(repair => repair.name).sort(),
+    ["color/border/alpha", "color/border/beta", "color/border/delta", "color/border/gamma"],
+    "suppressed DS-wide passive borders should still expose an optional bulk apply payload"
+  );
+  assert.deepStrictEqual(
+    universalPlan.optionalApplyInput.roleRepairs.find(repair => repair.name === "color/border/alpha"),
+    {
+      name: "color/border/alpha",
+      role: "border",
+      aliases: { Light: "color/neutral/300", Dark: "color/neutral/950" },
+    },
+    "optional passive border repairs should use standard passive ramp steps/nearest available steps"
+  );
+  assert.strictEqual(
+    universal.optionalSemanticRoleFindings[0].plannedRoleRepair.contrast,
+    undefined,
+    "optional passive border repairs should not carry contrast metadata"
+  );
+  assert.ok(
+    universalPlan.agentInstruction.includes("separate designer approval") ||
+      universalPlan.agentInstruction.includes("explicit approval"),
+    "agents must be instructed to ask before applying optional convention-level repairs"
+  );
+  assert.ok(
+    universalPlan.designerPresentation.sayToDesigner.some(line => line.includes("optional passive border/outline/stroke")),
+    "optional convention repairs should have a plain-language designer summary"
+  );
 
   // ── plannedReAlias: contrast failures should carry the picker's upgrade ──
   // The handler-level path is the one that attaches plannedReAlias, since the
@@ -221,6 +312,18 @@ module.exports = (() => {
       );
       assert.strictEqual(handlerResult.repairPlan.tool, "apply_ds_setup_repairs");
       assert.strictEqual(handlerResult.repairPlan.approvalRequired, true);
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(handlerResult.repairPlan, "optionalApplyInput"),
+        "repair plan should always expose the optional apply channel"
+      );
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(handlerResult.repairPlan, "missingCapabilityNotes"),
+        "repair plan should always expose missing capability notes"
+      );
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(handlerResult.repairPlan, "designerPresentation"),
+        "repair plan should expose a human-readable designer presentation"
+      );
       assert.ok(
         handlerResult.repairPlan.agentInstruction.includes("do not parse local tool-results files"),
         "repair plan should explicitly forbid local tool-result scraping"
@@ -337,6 +440,40 @@ module.exports = (() => {
     familyResult.summary.missingSemanticRoleCount,
     familyResult.missingSemanticRoles.length,
     "summary should count semantic-family role gaps"
+  );
+
+  const foregroundOnlyVars = [
+    sem("text-accent", "color/text/accent", alias("n950"), alias("n50")),
+    sem("icon-accent", "color/icon/accent", alias("r700"), alias("r700")),
+    sem("border-accent", "color/border/accent", alias("r700"), alias("r700")),
+  ];
+  const foregroundOnlySnap = {
+    variables: primitives.concat(foregroundOnlyVars),
+    collections: [
+      { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+      { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: foregroundOnlyVars.map(v => v.id) },
+    ],
+  };
+  const foregroundOnlyResult = inspectDsSetupGapsFromFigmaData(foregroundOnlySnap);
+  const missingAccentBg = foregroundOnlyResult.missingSemanticRoles.find(
+    gap => gap.family === "accent" && gap.missingRole === "background"
+  );
+  assert.ok(missingAccentBg, "foreground/icon/border-only semantic family should report missing background");
+  assert.strictEqual(missingAccentBg.agentAction, "ask-designer");
+  assert.strictEqual(missingAccentBg.plannedRoleRepair, undefined);
+  const foregroundOnlyPlan = _buildRepairPlan(foregroundOnlyResult);
+  assert.strictEqual(
+    foregroundOnlyPlan.applyInput.roleRepairs.some(repair => repair.role === "background" || repair.name === "color/bg/accent"),
+    false,
+    "missing backgrounds should never be lifted into applyInput without an explicit background planner"
+  );
+  assert.ok(
+    foregroundOnlyPlan.missingCapabilityNotes.some(note =>
+      note.kind === "missing-background" &&
+      note.family === "accent" &&
+      note.suggestedName === "color/bg/accent"
+    ),
+    "repair plan should name missing semantic-family backgrounds as designer/product decisions"
   );
 
   // ── Config context is a suppressive hint, not the source of truth. When a

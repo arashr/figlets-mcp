@@ -4,6 +4,26 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-18 — Color bulk repair planner stabilized through Phase 2]
+
+**Status:** Phase 1B, 1C, 1D, and Phase 2 from `docs/bulk-repair-api-implementation-plan.md` are implemented and verified on `main` in local work. Full test suite passed (`npm test`: 62/62) and `git diff --check` is clean before commit.
+
+**Planner shape:** `inspect_ds_setup_gaps` now returns a standardized `repairPlan` with `applyInput`, `optionalApplyInput`, `counts`, `designerSummary`, `optionalDesignerSummary`, `missingCapabilityNotes`, `designerPresentation`, and `agentInstruction`. Handler output keeps `message`, `summary`, `repairPlan`, and `topFindings` first for truncation safety. Empty plans still expose all structural keys and explicitly tell agents not to invent repairs.
+
+**Optional passive roles:** Passive border/outline/stroke repairs are now optional by contract. DS-wide suppressed passive-role absence and single advisory passive `plannedRoleRepair` cases both lift into `repairPlan.optionalApplyInput.roleRepairs`, never into default `applyInput`, unless the finding is a high-confidence required role repair. This fixed the observed `color/border/info-variant` stranded-payload case.
+
+**Focus border:** Missing foundation focus-border roles can become apply-ready only when Figlets has safe aliases: config-defined aliases, or derived aliases from `brand`/`primary`/`accent`/`blue` ramps checked at WCAG non-text 3:1 against a default surface/background. Naming preserves the active border family (`border`, `outline`, or `stroke`). Config rows are cleaned so descriptive fields such as `note` cannot leak into `aliases`.
+
+**Missing backgrounds:** Missing background findings are intentionally conservative. They carry `agentAction: "ask-designer"` and are collected in `repairPlan.missingCapabilityNotes`; they are excluded from both default and optional apply payloads. Agents must frame these as designer decisions or future Figlets planner scope, not as impossible gaps and not as script opportunities.
+
+**Designer presentation:** `repairPlan.designerPresentation` gives agents a plain-language summary shape (`Ready to fix`, `Optional convention`, `Needs your call`) and explicitly says not to present verification matrices or raw JSON unless requested. Agent Interface guidance now tells agents to use this field for designer-facing summaries.
+
+**E2E verification:** A live designer-flow test on a Figma fixture passed: 13 required role repairs in `applyInput`, one optional `color/border/info-variant` in `optionalApplyInput`, missing backgrounds in `missingCapabilityNotes`, focus-border in `applyInput` only with safe aliases, no write without approval.
+
+**Next roadmap:** Phase 3 should start conservatively with config-backed non-color token gap planning. Prefer a read-only `inspect_ds_token_gaps` planner first, then a dry-run/apply `update_ds_tokens` surface after the planner contract is stable.
+
+---
+
 ### [2026-05-18 — Bulk repair posture added to agent contract]
 
 **User direction:** The agent should understand that bulk design-system updates are part of Figlets when needed. The designer-facing experience should not be "here are the gaps, but we can't fix them" for deterministic setup/alias/binding repairs.

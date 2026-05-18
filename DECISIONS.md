@@ -4,6 +4,27 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-18] Repair plans have required, optional, and missing-capability channels
+
+**Decision:** Read-only planner outputs should expose a stable repair-plan contract instead of forcing agents to parse long diagnostic arrays. For `inspect_ds_setup_gaps`, the stable shape is:
+
+- `repairPlan.applyInput` for deterministic repairs ready for explicit designer approval.
+- `repairPlan.optionalApplyInput` for convention-level or designer-choice repairs, such as passive border/outline/stroke roles.
+- `repairPlan.missingCapabilityNotes` for named gaps that Figlets can identify but should not or cannot apply yet.
+- `repairPlan.designerPresentation` for a plain-language designer summary.
+
+**Why:** Less capable agents repeatedly found nested `plannedRoleRepair` data and either treated it as impossible, tried to hand-assemble payloads, or reported implementation-style verification tables to the designer. The planner must make the intended next action obvious near the top of the tool result.
+
+**Default vs optional:** Missing icon roles for complete background+foreground families are required deterministic repairs when accessible aliases can be derived, so they go into `applyInput.roleRepairs`. Passive border/outline/stroke roles are optional by default unless already classified as high-confidence required gaps, so they go into `optionalApplyInput.roleRepairs`.
+
+**Focus border:** Foundation focus-border repairs are apply-ready only when Figlets can provide aliases from explicit config or safely derive aliases from known ramps and verify them against a default surface/background at WCAG non-text 3:1. Otherwise the focus gap remains a finding with `agentAction: "ask-designer"`.
+
+**Missing backgrounds:** Figlets does not infer missing background aliases from foreground/icon/border usage. Missing backgrounds are designer decisions and are surfaced in `missingCapabilityNotes`, not in `applyInput` or `optionalApplyInput`, unless a future config-backed planner can provide explicit background aliases.
+
+**Designer-facing output:** Agents should use `repairPlan.designerPresentation` to summarize results in human language. They should not show verification matrices, JSON key audits, or raw payload dumps unless the designer asks for implementation details or exact payload review.
+
+---
+
 ## [2026-05-18] Bulk design-system repairs are Figlets scope when structured
 
 **Decision:** Agents should treat bulk design-system updates as in-scope for Figlets when the operation can be represented as a structured, designer-approved payload. Existing bulk-capable surfaces include `inspect_ds_setup_gaps.repairPlan.applyInput` passed to `apply_ds_setup_repairs`, `update_ds_primitives` for config-backed primitive/color-semantic updates, and `qa_binding_audit({ fix: true })` for high-confidence binding fixes.

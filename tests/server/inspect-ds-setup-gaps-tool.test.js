@@ -273,6 +273,17 @@ module.exports = (() => {
       undefined,
       "border repairs should not carry contrast-gate metadata"
     );
+    const inaccessiblePlan = _buildRepairPlan(inaccessibleResult);
+    assert.deepStrictEqual(
+      inaccessiblePlan.applyInput.roleRepairs.filter(repair => repair.name === "color/border/muted"),
+      [],
+      "advisory passive border repairs should not enter the default apply payload"
+    );
+    assert.deepStrictEqual(
+      inaccessiblePlan.optionalApplyInput.roleRepairs.find(repair => repair.name === "color/border/muted"),
+      { name: "color/border/muted", role: "border", aliases: { Light: "color/gray/500", Dark: "color/gray/600" } },
+      "advisory passive border repairs should be exposed through the optional apply payload"
+    );
     assert.ok(mutedIcon, "muted family should still report the icon role gap");
     assert.strictEqual(
       mutedIcon.plannedRoleRepair,

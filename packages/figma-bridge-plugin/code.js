@@ -6069,7 +6069,7 @@ async function _applyDsSetupRepairs(payload) {
     }
   }
 
-  // ── roleRepairs: create approved border/icon semantic role variables ─────
+  // ── roleRepairs: create approved border/icon/focus semantic role variables
   // This is intentionally separate from missing foreground repairs so agents
   // cannot smuggle arbitrary roles through the fg-companion path.
   for (var rri = 0; rri < roleRepairs.length; rri++) {

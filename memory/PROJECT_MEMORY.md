@@ -4,6 +4,14 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-19 — Live Phase 3C validation and MCP apply callback fix]
+
+**Validation:** A live Figma Desktop bridge run on a disposable file confirmed the Phase 3C slices in action: planner apply input contained only `border-width`, `radius`, `spacing-semantics`, and `typography-variables`; dry-run previewed broad typography text-style creation but apply did not create styles; bridge apply created the expected variables in the correct collections; semantic spacing and typography variables aliased expected primitives; no collection modes were created; reinspect left only the broad typography text-style product gap.
+
+**Fix:** The live run exposed an MCP registration bug: `update_ds_tokens` apply returned `{}` because `packages/figlets-mcp-server/src/index.js` stringified the unresolved async `handleUpdateDsTokens(...)` Promise. The callback now awaits the handler. Regression coverage lives in `tests/server/update-ds-tokens-mcp-callback.test.js`, which calls the registered MCP tool through stdio and asserts the resolved bridge apply result is returned.
+
+---
+
 ### [2026-05-19 — Phase 3C typography variables apply slice]
 
 **Status:** Implemented the first typography apply slice as `typography-variables`, keeping broad `typography` text-style work dry-run/product-gap scope. This builds on `fd5975b` guardrails and does not enable text style creation/refresh.

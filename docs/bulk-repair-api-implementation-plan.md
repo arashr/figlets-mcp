@@ -19,6 +19,8 @@ Current status as of 2026-05-19:
 - Phase 3C has expanded another slice: the approved apply path now covers `radius`, `border-width`, `spacing-semantics`, and `typography-variables`. Semantic spacing apply resolves primitive-spacing aliases when the primitive variable exists and maps responsive config values onto existing Spacing-collection modes without creating modes. Typography variable apply targets the existing Typography collection only; broad `typography` text-style work remains dry-run/product-gap scope.
 - Latest verification before commit: supported-runtime `npm --scripts-prepend-node-path=true test` passed 66/66, `node --check packages/figma-bridge-plugin/code.js` passed, no `??`/`?.`/`**` in the plugin diff, and `git diff --check` was clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, now exercising the spacing-semantics apply slice end to end.
 
+Validation finding on 2026-05-19: a live Figma Desktop bridge run on a disposable file confirmed the planner, dry-run, and bridge apply behavior for `radius`, `border-width`, `spacing-semantics`, and `typography-variables`. It also found that the MCP `update_ds_tokens` apply call returned `{}` because the server registration stringified the async `handleUpdateDsTokens(...)` Promise without awaiting it. Fixed by awaiting `handleUpdateDsTokens(args || {})` in `packages/figlets-mcp-server/src/index.js` and adding `tests/server/update-ds-tokens-mcp-callback.test.js` to assert the registered MCP tool returns the resolved apply result.
+
 Do not treat this document as a public designer guide. It is an internal implementation plan.
 
 ## Product Goal

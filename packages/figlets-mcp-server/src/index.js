@@ -432,7 +432,7 @@ server.tool(
   },
   async (args) => {
     try {
-      const result = handleUpdateDsTokens(args || {});
+      const result = await handleUpdateDsTokens(args || {});
       if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

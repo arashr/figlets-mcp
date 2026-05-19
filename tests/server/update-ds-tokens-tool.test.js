@@ -133,6 +133,24 @@ module.exports = (async () => {
       assert.deepStrictEqual(result.unknownCategories, ["typography"]);
     }
 
+    {
+      const result = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath,
+        categories: ["typography", "elevation", "primitive-typography", "primitive-shadow"],
+        dry_run: false,
+      });
+      assert.ok(result.error && /limited to radius, border-width, and semantic spacing/.test(result.error));
+      assert.strictEqual(result.dryRun, false);
+      assert.deepStrictEqual(result.categories, []);
+      assert.deepStrictEqual(result.unknownCategories, ["typography", "elevation", "primitive-typography", "primitive-shadow"]);
+      assert.deepStrictEqual(
+        result.missingCapabilityNotes.map(note => note.category),
+        ["typography", "elevation", "primitive-typography", "primitive-shadow"],
+        "typography/elevation-style categories should remain explicit apply product gaps until their strategies land"
+      );
+    }
+
     await (async () => {
       let receivedBody = null;
       const mockServer = http.createServer((req, res) => {

@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-19 — Phase 3C typography/elevation readiness guardrails]
+
+**Status:** After commit `253f638` landed semantic spacing apply, the next step is deliberately guardrail-first. Typography/elevation apply is still blocked; the product plan now defines the required split strategies before any writes are enabled.
+
+**Plan update:** `docs/bulk-repair-api-implementation-plan.md` now has "Typography And Elevation Apply Readiness Notes". Typography must split into a variables-only slice before text-style create/refresh. Elevation must split into elevation variables before effect-style create/refresh. Text styles require explicit font-loading behavior and `fontLoadFailures`; effect styles require an explicit shadow-color/semantic-color prerequisite strategy.
+
+**Test pin:** `tests/docs/bulk-repair-plan.test.js` asserts the readiness notes stay in the product plan. `tests/server/update-ds-tokens-tool.test.js` asserts `typography`, `elevation`, `primitive-typography`, and `primitive-shadow` still return `unsupported-apply-category` product-gap notes for `dry_run:false`.
+
+**Important:** Do not enable these categories in `APPLY_CATEGORIES` until their variable/style strategies and focused tests are implemented. This preserves the current product shape: dry-run is useful, apply is narrow and approval-gated.
+
+---
+
 ### [2026-05-19 — Non-color token planner and narrow apply slice added]
 
 **Status:** Phase 3A and Phase 3B are implemented, plus a deliberately narrow Phase 3C apply slice. Full supported-runtime suite passed (`npm --scripts-prepend-node-path=true test`: 66/66) and `git diff --check` is clean.

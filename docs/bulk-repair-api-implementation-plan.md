@@ -385,6 +385,42 @@ Deferred product concern from the `spacing-semantics` slice (do not silently dro
 - The narrow updater deliberately does **not** create Spacing-collection modes. Responsive semantic values are mapped onto modes that already exist (breakpoint-name match, then positional, then last value). A config with multiple breakpoints applied to a single-mode Spacing collection will collapse to the last value per the existing radius/border mode-invariant philosophy. Creating breakpoint modes is invasive setup-tool behavior and remains future product scope, ideally folded into the same guided partial-setup-repair path described under the Phase 3 boundary note. This is a known limitation, not a dead end.
 - Semantic spacing aliases resolve against the primitives collection read-only. If the primitive variable is absent, the value is written as a raw FLOAT rather than failing — consistent with `apply_ds_setup`'s `spaceAlias` fallback.
 
+#### Typography And Elevation Apply Readiness Notes
+
+Do not enable `typography`, `primitive-typography`, `primitive-shadow`, or `elevation` in `update_ds_tokens({ dry_run:false })` until the relevant strategy below is implemented and tested. These categories are higher-risk because they can touch text styles, effect styles, font loading, and multiple collections.
+
+Typography should be split into two slices:
+
+1. **Typography variables only.**
+   - Target the existing Typography collection.
+   - Create/update only `type/<role>/{size,line-height,weight,tracking}` FLOAT variables and optionally `type/<role>/family` STRING variables when config and primitives give a safe source.
+   - Preserve existing variable IDs and scopes.
+   - Map responsive values onto existing Typography modes only; do not create modes in the token updater.
+   - Report a missing Typography collection as `missing-foundation-collection` / future partial setup scope, not as a hard stop.
+   - Do not create or refresh text styles in this slice.
+
+2. **Text style create/refresh.**
+   - Requires an explicit font-loading strategy before implementation.
+   - Preserve existing text style IDs.
+   - Load required fonts before touching any text-style properties.
+   - If fonts are unavailable, report `fontLoadFailures` and leave the style unchanged.
+   - Keep style creation/refresh separate enough that designers can approve it independently from variable creation.
+
+Elevation should also be split:
+
+1. **Elevation variables only.**
+   - Target the existing Elevation collection.
+   - Create/update only generated `elevation/<key>/{offset-y,radius}` FLOAT variables.
+   - Preserve existing variable IDs and scopes.
+   - Do not create effect styles in this slice.
+
+2. **Effect style create/refresh.**
+   - Requires an explicit shadow-color/semantic-color strategy before implementation.
+   - Preserve existing effect style IDs.
+   - Report unresolved color/alias prerequisites as `missingCapabilityNotes` or structured failures, not silent fallbacks.
+
+Until these slices land, dry-run reports for typography/elevation are useful, but apply must keep returning `unsupported-apply-category` product-gap notes.
+
 Goal: If the active config defines tokens or styles that are missing from Figma, Figlets should expose a read-only plan and an approved apply path for creating/updating them.
 
 Important boundary:
@@ -460,18 +496,18 @@ Output:
     approvalRequired: true,
     previewInput: {
       config_path: "/path/design-system.config.js",
-      categories: ["typography", "radius"],
+      categories: ["typography", "spacing-semantics", "radius"],
       create_missing: true,
       dry_run: true
     },
     applyInput: {
       config_path: "/path/design-system.config.js",
-      categories: ["typography", "radius"],
+      categories: ["spacing-semantics", "radius"],
       create_missing: true,
       dry_run: false
     },
     counts: {},
-    agentInstruction: "Run update_ds_tokens with previewInput, show the dry-run report, ask for approval, then run applyInput."
+    agentInstruction: "Run update_ds_tokens with previewInput, show the dry-run report, ask for approval, then run applyInput for apply-supported categories only."
   },
   topFindings: {},
   tokenGaps: []

@@ -23,7 +23,7 @@ const inspectDsTokenGapsTool = {
       categories: {
         type: "array",
         items: { type: "string" },
-        description: "Optional config-backed categories to inspect. Phase 3A supports non-color categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, and elevation."
+        description: "Optional config-backed categories to inspect. Phase 3A supports non-color categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, and elevation."
       },
       include_existing_updates: {
         type: "boolean",
@@ -45,9 +45,9 @@ const DEFAULT_CATEGORIES = [
   "elevation",
 ];
 
-const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES);
+const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES.concat(["typography-variables"]));
 const KNOWN_COLOR_CATEGORIES = new Set(["primitive-color", "color-semantics"]);
-const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics"]);
+const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables"]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -130,7 +130,7 @@ function _requiredCollectionForCategory(ds, category) {
   if (category === "spacing-semantics" || category === "radius" || category === "border-width") {
     return ds && ds.collections && ds.collections.spacing || "4. Spacing";
   }
-  if (category === "typography") return ds && ds.collections && ds.collections.typography || "3. Typography";
+  if (category === "typography" || category === "typography-variables") return ds && ds.collections && ds.collections.typography || "3. Typography";
   if (category === "elevation") return ds && ds.collections && ds.collections.elevation || "5. Elevation";
   return null;
 }
@@ -231,7 +231,7 @@ function _expectedSpacingTokens(ds, category) {
   return expected;
 }
 
-function _expectedTypographyTokens(ds) {
+function _expectedTypographyTokens(ds, options = {}) {
   const expected = [];
   const scale = ds && ds.typography && ds.typography.scale ? ds.typography.scale : {};
   const prefix = _typePrefix(ds);
@@ -239,13 +239,15 @@ function _expectedTypographyTokens(ds) {
   for (const role of Object.keys(scale).sort()) {
     const base = prefix + "/" + role;
     for (const leaf of ["size", "line-height", "weight", "tracking"]) {
-      _pushExpected(expected, "typography", "variable", base + "/" + leaf, { expectedType: "FLOAT", collection });
+      _pushExpected(expected, options.category || "typography", "variable", base + "/" + leaf, { expectedType: "FLOAT", collection });
     }
-    _pushExpected(expected, "typography", "variable", base + "/family", { expectedType: "STRING", collection, optional: true });
-    _pushExpected(expected, "typography", "style", _textStyleName(ds, role), {
-      styleType: "TEXT",
-      collection: "local text styles",
-    });
+    _pushExpected(expected, options.category || "typography", "variable", base + "/family", { expectedType: "STRING", collection, optional: true });
+    if (!options.variablesOnly) {
+      _pushExpected(expected, "typography", "style", _textStyleName(ds, role), {
+        styleType: "TEXT",
+        collection: "local text styles",
+      });
+    }
   }
   return expected;
 }
@@ -281,6 +283,7 @@ function _expectedForCategory(ds, category) {
     return _expectedSpacingTokens(ds, category);
   }
   if (category === "typography") return _expectedTypographyTokens(ds);
+  if (category === "typography-variables") return _expectedTypographyTokens(ds, { variablesOnly: true, category: "typography-variables" });
   if (category === "elevation") return _expectedElevationTokens(ds);
   return [];
 }
@@ -392,7 +395,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     missingCapabilityNotes.push({
       kind: "unsupported-apply-category",
       category,
-      reason: "update_ds_tokens apply support is currently limited to radius, border-width, and semantic spacing. This category can be dry-run previewed, but cannot be written by the Phase 3C apply path yet.",
+      reason: "update_ds_tokens apply support is currently limited to radius, border-width, semantic spacing, and typography variables. This category can be dry-run previewed, but cannot be written by the Phase 3C apply path yet.",
       productGap: true,
     });
   }
@@ -441,7 +444,13 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
 function _buildRepairPlan(context) {
   const categories = context.categoriesWithGaps || [];
   const foundationBlocked = new Set(context.foundationBlockedApplyCategories || []);
-  const applyCategories = categories.filter(category => APPLY_CATEGORIES.has(category) && !foundationBlocked.has(category));
+  const applyCategorySet = new Set(categories.filter(category => APPLY_CATEGORIES.has(category) && !foundationBlocked.has(category)));
+  if (categories.indexOf("typography") >= 0 && !foundationBlocked.has("typography")) {
+    const hasTypographyVariableWork = (context.missingVariables || []).some(gap => gap.category === "typography")
+      || (context.typeMismatches || []).some(gap => gap.category === "typography");
+    if (hasTypographyVariableWork) applyCategorySet.add("typography-variables");
+  }
+  const applyCategories = Array.from(applyCategorySet).sort();
   const total = (context.missingVariables || []).length + (context.missingStyles || []).length + (context.typeMismatches || []).length;
   const previewInput = {
     config_path: context.configPath,

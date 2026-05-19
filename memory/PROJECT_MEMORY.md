@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-19 — Phase 3C typography variables apply slice]
+
+**Status:** Implemented the first typography apply slice as `typography-variables`, keeping broad `typography` text-style work dry-run/product-gap scope. This builds on `fd5975b` guardrails and does not enable text style creation/refresh.
+
+**Planner contract:** `inspect_ds_token_gaps` still previews broad `typography` gaps. When broad typography variable gaps exist, `repairPlan.applyInput.categories` can include `typography-variables`; broad `typography` remains in `missingCapabilityNotes` as unsupported apply scope when text styles or broader typography work are still missing.
+
+**Apply behavior:** `update_ds_tokens({ dry_run:false, categories:["typography-variables"] })` targets only the existing Typography collection. It creates/updates `type/<role>/{size,line-height,weight,tracking,family}` variables, maps responsive values onto existing Typography modes, preserves variable IDs/scopes, aliases primitive type/font variables when available, does not create modes, and does not create or refresh text styles.
+
+**Tests updated:** Server, bridge policy, and E2E proxy tests now cover `typography-variables`; broad `typography`, `elevation`, `primitive-typography`, and `primitive-shadow` remain blocked in apply unless future slices deliberately change that contract.
+
+---
+
 ### [2026-05-19 — Phase 3C typography/elevation readiness guardrails]
 
 **Status:** After commit `253f638` landed semantic spacing apply, the next step is deliberately guardrail-first. Typography/elevation apply is still blocked; the product plan now defines the required split strategies before any writes are enabled.

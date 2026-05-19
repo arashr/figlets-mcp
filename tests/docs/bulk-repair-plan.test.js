@@ -9,12 +9,16 @@ assert.ok(
   "Phase 3 plan should include explicit typography/elevation apply readiness notes"
 );
 assert.ok(
-  plan.includes("Do not enable `typography`, `primitive-typography`, `primitive-shadow`, or `elevation`"),
-  "Phase 3 plan should block high-risk categories until their strategies are implemented"
+  plan.includes("Do not enable broad `typography`, `primitive-typography`, `primitive-shadow`, or `elevation`"),
+  "Phase 3 plan should block broad high-risk categories until their strategies are implemented"
 );
 assert.ok(
-  plan.includes("Typography should be split into two slices"),
-  "Typography apply should be split into variable and text-style slices"
+  plan.includes("The narrow `typography-variables` category is the approved first typography slice"),
+  "Typography variable apply should be documented as the only approved typography apply slice"
+);
+assert.ok(
+  plan.includes("`typography-variables`") && plan.includes("No text styles"),
+  "Typography variable apply should be explicitly separated from text styles"
 );
 assert.ok(
   plan.includes("Text style create/refresh") && plan.includes("fontLoadFailures"),
@@ -25,6 +29,6 @@ assert.ok(
   "Elevation apply strategy should split variables from effect styles"
 );
 assert.ok(
-  plan.includes("dry-run reports for typography/elevation are useful, but apply must keep returning `unsupported-apply-category`"),
-  "Plan should preserve product-gap reporting until future apply slices land"
+  plan.includes("dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category`"),
+  "Plan should preserve product-gap reporting for broad typography/elevation until future apply slices land"
 );

@@ -106,8 +106,8 @@ module.exports = (() => {
   );
   assert.deepStrictEqual(
     result.repairPlan.applyInput.categories,
-    ["border-width", "radius", "spacing-semantics"],
-    "applyInput should include only Phase 3C apply-supported categories"
+    ["border-width", "radius", "spacing-semantics", "typography-variables"],
+    "applyInput should include only Phase 3C apply-supported categories, with typography narrowed to variables"
   );
   assert.strictEqual(result.repairPlan.applyInput.dry_run, false);
   assert.deepStrictEqual(result.repairPlan.optionalApplyInput.categories, []);

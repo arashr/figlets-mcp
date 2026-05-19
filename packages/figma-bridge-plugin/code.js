@@ -6005,6 +6005,17 @@ function _sanitizeSpaceStep(step) {
   return String(step).replace('.', '-');
 }
 
+function _typePrefixForTokenUpdate(DS) {
+  if (DS && DS.naming && DS.naming.typePrefix) return DS.naming.typePrefix;
+  if (DS && DS.naming && DS.naming.textStyle) return String(DS.naming.textStyle).split('/')[0] || 'type';
+  return 'type';
+}
+
+function _typeSizeTokenName(prefix, px) {
+  var sizeMap = { 10:'2xs', 12:'xs', 14:'sm', 16:'md', 18:'lg', 20:'xl', 24:'2xl', 30:'3xl', 36:'4xl', 48:'5xl', 60:'6xl', 72:'7xl' };
+  return sizeMap[px] ? (prefix + '/size/' + sizeMap[px]) : (prefix + '/size/' + px);
+}
+
 function _tokenUpdateEntriesForCategory(DS, category) {
   var entries = [];
   var spacing = DS && DS.spacing ? DS.spacing : {};
@@ -6032,6 +6043,49 @@ function _tokenUpdateEntriesForCategory(DS, category) {
         name: 'space/' + sKey,
         type: 'FLOAT',
         values: Array.isArray(vals) ? vals : [vals],
+        resolveSpaceAlias: true,
+      });
+    }
+  } else if (category === 'typography-variables') {
+    var scale = DS && DS.typography && DS.typography.scale ? DS.typography.scale : {};
+    var typoPrefix = _typePrefixForTokenUpdate(DS);
+    var familyPattern = DS && DS.naming && DS.naming.fontFamily ? DS.naming.fontFamily : 'font/{variant}';
+    var weightMap = { 400: 'regular', 500: 'medium', 600: 'semibold', 700: 'bold' };
+    var trackingMap = { '-0.02': 'tight', '-0.01': 'snug', '0': 'normal', '0.01': 'open', '0.02': 'wide', '0.05': 'wider', '0.1': 'widest' };
+    var roles = Object.keys(scale);
+    for (var ti = 0; ti < roles.length; ti++) {
+      var role = roles[ti];
+      var roleDef = scale[role] || {};
+      var tokenBase = typoPrefix + '/' + role;
+      var sizes = Array.isArray(roleDef.sizes) ? roleDef.sizes : [];
+      var lineHeights = Array.isArray(roleDef.lineHeights) ? roleDef.lineHeights : [];
+      var weight = roleDef.weight || 400;
+      var tracking = roleDef.tracking != null ? roleDef.tracking : 0;
+      entries.push({
+        name: tokenBase + '/size',
+        type: 'FLOAT',
+        values: sizes,
+        aliasNames: sizes.map(function(px) { return _typeSizeTokenName(typoPrefix, px); }),
+      });
+      entries.push({ name: tokenBase + '/line-height', type: 'FLOAT', values: lineHeights });
+      entries.push({
+        name: tokenBase + '/weight',
+        type: 'FLOAT',
+        value: weight,
+        aliasName: typoPrefix + '/weight/' + (weightMap[weight] || 'regular'),
+      });
+      entries.push({
+        name: tokenBase + '/tracking',
+        type: 'FLOAT',
+        value: tracking,
+        aliasName: typoPrefix + '/tracking/' + (trackingMap[String(tracking)] || String(tracking)),
+      });
+      entries.push({
+        name: tokenBase + '/family',
+        type: 'STRING',
+        value: null,
+        aliasName: familyPattern.replace('{variant}', 'sans'),
+        requiresAlias: true,
       });
     }
   }
@@ -6052,23 +6106,60 @@ async function _updateDsTokens(payload) {
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : [];
-  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true };
+  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true, 'typography-variables': true };
   var categories = [];
   var unknown = [];
+  var needsSpacing = false;
+  var needsTypography = false;
 
   for (var ri = 0; ri < requested.length; ri++) {
     var cat = requested[ri];
-    if (supported[cat]) categories.push(cat);
+    if (supported[cat]) {
+      categories.push(cat);
+      if (cat === 'radius' || cat === 'border-width' || cat === 'spacing-semantics') needsSpacing = true;
+      if (cat === 'typography-variables') needsTypography = true;
+    }
     else unknown.push(cat);
   }
 
-  var spacingName = (DS.collections && DS.collections.spacing) ? DS.collections.spacing : '4. Spacing';
   var allColls = await figma.variables.getLocalVariableCollectionsAsync();
-  var spacingColl = null;
-  for (var ci = 0; ci < allColls.length; ci++) {
-    if (allColls[ci].name === spacingName) { spacingColl = allColls[ci]; break; }
+  var allVars = await figma.variables.getLocalVariablesAsync();
+
+  function _collectionByName(name) {
+    for (var ci = 0; ci < allColls.length; ci++) {
+      if (allColls[ci].name === name) return allColls[ci];
+    }
+    return null;
   }
-  if (!spacingColl) {
+
+  function _variablesByNameForCollection(collectionId) {
+    var map = {};
+    for (var vi = 0; vi < allVars.length; vi++) {
+      if (allVars[vi].variableCollectionId === collectionId) map[allVars[vi].name] = allVars[vi];
+    }
+    return map;
+  }
+
+  function _modeOrderForCollection(collection) {
+    var bpModes = (DS.breakpoints && Array.isArray(DS.breakpoints.modes) && DS.breakpoints.modes.length)
+      ? DS.breakpoints.modes
+      : ['Mobile', 'Tablet', 'Desktop'];
+    var order = [];
+    for (var moi = 0; moi < collection.modes.length; moi++) {
+      var modeName = String(collection.modes[moi].name || '');
+      var bpIndex = moi;
+      for (var bmi = 0; bmi < bpModes.length; bmi++) {
+        if (String(bpModes[bmi]).toLowerCase() === modeName.toLowerCase()) { bpIndex = bmi; break; }
+      }
+      order.push({ modeId: collection.modes[moi].modeId, bpIndex: bpIndex });
+    }
+    return order;
+  }
+
+  var spacingName = (DS.collections && DS.collections.spacing) ? DS.collections.spacing : '4. Spacing';
+  var spacingColl = null;
+  if (needsSpacing) spacingColl = _collectionByName(spacingName);
+  if (needsSpacing && !spacingColl) {
     return {
       error: 'Spacing collection "' + spacingName + '" is not present in this Figma file, so this narrow token update did not make changes.',
       dryRun: dryRun,
@@ -6084,19 +6175,31 @@ async function _updateDsTokens(payload) {
     };
   }
 
-  var allVars = await figma.variables.getLocalVariablesAsync();
-  var byName = {};
-  for (var vi = 0; vi < allVars.length; vi++) {
-    if (allVars[vi].variableCollectionId === spacingColl.id) byName[allVars[vi].name] = allVars[vi];
+  var typographyName = (DS.collections && DS.collections.typography) ? DS.collections.typography : '3. Typography';
+  var typographyColl = null;
+  if (needsTypography) typographyColl = _collectionByName(typographyName);
+  if (needsTypography && !typographyColl) {
+    return {
+      error: 'Typography collection "' + typographyName + '" is not present in this Figma file, so this narrow token update did not make changes.',
+      dryRun: dryRun,
+      categories: categories,
+      unknownCategories: unknown,
+      missingCapabilityNotes: [{
+        kind: 'missing-foundation-collection',
+        collection: typographyName,
+        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing typography variable completion. That guided repair path is future product scope.',
+        productGap: true,
+      }],
+      report: {},
+    };
   }
 
   // Semantic spacing tokens can alias primitive spacing variables. Resolve the
   // primitives collection read-only so this narrow updater never mutates it.
   var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
   var primCollId = null;
-  for (var pci = 0; pci < allColls.length; pci++) {
-    if (allColls[pci].name === primName) { primCollId = allColls[pci].id; break; }
-  }
+  var primColl = _collectionByName(primName);
+  if (primColl) primCollId = primColl.id;
   var primByName = {};
   if (primCollId) {
     for (var pvi = 0; pvi < allVars.length; pvi++) {
@@ -6104,21 +6207,10 @@ async function _updateDsTokens(payload) {
     }
   }
 
-  // Map each existing Spacing-collection mode to a config breakpoint index.
-  // This updater intentionally never creates modes; responsive values fall back
-  // to positional order and then to the last value for single-mode collections.
-  var bpModes = (DS.breakpoints && Array.isArray(DS.breakpoints.modes) && DS.breakpoints.modes.length)
-    ? DS.breakpoints.modes
-    : ['Mobile', 'Tablet', 'Desktop'];
-  var modeOrder = [];
-  for (var moi = 0; moi < spacingColl.modes.length; moi++) {
-    var modeName = String(spacingColl.modes[moi].name || '');
-    var bpIndex = moi;
-    for (var bmi = 0; bmi < bpModes.length; bmi++) {
-      if (String(bpModes[bmi]).toLowerCase() === modeName.toLowerCase()) { bpIndex = bmi; break; }
-    }
-    modeOrder.push({ modeId: spacingColl.modes[moi].modeId, bpIndex: bpIndex });
-  }
+  var spacingByName = spacingColl ? _variablesByNameForCollection(spacingColl.id) : {};
+  var typographyByName = typographyColl ? _variablesByNameForCollection(typographyColl.id) : {};
+  var spacingModeOrder = spacingColl ? _modeOrderForCollection(spacingColl) : [];
+  var typographyModeOrder = typographyColl ? _modeOrderForCollection(typographyColl) : [];
 
   function _resolveSpaceValue(rawVal) {
     var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
@@ -6127,13 +6219,26 @@ async function _updateDsTokens(payload) {
     return isFinite(num) ? num : rawVal;
   }
 
+  function _resolveTokenUpdateValue(entry, rawVal) {
+    if (entry.aliasNames && entry.aliasNames.length) {
+      var aliasNameAtMode = entry.aliasNames[entry._activeIndex];
+      if (aliasNameAtMode && primByName[aliasNameAtMode]) return { type: 'VARIABLE_ALIAS', id: primByName[aliasNameAtMode] };
+    }
+    if (entry.aliasName && primByName[entry.aliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[entry.aliasName] };
+    if (entry.requiresAlias) return null;
+    if (entry.resolveSpaceAlias) return _resolveSpaceValue(rawVal);
+    var num = Number(rawVal);
+    return isFinite(num) ? num : rawVal;
+  }
+
   function _desiredForMode(entry, bpIndex) {
     if (entry.values) {
       var v = entry.values[bpIndex];
       if (v == null) v = entry.values[entry.values.length - 1];
-      return _resolveSpaceValue(v);
+      entry._activeIndex = bpIndex;
+      return _resolveTokenUpdateValue(entry, v);
     }
-    return entry.value;
+    return _resolveTokenUpdateValue(entry, entry.value);
   }
 
   var report = {};
@@ -6141,12 +6246,16 @@ async function _updateDsTokens(payload) {
     var category = categories[cati];
     var entries = _tokenUpdateEntriesForCategory(DS, category);
     var catReport = _emptyTokenUpdateReport();
+    var targetColl = (category === 'typography-variables') ? typographyColl : spacingColl;
+    var targetName = (category === 'typography-variables') ? typographyName : spacingName;
+    var byName = (category === 'typography-variables') ? typographyByName : spacingByName;
+    var modeOrder = (category === 'typography-variables') ? typographyModeOrder : spacingModeOrder;
 
     for (var ei = 0; ei < entries.length; ei++) {
       var entry = entries[ei];
       catReport.entries += 1;
       var existing = byName[entry.name];
-      var item = _tokenUpdateItem(entry.name, entry.type, spacingName);
+      var item = _tokenUpdateItem(entry.name, entry.type, targetName);
       if (!existing) {
         if (!createMissing) {
           catReport.unmatched.push(item);
@@ -6156,12 +6265,17 @@ async function _updateDsTokens(payload) {
           catReport.wouldCreateVariables.push(item);
           continue;
         }
+        if (entry.requiresAlias && !_desiredForMode(entry, 0)) {
+          catReport.unmatched.push(item);
+          continue;
+        }
         try {
-          existing = figma.variables.createVariable(entry.name, spacingColl, entry.type);
+          existing = figma.variables.createVariable(entry.name, targetColl, entry.type);
           _setVariableScopesForName(existing, entry.name, entry.type);
           byName[entry.name] = existing;
           for (var cm = 0; cm < modeOrder.length; cm++) {
-            existing.setValueForMode(modeOrder[cm].modeId, _desiredForMode(entry, modeOrder[cm].bpIndex));
+            var desiredCreateValue = _desiredForMode(entry, modeOrder[cm].bpIndex);
+            if (desiredCreateValue != null) existing.setValueForMode(modeOrder[cm].modeId, desiredCreateValue);
           }
           catReport.createdVariables.push(item);
         } catch (createErr) {
@@ -6176,14 +6290,20 @@ async function _updateDsTokens(payload) {
           kind: 'variable',
           expectedType: entry.type,
           actualType: existing.resolvedType,
-          collection: spacingName,
+          collection: targetName,
         });
         continue;
       }
 
       var changed = false;
       for (var vm = 0; vm < modeOrder.length; vm++) {
-        if (!_tokenValueEq(existing.valuesByMode[modeOrder[vm].modeId], _desiredForMode(entry, modeOrder[vm].bpIndex))) {
+        var desiredValue = _desiredForMode(entry, modeOrder[vm].bpIndex);
+        if (desiredValue == null) {
+          catReport.unmatched.push(item);
+          changed = false;
+          break;
+        }
+        if (!_tokenValueEq(existing.valuesByMode[modeOrder[vm].modeId], desiredValue)) {
           changed = true;
           break;
         }

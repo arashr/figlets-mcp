@@ -23,12 +23,17 @@ module.exports = (() => {
   const fn = extractFunction(code, "_updateDsTokens");
 
   assert.ok(
-    fn.includes("'radius': true") && fn.includes("'border-width': true") && fn.includes("'spacing-semantics': true"),
-    "Phase 3C apply support covers radius, border-width, and semantic spacing only"
+    fn.includes("'radius': true") &&
+      fn.includes("'border-width': true") &&
+      fn.includes("'spacing-semantics': true") &&
+      fn.includes("'typography-variables': true"),
+    "Phase 3C apply support covers radius, border-width, semantic spacing, and typography variables only"
   );
   assert.ok(!fn.includes("createTextStyle"), "Phase 3C token apply must not create text styles");
   assert.ok(!fn.includes("createEffectStyle"), "Phase 3C token apply must not create effect styles");
-  assert.ok(!fn.includes("'typography': true") && !fn.includes("'elevation': true"), "typography/elevation must stay out of the narrow apply slice");
+  assert.ok(!fn.includes("'typography': true") && !fn.includes("'elevation': true"), "broad typography/elevation must stay out of the narrow apply slice");
+  assert.ok(fn.includes("typographyName") && fn.includes("Typography collection"), "typography variables should target the Typography collection");
+  assert.ok(fn.includes("type/body") === false, "typography variable apply should be config-driven, not hard-coded to one role");
   assert.ok(fn.includes("VARIABLE_ALIAS"), "semantic spacing apply should alias to primitive spacing variables when available");
   assert.ok(!fn.includes("addMode("), "narrow token apply must not create new collection modes");
   assert.ok(fn.includes("figma.variables.createVariable"), "approved apply can create missing spacing variables");

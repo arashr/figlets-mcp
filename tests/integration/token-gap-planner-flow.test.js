@@ -80,7 +80,7 @@ module.exports = (async () => {
     });
     assert.ok(!inspected.error, inspected.error);
     assert.deepStrictEqual(inspected.repairPlan.previewInput.categories, ["border-width", "radius", "spacing-semantics", "typography"]);
-    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "radius", "spacing-semantics"]);
+    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "radius", "spacing-semantics", "typography-variables"]);
     assert.ok(
       inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
       "typography should remain a dry-run/product-gap category"
@@ -169,8 +169,27 @@ module.exports = (async () => {
                 typeMismatch: [],
                 fontLoadFailures: [],
               },
+              "typography-variables": {
+                entries: 5,
+                wouldCreateVariables: [],
+                createdVariables: [
+                  { name: "type/body/md/size" },
+                  { name: "type/body/md/line-height" },
+                  { name: "type/body/md/weight" },
+                  { name: "type/body/md/tracking" },
+                ],
+                wouldUpdateVariables: [],
+                updatedVariables: [],
+                wouldCreateStyles: [],
+                createdStyles: [],
+                wouldRefreshStyles: [],
+                refreshedStyles: [],
+                unmatched: [{ name: "type/body/md/family" }],
+                typeMismatch: [],
+                fontLoadFailures: [],
+              },
             },
-            message: "radius: 2 changed; border-width: 1 changed; spacing-semantics: 1 changed",
+            message: "radius: 2 changed; border-width: 1 changed; spacing-semantics: 1 changed; typography-variables: 4 changed",
           },
         }));
       });
@@ -184,7 +203,7 @@ module.exports = (async () => {
       const applied = await handleUpdateDsTokens(inspected.repairPlan.applyInput);
       assert.ok(!applied.error, applied.error);
       assert.strictEqual(applied.dryRun, false);
-      assert.deepStrictEqual(receivedBody.categories, ["border-width", "radius", "spacing-semantics"]);
+      assert.deepStrictEqual(receivedBody.categories, ["border-width", "radius", "spacing-semantics", "typography-variables"]);
       assert.strictEqual(receivedBody.dryRun, false);
     } finally {
       await new Promise(resolve => mockServer.close(resolve));
@@ -197,6 +216,11 @@ module.exports = (async () => {
         variable("space-radius-lg", "space/radius/lg"),
         variable("space-border-default", "space/border/default"),
         variable("space-component-md", "space/component/md"),
+        variable("type-body-md-size", "type/body/md/size"),
+        variable("type-body-md-line-height", "type/body/md/line-height"),
+        variable("type-body-md-weight", "type/body/md/weight"),
+        variable("type-body-md-tracking", "type/body/md/tracking"),
+        variable("type-body-md-family", "type/body/md/family", "STRING"),
       ],
     });
     writeSnapshot(figmaDataPath, updatedSnapshot);
@@ -214,8 +238,8 @@ module.exports = (async () => {
       "approved semantic spacing should be resolved after narrow apply"
     );
     assert.ok(
-      reinspected.tokenGaps.some(gap => gap.category === "typography"),
-      "unsupported apply categories should remain visible after narrow apply"
+      reinspected.tokenGaps.some(gap => gap.category === "typography" && gap.gapType === "missing-style"),
+      "text styles should remain visible as unsupported apply scope after typography variable apply"
     );
     assert.deepStrictEqual(reinspected.repairPlan.applyInput.categories, []);
   } finally {

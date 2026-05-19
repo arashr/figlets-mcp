@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-19 — Phase 3C second live validation and stale MCP session note]
+
+**Validation rerun:** A fresh disposable Figma file confirmed the implemented Phase 3C slices end to end. Starting state had `1. Primitives`, `3. Typography`, `4. Spacing`; required primitive tokens were present; target semantic/body variables were absent; no `type/body/md` text style existed. `inspect_ds_token_gaps` found 8 missing variables + 1 missing text style and `repairPlan.applyInput.categories` was exactly `["border-width", "radius", "spacing-semantics", "typography-variables"]`.
+
+**Apply result:** Applying only `repairPlan.applyInput` created `space/border/default`, `space/radius/md`, `space/component/md`, and `type/body/md/{size,line-height,weight,tracking,family}`. Final reinspect showed 0 missing variables and only the broad `type/body/md` text-style gap remaining as product-gap/dry-run scope. Semantic spacing aliases and typography aliases were correct. No text styles or collection modes were created.
+
+**Runtime wrinkle:** The currently connected Codex MCP server still returned `{}` for `update_ds_tokens` apply even though the bridge mutation completed and the checked-out repo is fixed at `cc7362e`. Treat this as a stale MCP server process/session until proven otherwise. Restart or reconnect the Figlets MCP server before retesting the MCP callback live. The repo regression test `tests/server/update-ds-tokens-mcp-callback.test.js` covers the fixed callback path.
+
+**Verification:** Supported-runtime `npm test` passed 69/69 after the validation.
+
+---
+
 ### [2026-05-19 — Live Phase 3C validation and MCP apply callback fix]
 
 **Validation:** A live Figma Desktop bridge run on a disposable file confirmed the Phase 3C slices in action: planner apply input contained only `border-width`, `radius`, `spacing-semantics`, and `typography-variables`; dry-run previewed broad typography text-style creation but apply did not create styles; bridge apply created the expected variables in the correct collections; semantic spacing and typography variables aliased expected primitives; no collection modes were created; reinspect left only the broad typography text-style product gap.

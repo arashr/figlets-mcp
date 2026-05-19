@@ -21,6 +21,8 @@ Current status as of 2026-05-19:
 
 Validation finding on 2026-05-19: a live Figma Desktop bridge run on a disposable file confirmed the planner, dry-run, and bridge apply behavior for `radius`, `border-width`, `spacing-semantics`, and `typography-variables`. It also found that the MCP `update_ds_tokens` apply call returned `{}` because the server registration stringified the async `handleUpdateDsTokens(...)` Promise without awaiting it. Fixed by awaiting `handleUpdateDsTokens(args || {})` in `packages/figlets-mcp-server/src/index.js` and adding `tests/server/update-ds-tokens-mcp-callback.test.js` to assert the registered MCP tool returns the resolved apply result.
 
+Follow-up live validation on 2026-05-19: rerunning the disposable Figma file from scratch confirmed the product behavior after the fix. The bridge created `space/border/default`, `space/radius/md`, `space/component/md`, and `type/body/md/{size,line-height,weight,tracking,family}` in the correct collections; final reinspect showed zero missing variables and only the broad `type/body/md` text-style gap remaining; aliases, no-text-style, and no-mode-creation expectations held. The connected Codex MCP session still returned `{}` for apply despite the checked-out repo being fixed at `cc7362e`, which points to a stale MCP server process in that agent session. Restart/reconnect the Figlets MCP server before re-testing the MCP callback live; do not chase this as a repo regression unless it reproduces after restart. Supported-runtime `npm test` passed 69/69.
+
 Do not treat this document as a public designer guide. It is an internal implementation plan.
 
 ## Product Goal

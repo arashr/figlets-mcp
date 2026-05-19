@@ -357,6 +357,23 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'update-tokens') {
+    try {
+      _appendSessionLog('Executing update_ds_tokens.');
+      const result = await _updateDsTokens(msg.data || {});
+      figma.ui.postMessage({ type: 'tokens-update-done', fileKey: _getFigletsFileKey(), data: result });
+      if (result && result.error) {
+        _appendSessionLog('update_ds_tokens failed: ' + result.error);
+      } else {
+        _appendSessionLog('Completed update_ds_tokens.');
+        figma.notify('Tokens updated.');
+      }
+    } catch (err) {
+      _appendSessionLog('update_ds_tokens failed: ' + err.message);
+      figma.ui.postMessage({ type: 'tokens-update-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
   if (msg.type === 'apply-setup-repairs') {
     try {
       _appendSessionLog('Executing apply_ds_setup_repairs.');
@@ -5960,6 +5977,179 @@ async function _updateDsPrimitives(payload) {
     pruned: dryRun ? 0 : pruneCount + pruneRampCount,
     wouldPrune: dryRun ? pruneCount + pruneRampCount : 0,
     message: msgParts.length ? msgParts.join('; ') : 'No categories processed.',
+  };
+}
+
+function _emptyTokenUpdateReport() {
+  return {
+    entries: 0,
+    wouldCreateVariables: [],
+    createdVariables: [],
+    wouldUpdateVariables: [],
+    updatedVariables: [],
+    wouldCreateStyles: [],
+    createdStyles: [],
+    wouldRefreshStyles: [],
+    refreshedStyles: [],
+    unmatched: [],
+    typeMismatch: [],
+    fontLoadFailures: [],
+  };
+}
+
+function _tokenUpdateItem(name, type, collection) {
+  return { name: name, kind: 'variable', expectedType: type, collection: collection };
+}
+
+function _tokenUpdateEntriesForCategory(DS, category) {
+  var entries = [];
+  var spacing = DS && DS.spacing ? DS.spacing : {};
+  if (category === 'radius') {
+    var radius = spacing.radius || {};
+    var radiusKeys = Object.keys(radius);
+    for (var ri = 0; ri < radiusKeys.length; ri++) {
+      var rKey = radiusKeys[ri];
+      entries.push({ name: 'space/radius/' + rKey, type: 'FLOAT', value: radius[rKey] });
+    }
+  } else if (category === 'border-width') {
+    var border = spacing.border || {};
+    var borderKeys = Object.keys(border);
+    for (var bi = 0; bi < borderKeys.length; bi++) {
+      var bKey = borderKeys[bi];
+      entries.push({ name: 'space/border/' + bKey, type: 'FLOAT', value: border[bKey] });
+    }
+  }
+  return entries;
+}
+
+async function _updateDsTokens(payload) {
+  var DS = (payload && payload.DS) || {};
+  var createMissing = !(payload && payload.createMissing === false);
+  var dryRun = !!(payload && payload.dryRun);
+  var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
+    ? payload.categories
+    : [];
+  var supported = { 'radius': true, 'border-width': true };
+  var categories = [];
+  var unknown = [];
+
+  for (var ri = 0; ri < requested.length; ri++) {
+    var cat = requested[ri];
+    if (supported[cat]) categories.push(cat);
+    else unknown.push(cat);
+  }
+
+  var spacingName = (DS.collections && DS.collections.spacing) ? DS.collections.spacing : '4. Spacing';
+  var allColls = await figma.variables.getLocalVariableCollectionsAsync();
+  var spacingColl = null;
+  for (var ci = 0; ci < allColls.length; ci++) {
+    if (allColls[ci].name === spacingName) { spacingColl = allColls[ci]; break; }
+  }
+  if (!spacingColl) {
+    return {
+      error: 'Spacing collection "' + spacingName + '" is not present in this Figma file, so this narrow token update did not make changes.',
+      dryRun: dryRun,
+      categories: categories,
+      unknownCategories: unknown,
+      missingCapabilityNotes: [{
+        kind: 'missing-foundation-collection',
+        collection: spacingName,
+        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing token completion. That guided repair path is future product scope.',
+        productGap: true,
+      }],
+      report: {},
+    };
+  }
+
+  var allVars = await figma.variables.getLocalVariablesAsync();
+  var byName = {};
+  for (var vi = 0; vi < allVars.length; vi++) {
+    if (allVars[vi].variableCollectionId === spacingColl.id) byName[allVars[vi].name] = allVars[vi];
+  }
+
+  var modeIds = [];
+  for (var mi = 0; mi < spacingColl.modes.length; mi++) modeIds.push(spacingColl.modes[mi].modeId);
+
+  var report = {};
+  for (var cati = 0; cati < categories.length; cati++) {
+    var category = categories[cati];
+    var entries = _tokenUpdateEntriesForCategory(DS, category);
+    var catReport = _emptyTokenUpdateReport();
+
+    for (var ei = 0; ei < entries.length; ei++) {
+      var entry = entries[ei];
+      catReport.entries += 1;
+      var existing = byName[entry.name];
+      var item = _tokenUpdateItem(entry.name, entry.type, spacingName);
+      if (!existing) {
+        if (!createMissing) {
+          catReport.unmatched.push(item);
+          continue;
+        }
+        if (dryRun) {
+          catReport.wouldCreateVariables.push(item);
+          continue;
+        }
+        try {
+          existing = figma.variables.createVariable(entry.name, spacingColl, entry.type);
+          _setVariableScopesForName(existing, entry.name, entry.type);
+          byName[entry.name] = existing;
+          for (var cm = 0; cm < modeIds.length; cm++) existing.setValueForMode(modeIds[cm], entry.value);
+          catReport.createdVariables.push(item);
+        } catch (createErr) {
+          catReport.unmatched.push(item);
+        }
+        continue;
+      }
+
+      if (existing.resolvedType !== entry.type) {
+        catReport.typeMismatch.push({
+          name: entry.name,
+          kind: 'variable',
+          expectedType: entry.type,
+          actualType: existing.resolvedType,
+          collection: spacingName,
+        });
+        continue;
+      }
+
+      var changed = false;
+      for (var vm = 0; vm < modeIds.length; vm++) {
+        if (existing.valuesByMode[modeIds[vm]] !== entry.value) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) continue;
+      if (dryRun) {
+        catReport.wouldUpdateVariables.push(item);
+        continue;
+      }
+      _setVariableScopesForName(existing, entry.name, entry.type);
+      for (var sm = 0; sm < modeIds.length; sm++) existing.setValueForMode(modeIds[sm], entry.value);
+      catReport.updatedVariables.push(item);
+    }
+
+    report[category] = catReport;
+  }
+
+  var parts = [];
+  var names = Object.keys(report);
+  for (var n = 0; n < names.length; n++) {
+    var r = report[names[n]];
+    var changedCount = dryRun
+      ? r.wouldCreateVariables.length + r.wouldUpdateVariables.length
+      : r.createdVariables.length + r.updatedVariables.length;
+    parts.push(names[n] + ': ' + changedCount + (dryRun ? ' would change' : ' changed'));
+  }
+  if (unknown.length) parts.push(unknown.length + ' unsupported categories');
+
+  return {
+    dryRun: dryRun,
+    categories: categories,
+    unknownCategories: unknown,
+    report: report,
+    message: parts.length ? parts.join('; ') : 'No token updates requested.',
   };
 }
 

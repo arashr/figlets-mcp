@@ -10,6 +10,7 @@
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev -w @figlets/mcp-server",
     "lint": "npm run lint --workspaces --if-present",
+    "pretest": "node scripts/check-node-version.js 22",
     "test": "node tests/run-tests.js",
     "build:server-tarball": "node scripts/build-server-tarball.js",
     "figlets:export-design-md": "node packages/figlets-mcp-server/src/cli/export-design-md.js",
@@ -17,7 +18,7 @@
     "figlets:check-setup-gaps": "node packages/figlets-mcp-server/src/cli/check-setup-gaps.js"
   },
   "engines": {
-    "node": ">=10"
+    "node": ">=22"
   },
   "license": "MIT",
   "devDependencies": {

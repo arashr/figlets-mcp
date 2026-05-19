@@ -65,6 +65,8 @@ module.exports = new Promise((resolve, reject) => {
       assert.ok(toolNames.indexOf("figlets_start") >= 0, "tools/list should expose figlets_start");
       assert.ok(toolNames.indexOf("figlets_route_intent") >= 0, "tools/list should expose figlets_route_intent");
       assert.ok(toolNames.indexOf("figlets_workflow_guide") >= 0, "tools/list should expose figlets_workflow_guide");
+      assert.ok(toolNames.indexOf("inspect_ds_token_gaps") >= 0, "tools/list should expose inspect_ds_token_gaps");
+      assert.ok(toolNames.indexOf("update_ds_tokens") >= 0, "tools/list should expose update_ds_tokens");
       finish();
     } catch (err) {
       err.message += `\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`;

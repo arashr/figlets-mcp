@@ -12,6 +12,8 @@ const { handlePrepareDsConfig } = require("./tools/prepare-ds-config.js");
 const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
 const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require("./tools/update-ds-primitives.js");
 const { inspectDsSetupGapsTool, handleInspectDsSetupGaps } = require("./tools/inspect-ds-setup-gaps.js");
+const { inspectDsTokenGapsTool, handleInspectDsTokenGaps } = require("./tools/inspect-ds-token-gaps.js");
+const { updateDsTokensTool, handleUpdateDsTokens } = require("./tools/update-ds-tokens.js");
 const { applyDsSetupRepairsTool, handleApplyDsSetupRepairs } = require("./tools/apply-ds-setup-repairs.js");
 const { refreshDsConfigFromFigmaTool, handleRefreshDsConfigFromFigma } = require("./tools/refresh-ds-config-from-figma.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
@@ -368,6 +370,69 @@ server.tool(
   async (args) => {
     try {
       const result = handleInspectDsSetupGaps(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- inspect_ds_token_gaps ---
+server.tool(
+  inspectDsTokenGapsTool.name,
+  inspectDsTokenGapsTool.description,
+  {
+    config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path. Defaults to the active file config."),
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
+    categories: z.array(z.string()).optional().describe("Optional config-backed categories to inspect. Phase 3A supports non-color token categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, and elevation."),
+    include_existing_updates: z.boolean().optional().describe("When true, preserve the request in update_ds_tokens preview/apply payloads. Phase 3B remains read-only and does not compare stale values.")
+  },
+  async (args) => {
+    try {
+      const result = handleInspectDsTokenGaps(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- update_ds_tokens ---
+server.tool(
+  updateDsTokensTool.name,
+  updateDsTokensTool.description,
+  {
+    config_path: z.string().describe("Absolute path to design-system.config.js."),
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
+    categories: z.array(z.string()).optional().describe("Optional categories to preview. Phase 3B supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, and elevation."),
+    create_missing: z.boolean().optional().describe("When true, missing variables/styles are reported as wouldCreate*. When false, they remain unmatched/missing only."),
+    dry_run: z.boolean().optional().describe("Must be true in Phase 3B. dry_run=false apply support is deferred."),
+    prune: z.object({
+      off_scale_color_steps: z.boolean().optional(),
+      unused_color_ramps: z.boolean().optional()
+    }).optional().describe("Future prune options. Phase 3B reports them as unsupported rather than deleting anything.")
+  },
+  async (args) => {
+    try {
+      const result = handleUpdateDsTokens(args || {});
       if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

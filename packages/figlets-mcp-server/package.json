@@ -28,6 +28,9 @@
     "export-figma-file": "node src/cli/export-figma-file.js",
     "inspect-component": "node src/cli/inspect-component.js"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.3.6"

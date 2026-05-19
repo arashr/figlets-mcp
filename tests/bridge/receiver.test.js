@@ -40,6 +40,7 @@ module.exports = new Promise((resolve, reject) => {
           assert.strictEqual(health.pluginConnected, false);
           assert.deepStrictEqual(health.pluginCapabilities, []);
           assert.strictEqual(health.updatePrimitivesLive, false);
+          assert.strictEqual(health.updateTokensLive, false);
           assert.strictEqual(health.dataPath, TEMP_FILE);
         } catch (err) {
           cleanup(err);

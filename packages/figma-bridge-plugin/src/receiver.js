@@ -14,6 +14,7 @@ let pendingDsSetupRequest = null;
 let pendingDocBuildRequest = null;
 let pendingQaAuditRequest = null;
 let pendingUpdatePrimitivesRequest = null;
+let pendingUpdateTokensRequest = null;
 let pendingSetupRepairsRequest = null;
 let pendingResetRequest = null;
 let pendingSyncPreviousFileKey = null;
@@ -105,6 +106,7 @@ const server = http.createServer((req, res) => {
       activeFileKey: lastFileKey,
       pluginCapabilities: pluginCapabilities,
       updatePrimitivesLive: pluginCapabilities.indexOf('update-primitives') !== -1,
+      updateTokensLive: pluginCapabilities.indexOf('update-tokens') !== -1,
       setupRepairsLive: pluginCapabilities.indexOf('setup-repairs') !== -1,
       dataPath: healthPaths.data,
       selectionPath: healthPaths.selection
@@ -435,6 +437,47 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 6d. MCP Agent calls this to apply approved narrow token updates in place.
+  if (req.method === 'POST' && pathname === '/request-update-tokens') {
+    if (pendingPollResponse) {
+      if (!_pluginHasCapability('update-tokens')) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'The Figlets Bridge plugin is connected but does not advertise the token-update command. Reload the plugin in Figma Desktop so it loads the latest local code.',
+          activeSessionId: pendingPollSessionId || null,
+          pluginCapabilities: activePluginCapabilities
+        }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = JSON.parse(body); } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'update-tokens', data: payload }));
+        _clearPendingPoll();
+
+        pendingUpdateTokensRequest = res;
+
+        const updateTokensTimer = setTimeout(() => {
+          if (pendingUpdateTokensRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Token update timed out.' }));
+            pendingUpdateTokensRequest = null;
+          }
+        }, 60000);
+        if (updateTokensTimer.unref) updateTokensTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
   // 6e. MCP Agent calls this to apply designer-approved setup repairs.
   if (req.method === 'POST' && pathname === '/request-setup-repairs') {
     if (pendingPollResponse) {
@@ -560,6 +603,26 @@ const server = http.createServer((req, res) => {
         pendingUpdatePrimitivesRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingUpdatePrimitivesRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingUpdatePrimitivesRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 6f. Figma Plugin posts the token update result here
+  if (req.method === 'POST' && pathname === '/sync-update-tokens') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingUpdateTokensRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingUpdateTokensRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingUpdateTokensRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingUpdateTokensRequest = null;
       }
     });
     return;

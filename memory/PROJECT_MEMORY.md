@@ -4,6 +4,24 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-19 — Non-color token planner and narrow apply slice added]
+
+**Status:** Phase 3A and Phase 3B are implemented, plus a deliberately narrow Phase 3C apply slice. Full supported-runtime suite passed (`npm --scripts-prepend-node-path=true test`: 66/66) and `git diff --check` is clean.
+
+**Planner:** `inspect_ds_token_gaps` is a read-only config-backed planner for non-color token gaps. It compares the active file-scoped `design-system.config.js` with the active Figma snapshot and returns `message`, `summary`, `repairPlan`, and `topFindings` first. `repairPlan.previewInput` can include all dry-run categories; `repairPlan.applyInput` is filtered to only currently apply-supported categories.
+
+**Dry run:** `update_ds_tokens({ dry_run: true })` previews config-backed token completion without bridge writes. It reports `wouldCreateVariables`, `wouldCreateStyles`, `unmatched`, `typeMismatch`, unsupported categories, and prune/delete requests as missing capability/product-gap notes.
+
+**Apply slice:** `update_ds_tokens({ dry_run: false })` is intentionally limited to `radius` and `border-width`. The bridge/plugin capability is `update-tokens`; the plugin creates missing `space/radius/*` and `space/border/*` variables in the existing Spacing collection or updates existing FLOAT values across modes, preserving variable IDs. It does not create typography styles, effect styles, semantic spacing, elevation, primitives, colors, or perform prune/delete operations.
+
+**Runtime contract:** Root dev/test now requires Node `>=22` with `.nvmrc` set to `22` and a `pretest` guard. The server package runtime declares Node `>=18`, matching the MCP SDK. Plain Node 10 now fails fast with a clear message instead of obscure API errors.
+
+**E2E-style verification:** `tests/integration/token-gap-planner-flow.test.js` is the current automated E2E proxy. It runs `inspect_ds_token_gaps` on a config/snapshot with missing radius, border-width, and typography items; runs `update_ds_tokens` dry-run from `repairPlan.previewInput`; applies only radius/border-width through a mocked bridge; rewrites the snapshot to represent the approved result; then re-inspects to confirm radius/border-width gaps are gone while typography remains dry-run/product-gap scope.
+
+**Next roadmap:** Keep expanding Phase 3C in small category slices only after tests pin compatibility and write boundaries. Good next candidates are semantic spacing variables, then typography variables/styles only after a careful font/style strategy. Do not broaden `update_ds_tokens` into arbitrary Figma mutation. Future product fix after this feature plan: if a required foundation such as the Spacing collection is missing, Figlets should guide a designer-approved partial setup repair and continue in the same run unless dismissed, not halt with only a "run setup first" message.
+
+---
+
 ### [2026-05-18 — Color bulk repair planner stabilized through Phase 2]
 
 **Status:** Phase 1B, 1C, 1D, and Phase 2 from `docs/bulk-repair-api-implementation-plan.md` are implemented and verified on `main` in local work. Full test suite passed (`npm test`: 62/62) and `git diff --check` is clean before commit.

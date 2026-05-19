@@ -4,17 +4,20 @@
 
 Planning artifact and roadmap for bulk-repair API work. This document is intentionally explicit so a less capable agent can continue the feature without inventing new product rules.
 
-Current status as of 2026-05-18:
+Current status as of 2026-05-19:
 
 - Branch: `main`
-- Latest checkpoint before the current commit: color semantic bulk repair planner implemented through Phase 2.
+- Latest checkpoint before the current commit: color semantic bulk repair planner implemented through Phase 2; non-color token planner/dry-run and a narrow radius/border-width apply slice are implemented in local work.
 - Phase 0 is complete: agents are taught that structured bulk updates are Figlets scope and missing planner/apply surfaces are product gaps.
 - Phase 1A is complete: missing icon roles for complete bg+foreground families can become apply-ready when Figlets derives accessible aliases.
 - Phase 1B is complete: passive border/outline/stroke repairs are exposed through `repairPlan.optionalApplyInput` when optional, including DS-wide suppressed cases and single advisory planned repairs.
 - Phase 1C is complete: missing focus-border foundation roles become apply-ready only when safe aliases can be derived or config provides aliases.
 - Phase 1D is complete: missing backgrounds remain designer decisions and are surfaced in `missingCapabilityNotes`, not apply payloads.
 - Phase 2 is complete for `inspect_ds_setup_gaps`: `repairPlan` has stable required, optional, missing-capability, and designer-presentation channels.
-- Latest verification before commit: `npm test` passed 62/62 and `git diff --check` was clean.
+- Phase 3A is complete: `inspect_ds_token_gaps` is a read-only config-backed non-color token-gap planner.
+- Phase 3B is complete: `update_ds_tokens({ dry_run: true })` previews missing variables/styles and type mismatches without Figma writes.
+- Phase 3C has started with a narrow approved apply slice for `radius` and `border-width` only. Other categories remain dry-run/product-gap scope.
+- Latest verification before commit: supported-runtime `npm --scripts-prepend-node-path=true test` passed 66/66 and `git diff --check` was clean. The new automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`.
 
 Do not treat this document as a public designer guide. It is an internal implementation plan.
 
@@ -54,6 +57,8 @@ Use this table before adding anything new.
 |---|---|---:|---|
 | `inspect_ds_setup_gaps` | Read-only semantic color setup QA, contrast QA, missing role planning, standardized `repairPlan.applyInput`, `repairPlan.optionalApplyInput`, `repairPlan.missingCapabilityNotes`, and `repairPlan.designerPresentation` generation | No | Focused on color semantics. Does not cover typography, spacing, radius, border-width, or elevation completeness. |
 | `apply_ds_setup_repairs` | Applies approved missing foreground repairs, alias updates, and missing color role creations including icon, passive border/outline/stroke, and focus-border roles | Yes | Color-only. It applies explicit approved payloads and does not independently discover or plan repairs. |
+| `inspect_ds_token_gaps` | Read-only config-backed non-color token-gap planner. Emits `repairPlan.previewInput`, filtered `repairPlan.applyInput`, missing-capability notes, and designer presentation | No | Does not infer tokens from page usage. Preview supports broader non-color categories than apply. |
+| `update_ds_tokens` | Dry-run preview for config-backed non-color completion; approved apply for `radius` and `border-width` only | Optional | Apply support is intentionally limited to Spacing collection FLOAT variables `space/radius/*` and `space/border/*`. No typography/elevation/style/prune apply yet. |
 | `update_ds_primitives` | Updates config-backed primitive color and primitive spacing values, and color semantic aliases, preserving variable IDs | Yes | Name is narrow and implementation assumes primitive collection except `color-semantics`. It does not handle typography, semantic spacing/radius/border-width, or elevation. |
 | `qa_binding_audit` | Audits selected/page nodes for raw unbound values and can fix high-confidence bindings | Optional | Binds to existing variables/styles only. It does not create missing tokens. Typography suggestions are conservative and may not be fixed automatically. |
 | `apply_ds_setup` | Creates or merges the configured design-system collections and styles | Yes | Broad setup tool, not a narrow repair planner. It has no dry-run merge-only contract. Use carefully after designer approval. |
@@ -65,10 +70,11 @@ Implement in these slices. Do not jump to the non-color token system before fini
 Current roadmap:
 
 1. **Done:** Phase 0 through Phase 2 for color semantic setup repairs.
-2. **Next:** Phase 3A - add a read-only `inspect_ds_token_gaps` planner for config-backed non-color token gaps.
-3. **Then:** Phase 3B - add `update_ds_tokens` dry-run preview for the first supported categories.
-4. **Then:** Phase 3C - add approved apply support in the bridge/plugin for those categories.
-5. **Later:** Expand category support beyond the first safe subset and decide whether `update_ds_primitives` becomes a compatibility wrapper.
+2. **Done:** Phase 3A - add a read-only `inspect_ds_token_gaps` planner for config-backed non-color token gaps.
+3. **Done:** Phase 3B - add `update_ds_tokens` dry-run preview.
+4. **Started:** Phase 3C - approved apply support exists only for `radius` and `border-width`.
+5. **Next:** Expand Phase 3C one category slice at a time, keeping existing behavior and write boundaries covered by tests.
+6. **Future product fix after this feature plan:** If token completion finds missing foundation setup, such as a missing Spacing collection, Figlets should not hard-stop with only a "run setup first" message. It should surface a designer-approved partial setup repair path that can create or merge the required foundation in the same guided run unless the designer dismisses it.
 
 For Phase 3, start with read-only planning and missing-capability reporting. Do not begin by creating broad mutation support.
 
@@ -381,6 +387,7 @@ Important boundary:
 - This phase is config-backed only.
 - Do not infer new typography, spacing, radius, border-width, or elevation tokens from arbitrary page usage in the first version.
 - Raw page usage should continue through `qa_binding_audit`, which binds to existing tokens/styles.
+- Missing foundation setup, such as an absent collection needed by a token category, is a product flow gap rather than a reason to abandon the designer. For the current phase, report the missing foundation clearly and do not silently create it inside a narrow token updater. After the current feature plan lands, add a guided partial setup repair that asks the designer to approve the required foundation creation/merge and then continues the token update in the same run.
 
 #### Recommended New Tools
 
@@ -624,9 +631,17 @@ Agent Interface tests:
 - Health-check guidance says non-color config-backed token completion is available when the planner emits a payload.
 - Agents are still told not to write custom scripts.
 
+E2E-style flow test:
+
+- `tests/integration/token-gap-planner-flow.test.js` covers a config-backed setup with missing `radius`, `border-width`, and `typography` tokens/styles.
+- The flow runs `inspect_ds_token_gaps`, then `update_ds_tokens` dry-run from `repairPlan.previewInput`, then an approved `update_ds_tokens({ dry_run:false })` call through a mocked bridge for only `radius` and `border-width`.
+- The test rewrites the synced snapshot to represent the approved bridge result, reruns `inspect_ds_token_gaps`, and verifies `radius`/`border-width` gaps are gone while `typography` remains visible as unsupported apply/product-gap scope.
+- This is the available automated E2E proxy for Phase 3C. A live Figma Desktop designer-flow E2E should be added later, after the guided product flow exposes these tools to designers through `figlets_workflow_guide`.
+
 Suggested verification:
 
 ```sh
+node tests/integration/token-gap-planner-flow.test.js
 node tests/server/inspect-ds-token-gaps-tool.test.js
 node tests/server/update-ds-tokens-tool.test.js
 node tests/server/update-ds-primitives-tool.test.js

@@ -42,15 +42,16 @@ module.exports = (async () => {
     const pollPromise = request(
       port,
       "GET",
-      "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives"
+      "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives,update-tokens"
     );
 
     const connectedHealth = await request(port, "GET", "/health");
     const connected = JSON.parse(connectedHealth.body);
     assert.strictEqual(connected.pluginConnected, true);
     assert.strictEqual(connected.activeSessionId, "figlets-live");
-    assert.deepStrictEqual(connected.pluginCapabilities, ["qa-audit", "update-primitives"]);
+    assert.deepStrictEqual(connected.pluginCapabilities, ["qa-audit", "update-primitives", "update-tokens"]);
     assert.strictEqual(connected.updatePrimitivesLive, true);
+    assert.strictEqual(connected.updateTokensLive, true);
     assert.strictEqual(connected.setupRepairsLive, false);
 
     const syncPromise = request(port, "POST", "/request-sync", "{}");
@@ -62,8 +63,9 @@ module.exports = (async () => {
     assert.strictEqual(busy.pluginConnected, false);
     assert.strictEqual(busy.pluginRecentlySeen, true);
     assert.strictEqual(busy.activeSessionId, "figlets-live");
-    assert.deepStrictEqual(busy.pluginCapabilities, ["qa-audit", "update-primitives"]);
+    assert.deepStrictEqual(busy.pluginCapabilities, ["qa-audit", "update-primitives", "update-tokens"]);
     assert.strictEqual(busy.updatePrimitivesLive, true);
+    assert.strictEqual(busy.updateTokensLive, true);
     assert.strictEqual(busy.setupRepairsLive, false);
 
     const busyQa = await request(port, "POST", "/request-qa-audit", "{}");

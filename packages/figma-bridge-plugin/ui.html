@@ -419,6 +419,7 @@
     'build-doc',
     'qa-audit',
     'update-primitives',
+    'update-tokens',
     'setup-repairs',
     'reset-figlets-file'
   ];
@@ -686,6 +687,13 @@
           document.getElementById('substatus').innerText = 'Overwriting primitive values in Figma.';
           _appendLog('Received command: update_ds_primitives.');
           parent.postMessage({ pluginMessage: { type: 'update-primitives', data: data.data } }, '*');
+        } else if (data.command === 'update-tokens') {
+          isExtracting = true;
+          _armWatchdog('Token update', 60000);
+          document.getElementById('status').innerText = 'Updating tokens...';
+          document.getElementById('substatus').innerText = 'Applying approved radius/border variables.';
+          _appendLog('Received command: update_ds_tokens.');
+          parent.postMessage({ pluginMessage: { type: 'update-tokens', data: data.data } }, '*');
         } else if (data.command === 'apply-setup-repairs') {
           isExtracting = true;
           _armWatchdog('Setup repairs', 60000);
@@ -825,6 +833,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
         _appendLog('Failed to send primitives update result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'tokens-update-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch('http://localhost:1337/sync-update-tokens?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Token update failed.' : 'Tokens updated.';
+        _appendLog(msg.data.error ? 'Token update failed in plugin.' : 'Token update result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        _appendLog('Failed to send token update result to receiver.');
       }
       isExtracting = false;
       poll();

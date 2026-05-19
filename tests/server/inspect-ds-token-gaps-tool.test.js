@@ -85,6 +85,14 @@ module.exports = (() => {
     result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
     "dry-run-only categories should be explicit product gaps for apply"
   );
+  assert.ok(
+    result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
+    "elevation should remain a dry-run/product-gap apply category"
+  );
+  assert.ok(
+    !result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "spacing-semantics"),
+    "spacing-semantics is now apply-supported and must not be flagged as an apply product gap"
+  );
   assert.deepStrictEqual(
     result.repairPlan.previewInput,
     {
@@ -98,7 +106,7 @@ module.exports = (() => {
   );
   assert.deepStrictEqual(
     result.repairPlan.applyInput.categories,
-    ["border-width", "radius"],
+    ["border-width", "radius", "spacing-semantics"],
     "applyInput should include only Phase 3C apply-supported categories"
   );
   assert.strictEqual(result.repairPlan.applyInput.dry_run, false);

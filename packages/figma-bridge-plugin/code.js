@@ -6001,6 +6001,10 @@ function _tokenUpdateItem(name, type, collection) {
   return { name: name, kind: 'variable', expectedType: type, collection: collection };
 }
 
+function _sanitizeSpaceStep(step) {
+  return String(step).replace('.', '-');
+}
+
 function _tokenUpdateEntriesForCategory(DS, category) {
   var entries = [];
   var spacing = DS && DS.spacing ? DS.spacing : {};
@@ -6018,8 +6022,27 @@ function _tokenUpdateEntriesForCategory(DS, category) {
       var bKey = borderKeys[bi];
       entries.push({ name: 'space/border/' + bKey, type: 'FLOAT', value: border[bKey] });
     }
+  } else if (category === 'spacing-semantics') {
+    var semantic = spacing.semantic || {};
+    var semKeys = Object.keys(semantic);
+    for (var si = 0; si < semKeys.length; si++) {
+      var sKey = semKeys[si];
+      var vals = semantic[sKey];
+      entries.push({
+        name: 'space/' + sKey,
+        type: 'FLOAT',
+        values: Array.isArray(vals) ? vals : [vals],
+      });
+    }
   }
   return entries;
+}
+
+function _tokenValueEq(a, b) {
+  if (a && b && a.type === 'VARIABLE_ALIAS' && b.type === 'VARIABLE_ALIAS') {
+    return a.id === b.id;
+  }
+  return a === b;
 }
 
 async function _updateDsTokens(payload) {
@@ -6029,7 +6052,7 @@ async function _updateDsTokens(payload) {
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : [];
-  var supported = { 'radius': true, 'border-width': true };
+  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true };
   var categories = [];
   var unknown = [];
 
@@ -6067,8 +6090,51 @@ async function _updateDsTokens(payload) {
     if (allVars[vi].variableCollectionId === spacingColl.id) byName[allVars[vi].name] = allVars[vi];
   }
 
-  var modeIds = [];
-  for (var mi = 0; mi < spacingColl.modes.length; mi++) modeIds.push(spacingColl.modes[mi].modeId);
+  // Semantic spacing tokens can alias primitive spacing variables. Resolve the
+  // primitives collection read-only so this narrow updater never mutates it.
+  var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
+  var primCollId = null;
+  for (var pci = 0; pci < allColls.length; pci++) {
+    if (allColls[pci].name === primName) { primCollId = allColls[pci].id; break; }
+  }
+  var primByName = {};
+  if (primCollId) {
+    for (var pvi = 0; pvi < allVars.length; pvi++) {
+      if (allVars[pvi].variableCollectionId === primCollId) primByName[allVars[pvi].name] = allVars[pvi].id;
+    }
+  }
+
+  // Map each existing Spacing-collection mode to a config breakpoint index.
+  // This updater intentionally never creates modes; responsive values fall back
+  // to positional order and then to the last value for single-mode collections.
+  var bpModes = (DS.breakpoints && Array.isArray(DS.breakpoints.modes) && DS.breakpoints.modes.length)
+    ? DS.breakpoints.modes
+    : ['Mobile', 'Tablet', 'Desktop'];
+  var modeOrder = [];
+  for (var moi = 0; moi < spacingColl.modes.length; moi++) {
+    var modeName = String(spacingColl.modes[moi].name || '');
+    var bpIndex = moi;
+    for (var bmi = 0; bmi < bpModes.length; bmi++) {
+      if (String(bpModes[bmi]).toLowerCase() === modeName.toLowerCase()) { bpIndex = bmi; break; }
+    }
+    modeOrder.push({ modeId: spacingColl.modes[moi].modeId, bpIndex: bpIndex });
+  }
+
+  function _resolveSpaceValue(rawVal) {
+    var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
+    if (primByName[aliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[aliasName] };
+    var num = Number(rawVal);
+    return isFinite(num) ? num : rawVal;
+  }
+
+  function _desiredForMode(entry, bpIndex) {
+    if (entry.values) {
+      var v = entry.values[bpIndex];
+      if (v == null) v = entry.values[entry.values.length - 1];
+      return _resolveSpaceValue(v);
+    }
+    return entry.value;
+  }
 
   var report = {};
   for (var cati = 0; cati < categories.length; cati++) {
@@ -6094,7 +6160,9 @@ async function _updateDsTokens(payload) {
           existing = figma.variables.createVariable(entry.name, spacingColl, entry.type);
           _setVariableScopesForName(existing, entry.name, entry.type);
           byName[entry.name] = existing;
-          for (var cm = 0; cm < modeIds.length; cm++) existing.setValueForMode(modeIds[cm], entry.value);
+          for (var cm = 0; cm < modeOrder.length; cm++) {
+            existing.setValueForMode(modeOrder[cm].modeId, _desiredForMode(entry, modeOrder[cm].bpIndex));
+          }
           catReport.createdVariables.push(item);
         } catch (createErr) {
           catReport.unmatched.push(item);
@@ -6114,8 +6182,8 @@ async function _updateDsTokens(payload) {
       }
 
       var changed = false;
-      for (var vm = 0; vm < modeIds.length; vm++) {
-        if (existing.valuesByMode[modeIds[vm]] !== entry.value) {
+      for (var vm = 0; vm < modeOrder.length; vm++) {
+        if (!_tokenValueEq(existing.valuesByMode[modeOrder[vm].modeId], _desiredForMode(entry, modeOrder[vm].bpIndex))) {
           changed = true;
           break;
         }
@@ -6126,7 +6194,9 @@ async function _updateDsTokens(payload) {
         continue;
       }
       _setVariableScopesForName(existing, entry.name, entry.type);
-      for (var sm = 0; sm < modeIds.length; sm++) existing.setValueForMode(modeIds[sm], entry.value);
+      for (var sm = 0; sm < modeOrder.length; sm++) {
+        existing.setValueForMode(modeOrder[sm].modeId, _desiredForMode(entry, modeOrder[sm].bpIndex));
+      }
       catReport.updatedVariables.push(item);
     }
 

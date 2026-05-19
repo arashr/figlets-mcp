@@ -2008,3 +2008,38 @@ Fixes shipped:
   - surfaces should be evaluated with the default foreground when that is the DS convention.
 - If a designer does not want icon semantics, the setup can preserve `semantics.icons: []`; the showcase should not synthesize icon rows from nowhere.
 - Active/focus borders are deliberately not shown as passive companions on every semantic row. `border/focus` is a foundational interaction token: QA should flag it when missing, and agents should ask the designer before creating or styling it.
+
+### [2026-05-19 — Phase 3C: spacing-semantics apply slice]
+
+**Objective completed:** Expanded the Phase 3C narrow approved token-apply path from `radius`/`border-width` to also include `spacing-semantics`, without weakening color/setup/primitives behavior or broadening into arbitrary mutation.
+
+**What changed:**
+
+- `packages/figlets-mcp-server/src/tools/inspect-ds-token-gaps.js` and `packages/figlets-mcp-server/src/tools/update-ds-tokens.js`
+  - `APPLY_CATEGORIES` now `["radius", "border-width", "spacing-semantics"]`.
+  - Tool description, schema text, apply-rejection error, missing-capability reason, and `nextStep` wording updated to say "radius, border-width, and semantic spacing".
+- `packages/figma-bridge-plugin/code.js` `_updateDsTokens`
+  - `supported` map adds `'spacing-semantics': true`.
+  - Added `_sanitizeSpaceStep`, `_tokenValueEq`, and (inside `_updateDsTokens`) `_resolveSpaceValue` / `_desiredForMode`.
+  - Semantic spacing entries are responsive: `{ name: 'space/<key>', type: 'FLOAT', values: [...] }`.
+  - Primitive spacing collection is read read-only to alias `space/<sanitized-step>` → `VARIABLE_ALIAS` when the primitive variable exists; otherwise a raw FLOAT is written (mirrors `apply_ds_setup` `spaceAlias` fallback).
+  - The updater maps responsive values onto **existing** Spacing-collection modes only — breakpoint-name match (case-insensitive), then positional index, then last value. It deliberately does **not** call `addMode` (no mode creation in the narrow updater).
+  - Create / change-detection / write loops now iterate `modeOrder` and compare via `_tokenValueEq` so alias objects diff correctly. `modeIds` was removed.
+
+**Designer-facing / product contract:**
+
+- Semantic spacing on a single-mode Spacing collection collapses to the last responsive value, consistent with the existing radius/border mode-invariant behavior. Creating breakpoint modes stays future product scope (fold into the deferred guided partial-setup-repair path). This is a documented limitation, not a dead end — see `docs/bulk-repair-api-implementation-plan.md` Phase 3C deferred-concern note.
+- Typography, elevation, primitive-*, styles, colors, and prune/delete remain dry-run/product-gap scope and must still surface as `missingCapabilityNotes`.
+
+**Tests added/updated:**
+
+- `tests/server/inspect-ds-token-gaps-tool.test.js` — `applyInput.categories` now includes `spacing-semantics`; explicit assertions that `typography`/`elevation` stay `unsupported-apply-category` product gaps and `spacing-semantics` does not.
+- `tests/server/update-ds-tokens-tool.test.js` — `supportedApplyCategories` includes `spacing-semantics`; updated description/error wording; added a positive mocked-bridge apply test for `spacing-semantics`.
+- `tests/bridge/update-tokens-apply-policy.test.js` — pins the three supported keys, forbids `typography`/`elevation` keys, requires `VARIABLE_ALIAS`, forbids `addMode(`, and keeps the no-text/effect-style guards.
+- `tests/integration/token-gap-planner-flow.test.js` — E2E proxy now drives `spacing-semantics` through inspect → dry-run → approved mocked apply → re-inspect, with typography still visible as unsupported apply scope.
+
+**Verification:**
+
+- `/Users/arash/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /usr/local/bin/npm --scripts-prepend-node-path=true test` → 66/66 passed.
+- `node --check packages/figma-bridge-plugin/code.js` passed; no `??`/`?.`/`**` in the plugin diff.
+- `git diff --check` clean.

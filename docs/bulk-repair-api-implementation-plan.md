@@ -7,7 +7,7 @@ Planning artifact and roadmap for bulk-repair API work. This document is intenti
 Current status as of 2026-05-19:
 
 - Branch: `main`
-- Latest checkpoint before the current commit: color semantic bulk repair planner implemented through Phase 2; non-color token planner/dry-run and a narrow radius/border-width apply slice are implemented in local work.
+- Latest checkpoint before the current commit: color semantic bulk repair planner implemented through Phase 2; non-color token planner/dry-run and a narrow radius/border-width/spacing-semantics apply slice are implemented in local work.
 - Phase 0 is complete: agents are taught that structured bulk updates are Figlets scope and missing planner/apply surfaces are product gaps.
 - Phase 1A is complete: missing icon roles for complete bg+foreground families can become apply-ready when Figlets derives accessible aliases.
 - Phase 1B is complete: passive border/outline/stroke repairs are exposed through `repairPlan.optionalApplyInput` when optional, including DS-wide suppressed cases and single advisory planned repairs.
@@ -16,8 +16,8 @@ Current status as of 2026-05-19:
 - Phase 2 is complete for `inspect_ds_setup_gaps`: `repairPlan` has stable required, optional, missing-capability, and designer-presentation channels.
 - Phase 3A is complete: `inspect_ds_token_gaps` is a read-only config-backed non-color token-gap planner.
 - Phase 3B is complete: `update_ds_tokens({ dry_run: true })` previews missing variables/styles and type mismatches without Figma writes.
-- Phase 3C has started with a narrow approved apply slice for `radius` and `border-width` only. Other categories remain dry-run/product-gap scope.
-- Latest verification before commit: supported-runtime `npm --scripts-prepend-node-path=true test` passed 66/66 and `git diff --check` was clean. The new automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`.
+- Phase 3C has expanded one slice: the approved apply path now covers `radius`, `border-width`, and `spacing-semantics`. Semantic spacing apply resolves primitive-spacing aliases when the primitive variable exists and maps responsive config values onto existing Spacing-collection modes without creating modes. Other categories (typography, elevation, primitive-*) remain dry-run/product-gap scope.
+- Latest verification before commit: supported-runtime `npm --scripts-prepend-node-path=true test` passed 66/66, `node --check packages/figma-bridge-plugin/code.js` passed, no `??`/`?.`/`**` in the plugin diff, and `git diff --check` was clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, now exercising the spacing-semantics apply slice end to end.
 
 Do not treat this document as a public designer guide. It is an internal implementation plan.
 
@@ -58,7 +58,7 @@ Use this table before adding anything new.
 | `inspect_ds_setup_gaps` | Read-only semantic color setup QA, contrast QA, missing role planning, standardized `repairPlan.applyInput`, `repairPlan.optionalApplyInput`, `repairPlan.missingCapabilityNotes`, and `repairPlan.designerPresentation` generation | No | Focused on color semantics. Does not cover typography, spacing, radius, border-width, or elevation completeness. |
 | `apply_ds_setup_repairs` | Applies approved missing foreground repairs, alias updates, and missing color role creations including icon, passive border/outline/stroke, and focus-border roles | Yes | Color-only. It applies explicit approved payloads and does not independently discover or plan repairs. |
 | `inspect_ds_token_gaps` | Read-only config-backed non-color token-gap planner. Emits `repairPlan.previewInput`, filtered `repairPlan.applyInput`, missing-capability notes, and designer presentation | No | Does not infer tokens from page usage. Preview supports broader non-color categories than apply. |
-| `update_ds_tokens` | Dry-run preview for config-backed non-color completion; approved apply for `radius` and `border-width` only | Optional | Apply support is intentionally limited to Spacing collection FLOAT variables `space/radius/*` and `space/border/*`. No typography/elevation/style/prune apply yet. |
+| `update_ds_tokens` | Dry-run preview for config-backed non-color completion; approved apply for `radius`, `border-width`, and `spacing-semantics` only | Optional | Apply support is intentionally limited to Spacing collection FLOAT variables `space/radius/*`, `space/border/*`, and responsive `space/<semantic>/*` (aliasing primitive spacing when present). No mode creation, typography/elevation/style/prune apply yet. |
 | `update_ds_primitives` | Updates config-backed primitive color and primitive spacing values, and color semantic aliases, preserving variable IDs | Yes | Name is narrow and implementation assumes primitive collection except `color-semantics`. It does not handle typography, semantic spacing/radius/border-width, or elevation. |
 | `qa_binding_audit` | Audits selected/page nodes for raw unbound values and can fix high-confidence bindings | Optional | Binds to existing variables/styles only. It does not create missing tokens. Typography suggestions are conservative and may not be fixed automatically. |
 | `apply_ds_setup` | Creates or merges the configured design-system collections and styles | Yes | Broad setup tool, not a narrow repair planner. It has no dry-run merge-only contract. Use carefully after designer approval. |
@@ -72,8 +72,8 @@ Current roadmap:
 1. **Done:** Phase 0 through Phase 2 for color semantic setup repairs.
 2. **Done:** Phase 3A - add a read-only `inspect_ds_token_gaps` planner for config-backed non-color token gaps.
 3. **Done:** Phase 3B - add `update_ds_tokens` dry-run preview.
-4. **Started:** Phase 3C - approved apply support exists only for `radius` and `border-width`.
-5. **Next:** Expand Phase 3C one category slice at a time, keeping existing behavior and write boundaries covered by tests.
+4. **Started:** Phase 3C - approved apply support exists for `radius`, `border-width`, and `spacing-semantics`.
+5. **Next:** Continue expanding Phase 3C one category slice at a time, keeping existing behavior and write boundaries covered by tests. Typography/elevation/style apply still require explicit font-loading and style-refresh strategy notes plus tests before implementation. Semantic spacing has shown that responsive multi-mode + primitive-alias resolution works inside the narrow updater without mode creation.
 6. **Future product fix after this feature plan:** If token completion finds missing foundation setup, such as a missing Spacing collection, Figlets should not hard-stop with only a "run setup first" message. It should surface a designer-approved partial setup repair path that can create or merge the required foundation in the same guided run unless the designer dismisses it.
 
 For Phase 3, start with read-only planning and missing-capability reporting. Do not begin by creating broad mutation support.
@@ -377,8 +377,13 @@ Recommended checkpointing:
 
 - **Phase 3A:** Add read-only `inspect_ds_token_gaps` with stable planner output and no bridge writes.
 - **Phase 3B:** Add `update_ds_tokens({ dry_run: true })` preview for a small supported category set.
-- **Phase 3C:** Add approved apply support for those categories through the bridge.
+- **Phase 3C:** Add approved apply support for those categories through the bridge. Slices landed so far: `radius`, `border-width`, then `spacing-semantics`.
 - **Phase 3D:** Expand supported categories and decide the compatibility relationship with `update_ds_primitives`.
+
+Deferred product concern from the `spacing-semantics` slice (do not silently drop):
+
+- The narrow updater deliberately does **not** create Spacing-collection modes. Responsive semantic values are mapped onto modes that already exist (breakpoint-name match, then positional, then last value). A config with multiple breakpoints applied to a single-mode Spacing collection will collapse to the last value per the existing radius/border mode-invariant philosophy. Creating breakpoint modes is invasive setup-tool behavior and remains future product scope, ideally folded into the same guided partial-setup-repair path described under the Phase 3 boundary note. This is a known limitation, not a dead end.
+- Semantic spacing aliases resolve against the primitives collection read-only. If the primitive variable is absent, the value is written as a raw FLOAT rather than failing — consistent with `apply_ds_setup`'s `spaceAlias` fallback.
 
 Goal: If the active config defines tokens or styles that are missing from Figma, Figlets should expose a read-only plan and an approved apply path for creating/updating them.
 

@@ -10,7 +10,7 @@ const { inspectDsTokenGapsFromConfigAndFigmaData } = require("./inspect-ds-token
 const updateDsTokensTool = {
   name: "update_ds_tokens",
   description:
-    "Preview and apply narrow config-backed token completion for non-color token categories. dry_run=true reports missing variables/styles, type mismatches, and unsupported categories without mutating Figma. Phase 3C apply support is intentionally limited to radius and border-width variables in the Spacing collection.",
+    "Preview and apply narrow config-backed token completion for non-color token categories. dry_run=true reports missing variables/styles, type mismatches, and unsupported categories without mutating Figma. Phase 3C apply support is intentionally limited to radius, border-width, and semantic spacing variables in the Spacing collection.",
   inputSchema: {
     type: "object",
     properties: {
@@ -33,7 +33,7 @@ const updateDsTokensTool = {
       },
       dry_run: {
         type: "boolean",
-        description: "When true, report what would happen without mutating Figma. When false, Phase 3C apply support is limited to radius and border-width."
+        description: "When true, report what would happen without mutating Figma. When false, Phase 3C apply support is limited to radius, border-width, and semantic spacing."
       },
       prune: {
         type: "object",
@@ -50,7 +50,7 @@ const updateDsTokensTool = {
   }
 };
 
-const APPLY_CATEGORIES = new Set(["radius", "border-width"]);
+const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics"]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -173,7 +173,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
   const categories = _requestedCategories(args);
   if (!categories.length) {
     return {
-      error: "categories is required for update_ds_tokens apply. Phase 3C supports only radius and border-width.",
+      error: "categories is required for update_ds_tokens apply. Phase 3C supports only radius, border-width, and semantic spacing.",
       dryRun: false,
       configPath,
       supportedApplyCategories: Array.from(APPLY_CATEGORIES).sort(),
@@ -182,7 +182,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
   const unsupported = _applyUnsupportedCategories(categories);
   if (unsupported.length) {
     return {
-      error: "update_ds_tokens apply support is limited to radius and border-width in Phase 3C.",
+      error: "update_ds_tokens apply support is limited to radius, border-width, and semantic spacing in Phase 3C.",
       dryRun: false,
       configPath,
       categories: categories.filter(category => APPLY_CATEGORIES.has(category)),
@@ -190,7 +190,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
       missingCapabilityNotes: unsupported.map(category => ({
         kind: "unsupported-apply-category",
         category,
-        reason: "Phase 3C starts with narrow radius and border-width apply support. Other config-backed token categories remain dry-run/product-gap scope.",
+        reason: "Phase 3C apply support covers radius, border-width, and semantic spacing only. Other config-backed token categories remain dry-run/product-gap scope.",
         productGap: true,
       })),
     };
@@ -359,7 +359,7 @@ function handleUpdateDsTokens(args = {}) {
     },
     applySupported: true,
     supportedApplyCategories: Array.from(APPLY_CATEGORIES).sort(),
-    nextStep: "Show this dry-run report to the designer. If they approve radius or border-width updates, call update_ds_tokens with dry_run:false for only those approved categories. Other categories remain dry-run only.",
+    nextStep: "Show this dry-run report to the designer. If they approve radius, border-width, or semantic spacing updates, call update_ds_tokens with dry_run:false for only those approved categories. Other categories remain dry-run only.",
   };
 }
 

@@ -22,9 +22,15 @@ function extractFunction(source, name) {
 module.exports = (() => {
   const fn = extractFunction(code, "_updateDsTokens");
 
-  assert.ok(fn.includes("'radius': true") && fn.includes("'border-width': true"), "apply support should stay limited to radius and border-width");
+  assert.ok(
+    fn.includes("'radius': true") && fn.includes("'border-width': true") && fn.includes("'spacing-semantics': true"),
+    "Phase 3C apply support covers radius, border-width, and semantic spacing only"
+  );
   assert.ok(!fn.includes("createTextStyle"), "Phase 3C token apply must not create text styles");
   assert.ok(!fn.includes("createEffectStyle"), "Phase 3C token apply must not create effect styles");
+  assert.ok(!fn.includes("'typography': true") && !fn.includes("'elevation': true"), "typography/elevation must stay out of the narrow apply slice");
+  assert.ok(fn.includes("VARIABLE_ALIAS"), "semantic spacing apply should alias to primitive spacing variables when available");
+  assert.ok(!fn.includes("addMode("), "narrow token apply must not create new collection modes");
   assert.ok(fn.includes("figma.variables.createVariable"), "approved apply can create missing spacing variables");
   assert.ok(fn.includes("_setVariableScopesForName(existing, entry.name, entry.type)"), "existing variables should preserve IDs and refresh scopes");
   assert.ok(fn.includes("existing.setValueForMode"), "approved apply can update existing variable values");

@@ -62,7 +62,7 @@ fs.writeFileSync(figmaDataPath, JSON.stringify(figmaData, null, 2), "utf8");
 module.exports = (async () => {
   try {
     assert.strictEqual(updateDsTokensTool.name, "update_ds_tokens");
-    assert.ok(updateDsTokensTool.description.includes("radius and border-width"));
+    assert.ok(updateDsTokensTool.description.includes("radius, border-width, and semantic spacing"));
     assert.ok(updateDsTokensTool.inputSchema.properties.prune, "schema should expose prune options");
 
     {
@@ -101,7 +101,7 @@ module.exports = (async () => {
       );
       assert.ok(/would create/.test(result.message), "message should summarize would-create work");
       assert.strictEqual(result.applySupported, true);
-      assert.deepStrictEqual(result.supportedApplyCategories, ["border-width", "radius"]);
+      assert.deepStrictEqual(result.supportedApplyCategories, ["border-width", "radius", "spacing-semantics"]);
     }
 
     {
@@ -128,7 +128,7 @@ module.exports = (async () => {
         categories: ["typography"],
         dry_run: false,
       });
-      assert.ok(result.error && /limited to radius and border-width/.test(result.error), "unsupported apply categories should be explicit");
+      assert.ok(result.error && /limited to radius, border-width, and semantic spacing/.test(result.error), "unsupported apply categories should be explicit");
       assert.strictEqual(result.dryRun, false);
       assert.deepStrictEqual(result.unknownCategories, ["typography"]);
     }
@@ -202,6 +202,69 @@ module.exports = (async () => {
         assert.ok(receivedBody && receivedBody.DS, "apply should send DS to bridge");
         assert.deepStrictEqual(receivedBody.categories, ["radius", "border-width"]);
         assert.strictEqual(receivedBody.createMissing, true);
+        assert.strictEqual(receivedBody.dryRun, false);
+      } finally {
+        await new Promise(resolve => mockServer.close(resolve));
+        delete process.env.FIGLETS_RECEIVER_URL;
+      }
+    })();
+
+    await (async () => {
+      let receivedBody = null;
+      const mockServer = http.createServer((req, res) => {
+        if (req.method === "POST" && req.url === "/request-update-tokens") {
+          let body = "";
+          req.on("data", chunk => { body += chunk.toString(); });
+          req.on("end", () => {
+            receivedBody = JSON.parse(body);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              success: true,
+              result: {
+                dryRun: false,
+                categories: ["spacing-semantics"],
+                unknownCategories: [],
+                report: {
+                  "spacing-semantics": {
+                    entries: 1,
+                    createdVariables: [{ name: "space/component/md" }],
+                    updatedVariables: [],
+                    wouldCreateVariables: [],
+                    wouldUpdateVariables: [],
+                    createdStyles: [],
+                    refreshedStyles: [],
+                    unmatched: [],
+                    typeMismatch: [],
+                    fontLoadFailures: [],
+                  },
+                },
+                message: "spacing-semantics: 1 changed",
+              }
+            }));
+          });
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+
+      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
+      const { port } = mockServer.address();
+      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+
+      try {
+        const result = await handleUpdateDsTokens({
+          config_path: configPath,
+          categories: ["spacing-semantics"],
+          create_missing: true,
+          dry_run: false,
+        });
+        assert.ok(!result.error, result.error);
+        assert.strictEqual(result.dryRun, false);
+        assert.deepStrictEqual(result.categories, ["spacing-semantics"]);
+        assert.strictEqual(result.applySupported, true);
+        assert.ok(receivedBody && receivedBody.DS, "spacing-semantics apply should send DS to bridge");
+        assert.deepStrictEqual(receivedBody.categories, ["spacing-semantics"]);
         assert.strictEqual(receivedBody.dryRun, false);
       } finally {
         await new Promise(resolve => mockServer.close(resolve));

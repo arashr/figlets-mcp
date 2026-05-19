@@ -47,7 +47,7 @@ const DEFAULT_CATEGORIES = [
 
 const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES);
 const KNOWN_COLOR_CATEGORIES = new Set(["primitive-color", "color-semantics"]);
-const APPLY_CATEGORIES = new Set(["radius", "border-width"]);
+const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics"]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -392,7 +392,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     missingCapabilityNotes.push({
       kind: "unsupported-apply-category",
       category,
-      reason: "update_ds_tokens apply support is currently limited to radius and border-width. This category can be dry-run previewed, but cannot be written by the Phase 3C apply path yet.",
+      reason: "update_ds_tokens apply support is currently limited to radius, border-width, and semantic spacing. This category can be dry-run previewed, but cannot be written by the Phase 3C apply path yet.",
       productGap: true,
     });
   }

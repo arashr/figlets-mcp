@@ -76,14 +76,18 @@ module.exports = (async () => {
     const inspected = handleInspectDsTokenGaps({
       config_path: configPath,
       figmaDataPath,
-      categories: ["radius", "border-width", "typography"],
+      categories: ["radius", "border-width", "spacing-semantics", "typography"],
     });
     assert.ok(!inspected.error, inspected.error);
-    assert.deepStrictEqual(inspected.repairPlan.previewInput.categories, ["border-width", "radius", "typography"]);
-    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "radius"]);
+    assert.deepStrictEqual(inspected.repairPlan.previewInput.categories, ["border-width", "radius", "spacing-semantics", "typography"]);
+    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "radius", "spacing-semantics"]);
     assert.ok(
       inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
       "typography should remain a dry-run/product-gap category"
+    );
+    assert.ok(
+      !inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "spacing-semantics"),
+      "spacing-semantics should be apply-supported, not a product gap"
     );
 
     const dryRun = handleUpdateDsTokens(Object.assign({}, inspected.repairPlan.previewInput, {
@@ -93,6 +97,10 @@ module.exports = (async () => {
     assert.strictEqual(dryRun.dryRun, true);
     assert.strictEqual(dryRun.report.radius.wouldCreateVariables.length, 2);
     assert.strictEqual(dryRun.report["border-width"].wouldCreateVariables.length, 1);
+    assert.ok(
+      dryRun.report["spacing-semantics"].wouldCreateVariables.some(item => item.name === "space/component/md"),
+      "dry-run should preview missing semantic spacing variables"
+    );
     assert.ok(dryRun.report.typography.wouldCreateVariables.length > 0);
     assert.ok(dryRun.report.typography.wouldCreateStyles.length > 0);
 
@@ -147,8 +155,22 @@ module.exports = (async () => {
                 typeMismatch: [],
                 fontLoadFailures: [],
               },
+              "spacing-semantics": {
+                entries: 1,
+                wouldCreateVariables: [],
+                createdVariables: [{ name: "space/component/md" }],
+                wouldUpdateVariables: [],
+                updatedVariables: [],
+                wouldCreateStyles: [],
+                createdStyles: [],
+                wouldRefreshStyles: [],
+                refreshedStyles: [],
+                unmatched: [],
+                typeMismatch: [],
+                fontLoadFailures: [],
+              },
             },
-            message: "radius: 2 changed; border-width: 1 changed",
+            message: "radius: 2 changed; border-width: 1 changed; spacing-semantics: 1 changed",
           },
         }));
       });
@@ -162,7 +184,7 @@ module.exports = (async () => {
       const applied = await handleUpdateDsTokens(inspected.repairPlan.applyInput);
       assert.ok(!applied.error, applied.error);
       assert.strictEqual(applied.dryRun, false);
-      assert.deepStrictEqual(receivedBody.categories, ["border-width", "radius"]);
+      assert.deepStrictEqual(receivedBody.categories, ["border-width", "radius", "spacing-semantics"]);
       assert.strictEqual(receivedBody.dryRun, false);
     } finally {
       await new Promise(resolve => mockServer.close(resolve));
@@ -174,6 +196,7 @@ module.exports = (async () => {
         variable("space-radius-md", "space/radius/md"),
         variable("space-radius-lg", "space/radius/lg"),
         variable("space-border-default", "space/border/default"),
+        variable("space-component-md", "space/component/md"),
       ],
     });
     writeSnapshot(figmaDataPath, updatedSnapshot);
@@ -181,11 +204,15 @@ module.exports = (async () => {
     const reinspected = handleInspectDsTokenGaps({
       config_path: configPath,
       figmaDataPath,
-      categories: ["radius", "border-width", "typography"],
+      categories: ["radius", "border-width", "spacing-semantics", "typography"],
     });
     assert.ok(!reinspected.error, reinspected.error);
     assert.ok(!reinspected.tokenGaps.some(gap => gap.category === "radius"));
     assert.ok(!reinspected.tokenGaps.some(gap => gap.category === "border-width"));
+    assert.ok(
+      !reinspected.tokenGaps.some(gap => gap.category === "spacing-semantics"),
+      "approved semantic spacing should be resolved after narrow apply"
+    );
     assert.ok(
       reinspected.tokenGaps.some(gap => gap.category === "typography"),
       "unsupported apply categories should remain visible after narrow apply"

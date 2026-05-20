@@ -4,6 +4,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-20 — Phase 3C/3D narrow token apply slices complete]
+
+**Status:** The planned narrow `update_ds_tokens` apply set is implemented, live-validated on Figlets Test (`local_mpcspbgz_7gq8yy0l`), and covered by tests. Approved apply categories: `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, `elevation-styles`. Broad `typography`, broad `elevation`, `primitive-typography`, `primitive-shadow`, prune/delete, and mode creation remain out of scope by design.
+
+**Latest commits:** `dd19333` (dev-only gate for `remove-text-styles`), `d1e528c` + `1d39915` (typography-styles live validation logs), `21ff89d` (typography-styles implementation).
+
+**Live validation summary:** All seven narrow slices were exercised on the disposable file through the bridge on `http://localhost:17337` using direct current-repo handlers. `typography-styles` and `elevation-styles` were validated for both missing-style creation and refresh-in-place paths. `elevation-variables` validated variable-only creation with style gaps left for the narrow style slice.
+
+**Developer test prep only:** `request-remove-text-styles` is gated behind `FIGLETS_DEV_BRIDGE=1` on the receiver (404 in designer flows). Repeatable script: `scripts/live-validate-typography-styles.js`. Not listed in plugin capabilities.
+
+**Verification:** Supported-runtime tests pass **71/71** (includes `tests/bridge/receiver-dev-bridge.test.js`).
+
+**Next product/engineering step:** Missing-foundation guided repair when token completion finds absent collections (for example no Spacing/Typography/Elevation collection), optional dry-run refresh preview for already-complete files, and document/clarify the `update_ds_tokens` vs `update_ds_primitives` boundary. Reconnect/restart the app-managed Figlets MCP host and re-check `update_ds_tokens` MCP callback live if that session was stale.
+
 ### [2026-05-20 — Phase 3D typography text-style apply slice]
 
 **Status:** Implemented the next narrow token-completion apply slice as `typography-styles`. Broad `typography` remains dry-run/product-gap scope; `update_ds_tokens({ dry_run:false, categories:["typography"] })` is still rejected as unsupported apply scope.
@@ -18,7 +32,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Tests updated:** Planner, server allow/reject behavior, bridge policy, fake-Figma runtime flow, docs-plan coverage, and integration proxy now cover `typography-styles`. The integration proxy exercises inspect -> dry-run -> variable apply -> reinspect -> style dry-run -> style apply -> final reinspect across spacing, typography, and elevation slices.
 
-**Verification:** Full supported-runtime test suite passed 70/70 after the slice landed, and `git diff --check` was clean.
+**Verification:** Full supported-runtime test suite passed 70/70 after the slice landed (71/71 after the dev-bridge gate test), and `git diff --check` was clean.
 
 **Live validation (complete on disposable file `local_mpcspbgz_7gq8yy0l` / Figlets Test):** Bridge on `http://localhost:17337`, direct current-repo handlers. After removing `type/body/md` while keeping typography variables, `inspect_ds_token_gaps({ categories:["typography"] })` reported 1 missing text style and `repairPlan.applyInput.categories` was `["typography-styles"]` only. Snapshot dry-run for `typography-styles` previewed creating `type/body/md`. Live apply created `type/body/md` with a new style id, refreshed the other 14 config-derived text styles in place, bound `fontFamily`/`fontSize`/`fontWeight`/`letterSpacing`/`lineHeight`, and reported no `fontLoadFailures` or `bindingWarnings`. Final sync + reinspect showed 0 broad typography gaps. A prior refresh-only pass on the already-complete file had already confirmed in-place refresh for all 15 styles with preserved ids. Test prep uses developer-only bridge `request-remove-text-styles` (`scripts/live-validate-typography-styles.js` with `FIGLETS_DEV_BRIDGE=1` on the receiver). It is not advertised in plugin capabilities or designer workflows; the receiver returns 404 unless dev bridge mode is enabled.
 

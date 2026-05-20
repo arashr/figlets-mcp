@@ -8,6 +8,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Status:** Implemented the next narrow token-completion apply slice as `typography-styles`. Broad `typography` remains dry-run/product-gap scope; `update_ds_tokens({ dry_run:false, categories:["typography"] })` is still rejected as unsupported apply scope.
 
+**Commit:** `21ff89d Add typography style token completion`.
+
 **Planner contract:** `inspect_ds_token_gaps` still previews broad typography variables and text styles. When broad typography variable gaps exist, `repairPlan.applyInput.categories` includes `typography-variables` only. Once required typography variables exist and broad typography has only local text-style gaps, the planner narrows apply input to `typography-styles`.
 
 **Apply behavior:** `update_ds_tokens({ dry_run:false, categories:["typography-styles"] })` targets only local text styles derived from `DS.typography.scale` and `DS.naming.textStyle`. It creates missing text styles, refreshes existing styles in place to preserve IDs, loads fonts through `figma.loadFontAsync(...)` before touching style font properties, binds supported text-style fields to existing typography variables, reports `fontLoadFailures` per style, and reports structured prerequisite/binding warnings such as `missingTypographyVariable`, `missingFontFamilyVariable`, and `unsupportedTextStyleBinding`.
@@ -15,6 +17,10 @@ Active context for the project so future sessions can recover quickly without re
 **Boundary:** The slice does not create variables, primitive typography, modes, effect styles, arbitrary text styles, broad typography writes, or prune/delete operations. If required typography variables are absent, styles are not silently created as raw-only text styles.
 
 **Tests updated:** Planner, server allow/reject behavior, bridge policy, fake-Figma runtime flow, docs-plan coverage, and integration proxy now cover `typography-styles`. The integration proxy exercises inspect -> dry-run -> variable apply -> reinspect -> style dry-run -> style apply -> final reinspect across spacing, typography, and elevation slices.
+
+**Verification:** Full supported-runtime test suite passed 70/70 after the slice landed, and `git diff --check` was clean.
+
+**Pending live validation:** `typography-styles` still needs a disposable Figma file validation. Use the reloaded bridge on `http://localhost:17337`; if the app-managed MCP namespace is stale, call the current repo handlers directly as with the `elevation-styles` validation. Prepare or reuse a file where Typography variables exist and at least one config-derived local text style is missing or stale, then inspect -> dry-run -> apply `typography-styles` -> sync/reinspect.
 
 ### [2026-05-20 — Typography text-style strategy checkpoint]
 

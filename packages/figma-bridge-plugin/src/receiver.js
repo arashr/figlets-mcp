@@ -6,6 +6,11 @@ const DEFAULT_PORT = 17337;
 const PORT = Number(process.env.FIGLETS_RECEIVER_PORT || DEFAULT_PORT);
 const DEST_DIR = process.env.FIGLETS_LOCAL_DIR || path.resolve(__dirname, '../../../.local');
 
+function _devBridgeCommandsEnabled() {
+  const raw = String(process.env.FIGLETS_DEV_BRIDGE || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 let pendingPollResponse = null;
 let pendingPollSessionId = null;
 let pendingSyncRequest = null;
@@ -591,6 +596,14 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'POST' && pathname === '/request-remove-text-styles') {
+    if (!_devBridgeCommandsEnabled()) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'remove-text-styles is a developer-only bridge command and is disabled for designer flows.',
+        hint: 'Set FIGLETS_DEV_BRIDGE=1 on the bridge receiver process for local validation scripts only.',
+      }));
+      return;
+    }
     if (pendingPollResponse) {
       let body = '';
       req.on('data', chunk => { body += chunk.toString(); });
@@ -621,6 +634,11 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'POST' && pathname === '/sync-remove-text-styles') {
+    if (!_devBridgeCommandsEnabled()) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'remove-text-styles sync is disabled outside developer bridge mode.' }));
+      return;
+    }
     let body = '';
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', () => {

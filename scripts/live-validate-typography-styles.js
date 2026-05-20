@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Developer-only live validation. Requires FIGLETS_DEV_BRIDGE=1 on the bridge receiver.
+process.env.FIGLETS_DEV_BRIDGE = process.env.FIGLETS_DEV_BRIDGE || "1";
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
@@ -47,6 +49,12 @@ function postJson(url, body, timeoutMs) {
 async function removeTextStyles(names) {
   const receiverUrl = getReceiverUrl();
   const response = await postJson(`${receiverUrl}/request-remove-text-styles`, { names }, 35000);
+  if (response.statusCode === 404) {
+    throw new Error(
+      (response.body && response.body.error) ||
+        "remove-text-styles is disabled. Restart the bridge receiver with FIGLETS_DEV_BRIDGE=1."
+    );
+  }
   if (response.statusCode !== 200) {
     throw new Error(response.body.error || `Remove text styles failed with status ${response.statusCode}`);
   }
@@ -70,6 +78,9 @@ function save(name, data) {
 }
 
 (async () => {
+  if (process.env.FIGLETS_DEV_BRIDGE !== "1") {
+    throw new Error("FIGLETS_DEV_BRIDGE=1 is required for this developer-only validation script.");
+  }
   await ensureReceiverRunning();
   const log = [];
 

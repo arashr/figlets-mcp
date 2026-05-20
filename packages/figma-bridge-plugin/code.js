@@ -340,6 +340,7 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  // Developer-only bridge command (FIGLETS_DEV_BRIDGE=1). Not advertised in plugin capabilities.
   if (msg.type === 'remove-text-styles') {
     try {
       _appendSessionLog('Executing remove_text_styles.');

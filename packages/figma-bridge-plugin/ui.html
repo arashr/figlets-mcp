@@ -711,11 +711,12 @@
           _appendLog('Received command: reset_figlets_file.');
           parent.postMessage({ pluginMessage: { type: 'reset-figlets-file', data: data.data || {} } }, '*');
         } else if (data.command === 'remove-text-styles') {
+          // Developer-only: receiver dispatches this only when FIGLETS_DEV_BRIDGE=1.
           isExtracting = true;
           _armWatchdog('Remove text styles', 30000);
           document.getElementById('status').innerText = 'Removing text styles...';
-          document.getElementById('substatus').innerText = 'Preparing token validation state.';
-          _appendLog('Received command: remove_text_styles.');
+          document.getElementById('substatus').innerText = 'Developer test prep only.';
+          _appendLog('Received command: remove_text_styles (dev bridge).');
           parent.postMessage({ pluginMessage: { type: 'remove-text-styles', data: data.data || {} } }, '*');
         }
       }

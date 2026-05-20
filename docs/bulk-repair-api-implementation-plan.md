@@ -413,11 +413,41 @@ Typography should be split into two slices:
    - Do not create or refresh text styles in this slice.
 
 2. **Future:** **Text style create/refresh.**
-   - Requires an explicit font-loading strategy before implementation.
+   - Requires the explicit font-loading strategy documented below before implementation.
    - Preserve existing text style IDs.
    - Load required fonts before touching any text-style properties.
    - If fonts are unavailable, report `fontLoadFailures` and leave the style unchanged.
    - Keep style creation/refresh separate enough that designers can approve it independently from variable creation.
+
+#### Typography Text-Style Apply Strategy Draft
+
+The next typography apply slice should use a new narrow category such as `typography-styles`, not broad `typography`. Broad `typography` should remain preview/product-gap scope until both variable and style sub-slices are safe to approve independently.
+
+`typography-styles` should:
+
+- Target local text styles derived from `DS.typography.scale` and the configured text-style naming pattern only.
+- Create missing local text styles and refresh existing local styles in place, preserving existing style IDs.
+- Never create Typography collection variables, primitive typography variables, collection modes, or arbitrary text styles in this slice.
+- Require the matching `type/<role>/{size,line-height,weight,tracking}` variables to exist before a style is created or refreshed.
+- Bind style fields to existing typography variables where the Figma plugin API supports text-style variable binding. If a field cannot be bound by the current Figma API, write the config-backed raw fallback only when that fallback is explicitly part of the strategy and report the unbound field in structured output.
+- Resolve the intended font family from `type/<role>/family` or the configured fallback family, then call `figma.loadFontAsync(...)` before touching style font properties.
+- Load at least the target font family with a deterministic style derived from the configured weight. If the exact style is unavailable, report `fontLoadFailures` and leave that text style unchanged.
+- Return created/refreshed style details, including style id, name, font family/style, bound variable fields, and skipped fields.
+- Report missing prerequisites as structured failures such as `missingTypographyVariable`, `missingFontFamilyVariable`, `fontLoadFailures`, or `unsupportedTextStyleBinding`, rather than silently creating raw-only styles.
+
+Prerequisite behavior:
+
+- If broad `typography` has variable gaps, `inspect_ds_token_gaps` should continue to put `typography-variables` in `repairPlan.applyInput`; it should not put `typography-styles` in apply input until the required typography variables exist or are included in the same approved apply call with deterministic ordering.
+- Missing optional family variables may fall back to configured `DS.typography.families.sans` or `DS.naming.fontFamily`, but the fallback must be visible in the apply result.
+- Font load failure must be per-style, not all-or-nothing. A failing style should remain unchanged while other styles with loadable fonts may still be created/refreshed.
+
+Tests required before implementation:
+
+- Planner maps broad `typography` style gaps to `typography-styles` apply input only when required typography variables exist or are included via approved `typography-variables`.
+- Server allow-list accepts `typography-styles` only when implementation lands and still rejects broad `typography`.
+- Bridge policy test confirms `typography-styles` uses `figma.loadFontAsync(...)`, does not create variables or modes, and does not touch effect styles.
+- Runtime fake-Figma test verifies missing style creation, existing style refresh with ID preservation, font loading, style-level font failures, binding summaries, and structured warnings for unsupported text-style binding fields.
+- Integration proxy covers inspect -> dry-run -> apply -> sync/reinspect, leaving broad `primitive-typography` still unsupported.
 
 Elevation should also be split:
 

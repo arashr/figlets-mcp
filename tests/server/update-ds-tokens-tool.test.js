@@ -171,6 +171,28 @@ module.exports = (async () => {
       );
     }
 
+    {
+      const result = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath,
+        categories: ["typography-styles"],
+        dry_run: false,
+      });
+      assert.ok(
+        result.error && /limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles/.test(result.error),
+        "typography-styles apply should stay disabled until font-loading strategy implementation lands"
+      );
+      assert.deepStrictEqual(result.unknownCategories, ["typography-styles"]);
+      assert.ok(
+        result.missingCapabilityNotes.some(note =>
+          note.kind === "unsupported-apply-category" &&
+          note.category === "typography-styles" &&
+          note.productGap === true
+        ),
+        "typography-styles should be surfaced as future product scope, not silently ignored"
+      );
+    }
+
     await (async () => {
       let receivedBody = null;
       const mockServer = http.createServer((req, res) => {

@@ -32,13 +32,19 @@ module.exports = (() => {
     "Phase 3C/3D apply support covers radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles only"
   );
   assert.ok(!fn.includes("createTextStyle"), "Phase 3C token apply must not create text styles");
+  assert.ok(!fn.includes("loadFontAsync"), "typography style apply must not land before the font-loading strategy is implemented");
   assert.ok(fn.includes("figma.createEffectStyle"), "elevation-styles apply can create approved local effect styles");
   assert.ok(fn.includes("figma.getLocalEffectStylesAsync"), "elevation-styles apply should refresh existing local effect styles");
   assert.ok(fn.includes("figma.variables.setBoundVariableForEffect"), "elevation-styles apply should bind effect fields to variables where possible");
   assert.ok(fn.includes("missingElevationVariable"), "elevation-styles should report missing required elevation variables");
   assert.ok(fn.includes("missingShadowColorVariable"), "elevation-styles should report missing optional shadow color variables");
   assert.ok(fn.includes("unsupportedEffectBinding"), "elevation-styles should report binding API failures");
-  assert.ok(!fn.includes("'typography': true") && !fn.includes("'elevation': true"), "broad typography/elevation must stay out of the narrow apply slice");
+  assert.ok(
+    !fn.includes("'typography': true") &&
+      !fn.includes("'typography-styles': true") &&
+      !fn.includes("'elevation': true"),
+    "broad typography/elevation and future typography-styles must stay out of the current narrow apply slice"
+  );
   assert.ok(fn.includes("typographyName") && fn.includes("Typography collection"), "typography variables should target the Typography collection");
   assert.ok(fn.includes("type/body") === false, "typography variable apply should be config-driven, not hard-coded to one role");
   assert.ok(fn.includes("VARIABLE_ALIAS"), "semantic spacing apply should alias to primitive spacing variables when available");

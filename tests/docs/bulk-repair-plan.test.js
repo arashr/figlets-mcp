@@ -25,6 +25,18 @@ assert.ok(
   "Text-style apply strategy should require font-loading failure reporting"
 );
 assert.ok(
+  plan.includes("Typography Text-Style Apply Strategy Draft") &&
+    plan.includes("new narrow category such as `typography-styles`") &&
+    plan.includes("figma.loadFontAsync"),
+  "Typography text-style apply should have a pinned narrow strategy before implementation"
+);
+assert.ok(
+  plan.includes("missingTypographyVariable") &&
+    plan.includes("missingFontFamilyVariable") &&
+    plan.includes("unsupportedTextStyleBinding"),
+  "Typography style strategy should require structured prerequisite/failure reporting"
+);
+assert.ok(
   plan.includes("Elevation should also be split") && plan.includes("Effect style create/refresh"),
   "Elevation apply strategy should split variables from effect styles"
 );

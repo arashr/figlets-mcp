@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-20 — Typography text-style strategy checkpoint]
+
+**Status:** Added the `typography-styles` strategy draft without enabling text-style writes. Broad `typography` remains rejected for `update_ds_tokens({ dry_run:false })`, and the future narrow `typography-styles` category is also still rejected until implementation lands.
+
+**Strategy pinned:** Future text-style create/refresh must target config-derived local text styles only, preserve existing style IDs, require matching typography variables, load fonts with `figma.loadFontAsync(...)` before touching style font properties, report per-style `fontLoadFailures`, and surface structured prerequisite/binding failures such as `missingTypographyVariable`, `missingFontFamilyVariable`, and `unsupportedTextStyleBinding`.
+
+**Tests updated:** Docs coverage pins the strategy and structured failure names. Server tests assert premature `typography-styles` apply remains `unsupported-apply-category`. Bridge policy tests assert `createTextStyle`, `loadFontAsync`, broad `typography`, and `typography-styles` are absent from the current `_updateDsTokens` apply slice.
+
+---
+
 ### [2026-05-20 — Figlets bridge default port moved off 1337]
 
 **Status:** Changed the local Figlets bridge default from generic port `1337` to Figlets-specific port `17337` to reduce collisions with other localhost projects. Server-side tools now resolve the receiver through `getReceiverUrl()` / `getReceiverPort()`, honoring `FIGLETS_RECEIVER_URL` first and `FIGLETS_RECEIVER_PORT` next.

@@ -710,6 +710,13 @@
           document.getElementById('substatus').innerText = 'Removing local variables, styles, and canvas content.';
           _appendLog('Received command: reset_figlets_file.');
           parent.postMessage({ pluginMessage: { type: 'reset-figlets-file', data: data.data || {} } }, '*');
+        } else if (data.command === 'remove-text-styles') {
+          isExtracting = true;
+          _armWatchdog('Remove text styles', 30000);
+          document.getElementById('status').innerText = 'Removing text styles...';
+          document.getElementById('substatus').innerText = 'Preparing token validation state.';
+          _appendLog('Received command: remove_text_styles.');
+          parent.postMessage({ pluginMessage: { type: 'remove-text-styles', data: data.data || {} } }, '*');
         }
       }
     } catch (err) {
@@ -901,6 +908,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send reset result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'figlets-remove-text-styles-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch(RECEIVER_URL + '/sync-remove-text-styles?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Text-style removal failed.' : 'Text styles removed.';
+        _appendLog(msg.data.error ? 'Text-style removal failed in plugin.' : 'Text-style removal result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
+        _appendLog('Failed to send text-style removal result to receiver.');
       }
       isExtracting = false;
       poll();

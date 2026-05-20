@@ -340,6 +340,18 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'remove-text-styles') {
+    try {
+      _appendSessionLog('Executing remove_text_styles.');
+      const result = await _removeLocalTextStylesByName((msg.data && msg.data.names) || []);
+      figma.ui.postMessage({ type: 'figlets-remove-text-styles-done', fileKey: _getFigletsFileKey(), data: result });
+      _appendSessionLog('Completed remove_text_styles.');
+    } catch (err) {
+      _appendSessionLog('remove_text_styles failed: ' + err.message);
+      figma.ui.postMessage({ type: 'figlets-remove-text-styles-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
   if (msg.type === 'update-primitives') {
     try {
       _appendSessionLog('Executing update_ds_primitives.');
@@ -933,6 +945,29 @@ async function _createDsBindingContext() {
     paint,
     bindVar
   };
+}
+
+async function _removeLocalTextStylesByName(names) {
+  var requested = Array.isArray(names) ? names.filter(Boolean) : [];
+  var nameSet = {};
+  for (var ni = 0; ni < requested.length; ni++) nameSet[requested[ni]] = true;
+  var result = { removedTextStyles: 0, removedStyleNames: [], missingStyleNames: [] };
+  if (!requested.length) return result;
+
+  var textStyles = await figma.getLocalTextStylesAsync();
+  for (var ti = 0; ti < textStyles.length; ti++) {
+    var style = textStyles[ti];
+    if (!style || !style.name || !nameSet[style.name]) continue;
+    var styleName = style.name;
+    try {
+      style.remove();
+      result.removedTextStyles++;
+      result.removedStyleNames.push(styleName);
+      delete nameSet[styleName];
+    } catch (e) {}
+  }
+  result.missingStyleNames = Object.keys(nameSet);
+  return result;
 }
 
 async function _resetFigletsFile(opts) {

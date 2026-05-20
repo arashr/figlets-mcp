@@ -18,6 +18,7 @@ let pendingUpdatePrimitivesRequest = null;
 let pendingUpdateTokensRequest = null;
 let pendingSetupRepairsRequest = null;
 let pendingResetRequest = null;
+let pendingRemoveTextStylesRequest = null;
 let pendingSyncPreviousFileKey = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
@@ -584,6 +585,55 @@ const server = http.createServer((req, res) => {
         pendingResetRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingResetRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingResetRequest = null;
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/request-remove-text-styles') {
+    if (pendingPollResponse) {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'remove-text-styles', data: payload }));
+        _clearPendingPoll();
+
+        pendingRemoveTextStylesRequest = res;
+
+        const removeTimer = setTimeout(() => {
+          if (pendingRemoveTextStylesRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Text-style removal timed out.' }));
+            pendingRemoveTextStylesRequest = null;
+          }
+        }, 30000);
+        if (removeTimer.unref) removeTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-remove-text-styles') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingRemoveTextStylesRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingRemoveTextStylesRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingRemoveTextStylesRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingRemoveTextStylesRequest = null;
       }
     });
     return;

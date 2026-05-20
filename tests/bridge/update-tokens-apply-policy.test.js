@@ -27,11 +27,17 @@ module.exports = (() => {
       fn.includes("'border-width': true") &&
       fn.includes("'spacing-semantics': true") &&
       fn.includes("'typography-variables': true") &&
-      fn.includes("'elevation-variables': true"),
-    "Phase 3C apply support covers radius, border-width, semantic spacing, typography variables, and elevation variables only"
+      fn.includes("'elevation-variables': true") &&
+      fn.includes("'elevation-styles': true"),
+    "Phase 3C/3D apply support covers radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles only"
   );
   assert.ok(!fn.includes("createTextStyle"), "Phase 3C token apply must not create text styles");
-  assert.ok(!fn.includes("createEffectStyle"), "Phase 3C token apply must not create effect styles");
+  assert.ok(fn.includes("figma.createEffectStyle"), "elevation-styles apply can create approved local effect styles");
+  assert.ok(fn.includes("figma.getLocalEffectStylesAsync"), "elevation-styles apply should refresh existing local effect styles");
+  assert.ok(fn.includes("figma.variables.setBoundVariableForEffect"), "elevation-styles apply should bind effect fields to variables where possible");
+  assert.ok(fn.includes("missingElevationVariable"), "elevation-styles should report missing required elevation variables");
+  assert.ok(fn.includes("missingShadowColorVariable"), "elevation-styles should report missing optional shadow color variables");
+  assert.ok(fn.includes("unsupportedEffectBinding"), "elevation-styles should report binding API failures");
   assert.ok(!fn.includes("'typography': true") && !fn.includes("'elevation': true"), "broad typography/elevation must stay out of the narrow apply slice");
   assert.ok(fn.includes("typographyName") && fn.includes("Typography collection"), "typography variables should target the Typography collection");
   assert.ok(fn.includes("type/body") === false, "typography variable apply should be config-driven, not hard-coded to one role");

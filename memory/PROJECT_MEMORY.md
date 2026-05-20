@@ -4,6 +4,24 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-20 — Phase 3D elevation effect-style apply slice]
+
+**Status:** Implemented the next narrow token-completion apply slice as `elevation-styles`. Broad `elevation` remains dry-run/product-gap scope; `update_ds_tokens({ dry_run:false, categories:["elevation"] })` is still rejected as unsupported apply scope.
+
+**Planner contract:** `inspect_ds_token_gaps` still previews broad elevation variables and effect styles. When broad elevation variable gaps exist, `repairPlan.applyInput.categories` includes `elevation-variables` only. Once required elevation variables exist and broad elevation has only local effect-style gaps, the planner narrows apply input to `elevation-styles`.
+
+**Apply behavior:** `update_ds_tokens({ dry_run:false, categories:["elevation-styles"] })` targets only local effect styles named `elevation/0` through `elevation/5`. It creates missing styles, refreshes existing styles in place to preserve IDs, rebuilds the expected DROP_SHADOW effects, binds key shadow `offsetY`/`radius` to `elevation/<key>/{offset-y,radius}` via `figma.variables.setBoundVariableForEffect(...)`, binds shadow colors and ambient radii when those variables exist, and reports structured `bindingWarnings` such as `missingElevationVariable`, `missingShadowColorVariable`, `missingAmbientRadiusVariable`, and `unsupportedEffectBinding`.
+
+**Boundary:** The slice does not create variables, modes, text styles, broad effect styles, primitive shadows, or prune/delete operations. If required elevation variables are absent, styles are not silently created as raw-only shadows; the result reports the missing prerequisite.
+
+**Tests updated:** Planner, server allow/reject behavior, bridge policy, fake-Figma runtime flow, docs-plan coverage, and integration proxy now cover `elevation-styles`. The integration proxy exercises inspect -> dry-run -> variable apply -> reinspect -> style dry-run -> style apply -> final reinspect while leaving broad typography text styles outside apply scope.
+
+**Live validation:** On the disposable file `local_mpcspbgz_7gq8yy0l`, the file already had complete elevation variables and styles, so the missing-style planner path was resolved. Direct live apply through the current repo server handler refreshed all six existing `elevation/0..5` styles in place via the bridge: 0 created styles, 6 refreshed styles, preserved style IDs, key-shadow bound fields `color`, `offsetY`, and `radius`, ambient bound fields `color` and `radius`, and no `bindingWarnings`. Final sync + reinspect for broad `elevation` showed 0 missing variables, 0 missing styles, and empty `applyInput.categories`.
+
+**Runtime wrinkle:** The connected MCP tool host still described the older `update_ds_tokens` category set and treated `elevation-styles` as unsupported until restart/reconnect. The live validation therefore used the current repo `handleUpdateDsTokens(...)` directly against a freshly restarted local bridge receiver. Treat MCP-level `elevation-styles` unsupported results as stale MCP process symptoms until reproduced after reconnect.
+
+---
+
 ### [2026-05-20 — update_ds_tokens changed-variable observability]
 
 **Status:** Added a narrow observability improvement to bridge apply results for `update_ds_tokens`. Created/updated variable report items now include changed-variable details such as variable id, collection, scopes, per-mode values, mode names, and alias target names when a value is a `VARIABLE_ALIAS`.

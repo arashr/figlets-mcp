@@ -29,6 +29,23 @@ assert.ok(
   "Elevation apply strategy should split variables from effect styles"
 );
 assert.ok(
+  plan.includes("approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `elevation-variables`, and `elevation-styles` only") &&
+    plan.includes("Elevation collection FLOAT variables `elevation/<key>/{offset-y,radius}`"),
+  "Current surface table should include the elevation apply slices"
+);
+assert.ok(
+  plan.includes("Elevation Effect-Style Apply Strategy") &&
+    plan.includes("The effect-style apply slice uses the narrow category `elevation-styles`") &&
+    plan.includes("figma.variables.setBoundVariableForEffect"),
+  "Broad elevation style apply should keep a pinned narrow strategy after implementation"
+);
+assert.ok(
+  plan.includes("missingElevationVariable") &&
+    plan.includes("missingShadowColorVariable") &&
+    plan.includes("unsupportedEffectBinding"),
+  "Elevation style strategy should require structured prerequisite/failure reporting"
+);
+assert.ok(
   plan.includes("dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category`"),
   "Plan should preserve product-gap reporting for broad typography/elevation until future apply slices land"
 );

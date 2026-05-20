@@ -79,6 +79,9 @@ module.exports = (async () => {
     makeVariable("font-sans", "font/sans", "primitives", "STRING", { value: "Inter" }),
     makeVariable("shadow-1-offset", "shadow/1/offset-y", "primitives", "FLOAT", { value: 1 }),
     makeVariable("shadow-1-radius", "shadow/1/radius", "primitives", "FLOAT", { value: 2 }),
+    makeVariable("shadow-ambient-2-radius", "shadow/ambient/2/radius", "primitives", "FLOAT", { value: 8 }),
+    makeVariable("color-shadow-key", "color/shadow/key", "primitives", "COLOR", { value: { r: 0, g: 0, b: 0, a: 0.2 } }),
+    makeVariable("color-shadow-ambient", "color/shadow/ambient", "primitives", "COLOR", { value: { r: 0, g: 0, b: 0, a: 0.08 } }),
     makeVariable("existing-size", "type/body/md/size", "typography", "FLOAT", {
       mobile: 10,
       tablet: 10,
@@ -87,6 +90,9 @@ module.exports = (async () => {
     makeVariable("existing-elevation-radius", "elevation/xs/radius", "elevation", "FLOAT", {
       value: 99,
     }),
+  ];
+  const effectStyles = [
+    { id: "existing-effect-1", name: "elevation/1", effects: [{ type: "DROP_SHADOW", radius: 99 }] },
   ];
 
   const figma = {
@@ -102,6 +108,23 @@ module.exports = (async () => {
         variables.push(variable);
         return variable;
       },
+      getVariableById(id) {
+        return variables.find(variable => variable.id === id) || null;
+      },
+      setBoundVariableForEffect(effect, property, variable) {
+        const next = Object.assign({}, effect);
+        next.boundVariables = Object.assign({}, effect.boundVariables || {});
+        next.boundVariables[property] = { id: variable.id, type: variable.resolvedType };
+        return next;
+      },
+    },
+    async getLocalEffectStylesAsync() {
+      return effectStyles;
+    },
+    createEffectStyle() {
+      const style = { id: `created-effect-${effectStyles.length}`, name: "", effects: [] };
+      effectStyles.push(style);
+      return style;
     },
   };
 
@@ -151,13 +174,13 @@ module.exports = (async () => {
 
   const result = await context.module.exports._updateDsTokens({
     DS,
-    categories: ["spacing-semantics", "typography-variables", "elevation-variables"],
+    categories: ["spacing-semantics", "typography-variables", "elevation-variables", "elevation-styles"],
     createMissing: true,
     dryRun: false,
   });
 
   assert.ok(!result.error, result.error);
-  assertJsonEqual(result.categories, ["spacing-semantics", "typography-variables", "elevation-variables"]);
+  assertJsonEqual(result.categories, ["spacing-semantics", "typography-variables", "elevation-variables", "elevation-styles"]);
   assert.strictEqual(result.report["spacing-semantics"].createdVariables.length, 1);
   assert.strictEqual(result.report["typography-variables"].createdVariables.length, 4);
   assert.strictEqual(result.report["typography-variables"].updatedVariables.length, 1);
@@ -167,6 +190,15 @@ module.exports = (async () => {
   assert.strictEqual(result.report["elevation-variables"].updatedVariables.length, 1);
   assert.strictEqual(result.report["elevation-variables"].createdStyles.length, 0);
   assert.strictEqual(result.report["elevation-variables"].refreshedStyles.length, 0);
+  assert.strictEqual(result.report["elevation-styles"].createdVariables.length, 0);
+  assert.strictEqual(result.report["elevation-styles"].updatedVariables.length, 0);
+  assert.strictEqual(result.report["elevation-styles"].createdStyles.length, 5);
+  assert.strictEqual(result.report["elevation-styles"].refreshedStyles.length, 1);
+  assert.strictEqual(result.report["elevation-styles"].refreshedStyles[0].id, "existing-effect-1");
+  assert.ok(
+    result.report["elevation-styles"].bindingWarnings.some(item => item.kind === "missingAmbientRadiusVariable" && item.styleName === "elevation/3"),
+    "ambient radius gaps should be reported without blocking style creation"
+  );
 
   const byName = new Map(variables.map(variable => [variable.name, variable]));
   const semanticSpacing = byName.get("space/component/md");
@@ -221,6 +253,19 @@ module.exports = (async () => {
     modeName: "Value",
     value: { type: "VARIABLE_ALIAS", id: "shadow-1-radius", name: "shadow/1/radius" },
   }]);
+
+  const styleByName = new Map(effectStyles.map(style => [style.name, style]));
+  const elevationOneStyle = styleByName.get("elevation/1");
+  assert.strictEqual(elevationOneStyle.id, "existing-effect-1", "existing elevation style ID should be preserved");
+  assert.strictEqual(elevationOneStyle.effects.length, 1);
+  assertJsonEqual(elevationOneStyle.effects[0].boundVariables.offsetY, { id: elevationOffset.id, type: "FLOAT" });
+  assertJsonEqual(elevationOneStyle.effects[0].boundVariables.radius, { id: "existing-elevation-radius", type: "FLOAT" });
+  assertJsonEqual(elevationOneStyle.effects[0].boundVariables.color, { id: "color-shadow-key", type: "COLOR" });
+
+  const elevationTwoStyle = styleByName.get("elevation/2");
+  assert.strictEqual(elevationTwoStyle.effects.length, 2);
+  assertJsonEqual(elevationTwoStyle.effects[1].boundVariables.color, { id: "color-shadow-ambient", type: "COLOR" });
+  assertJsonEqual(elevationTwoStyle.effects[1].boundVariables.radius, { id: "shadow-ambient-2-radius", type: "FLOAT" });
 
   const lineHeightReport = result.report["typography-variables"].createdVariables.find(item => item.name === "type/body/md/line-height");
   assert.ok(lineHeightReport, "created raw typography variable should include value details");

@@ -6005,6 +6005,7 @@ function _emptyTokenUpdateReport() {
     unmatched: [],
     typeMismatch: [],
     fontLoadFailures: [],
+    bindingWarnings: [],
   };
 }
 
@@ -6171,7 +6172,7 @@ async function _updateDsTokens(payload) {
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : [];
-  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true, 'typography-variables': true, 'elevation-variables': true };
+  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true, 'typography-variables': true, 'elevation-variables': true, 'elevation-styles': true };
   var categories = [];
   var unknown = [];
   var needsSpacing = false;
@@ -6184,10 +6185,12 @@ async function _updateDsTokens(payload) {
       categories.push(cat);
       if (cat === 'radius' || cat === 'border-width' || cat === 'spacing-semantics') needsSpacing = true;
       if (cat === 'typography-variables') needsTypography = true;
-      if (cat === 'elevation-variables') needsElevation = true;
+      if (cat === 'elevation-variables' || cat === 'elevation-styles') needsElevation = true;
     }
     else unknown.push(cat);
   }
+  var applyOrder = { 'radius': 1, 'border-width': 2, 'spacing-semantics': 3, 'typography-variables': 4, 'elevation-variables': 5, 'elevation-styles': 6 };
+  categories.sort(function(a, b) { return (applyOrder[a] || 99) - (applyOrder[b] || 99); });
 
   var allColls = await figma.variables.getLocalVariableCollectionsAsync();
   var allVars = await figma.variables.getLocalVariablesAsync();
@@ -6273,7 +6276,7 @@ async function _updateDsTokens(payload) {
       missingCapabilityNotes: [{
         kind: 'missing-foundation-collection',
         collection: elevationName,
-        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing elevation variable completion. That guided repair path is future product scope.',
+        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing elevation variable or effect-style completion. That guided repair path is future product scope.',
         productGap: true,
       }],
       report: {},
@@ -6303,6 +6306,8 @@ async function _updateDsTokens(payload) {
   var spacingModeOrder = spacingColl ? _modeOrderForCollection(spacingColl) : [];
   var typographyModeOrder = typographyColl ? _modeOrderForCollection(typographyColl) : [];
   var elevationModeOrder = elevationColl ? _modeOrderForCollection(elevationColl) : [];
+  var allVariablesByName = {};
+  for (var avn = 0; avn < allVars.length; avn++) allVariablesByName[allVars[avn].name] = allVars[avn];
 
   function _resolveSpaceValue(rawVal) {
     var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
@@ -6376,6 +6381,7 @@ async function _updateDsTokens(payload) {
           existing = figma.variables.createVariable(entry.name, targetColl, entry.type);
           _setVariableScopesForName(existing, entry.name, entry.type);
           byName[entry.name] = existing;
+          allVariablesByName[entry.name] = existing;
           idToName[existing.id] = existing.name;
           for (var cm = 0; cm < modeOrder.length; cm++) {
             var desiredCreateValue = _desiredForMode(entry, modeOrder[cm].bpIndex);
@@ -6424,6 +6430,151 @@ async function _updateDsTokens(payload) {
       catReport.updatedVariables.push(_tokenUpdateChangedItem(existing, item, modeOrder, idToName));
     }
 
+    if (category === 'elevation-styles') {
+      var styleLevels = [
+        { name: 'elevation/0', key: null, level: 0, shadows: [] },
+        { name: 'elevation/1', key: 'xs', level: 1, shadows: [{ offsetY: 1, radius: 2, ambient: false }] },
+        { name: 'elevation/2', key: 'sm', level: 2, shadows: [{ offsetY: 4, radius: 8, ambient: true, ambRadius: 8 }] },
+        { name: 'elevation/3', key: 'md', level: 3, shadows: [{ offsetY: 8, radius: 16, ambient: true, ambRadius: 12 }] },
+        { name: 'elevation/4', key: 'lg', level: 4, shadows: [{ offsetY: 12, radius: 24, ambient: true, ambRadius: 16 }] },
+        { name: 'elevation/5', key: 'xl', level: 5, shadows: [{ offsetY: 16, radius: 32, ambient: true, ambRadius: 20 }] },
+      ];
+      var localEffectStyles = await figma.getLocalEffectStylesAsync();
+      var styleByName = {};
+      for (var esi = 0; esi < localEffectStyles.length; esi++) {
+        if (localEffectStyles[esi] && localEffectStyles[esi].name) styleByName[localEffectStyles[esi].name] = localEffectStyles[esi];
+      }
+
+      function _styleItem(name) {
+        return { name: name, kind: 'style', styleType: 'EFFECT', collection: 'local effect styles' };
+      }
+
+      function _styleDetail(style) {
+        var detail = {
+          name: style.name,
+          kind: 'style',
+          styleType: 'EFFECT',
+          collection: 'local effect styles',
+          id: style.id || null,
+          effectCount: Array.isArray(style.effects) ? style.effects.length : 0,
+          boundVariables: [],
+        };
+        var effects = Array.isArray(style.effects) ? style.effects : [];
+        for (var bvi = 0; bvi < effects.length; bvi++) {
+          detail.boundVariables.push({
+            effectIndex: bvi,
+            fields: Object.keys(effects[bvi].boundVariables || {}).sort(),
+          });
+        }
+        return detail;
+      }
+
+      function _bindEffectVariable(effect, property, variable, styleName, variableName, required) {
+        if (!variable) {
+          catReport.bindingWarnings.push({
+            kind: required ? 'missingElevationVariable' : (String(variableName).indexOf('color/') === 0 ? 'missingShadowColorVariable' : 'missingAmbientRadiusVariable'),
+            styleName: styleName,
+            name: variableName,
+          });
+          return effect;
+        }
+        try {
+          return figma.variables.setBoundVariableForEffect(effect, property, variable);
+        } catch (bindErr) {
+          catReport.bindingWarnings.push({
+            kind: 'unsupportedEffectBinding',
+            styleName: styleName,
+            name: variableName,
+            property: property,
+            reason: bindErr && bindErr.message ? bindErr.message : 'Figma did not accept this effect variable binding.',
+          });
+        }
+        return effect;
+      }
+
+      for (var sli = 0; sli < styleLevels.length; sli++) {
+        var levelDef = styleLevels[sli];
+        catReport.entries += 1;
+        var existingStyle = styleByName[levelDef.name];
+        var levelItem = _styleItem(levelDef.name);
+        if (!existingStyle) {
+          if (!createMissing) {
+            catReport.unmatched.push(levelItem);
+            continue;
+          }
+          if (dryRun) {
+            catReport.wouldCreateStyles.push(levelItem);
+            continue;
+          }
+        } else if (dryRun) {
+          catReport.wouldRefreshStyles.push(levelItem);
+          continue;
+        }
+
+        var missingRequired = false;
+        if (levelDef.key) {
+          var offsetVarName = 'elevation/' + levelDef.key + '/offset-y';
+          var radiusVarName = 'elevation/' + levelDef.key + '/radius';
+          if (!allVariablesByName[offsetVarName]) {
+            catReport.bindingWarnings.push({ kind: 'missingElevationVariable', styleName: levelDef.name, name: offsetVarName });
+            missingRequired = true;
+          }
+          if (!allVariablesByName[radiusVarName]) {
+            catReport.bindingWarnings.push({ kind: 'missingElevationVariable', styleName: levelDef.name, name: radiusVarName });
+            missingRequired = true;
+          }
+        }
+        if (missingRequired) {
+          catReport.unmatched.push(levelItem);
+          continue;
+        }
+
+        var effectArr = [];
+        if (levelDef.shadows.length) {
+          for (var shi = 0; shi < levelDef.shadows.length; shi++) {
+            var shadow = levelDef.shadows[shi];
+            var keyEffect = {
+              type: 'DROP_SHADOW',
+              color: { r: 0, g: 0, b: 0, a: 0.2 },
+              offset: { x: 0, y: shadow.offsetY },
+              radius: shadow.radius,
+              spread: 0,
+              visible: true,
+              blendMode: 'NORMAL',
+            };
+            keyEffect = _bindEffectVariable(keyEffect, 'color', allVariablesByName['color/shadow/key'], levelDef.name, 'color/shadow/key', false);
+            keyEffect = _bindEffectVariable(keyEffect, 'offsetY', allVariablesByName['elevation/' + levelDef.key + '/offset-y'], levelDef.name, 'elevation/' + levelDef.key + '/offset-y', true);
+            keyEffect = _bindEffectVariable(keyEffect, 'radius', allVariablesByName['elevation/' + levelDef.key + '/radius'], levelDef.name, 'elevation/' + levelDef.key + '/radius', true);
+            effectArr.push(keyEffect);
+
+            if (shadow.ambient) {
+              var ambientEffect = {
+                type: 'DROP_SHADOW',
+                color: { r: 0, g: 0, b: 0, a: 0.08 },
+                offset: { x: 0, y: 0 },
+                radius: shadow.ambRadius,
+                spread: 0,
+                visible: true,
+                blendMode: 'NORMAL',
+              };
+              ambientEffect = _bindEffectVariable(ambientEffect, 'color', allVariablesByName['color/shadow/ambient'], levelDef.name, 'color/shadow/ambient', false);
+              ambientEffect = _bindEffectVariable(ambientEffect, 'radius', allVariablesByName['shadow/ambient/' + levelDef.level + '/radius'], levelDef.name, 'shadow/ambient/' + levelDef.level + '/radius', false);
+              effectArr.push(ambientEffect);
+            }
+          }
+        }
+
+        var targetStyle = existingStyle || figma.createEffectStyle();
+        targetStyle.name = levelDef.name;
+        targetStyle.effects = effectArr;
+        if (existingStyle) catReport.refreshedStyles.push(_styleDetail(targetStyle));
+        else catReport.createdStyles.push(_styleDetail(targetStyle));
+      }
+
+      report[category] = catReport;
+      continue;
+    }
+
     report[category] = catReport;
   }
 
@@ -6432,8 +6583,8 @@ async function _updateDsTokens(payload) {
   for (var n = 0; n < names.length; n++) {
     var r = report[names[n]];
     var changedCount = dryRun
-      ? r.wouldCreateVariables.length + r.wouldUpdateVariables.length
-      : r.createdVariables.length + r.updatedVariables.length;
+      ? r.wouldCreateVariables.length + r.wouldUpdateVariables.length + r.wouldCreateStyles.length + r.wouldRefreshStyles.length
+      : r.createdVariables.length + r.updatedVariables.length + r.createdStyles.length + r.refreshedStyles.length;
     parts.push(names[n] + ': ' + changedCount + (dryRun ? ' would change' : ' changed'));
   }
   if (unknown.length) parts.push(unknown.length + ' unsupported categories');

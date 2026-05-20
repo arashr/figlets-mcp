@@ -294,9 +294,113 @@ module.exports = (async () => {
     );
     assert.ok(
       reinspected.tokenGaps.some(gap => gap.category === "elevation" && gap.gapType === "missing-style"),
-      "effect styles should remain visible as unsupported apply scope after elevation variable apply"
+      "effect styles should remain visible after elevation variable apply"
     );
-    assert.deepStrictEqual(reinspected.repairPlan.applyInput.categories, []);
+    assert.deepStrictEqual(
+      reinspected.repairPlan.applyInput.categories,
+      ["elevation-styles"],
+      "once elevation variables exist, planner should offer the narrow elevation-styles apply slice"
+    );
+
+    const styleDryRun = handleUpdateDsTokens({
+      config_path: configPath,
+      figmaDataPath,
+      categories: ["elevation-styles"],
+      create_missing: true,
+      dry_run: true,
+    });
+    assert.ok(!styleDryRun.error, styleDryRun.error);
+    assert.strictEqual(styleDryRun.report["elevation-styles"].wouldCreateStyles.length, 6);
+
+    let receivedStyleBody = null;
+    const mockStyleServer = http.createServer((req, res) => {
+      if (req.method !== "POST" || req.url !== "/request-update-tokens") {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+
+      let body = "";
+      req.on("data", chunk => { body += chunk.toString(); });
+      req.on("end", () => {
+        receivedStyleBody = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          success: true,
+          result: {
+            dryRun: false,
+            categories: receivedStyleBody.categories,
+            unknownCategories: [],
+            report: {
+              "elevation-styles": {
+                entries: 6,
+                wouldCreateVariables: [],
+                createdVariables: [],
+                wouldUpdateVariables: [],
+                updatedVariables: [],
+                wouldCreateStyles: [],
+                createdStyles: [
+                  { name: "elevation/0" },
+                  { name: "elevation/1" },
+                  { name: "elevation/2" },
+                  { name: "elevation/3" },
+                  { name: "elevation/4" },
+                  { name: "elevation/5" },
+                ],
+                wouldRefreshStyles: [],
+                refreshedStyles: [],
+                unmatched: [],
+                typeMismatch: [],
+                fontLoadFailures: [],
+                bindingWarnings: [],
+              },
+            },
+            message: "elevation-styles: 6 changed",
+          },
+        }));
+      });
+    });
+
+    await new Promise(resolve => mockStyleServer.listen(0, "127.0.0.1", resolve));
+    const stylePort = mockStyleServer.address().port;
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${stylePort}`;
+
+    try {
+      const appliedStyles = await handleUpdateDsTokens(reinspected.repairPlan.applyInput);
+      assert.ok(!appliedStyles.error, appliedStyles.error);
+      assert.strictEqual(appliedStyles.dryRun, false);
+      assert.deepStrictEqual(receivedStyleBody.categories, ["elevation-styles"]);
+    } finally {
+      await new Promise(resolve => mockStyleServer.close(resolve));
+      delete process.env.FIGLETS_RECEIVER_URL;
+    }
+
+    const finalSnapshot = Object.assign({}, updatedSnapshot, {
+      effectStyles: [
+        { name: "elevation/0" },
+        { name: "elevation/1" },
+        { name: "elevation/2" },
+        { name: "elevation/3" },
+        { name: "elevation/4" },
+        { name: "elevation/5" },
+      ],
+    });
+    writeSnapshot(figmaDataPath, finalSnapshot);
+
+    const finalInspect = handleInspectDsTokenGaps({
+      config_path: configPath,
+      figmaDataPath,
+      categories: ["radius", "border-width", "spacing-semantics", "typography", "elevation"],
+    });
+    assert.ok(!finalInspect.error, finalInspect.error);
+    assert.ok(
+      !finalInspect.tokenGaps.some(gap => gap.category === "elevation"),
+      "elevation variables and effect styles should be resolved after both narrow applies"
+    );
+    assert.ok(
+      finalInspect.tokenGaps.some(gap => gap.category === "typography" && gap.gapType === "missing-style"),
+      "text styles should remain outside this elevation-focused slice"
+    );
   } finally {
     try { fs.unlinkSync(configPath); } catch (err) {}
     try { fs.unlinkSync(figmaDataPath); } catch (err) {}

@@ -18,6 +18,21 @@ function variable(id, name, type) {
   };
 }
 
+function elevationVariables() {
+  return [
+    variable("elevation-xs-offset", "elevation/xs/offset-y"),
+    variable("elevation-xs-radius", "elevation/xs/radius"),
+    variable("elevation-sm-offset", "elevation/sm/offset-y"),
+    variable("elevation-sm-radius", "elevation/sm/radius"),
+    variable("elevation-md-offset", "elevation/md/offset-y"),
+    variable("elevation-md-radius", "elevation/md/radius"),
+    variable("elevation-lg-offset", "elevation/lg/offset-y"),
+    variable("elevation-lg-radius", "elevation/lg/radius"),
+    variable("elevation-xl-offset", "elevation/xl/offset-y"),
+    variable("elevation-xl-radius", "elevation/xl/radius"),
+  ];
+}
+
 const DS = {
   collections: {
     primitives: "1. Primitives",
@@ -144,6 +159,56 @@ module.exports = (() => {
       elevationVariables.repairPlan.applyInput.categories,
       ["elevation-variables"],
       "elevation-variables should be an apply-supported narrow category"
+    );
+  }
+
+  {
+    const elevationStyles = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [{ name: "5. Elevation" }],
+      variables: elevationVariables(),
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["elevation"],
+    });
+    assert.strictEqual(elevationStyles.summary.missingVariableCount, 0);
+    assert.strictEqual(elevationStyles.summary.missingStyleCount, 6);
+    assert.ok(
+      elevationStyles.tokenGaps.some(gap => gap.category === "elevation" && gap.name === "elevation/5"),
+      "broad elevation should still report missing effect-style gaps"
+    );
+    assert.deepStrictEqual(
+      elevationStyles.repairPlan.applyInput.categories,
+      ["elevation-styles"],
+      "planner should narrow broad elevation style-only gaps to the approved elevation-styles apply slice"
+    );
+    assert.ok(
+      elevationStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
+      "broad elevation should remain a product-gap category even when a narrow style slice is available"
+    );
+  }
+
+  {
+    const directElevationStyles = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [{ name: "5. Elevation" }],
+      variables: elevationVariables(),
+      textStyles: [],
+      effectStyles: [{ name: "elevation/0" }],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["elevation-styles"],
+    });
+    assert.strictEqual(directElevationStyles.summary.missingVariableCount, 0);
+    assert.strictEqual(directElevationStyles.summary.missingStyleCount, 5);
+    assert.deepStrictEqual(
+      directElevationStyles.repairPlan.applyInput.categories,
+      ["elevation-styles"],
+      "elevation-styles should be directly apply-supported without enabling broad elevation"
+    );
+    assert.ok(
+      !directElevationStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation-styles"),
+      "direct elevation-styles requests should not be flagged as unsupported apply scope"
     );
   }
 

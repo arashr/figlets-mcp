@@ -12,6 +12,10 @@ Active context for the project so future sessions can recover quickly without re
 
 **Compatibility:** Existing tests and developer workflows that set `FIGLETS_RECEIVER_URL` continue to override the default. If another process needs the old port, leave it alone; Figlets should use `17337` unless explicitly configured otherwise.
 
+**Post-reload check:** After the Figma Bridge plugin was reloaded, the local receiver started on `http://localhost:17337` and the plugin connected there with session `figlets-mpe5ypbw-lm7i3` for disposable file `local_mpcspbgz_7gq8yy0l`. Direct current-repo handlers successfully ran `sync_figma_data` and `update_ds_tokens({ categories:["elevation-styles"], dry_run:false })` through the new port; the style apply refreshed all six `elevation/0..5` styles with no `bindingWarnings`.
+
+**MCP host note:** The `mcp__figlets__` namespace in the current Codex session still failed `sync_figma_data` even while direct current-repo handlers worked. Process inspection did not show a standalone `figlets-mcp` process that could be safely restarted from the shell, so this appears to be an app-managed/stale MCP host boundary rather than a repo or bridge receiver issue. Re-test the MCP namespace only after the app-level MCP session refreshes.
+
 ---
 
 ### [2026-05-20 — Phase 3D elevation effect-style apply slice]

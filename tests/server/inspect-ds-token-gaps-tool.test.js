@@ -106,8 +106,8 @@ module.exports = (() => {
   );
   assert.deepStrictEqual(
     result.repairPlan.applyInput.categories,
-    ["border-width", "radius", "spacing-semantics", "typography-variables"],
-    "applyInput should include only Phase 3C apply-supported categories, with typography narrowed to variables"
+    ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"],
+    "applyInput should include only Phase 3C apply-supported categories, with typography/elevation narrowed to variables"
   );
   assert.strictEqual(result.repairPlan.applyInput.dry_run, false);
   assert.deepStrictEqual(result.repairPlan.optionalApplyInput.categories, []);
@@ -122,6 +122,30 @@ module.exports = (() => {
   assert.ok(gapNames.indexOf("elevation/1") >= 0, "missing elevation effect style should be reported from config");
   assert.ok(gapNames.indexOf("space/component/md") === -1, "existing variables should not be reported as missing");
   assert.ok(gapNames.indexOf("type/body/md") === -1, "existing text styles should not be reported as missing");
+
+  {
+    const elevationVariables = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [{ name: "5. Elevation" }],
+      variables: [
+        variable("elevation-xs-offset", "elevation/xs/offset-y"),
+      ],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["elevation-variables"],
+    });
+    assert.strictEqual(elevationVariables.summary.missingStyleCount, 0);
+    assert.ok(
+      elevationVariables.tokenGaps.some(gap => gap.category === "elevation-variables" && gap.name === "elevation/xs/radius"),
+      "elevation-variables should report only elevation variable gaps"
+    );
+    assert.deepStrictEqual(
+      elevationVariables.repairPlan.applyInput.categories,
+      ["elevation-variables"],
+      "elevation-variables should be an apply-supported narrow category"
+    );
+  }
 
   {
     const cleanSetup = inspectDsTokenGapsFromConfigAndFigmaData(DS, {

@@ -5369,12 +5369,13 @@ async function _applyDsSetup(DS) {
     var primVarMapForElev = await buildVarMap(primColl.id);
 
     var ELEV_LEVELS = [
-      { level: 1, key: 'xs' },
-      { level: 2, key: 'sm' },
-      { level: 3, key: 'md' },
-      { level: 4, key: 'lg' },
-      { level: 5, key: 'xl' },
+      { level: 1, key: 'xs', offsetY: 1,  radius: 2  },
+      { level: 2, key: 'sm', offsetY: 4,  radius: 8  },
+      { level: 3, key: 'md', offsetY: 8,  radius: 16 },
+      { level: 4, key: 'lg', offsetY: 12, radius: 24 },
+      { level: 5, key: 'xl', offsetY: 16, radius: 32 },
     ];
+    var elevVarMapForStyles = {};
 
     for (var eli = 0; eli < ELEV_LEVELS.length; eli++) {
       var el = ELEV_LEVELS[eli];
@@ -5387,8 +5388,10 @@ async function _applyDsSetup(DS) {
       var elevRadiusVar = figma.variables.createVariable('elevation/' + el.key + '/radius', elevColl, 'FLOAT');
       _setVariableScopesForName(elevOffsetVar, 'elevation/' + el.key + '/offset-y', 'FLOAT');
       _setVariableScopesForName(elevRadiusVar, 'elevation/' + el.key + '/radius', 'FLOAT');
-      if (offsetYId) elevOffsetVar.setValueForMode(elevModeId, { type: 'VARIABLE_ALIAS', id: offsetYId });
-      if (radiusId)  elevRadiusVar.setValueForMode(elevModeId, { type: 'VARIABLE_ALIAS', id: radiusId });
+      elevOffsetVar.setValueForMode(elevModeId, offsetYId ? { type: 'VARIABLE_ALIAS', id: offsetYId } : el.offsetY);
+      elevRadiusVar.setValueForMode(elevModeId, radiusId ? { type: 'VARIABLE_ALIAS', id: radiusId } : el.radius);
+      elevVarMapForStyles['elevation/' + el.key + '/offset-y'] = elevOffsetVar;
+      elevVarMapForStyles['elevation/' + el.key + '/radius'] = elevRadiusVar;
     }
 
     built.push(elevName);
@@ -5398,13 +5401,24 @@ async function _applyDsSetup(DS) {
     var keyColorId     = semVarMapForElev['color/shadow/key'];
     var ambientColorId = semVarMapForElev['color/shadow/ambient'];
 
+    function _varById(id) {
+      if (!id) return null;
+      try { return figma.variables.getVariableById(id); } catch (e) { return null; }
+    }
+
+    function _withBoundEffectVariable(effect, property, variable) {
+      if (!variable) return effect;
+      try { return figma.variables.setBoundVariableForEffect(effect, property, variable); } catch (e) {}
+      return effect;
+    }
+
     var EFFECT_LEVELS = [
-      { name: 'elevation/0',  shadows: [] },
-      { name: 'elevation/1',  shadows: [{ offsetY: 1,  radius: 2,  ambient: false }] },
-      { name: 'elevation/2',  shadows: [{ offsetY: 4,  radius: 8,  ambient: true,  ambRadius: 8  }] },
-      { name: 'elevation/3',  shadows: [{ offsetY: 8,  radius: 16, ambient: true,  ambRadius: 12 }] },
-      { name: 'elevation/4',  shadows: [{ offsetY: 12, radius: 24, ambient: true,  ambRadius: 16 }] },
-      { name: 'elevation/5',  shadows: [{ offsetY: 16, radius: 32, ambient: true,  ambRadius: 20 }] },
+      { name: 'elevation/0',  key: null, shadows: [] },
+      { name: 'elevation/1',  key: 'xs', level: 1, shadows: [{ offsetY: 1,  radius: 2,  ambient: false }] },
+      { name: 'elevation/2',  key: 'sm', level: 2, shadows: [{ offsetY: 4,  radius: 8,  ambient: true,  ambRadius: 8  }] },
+      { name: 'elevation/3',  key: 'md', level: 3, shadows: [{ offsetY: 8,  radius: 16, ambient: true,  ambRadius: 12 }] },
+      { name: 'elevation/4',  key: 'lg', level: 4, shadows: [{ offsetY: 12, radius: 24, ambient: true,  ambRadius: 16 }] },
+      { name: 'elevation/5',  key: 'xl', level: 5, shadows: [{ offsetY: 16, radius: 32, ambient: true,  ambRadius: 20 }] },
     ];
 
     for (var efli = 0; efli < EFFECT_LEVELS.length; efli++) {
@@ -5419,7 +5433,7 @@ async function _applyDsSetup(DS) {
         for (var shi = 0; shi < eff.shadows.length; shi++) {
           var sh = eff.shadows[shi];
           // Key shadow
-          effectArr.push({
+          var keyEffect = {
             type: 'DROP_SHADOW',
             color: { r: 0, g: 0, b: 0, a: 0.2 },
             offset: { x: 0, y: sh.offsetY },
@@ -5427,10 +5441,16 @@ async function _applyDsSetup(DS) {
             spread: 0,
             visible: true,
             blendMode: 'NORMAL',
-          });
+          };
+          keyEffect = _withBoundEffectVariable(keyEffect, 'color', _varById(keyColorId));
+          if (eff.key) {
+            keyEffect = _withBoundEffectVariable(keyEffect, 'offsetY', elevVarMapForStyles['elevation/' + eff.key + '/offset-y']);
+            keyEffect = _withBoundEffectVariable(keyEffect, 'radius', elevVarMapForStyles['elevation/' + eff.key + '/radius']);
+          }
+          effectArr.push(keyEffect);
           // Ambient shadow (levels 2-5)
           if (sh.ambient) {
-            effectArr.push({
+            var ambientEffect = {
               type: 'DROP_SHADOW',
               color: { r: 0, g: 0, b: 0, a: 0.08 },
               offset: { x: 0, y: 0 },
@@ -5438,22 +5458,13 @@ async function _applyDsSetup(DS) {
               spread: 0,
               visible: true,
               blendMode: 'NORMAL',
-            });
+            };
+            ambientEffect = _withBoundEffectVariable(ambientEffect, 'color', _varById(ambientColorId));
+            ambientEffect = _withBoundEffectVariable(ambientEffect, 'radius', _varById(primVarMapForElev['shadow/ambient/' + eff.level + '/radius']));
+            effectArr.push(ambientEffect);
           }
         }
         style.effects = effectArr;
-
-        // Bind color variables to shadows
-        if (keyColorId && style.effects.length > 0) {
-          try {
-            style.setBoundVariableForEffect(0, 'color', figma.variables.getVariableById(keyColorId));
-          } catch (e) {}
-        }
-        if (ambientColorId && eff.shadows[0] && eff.shadows[0].ambient && style.effects.length > 1) {
-          try {
-            style.setBoundVariableForEffect(1, 'color', figma.variables.getVariableById(ambientColorId));
-          } catch (e) {}
-        }
       }
     }
   }
@@ -6001,6 +6012,37 @@ function _tokenUpdateItem(name, type, collection) {
   return { name: name, kind: 'variable', expectedType: type, collection: collection };
 }
 
+function _tokenUpdateValueSummary(value, idToName) {
+  if (value && value.type === 'VARIABLE_ALIAS') {
+    return {
+      type: 'VARIABLE_ALIAS',
+      id: value.id,
+      name: idToName[value.id] || null,
+    };
+  }
+  return value;
+}
+
+function _tokenUpdateChangedItem(variable, item, modeOrder, idToName) {
+  var detail = {
+    name: item.name,
+    kind: item.kind,
+    expectedType: item.expectedType,
+    collection: item.collection,
+    id: variable.id || null,
+    scopes: Array.isArray(variable.scopes) ? variable.scopes.slice() : [],
+    valuesByMode: [],
+  };
+  for (var mi = 0; mi < modeOrder.length; mi++) {
+    detail.valuesByMode.push({
+      modeId: modeOrder[mi].modeId,
+      modeName: modeOrder[mi].modeName || null,
+      value: _tokenUpdateValueSummary(variable.valuesByMode[modeOrder[mi].modeId], idToName),
+    });
+  }
+  return detail;
+}
+
 function _sanitizeSpaceStep(step) {
   return String(step).replace('.', '-');
 }
@@ -6088,6 +6130,29 @@ function _tokenUpdateEntriesForCategory(DS, category) {
         requiresAlias: true,
       });
     }
+  } else if (category === 'elevation-variables') {
+    var elevLevels = [
+      { level: 1, key: 'xs', offsetY: 1, radius: 2 },
+      { level: 2, key: 'sm', offsetY: 4, radius: 8 },
+      { level: 3, key: 'md', offsetY: 8, radius: 16 },
+      { level: 4, key: 'lg', offsetY: 12, radius: 24 },
+      { level: 5, key: 'xl', offsetY: 16, radius: 32 },
+    ];
+    for (var ei = 0; ei < elevLevels.length; ei++) {
+      var level = elevLevels[ei];
+      entries.push({
+        name: 'elevation/' + level.key + '/offset-y',
+        type: 'FLOAT',
+        value: level.offsetY,
+        aliasName: 'shadow/' + level.level + '/offset-y',
+      });
+      entries.push({
+        name: 'elevation/' + level.key + '/radius',
+        type: 'FLOAT',
+        value: level.radius,
+        aliasName: 'shadow/' + level.level + '/radius',
+      });
+    }
   }
   return entries;
 }
@@ -6106,11 +6171,12 @@ async function _updateDsTokens(payload) {
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : [];
-  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true, 'typography-variables': true };
+  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true, 'typography-variables': true, 'elevation-variables': true };
   var categories = [];
   var unknown = [];
   var needsSpacing = false;
   var needsTypography = false;
+  var needsElevation = false;
 
   for (var ri = 0; ri < requested.length; ri++) {
     var cat = requested[ri];
@@ -6118,6 +6184,7 @@ async function _updateDsTokens(payload) {
       categories.push(cat);
       if (cat === 'radius' || cat === 'border-width' || cat === 'spacing-semantics') needsSpacing = true;
       if (cat === 'typography-variables') needsTypography = true;
+      if (cat === 'elevation-variables') needsElevation = true;
     }
     else unknown.push(cat);
   }
@@ -6151,7 +6218,7 @@ async function _updateDsTokens(payload) {
       for (var bmi = 0; bmi < bpModes.length; bmi++) {
         if (String(bpModes[bmi]).toLowerCase() === modeName.toLowerCase()) { bpIndex = bmi; break; }
       }
-      order.push({ modeId: collection.modes[moi].modeId, bpIndex: bpIndex });
+      order.push({ modeId: collection.modes[moi].modeId, modeName: modeName, bpIndex: bpIndex });
     }
     return order;
   }
@@ -6194,6 +6261,25 @@ async function _updateDsTokens(payload) {
     };
   }
 
+  var elevationName = (DS.collections && DS.collections.elevation) ? DS.collections.elevation : '5. Elevation';
+  var elevationColl = null;
+  if (needsElevation) elevationColl = _collectionByName(elevationName);
+  if (needsElevation && !elevationColl) {
+    return {
+      error: 'Elevation collection "' + elevationName + '" is not present in this Figma file, so this narrow token update did not make changes.',
+      dryRun: dryRun,
+      categories: categories,
+      unknownCategories: unknown,
+      missingCapabilityNotes: [{
+        kind: 'missing-foundation-collection',
+        collection: elevationName,
+        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing elevation variable completion. That guided repair path is future product scope.',
+        productGap: true,
+      }],
+      report: {},
+    };
+  }
+
   // Semantic spacing tokens can alias primitive spacing variables. Resolve the
   // primitives collection read-only so this narrow updater never mutates it.
   var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
@@ -6201,6 +6287,10 @@ async function _updateDsTokens(payload) {
   var primColl = _collectionByName(primName);
   if (primColl) primCollId = primColl.id;
   var primByName = {};
+  var idToName = {};
+  for (var idn = 0; idn < allVars.length; idn++) {
+    idToName[allVars[idn].id] = allVars[idn].name;
+  }
   if (primCollId) {
     for (var pvi = 0; pvi < allVars.length; pvi++) {
       if (allVars[pvi].variableCollectionId === primCollId) primByName[allVars[pvi].name] = allVars[pvi].id;
@@ -6209,8 +6299,10 @@ async function _updateDsTokens(payload) {
 
   var spacingByName = spacingColl ? _variablesByNameForCollection(spacingColl.id) : {};
   var typographyByName = typographyColl ? _variablesByNameForCollection(typographyColl.id) : {};
+  var elevationByName = elevationColl ? _variablesByNameForCollection(elevationColl.id) : {};
   var spacingModeOrder = spacingColl ? _modeOrderForCollection(spacingColl) : [];
   var typographyModeOrder = typographyColl ? _modeOrderForCollection(typographyColl) : [];
+  var elevationModeOrder = elevationColl ? _modeOrderForCollection(elevationColl) : [];
 
   function _resolveSpaceValue(rawVal) {
     var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
@@ -6246,10 +6338,21 @@ async function _updateDsTokens(payload) {
     var category = categories[cati];
     var entries = _tokenUpdateEntriesForCategory(DS, category);
     var catReport = _emptyTokenUpdateReport();
-    var targetColl = (category === 'typography-variables') ? typographyColl : spacingColl;
-    var targetName = (category === 'typography-variables') ? typographyName : spacingName;
-    var byName = (category === 'typography-variables') ? typographyByName : spacingByName;
-    var modeOrder = (category === 'typography-variables') ? typographyModeOrder : spacingModeOrder;
+    var targetColl = spacingColl;
+    var targetName = spacingName;
+    var byName = spacingByName;
+    var modeOrder = spacingModeOrder;
+    if (category === 'typography-variables') {
+      targetColl = typographyColl;
+      targetName = typographyName;
+      byName = typographyByName;
+      modeOrder = typographyModeOrder;
+    } else if (category === 'elevation-variables') {
+      targetColl = elevationColl;
+      targetName = elevationName;
+      byName = elevationByName;
+      modeOrder = elevationModeOrder;
+    }
 
     for (var ei = 0; ei < entries.length; ei++) {
       var entry = entries[ei];
@@ -6273,11 +6376,12 @@ async function _updateDsTokens(payload) {
           existing = figma.variables.createVariable(entry.name, targetColl, entry.type);
           _setVariableScopesForName(existing, entry.name, entry.type);
           byName[entry.name] = existing;
+          idToName[existing.id] = existing.name;
           for (var cm = 0; cm < modeOrder.length; cm++) {
             var desiredCreateValue = _desiredForMode(entry, modeOrder[cm].bpIndex);
             if (desiredCreateValue != null) existing.setValueForMode(modeOrder[cm].modeId, desiredCreateValue);
           }
-          catReport.createdVariables.push(item);
+          catReport.createdVariables.push(_tokenUpdateChangedItem(existing, item, modeOrder, idToName));
         } catch (createErr) {
           catReport.unmatched.push(item);
         }
@@ -6317,7 +6421,7 @@ async function _updateDsTokens(payload) {
       for (var sm = 0; sm < modeOrder.length; sm++) {
         existing.setValueForMode(modeOrder[sm].modeId, _desiredForMode(entry, modeOrder[sm].bpIndex));
       }
-      catReport.updatedVariables.push(item);
+      catReport.updatedVariables.push(_tokenUpdateChangedItem(existing, item, modeOrder, idToName));
     }
 
     report[category] = catReport;

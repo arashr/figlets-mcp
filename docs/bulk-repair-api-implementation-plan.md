@@ -4,7 +4,7 @@
 
 Planning artifact and roadmap for bulk-repair API work. This document is intentionally explicit so a less capable agent can continue the feature without inventing new product rules.
 
-Current status as of 2026-05-19:
+Current status as of 2026-05-20:
 
 - Branch: `main`
 - Latest checkpoint before the current commit: color semantic bulk repair planner implemented through Phase 2; non-color token planner/dry-run and narrow radius/border-width/spacing-semantics/typography-variables apply slices are implemented in local work.
@@ -16,8 +16,11 @@ Current status as of 2026-05-19:
 - Phase 2 is complete for `inspect_ds_setup_gaps`: `repairPlan` has stable required, optional, missing-capability, and designer-presentation channels.
 - Phase 3A is complete: `inspect_ds_token_gaps` is a read-only config-backed non-color token-gap planner.
 - Phase 3B is complete: `update_ds_tokens({ dry_run: true })` previews missing variables/styles and type mismatches without Figma writes.
-- Phase 3C has expanded another slice: the approved apply path now covers `radius`, `border-width`, `spacing-semantics`, and `typography-variables`. Semantic spacing apply resolves primitive-spacing aliases when the primitive variable exists and maps responsive config values onto existing Spacing-collection modes without creating modes. Typography variable apply targets the existing Typography collection only; broad `typography` text-style work remains dry-run/product-gap scope.
-- Latest verification before commit: supported-runtime `npm --scripts-prepend-node-path=true test` passed 66/66, `node --check packages/figma-bridge-plugin/code.js` passed, no `??`/`?.`/`**` in the plugin diff, and `git diff --check` was clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, now exercising the spacing-semantics apply slice end to end.
+- Phase 3C has expanded another slice: the approved apply path now covers `radius`, `border-width`, `spacing-semantics`, `typography-variables`, and `elevation-variables`. Semantic spacing apply resolves primitive-spacing aliases when the primitive variable exists and maps responsive config values onto existing Spacing-collection modes without creating modes. Typography variable apply targets the existing Typography collection only; broad `typography` text-style work remains dry-run/product-gap scope. Elevation variable apply targets the existing Elevation collection only; broad `elevation` effect-style work remains dry-run/product-gap scope.
+- Latest local verification after the `elevation-variables` and setup-elevation hardening slices: `npm test` passed 70/70, `node --check packages/figma-bridge-plugin/code.js` passed, and `git diff --check` was clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, now exercising the spacing-semantics, typography-variables, and elevation-variables apply slices end to end.
+- Follow-up observability slice: `update_ds_tokens` bridge apply results now include changed-variable details for variables the tool creates or updates, including variable id, scopes, collection, mode names, and alias target names when the written value is a variable alias. This is intentionally not a broad inventory/debug API.
+- Live disposable-file validation confirmed `elevation-variables` end to end after the file was prepared with an existing `5. Elevation` collection and missing elevation semantic variables: inspect found 10 missing variables + 6 missing effect styles, apply created the 10 variables only, final reinspect showed 0 missing variables and 6 remaining effect-style gaps, no styles were created/refreshed, and broad `elevation` apply stayed unsupported. A separate live observability check confirmed changed-variable report items include id, scopes, mode names, and alias target names through the real `update_ds_tokens` bridge path.
+- Setup-path hardening after live dummy-file feedback: `apply_ds_setup` now writes numeric fallback values into setup-created `elevation/<key>/{offset-y,radius}` variables when primitive shadow aliases are unavailable, avoiding Figma default `0` values. It also binds setup-created shadow styles through Figma's documented `figma.variables.setBoundVariableForEffect(...)` helper for key `offsetY`/`radius` and ambient `radius` where variables are available. Live validation confirmed `elevation/1` exposes bound variables for `color`, `radius`, and `offsetY`. This does not enable broad elevation/style apply in `update_ds_tokens`.
 
 Validation finding on 2026-05-19: a live Figma Desktop bridge run on a disposable file confirmed the planner, dry-run, and bridge apply behavior for `radius`, `border-width`, `spacing-semantics`, and `typography-variables`. It also found that the MCP `update_ds_tokens` apply call returned `{}` because the server registration stringified the async `handleUpdateDsTokens(...)` Promise without awaiting it. Fixed by awaiting `handleUpdateDsTokens(args || {})` in `packages/figlets-mcp-server/src/index.js` and adding `tests/server/update-ds-tokens-mcp-callback.test.js` to assert the registered MCP tool returns the resolved apply result.
 
@@ -381,7 +384,7 @@ Recommended checkpointing:
 
 - **Phase 3A:** Add read-only `inspect_ds_token_gaps` with stable planner output and no bridge writes.
 - **Phase 3B:** Add `update_ds_tokens({ dry_run: true })` preview for a small supported category set.
-- **Phase 3C:** Add approved apply support for those categories through the bridge. Slices landed so far: `radius`, `border-width`, `spacing-semantics`, then `typography-variables`.
+- **Phase 3C:** Add approved apply support for those categories through the bridge. Slices landed so far: `radius`, `border-width`, `spacing-semantics`, `typography-variables`, then `elevation-variables`.
 - **Phase 3D:** Expand supported categories and decide the compatibility relationship with `update_ds_primitives`.
 
 Deferred product concern from the `spacing-semantics` slice (do not silently drop):
@@ -389,9 +392,13 @@ Deferred product concern from the `spacing-semantics` slice (do not silently dro
 - The narrow updater deliberately does **not** create Spacing-collection modes. Responsive semantic values are mapped onto modes that already exist (breakpoint-name match, then positional, then last value). A config with multiple breakpoints applied to a single-mode Spacing collection will collapse to the last value per the existing radius/border mode-invariant philosophy. Creating breakpoint modes is invasive setup-tool behavior and remains future product scope, ideally folded into the same guided partial-setup-repair path described under the Phase 3 boundary note. This is a known limitation, not a dead end.
 - Semantic spacing aliases resolve against the primitives collection read-only. If the primitive variable is absent, the value is written as a raw FLOAT rather than failing — consistent with `apply_ds_setup`'s `spaceAlias` fallback.
 
+Apply-result observability note:
+
+- `update_ds_tokens` should return richer details only for variables it creates or updates. Changed-variable report items may include `id`, `scopes`, and `valuesByMode` with alias target names. Do not turn this into an arbitrary Figma inventory or mutation surface; read-only broad inventory still belongs in sync/inspect outputs, and designer-facing repair planning should remain planner-owned.
+
 #### Typography And Elevation Apply Readiness Notes
 
-Do not enable broad `typography`, `primitive-typography`, `primitive-shadow`, or `elevation` in `update_ds_tokens({ dry_run:false })` until the relevant strategy below is implemented and tested. These categories are higher-risk because they can touch text styles, effect styles, font loading, and multiple collections. The narrow `typography-variables` category is the approved first typography slice.
+Do not enable broad `typography`, `primitive-typography`, `primitive-shadow`, or `elevation` in `update_ds_tokens({ dry_run:false })` until the relevant strategy below is implemented and tested. These categories are higher-risk because they can touch text styles, effect styles, font loading, and multiple collections. The narrow `typography-variables` category is the approved first typography slice, and the narrow `elevation-variables` category is the approved first elevation slice.
 
 Typography should be split into two slices:
 
@@ -412,10 +419,13 @@ Typography should be split into two slices:
 
 Elevation should also be split:
 
-1. **Elevation variables only.**
+1. **Done:** **Elevation variables only** via `elevation-variables`.
    - Target the existing Elevation collection.
    - Create/update only generated `elevation/<key>/{offset-y,radius}` FLOAT variables.
+   - Alias primitive `shadow/<level>/{offset-y,radius}` variables when they exist; otherwise use generated numeric FLOAT values.
    - Preserve existing variable IDs and scopes.
+   - Map values onto existing Elevation modes only; do not create modes in the token updater.
+   - Report a missing Elevation collection as `missing-foundation-collection` / future partial setup scope, not as a hard stop.
    - Do not create effect styles in this slice.
 
 2. **Effect style create/refresh.**
@@ -423,7 +433,7 @@ Elevation should also be split:
    - Preserve existing effect style IDs.
    - Report unresolved color/alias prerequisites as `missingCapabilityNotes` or structured failures, not silent fallbacks.
 
-Until the remaining slices land, dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category` product-gap notes. `inspect_ds_token_gaps` may include `typography-variables` in `repairPlan.applyInput` when broad `typography` variable gaps are present, while still reporting broad `typography` text-style work as product-gap scope.
+Until the remaining style slices land, dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category` product-gap notes for broad `typography` and broad `elevation`. `inspect_ds_token_gaps` may include `typography-variables` in `repairPlan.applyInput` when broad `typography` variable gaps are present, while still reporting broad `typography` text-style work as product-gap scope. It may include `elevation-variables` in `repairPlan.applyInput` when broad `elevation` variable gaps are present, while still reporting broad `elevation` effect-style work as product-gap scope.
 
 Goal: If the active config defines tokens or styles that are missing from Figma, Figlets should expose a read-only plan and an approved apply path for creating/updating them.
 

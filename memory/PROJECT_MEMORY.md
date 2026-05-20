@@ -4,6 +4,46 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-20 — update_ds_tokens changed-variable observability]
+
+**Status:** Added a narrow observability improvement to bridge apply results for `update_ds_tokens`. Created/updated variable report items now include changed-variable details such as variable id, collection, scopes, per-mode values, mode names, and alias target names when a value is a `VARIABLE_ALIAS`.
+
+**Boundary:** This is intentionally limited to variables changed by `update_ds_tokens`; it is not a broad Figma inventory/debug API and does not add any new mutation categories. Dry-run and unmatched/type-mismatch items keep their lightweight preview shape.
+
+**Why:** Live validation of `elevation-variables` could confirm creation and style/mode guardrails, but Figlets responses did not expose alias targets or scopes. Runtime tests already covered those details; this slice makes future live validation self-contained without widening product scope.
+
+**Live validation:** A disposable Figma file validation confirmed the richer changed-variable report shape through the real `update_ds_tokens` live bridge path. A created semantic spacing variable reported `id`, `collection`, `scopes`, per-mode `modeId`/`modeName`, and alias target names such as `space/12` and `space/16`. No stale `update_ds_tokens` callback symptom was observed.
+
+---
+
+### [2026-05-20 — setup elevation fallback and style binding hardening]
+
+**Bug report:** On a disposable file, setup-created elevation variables appeared with `0` values and setup-created shadow/elevation styles used raw numeric shadow values instead of variables. This was not part of the `elevation-variables` updater slice; it came from the broader `apply_ds_setup` setup path.
+
+**Fix:** `apply_ds_setup` now writes numeric fallback values into `elevation/<key>/{offset-y,radius}` variables when primitive `shadow/<level>/*` aliases are unavailable, instead of leaving Figma's default `0`. Setup-created effect styles now bind key shadow `offsetY` and `radius` using semantic elevation variables through Figma's documented `figma.variables.setBoundVariableForEffect(...)` helper before assigning `style.effects`; ambient radius binds to `shadow/ambient/<level>/radius` when present. Color effect binding remains unchanged.
+
+**Live validation:** After reloading the bridge on the disposable file, setup-created `elevation/xs/offset-y` and `elevation/xs/radius` aliased to `shadow/1/offset-y` and `shadow/1/radius` with resolved primitive values `1` and `2`, not raw `0`. The `elevation/1` effect exported `offset.y: 1`, `radius: 2`, and visible bound variables for `color`, `radius`, and `offsetY`.
+
+**Boundary:** Broad `update_ds_tokens({ categories:["elevation"], dry_run:false })` remains unsupported. This fix only hardens the setup tool's existing broad design-system creation behavior; it does not enable effect-style create/refresh in `update_ds_tokens`.
+
+---
+
+### [2026-05-20 — Phase 3C elevation variables apply slice]
+
+**Status:** Implemented the next narrow token-completion apply slice as `elevation-variables`. Broad `elevation` remains dry-run/product-gap scope for effect styles; `update_ds_tokens({ dry_run:false, categories:["elevation"] })` is still rejected as unsupported apply scope.
+
+**Planner contract:** `inspect_ds_token_gaps` still previews broad elevation variables and effect styles. When broad elevation variable gaps exist, `repairPlan.applyInput.categories` can include `elevation-variables`; broad `elevation` remains in `missingCapabilityNotes` while effect-style work is missing.
+
+**Apply behavior:** `update_ds_tokens({ dry_run:false, categories:["elevation-variables"] })` targets only the existing Elevation collection. It creates/updates `elevation/<key>/{offset-y,radius}` FLOAT variables for xs-sm-md-lg-xl, preserves existing variable IDs and scopes, aliases primitive `shadow/<level>/{offset-y,radius}` variables when present, falls back to generated numeric values otherwise, does not create modes, and does not create or refresh effect styles.
+
+**Tests updated:** Planner, server allow/reject behavior, bridge policy, fake-Figma runtime flow, and integration proxy now cover `elevation-variables`. Broad `elevation`, text-style creation/refresh, effect-style creation/refresh, primitive typography/shadow apply, prune/delete, and collection mode creation remain unsupported apply scope.
+
+**Live validation:** After manually preparing the disposable file with an existing `5. Elevation` collection and missing elevation semantic variables, the live flow passed. Initial inspect found 10 missing elevation variables + 6 missing effect styles and `repairPlan.applyInput.categories` was `["elevation-variables"]`. Apply created all 10 expected `elevation/xs..xl/{offset-y,radius}` variables, created/refreshed no styles, and final reinspect showed 0 missing variables with the 6 broad effect-style gaps still present. Broad `elevation` apply remained `unsupported-apply-category`.
+
+**Follow-up note:** During developer fixture prep for observability validation, direct bridge setup rebuilt collections while the MCP `apply_ds_setup` wrapper appeared stale/incomplete. This is separate from `update_ds_tokens`; investigate only if setup wrapper behavior reproduces in a clean focused test.
+
+---
+
 ### [2026-05-19 — Phase 3C second live validation and stale MCP session note]
 
 **Validation rerun:** A fresh disposable Figma file confirmed the implemented Phase 3C slices end to end. Starting state had `1. Primitives`, `3. Typography`, `4. Spacing`; required primitive tokens were present; target semantic/body variables were absent; no `type/body/md` text style existed. `inspect_ds_token_gaps` found 8 missing variables + 1 missing text style and `repairPlan.applyInput.categories` was exactly `["border-width", "radius", "spacing-semantics", "typography-variables"]`.

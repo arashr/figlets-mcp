@@ -62,6 +62,11 @@ module.exports = (async () => {
         { modeId: "desktop", name: "Desktop" },
       ],
     },
+    {
+      id: "elevation",
+      name: "5. Elevation",
+      modes: [{ modeId: "value", name: "Value" }],
+    },
   ];
 
   const variables = [
@@ -72,10 +77,15 @@ module.exports = (async () => {
     makeVariable("type-weight-regular", "type/weight/regular", "primitives", "FLOAT", { value: 400 }),
     makeVariable("type-tracking-normal", "type/tracking/normal", "primitives", "FLOAT", { value: 0 }),
     makeVariable("font-sans", "font/sans", "primitives", "STRING", { value: "Inter" }),
+    makeVariable("shadow-1-offset", "shadow/1/offset-y", "primitives", "FLOAT", { value: 1 }),
+    makeVariable("shadow-1-radius", "shadow/1/radius", "primitives", "FLOAT", { value: 2 }),
     makeVariable("existing-size", "type/body/md/size", "typography", "FLOAT", {
       mobile: 10,
       tablet: 10,
       desktop: 10,
+    }),
+    makeVariable("existing-elevation-radius", "elevation/xs/radius", "elevation", "FLOAT", {
+      value: 99,
     }),
   ];
 
@@ -102,6 +112,8 @@ module.exports = (async () => {
     "_setVariableScopesForName",
     "_emptyTokenUpdateReport",
     "_tokenUpdateItem",
+    "_tokenUpdateValueSummary",
+    "_tokenUpdateChangedItem",
     "_sanitizeSpaceStep",
     "_typePrefixForTokenUpdate",
     "_typeSizeTokenName",
@@ -121,6 +133,7 @@ module.exports = (async () => {
       primitives: "1. Primitives",
       spacing: "4. Spacing",
       typography: "3. Typography",
+      elevation: "5. Elevation",
     },
     breakpoints: { modes: ["Mobile", "Tablet", "Desktop"] },
     naming: { textStyle: "type/{role}/{size}", typePrefix: "type", fontFamily: "font/{variant}" },
@@ -138,18 +151,22 @@ module.exports = (async () => {
 
   const result = await context.module.exports._updateDsTokens({
     DS,
-    categories: ["spacing-semantics", "typography-variables"],
+    categories: ["spacing-semantics", "typography-variables", "elevation-variables"],
     createMissing: true,
     dryRun: false,
   });
 
   assert.ok(!result.error, result.error);
-  assertJsonEqual(result.categories, ["spacing-semantics", "typography-variables"]);
+  assertJsonEqual(result.categories, ["spacing-semantics", "typography-variables", "elevation-variables"]);
   assert.strictEqual(result.report["spacing-semantics"].createdVariables.length, 1);
   assert.strictEqual(result.report["typography-variables"].createdVariables.length, 4);
   assert.strictEqual(result.report["typography-variables"].updatedVariables.length, 1);
   assert.strictEqual(result.report["typography-variables"].createdStyles.length, 0);
   assert.strictEqual(result.report["typography-variables"].refreshedStyles.length, 0);
+  assert.strictEqual(result.report["elevation-variables"].createdVariables.length, 9);
+  assert.strictEqual(result.report["elevation-variables"].updatedVariables.length, 1);
+  assert.strictEqual(result.report["elevation-variables"].createdStyles.length, 0);
+  assert.strictEqual(result.report["elevation-variables"].refreshedStyles.length, 0);
 
   const byName = new Map(variables.map(variable => [variable.name, variable]));
   const semanticSpacing = byName.get("space/component/md");
@@ -176,4 +193,40 @@ module.exports = (async () => {
   assert.ok(family, "family variable should be created when a font primitive exists");
   assertJsonEqual(family.valuesByMode.mobile, { type: "VARIABLE_ALIAS", id: "font-sans" });
   assertJsonEqual(family.scopes, ["FONT_FAMILY"]);
+
+  const elevationOffset = byName.get("elevation/xs/offset-y");
+  assert.ok(elevationOffset, "elevation offset variable should be created");
+  assertJsonEqual(elevationOffset.valuesByMode.value, { type: "VARIABLE_ALIAS", id: "shadow-1-offset" });
+  assertJsonEqual(elevationOffset.scopes, ["EFFECT_FLOAT"]);
+  const elevationOffsetReport = result.report["elevation-variables"].createdVariables.find(item => item.name === "elevation/xs/offset-y");
+  assert.ok(elevationOffsetReport, "created elevation offset report should include the changed variable");
+  assert.strictEqual(elevationOffsetReport.id, elevationOffset.id);
+  assertJsonEqual(elevationOffsetReport.scopes, ["EFFECT_FLOAT"]);
+  assertJsonEqual(elevationOffsetReport.valuesByMode, [{
+    modeId: "value",
+    modeName: "Value",
+    value: { type: "VARIABLE_ALIAS", id: "shadow-1-offset", name: "shadow/1/offset-y" },
+  }]);
+
+  const elevationRadius = byName.get("elevation/xs/radius");
+  assert.strictEqual(elevationRadius.id, "existing-elevation-radius", "existing elevation variable ID should be preserved");
+  assertJsonEqual(elevationRadius.valuesByMode.value, { type: "VARIABLE_ALIAS", id: "shadow-1-radius" });
+  assertJsonEqual(elevationRadius.scopes, ["EFFECT_FLOAT"]);
+  const elevationRadiusReport = result.report["elevation-variables"].updatedVariables.find(item => item.name === "elevation/xs/radius");
+  assert.ok(elevationRadiusReport, "updated elevation radius report should include the changed variable");
+  assert.strictEqual(elevationRadiusReport.id, "existing-elevation-radius");
+  assertJsonEqual(elevationRadiusReport.scopes, ["EFFECT_FLOAT"]);
+  assertJsonEqual(elevationRadiusReport.valuesByMode, [{
+    modeId: "value",
+    modeName: "Value",
+    value: { type: "VARIABLE_ALIAS", id: "shadow-1-radius", name: "shadow/1/radius" },
+  }]);
+
+  const lineHeightReport = result.report["typography-variables"].createdVariables.find(item => item.name === "type/body/md/line-height");
+  assert.ok(lineHeightReport, "created raw typography variable should include value details");
+  assertJsonEqual(lineHeightReport.valuesByMode, [
+    { modeId: "mobile", modeName: "Mobile", value: 20 },
+    { modeId: "tablet", modeName: "Tablet", value: 20 },
+    { modeId: "desktop", modeName: "Desktop", value: 24 },
+  ]);
 })();

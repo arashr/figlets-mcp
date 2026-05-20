@@ -26,8 +26,9 @@ module.exports = (() => {
     fn.includes("'radius': true") &&
       fn.includes("'border-width': true") &&
       fn.includes("'spacing-semantics': true") &&
-      fn.includes("'typography-variables': true"),
-    "Phase 3C apply support covers radius, border-width, semantic spacing, and typography variables only"
+      fn.includes("'typography-variables': true") &&
+      fn.includes("'elevation-variables': true"),
+    "Phase 3C apply support covers radius, border-width, semantic spacing, typography variables, and elevation variables only"
   );
   assert.ok(!fn.includes("createTextStyle"), "Phase 3C token apply must not create text styles");
   assert.ok(!fn.includes("createEffectStyle"), "Phase 3C token apply must not create effect styles");

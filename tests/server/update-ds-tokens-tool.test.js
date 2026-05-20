@@ -62,7 +62,7 @@ fs.writeFileSync(figmaDataPath, JSON.stringify(figmaData, null, 2), "utf8");
 module.exports = (async () => {
   try {
     assert.strictEqual(updateDsTokensTool.name, "update_ds_tokens");
-    assert.ok(updateDsTokensTool.description.includes("radius, border-width, semantic spacing, and typography variables"));
+    assert.ok(updateDsTokensTool.description.includes("radius, border-width, semantic spacing, typography variables, and elevation variables"));
     assert.ok(updateDsTokensTool.inputSchema.properties.prune, "schema should expose prune options");
 
     {
@@ -101,7 +101,7 @@ module.exports = (async () => {
       );
       assert.ok(/would create/.test(result.message), "message should summarize would-create work");
       assert.strictEqual(result.applySupported, true);
-      assert.deepStrictEqual(result.supportedApplyCategories, ["border-width", "radius", "spacing-semantics", "typography-variables"]);
+      assert.deepStrictEqual(result.supportedApplyCategories, ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"]);
     }
 
     {
@@ -148,7 +148,7 @@ module.exports = (async () => {
         categories: ["typography"],
         dry_run: false,
       });
-      assert.ok(result.error && /limited to radius, border-width, semantic spacing, and typography variables/.test(result.error), "unsupported apply categories should be explicit");
+      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables, and elevation variables/.test(result.error), "unsupported apply categories should be explicit");
       assert.strictEqual(result.dryRun, false);
       assert.deepStrictEqual(result.unknownCategories, ["typography"]);
     }
@@ -160,7 +160,7 @@ module.exports = (async () => {
         categories: ["typography", "elevation", "primitive-typography", "primitive-shadow"],
         dry_run: false,
       });
-      assert.ok(result.error && /limited to radius, border-width, semantic spacing, and typography variables/.test(result.error));
+      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables, and elevation variables/.test(result.error));
       assert.strictEqual(result.dryRun, false);
       assert.deepStrictEqual(result.categories, []);
       assert.deepStrictEqual(result.unknownCategories, ["typography", "elevation", "primitive-typography", "primitive-shadow"]);
@@ -170,6 +170,90 @@ module.exports = (async () => {
         "typography/elevation-style categories should remain explicit apply product gaps until their strategies land"
       );
     }
+
+    await (async () => {
+      let receivedBody = null;
+      const mockServer = http.createServer((req, res) => {
+        if (req.method === "POST" && req.url === "/request-update-tokens") {
+          let body = "";
+          req.on("data", chunk => { body += chunk.toString(); });
+          req.on("end", () => {
+            receivedBody = JSON.parse(body);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              success: true,
+              result: {
+                dryRun: false,
+                categories: ["elevation-variables"],
+                unknownCategories: [],
+                report: {
+                  "elevation-variables": {
+                    entries: 10,
+                    createdVariables: [{
+                      name: "elevation/xs/offset-y",
+                      scopes: ["EFFECT_FLOAT"],
+                      valuesByMode: [{
+                        modeId: "value",
+                        modeName: "Value",
+                        value: { type: "VARIABLE_ALIAS", id: "shadow-1-offset", name: "shadow/1/offset-y" },
+                      }],
+                    }],
+                    updatedVariables: [{
+                      name: "elevation/xs/radius",
+                      scopes: ["EFFECT_FLOAT"],
+                      valuesByMode: [{
+                        modeId: "value",
+                        modeName: "Value",
+                        value: { type: "VARIABLE_ALIAS", id: "shadow-1-radius", name: "shadow/1/radius" },
+                      }],
+                    }],
+                    wouldCreateVariables: [],
+                    wouldUpdateVariables: [],
+                    createdStyles: [],
+                    refreshedStyles: [],
+                    unmatched: [],
+                    typeMismatch: [],
+                    fontLoadFailures: [],
+                  },
+                },
+                message: "elevation-variables: 2 changed",
+              }
+            }));
+          });
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+
+      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
+      const { port } = mockServer.address();
+      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+
+      try {
+        const result = await handleUpdateDsTokens({
+          config_path: configPath,
+          categories: ["elevation-variables"],
+          create_missing: true,
+          dry_run: false,
+        });
+        assert.ok(!result.error, result.error);
+        assert.strictEqual(result.dryRun, false);
+        assert.deepStrictEqual(result.categories, ["elevation-variables"]);
+        assert.strictEqual(result.applySupported, true);
+        assert.deepStrictEqual(
+          result.report["elevation-variables"].createdVariables[0].valuesByMode[0].value.name,
+          "shadow/1/offset-y",
+          "server should preserve bridge alias target details for changed variables"
+        );
+        assert.ok(receivedBody && receivedBody.DS, "elevation-variables apply should send DS to bridge");
+        assert.deepStrictEqual(receivedBody.categories, ["elevation-variables"]);
+        assert.strictEqual(receivedBody.dryRun, false);
+      } finally {
+        await new Promise(resolve => mockServer.close(resolve));
+        delete process.env.FIGLETS_RECEIVER_URL;
+      }
+    })();
 
     await (async () => {
       let receivedBody = null;

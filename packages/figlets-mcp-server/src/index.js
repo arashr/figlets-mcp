@@ -393,7 +393,7 @@ server.tool(
   {
     config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path. Defaults to the active file config."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
-    categories: z.array(z.string()).optional().describe("Optional config-backed categories to inspect. Phase 3A supports non-color token categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, and elevation."),
+    categories: z.array(z.string()).optional().describe("Optional config-backed categories to inspect. Phase 3A supports non-color token categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, elevation, and elevation-variables."),
     include_existing_updates: z.boolean().optional().describe("When true, preserve the request in update_ds_tokens preview/apply payloads. Phase 3B remains read-only and does not compare stale values.")
   },
   async (args) => {
@@ -422,9 +422,9 @@ server.tool(
   {
     config_path: z.string().describe("Absolute path to design-system.config.js."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
-    categories: z.array(z.string()).optional().describe("Optional categories to preview. Phase 3B supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, and elevation."),
+    categories: z.array(z.string()).optional().describe("Optional categories to preview. Phase 3B supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, elevation, and elevation-variables."),
     create_missing: z.boolean().optional().describe("When true, missing variables/styles are reported as wouldCreate*. When false, they remain unmatched/missing only."),
-    dry_run: z.boolean().optional().describe("Must be true in Phase 3B. dry_run=false apply support is deferred."),
+    dry_run: z.boolean().optional().describe("When true, preview without mutating Figma. dry_run=false is limited to approved narrow token categories."),
     prune: z.object({
       off_scale_color_steps: z.boolean().optional(),
       unused_color_ramps: z.boolean().optional()

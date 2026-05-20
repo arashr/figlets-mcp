@@ -63,6 +63,12 @@ module.exports = (async () => {
         modes: [{ id: "m1", modeId: "m1", name: "Value" }],
         variableIds: [],
       },
+      {
+        id: "elevation",
+        name: "5. Elevation",
+        modes: [{ id: "e1", modeId: "e1", name: "Value" }],
+        variableIds: [],
+      },
     ],
     variables: [],
     textStyles: [],
@@ -76,11 +82,11 @@ module.exports = (async () => {
     const inspected = handleInspectDsTokenGaps({
       config_path: configPath,
       figmaDataPath,
-      categories: ["radius", "border-width", "spacing-semantics", "typography"],
+      categories: ["radius", "border-width", "spacing-semantics", "typography", "elevation"],
     });
     assert.ok(!inspected.error, inspected.error);
-    assert.deepStrictEqual(inspected.repairPlan.previewInput.categories, ["border-width", "radius", "spacing-semantics", "typography"]);
-    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "radius", "spacing-semantics", "typography-variables"]);
+    assert.deepStrictEqual(inspected.repairPlan.previewInput.categories, ["border-width", "elevation", "radius", "spacing-semantics", "typography"]);
+    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"]);
     assert.ok(
       inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
       "typography should remain a dry-run/product-gap category"
@@ -88,6 +94,10 @@ module.exports = (async () => {
     assert.ok(
       !inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "spacing-semantics"),
       "spacing-semantics should be apply-supported, not a product gap"
+    );
+    assert.ok(
+      inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
+      "broad elevation effect-style work should remain a dry-run/product-gap category"
     );
 
     const dryRun = handleUpdateDsTokens(Object.assign({}, inspected.repairPlan.previewInput, {
@@ -103,6 +113,8 @@ module.exports = (async () => {
     );
     assert.ok(dryRun.report.typography.wouldCreateVariables.length > 0);
     assert.ok(dryRun.report.typography.wouldCreateStyles.length > 0);
+    assert.ok(dryRun.report.elevation.wouldCreateVariables.length > 0);
+    assert.ok(dryRun.report.elevation.wouldCreateStyles.length > 0);
 
     let receivedBody = null;
     const mockServer = http.createServer((req, res) => {
@@ -188,8 +200,33 @@ module.exports = (async () => {
                 typeMismatch: [],
                 fontLoadFailures: [],
               },
+              "elevation-variables": {
+                entries: 10,
+                wouldCreateVariables: [],
+                createdVariables: [
+                  { name: "elevation/xs/offset-y" },
+                  { name: "elevation/xs/radius" },
+                  { name: "elevation/sm/offset-y" },
+                  { name: "elevation/sm/radius" },
+                  { name: "elevation/md/offset-y" },
+                  { name: "elevation/md/radius" },
+                  { name: "elevation/lg/offset-y" },
+                  { name: "elevation/lg/radius" },
+                  { name: "elevation/xl/offset-y" },
+                  { name: "elevation/xl/radius" },
+                ],
+                wouldUpdateVariables: [],
+                updatedVariables: [],
+                wouldCreateStyles: [],
+                createdStyles: [],
+                wouldRefreshStyles: [],
+                refreshedStyles: [],
+                unmatched: [],
+                typeMismatch: [],
+                fontLoadFailures: [],
+              },
             },
-            message: "radius: 2 changed; border-width: 1 changed; spacing-semantics: 1 changed; typography-variables: 4 changed",
+            message: "radius: 2 changed; border-width: 1 changed; spacing-semantics: 1 changed; typography-variables: 4 changed; elevation-variables: 10 changed",
           },
         }));
       });
@@ -203,7 +240,7 @@ module.exports = (async () => {
       const applied = await handleUpdateDsTokens(inspected.repairPlan.applyInput);
       assert.ok(!applied.error, applied.error);
       assert.strictEqual(applied.dryRun, false);
-      assert.deepStrictEqual(receivedBody.categories, ["border-width", "radius", "spacing-semantics", "typography-variables"]);
+      assert.deepStrictEqual(receivedBody.categories, ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"]);
       assert.strictEqual(receivedBody.dryRun, false);
     } finally {
       await new Promise(resolve => mockServer.close(resolve));
@@ -221,6 +258,16 @@ module.exports = (async () => {
         variable("type-body-md-weight", "type/body/md/weight"),
         variable("type-body-md-tracking", "type/body/md/tracking"),
         variable("type-body-md-family", "type/body/md/family", "STRING"),
+        variable("elevation-xs-offset", "elevation/xs/offset-y"),
+        variable("elevation-xs-radius", "elevation/xs/radius"),
+        variable("elevation-sm-offset", "elevation/sm/offset-y"),
+        variable("elevation-sm-radius", "elevation/sm/radius"),
+        variable("elevation-md-offset", "elevation/md/offset-y"),
+        variable("elevation-md-radius", "elevation/md/radius"),
+        variable("elevation-lg-offset", "elevation/lg/offset-y"),
+        variable("elevation-lg-radius", "elevation/lg/radius"),
+        variable("elevation-xl-offset", "elevation/xl/offset-y"),
+        variable("elevation-xl-radius", "elevation/xl/radius"),
       ],
     });
     writeSnapshot(figmaDataPath, updatedSnapshot);
@@ -228,7 +275,7 @@ module.exports = (async () => {
     const reinspected = handleInspectDsTokenGaps({
       config_path: configPath,
       figmaDataPath,
-      categories: ["radius", "border-width", "spacing-semantics", "typography"],
+      categories: ["radius", "border-width", "spacing-semantics", "typography", "elevation"],
     });
     assert.ok(!reinspected.error, reinspected.error);
     assert.ok(!reinspected.tokenGaps.some(gap => gap.category === "radius"));
@@ -240,6 +287,14 @@ module.exports = (async () => {
     assert.ok(
       reinspected.tokenGaps.some(gap => gap.category === "typography" && gap.gapType === "missing-style"),
       "text styles should remain visible as unsupported apply scope after typography variable apply"
+    );
+    assert.ok(
+      !reinspected.tokenGaps.some(gap => gap.category === "elevation" && gap.gapType === "missing-variable"),
+      "approved elevation variables should be resolved after narrow apply"
+    );
+    assert.ok(
+      reinspected.tokenGaps.some(gap => gap.category === "elevation" && gap.gapType === "missing-style"),
+      "effect styles should remain visible as unsupported apply scope after elevation variable apply"
     );
     assert.deepStrictEqual(reinspected.repairPlan.applyInput.categories, []);
   } finally {

@@ -5,6 +5,7 @@ const http = require("http");
 const path = require("path");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getConfigPathGuardError } = require("../utils/paths.js");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 const { inspectDsTokenGapsFromConfigAndFigmaData } = require("./inspect-ds-token-gaps.js");
 
 const updateDsTokensTool = {
@@ -209,7 +210,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
     };
   }
 
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const receiverUrl = getReceiverUrl();
   const body = JSON.stringify({
     DS: ds,
     categories,

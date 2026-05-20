@@ -1,6 +1,7 @@
 const http = require("http");
 const { getActiveFileKey, getActiveFilePaths, getFilePaths } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 
 const syncFigmaDataTool = {
   name: "sync_figma_data",
@@ -13,7 +14,7 @@ const syncFigmaDataTool = {
 };
 
 function handleSyncFigmaData() {
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const receiverUrl = getReceiverUrl();
   const beforeFileKey = getActiveFileKey();
   return new Promise((resolve, reject) => {
     const req = http.request(

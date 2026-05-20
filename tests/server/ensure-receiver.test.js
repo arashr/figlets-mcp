@@ -6,6 +6,7 @@ const fs = require("fs");
 module.exports = (async () => {
   // Test 1: RECEIVER_PATH points to a file that actually exists
   assert.ok(fs.existsSync(RECEIVER_PATH), `receiver.js not found at ${RECEIVER_PATH}`);
+  assert.strictEqual(RECEIVER_PORT, 17337, "Figlets should default to its project-specific bridge port");
 
   // Test 2: checkPort returns true for a port that is open
   {
@@ -43,8 +44,7 @@ module.exports = (async () => {
     );
   }
 
-  // Test 6: ensureReceiverRunning is a no-op when the receiver is already running on :1337
-  // (port 1337 is in use in this environment from the live receiver)
+  // Test 6: ensureReceiverRunning is a no-op when the configured receiver is already running.
   {
     const receiverUp = await checkPort(RECEIVER_PORT);
     if (receiverUp) {

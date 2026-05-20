@@ -1,8 +1,9 @@
 const net = require("net");
 const path = require("path");
 const { spawn } = require("child_process");
+const { getReceiverPort } = require("./receiver-url.js");
 
-const RECEIVER_PORT = 1337;
+const RECEIVER_PORT = getReceiverPort();
 const RECEIVER_PATH = path.resolve(__dirname, "../../../figma-bridge-plugin/src/receiver.js");
 
 function checkPort(port) {
@@ -30,15 +31,16 @@ function waitForPort(port, timeout = 5000) {
 async function ensureReceiverRunning() {
   const already = await checkPort(RECEIVER_PORT);
   if (already) {
-    process.stderr.write("[figlets] Bridge receiver already running on :1337\n");
+    process.stderr.write(`[figlets] Bridge receiver already running on :${RECEIVER_PORT}\n`);
     return;
   }
 
-  process.stderr.write("[figlets] Starting bridge receiver on :1337...\n");
+  process.stderr.write(`[figlets] Starting bridge receiver on :${RECEIVER_PORT}...\n`);
 
   const child = spawn(process.execPath, [RECEIVER_PATH], {
     detached: false,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env: Object.assign({}, process.env, { FIGLETS_RECEIVER_PORT: String(RECEIVER_PORT) }),
   });
 
   child.stdout.on("data", (d) => process.stderr.write(`[receiver] ${d}`));

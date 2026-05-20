@@ -34,11 +34,11 @@ packages/
 
 - The bridge plugin runs inside Figma Desktop (sandboxed JS).
 - It can't talk directly to the agent or to local files.
-- Instead, the plugin polls a local HTTP receiver at `http://localhost:1337` (`packages/figma-bridge-plugin/src/receiver.js`).
+- Instead, the plugin polls a local HTTP receiver at `http://localhost:17337` by default (`packages/figma-bridge-plugin/src/receiver.js`).
 - The MCP server makes HTTP calls to the same receiver to dispatch commands and collect results.
 - Plugin → receiver → MCP server → agent. All on the same machine.
 
-**The plugin makes ~16 fetches to `http://localhost:1337`** from `ui.html`. This is the source of one of the productization blockers (see §6).
+**The plugin makes its bridge fetches to `http://localhost:17337`** from `ui.html`. This is still a productization blocker until the endpoint is configurable in packaged builds (see §6), but the port is no longer the generic `1337`.
 
 ---
 
@@ -105,7 +105,7 @@ Decomposed into four layers of friction for a non-technical designer today:
 1. **Install** — clone repo, `npm install`, edit JSON for their agent, import a Figma plugin via developer-import flow, set `.env` token, etc.
 2. **Command** — designer must know what to type. The current designer prompt at [`docs/designer-fix-flow-prompt.md`](./designer-fix-flow-prompt.md) is ~100 lines of engineer-grade instructions.
 3. **Navigate / discover** — no surface tells the designer what's possible. They have to read docs.
-4. **Recover from errors** — error messages today often surface implementation details (`ECONNREFUSED on 127.0.0.1:1337`, etc.).
+4. **Recover from errors** — error messages today often surface implementation details (`ECONNREFUSED on 127.0.0.1:17337`, etc.).
 
 ---
 
@@ -127,7 +127,7 @@ Per [Figma's plugin manifest docs](https://developers.figma.com/docs/plugins/man
 
 > "Published plugins cannot use localhost." Localhost patterns are only for `devAllowedDomains`, not for production `allowedDomains`.
 
-The bridge plugin makes **~16 HTTP calls to `http://localhost:1337`** from `ui.html` (verified via `grep` — see `packages/figma-bridge-plugin/ui.html` lines 630–917). Community publication would silently break every command.
+The bridge plugin makes its HTTP calls to the local receiver from `ui.html` (currently `http://localhost:17337`). Community publication would silently break every command unless this endpoint becomes user-configurable or packaged with a companion app.
 
 **Escape hatches, ranked by effort:**
 

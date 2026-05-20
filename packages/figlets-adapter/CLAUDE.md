@@ -8,7 +8,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 ## Prerequisites
 
 1. figlets-mcp server running and configured in your MCP config (see `docs/mcp-config-examples.md`)
-2. For live Figma data: figma-bridge-plugin open in Figma Desktop (port 1337)
+2. For live Figma data: figma-bridge-plugin open in Figma Desktop (default port 17337)
 
 ---
 

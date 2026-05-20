@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-20 — Figlets bridge default port moved off 1337]
+
+**Status:** Changed the local Figlets bridge default from generic port `1337` to Figlets-specific port `17337` to reduce collisions with other localhost projects. Server-side tools now resolve the receiver through `getReceiverUrl()` / `getReceiverPort()`, honoring `FIGLETS_RECEIVER_URL` first and `FIGLETS_RECEIVER_PORT` next.
+
+**Bridge behavior:** `packages/figma-bridge-plugin/src/receiver.js` now listens on `17337` by default and can be overridden with `FIGLETS_RECEIVER_PORT`. The plugin UI posts/polls `http://localhost:17337` by default, so Figma must reload the local Figlets Bridge plugin after this change.
+
+**Compatibility:** Existing tests and developer workflows that set `FIGLETS_RECEIVER_URL` continue to override the default. If another process needs the old port, leave it alone; Figlets should use `17337` unless explicitly configured otherwise.
+
+---
+
 ### [2026-05-20 — Phase 3D elevation effect-style apply slice]
 
 **Status:** Implemented the next narrow token-completion apply slice as `elevation-styles`. Broad `elevation` remains dry-run/product-gap scope; `update_ds_tokens({ dry_run:false, categories:["elevation"] })` is still rejected as unsupported apply scope.
@@ -1728,7 +1738,7 @@ All items from the initial `feature/figma-bridge-plugin` branch are shipped:
 
 - Added `tests/integration/sync-detect-flow.test.js` — full E2E for `sync_figma_data` → `detect_design_system`. Starts the real receiver on a random port, simulates the plugin via raw HTTP (poll → respond to `extract-all` → POST `/sync` with fixture), runs both real MCP handlers, asserts file write and DS summary shape.
 - Added `tests/integration/inspect-component-flow.test.js` — same pattern for `inspect_component` (poll → `extract-selection` → POST `/sync-selection`).
-- Standardised receiver URLs across all tools: `inspect-component.js` was the last hold-out hardcoding `localhost:1337`. All tools now read `FIGLETS_RECEIVER_URL` (defaults to `http://localhost:1337`).
+- Standardised receiver URLs across all tools: `inspect-component.js` was the last hold-out hardcoding the receiver URL. All tools now read receiver configuration from the shared receiver URL helper, with `FIGLETS_RECEIVER_URL` as the explicit override.
 - 20/20 tests passing. New bridge-backed tools should ship with a matching integration test.
 
 ---

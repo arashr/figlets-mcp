@@ -13,6 +13,7 @@
 
 const http = require('http');
 const fs = require('fs');
+const { getReceiverUrl } = require('../utils/receiver-url.js');
 
 const generateComponentDocTool = {
   name: 'generate_component_doc',
@@ -51,7 +52,7 @@ const generateComponentDocTool = {
 };
 
 function handleGenerateComponentDoc(args) {
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || 'http://localhost:1337';
+  const receiverUrl = getReceiverUrl();
   const fallbackComponentName = args && args.component_name ? String(args.component_name) : '';
 
   return _resolveSelectedComponent(receiverUrl).then((selectionInfo) => {

@@ -24,7 +24,7 @@ module.exports = (async () => {
   // Bridge not running
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: false,
       pluginConnected: false,
       activeFileKey: null,
@@ -42,7 +42,7 @@ module.exports = (async () => {
   // Plugin not connected
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: false,
       activeFileKey: null,
@@ -60,7 +60,7 @@ module.exports = (async () => {
   // Sync failed
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: true,
       activeFileKey: "abc123",
@@ -78,7 +78,7 @@ module.exports = (async () => {
   // Happy path with no findings
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: true,
       activeFileKey: "abc123",
@@ -97,7 +97,7 @@ module.exports = (async () => {
   // No config yet — Figma is the source of truth
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: true,
       activeFileKey: "abc123",
@@ -113,7 +113,7 @@ module.exports = (async () => {
   // Findings across every QA category
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: true,
       activeFileKey: "abc123",
@@ -256,7 +256,7 @@ module.exports = (async () => {
   // High-confidence neighboring-outline gaps should not be hidden behind medium variant advisories.
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: true,
       activeFileKey: "abc123",
@@ -284,7 +284,7 @@ module.exports = (async () => {
   // APCA-mode label propagates + near-miss tag + hex render + snapshot
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: true,
       activeFileKey: "abc123",
@@ -317,7 +317,7 @@ module.exports = (async () => {
   // Advisory suppression: render the DS-level note when a role is universally absent
   {
     const out = formatCheckReport({
-      receiverUrl: "http://127.0.0.1:1337",
+      receiverUrl: "http://127.0.0.1:17337",
       receiverRunning: true,
       pluginConnected: true,
       activeFileKey: "abc123",

@@ -14,6 +14,7 @@
 const http = require('http');
 const path = require('path');
 const { getConfigPathGuardError } = require('../utils/paths.js');
+const { getReceiverUrl } = require('../utils/receiver-url.js');
 
 function _writeDesignMdExport(configPath) {
   try {
@@ -32,7 +33,7 @@ function _writeDesignMdExport(configPath) {
 
 function handleApplyDsSetup({ config_path }) {
   const resolvedPath = path.resolve(config_path);
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || 'http://localhost:1337';
+  const receiverUrl = getReceiverUrl();
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return Promise.resolve(guardError);
 

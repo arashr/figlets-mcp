@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const { getActiveFileConfigPath } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 
 const buildShowcaseTool = {
   name: "build_ds_showcase",
@@ -27,7 +28,7 @@ const buildShowcaseTool = {
 };
 
 function handleBuildShowcase(args = {}) {
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const receiverUrl = getReceiverUrl();
   let dsPayload = null;
   const configStatus = ensureActiveDsConfig({ reason: "build-showcase", refreshGenerated: true });
   try {

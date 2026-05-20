@@ -10,7 +10,7 @@
 
 ## 1. Project context — what `figlets-mcp` is
 
-An agent-agnostic MCP toolkit for Figma design-system workflows. Deterministic Figma logic lives in `packages/figlets-core` and `packages/figlets-mcp-server`; thin adapter prompts live under `packages/figlets-adapter`. The bridge plugin in `packages/figma-bridge-plugin` runs inside Figma Desktop and talks to a local HTTP receiver on `:1337`.
+An agent-agnostic MCP toolkit for Figma design-system workflows. Deterministic Figma logic lives in `packages/figlets-core` and `packages/figlets-mcp-server`; thin adapter prompts live under `packages/figlets-adapter`. The bridge plugin in `packages/figma-bridge-plugin` runs inside Figma Desktop and talks to a local HTTP receiver on `:17337` by default.
 
 **Key files relevant to this work:**
 

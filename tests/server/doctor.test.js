@@ -51,7 +51,7 @@ module.exports = (async () => {
   }
 
   const disconnected = formatDoctorReport({
-    receiverUrl: "http://127.0.0.1:1337",
+    receiverUrl: "http://127.0.0.1:17337",
     receiverRunning: true,
     receiverHealth: { ok: true, pluginConnected: false },
     pluginConnected: false,
@@ -62,7 +62,7 @@ module.exports = (async () => {
   assert.ok(disconnected.includes("open the Figlets Bridge plugin"));
 
   const stalePlugin = formatDoctorReport({
-    receiverUrl: "http://127.0.0.1:1337",
+    receiverUrl: "http://127.0.0.1:17337",
     receiverRunning: true,
     receiverHealth: { ok: true, pluginConnected: true, updatePrimitivesLive: false },
     pluginConnected: true,

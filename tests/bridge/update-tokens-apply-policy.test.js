@@ -52,7 +52,11 @@ module.exports = (() => {
   assert.ok(ui.includes("'update-tokens'"), "UI should advertise update-tokens capability");
   assert.ok(ui.includes("data.command === 'update-tokens'"), "UI should dispatch update-tokens commands");
   assert.ok(ui.includes("sync-update-tokens"), "UI should post update token results back to receiver");
+  assert.ok(ui.includes("http://localhost:17337"), "UI should use the Figlets-specific bridge port");
+  assert.ok(!ui.includes("localhost:1337"), "UI should not use the generic 1337 bridge port");
 
+  assert.ok(receiver.includes("const DEFAULT_PORT = 17337"), "receiver should default to the Figlets-specific bridge port");
+  assert.ok(receiver.includes("FIGLETS_RECEIVER_PORT"), "receiver should allow local port override");
   assert.ok(receiver.includes("/request-update-tokens"), "receiver should expose request-update-tokens");
   assert.ok(receiver.includes("/sync-update-tokens"), "receiver should accept sync-update-tokens results");
   assert.ok(receiver.includes("_pluginHasCapability('update-tokens')"), "receiver should gate token updates on advertised capability");

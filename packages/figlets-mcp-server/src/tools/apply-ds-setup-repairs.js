@@ -2,6 +2,7 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { getActiveFileConfigPath, getActiveFilePaths, getConfigPathGuardError } = require("../utils/paths.js");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 const {
   computePlannedAliases,
   loadActiveSnapshot,
@@ -263,7 +264,7 @@ function handleApplyDsSetupRepairs(args = {}) {
     return out;
   });
 
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const receiverUrl = getReceiverUrl();
   const requestBody = { repairs: wirePayload };
   if (aliasUpdates.length) requestBody.aliasUpdates = aliasUpdates;
   if (roleRepairs.length) requestBody.roleRepairs = roleRepairs;

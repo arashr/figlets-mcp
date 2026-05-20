@@ -23,6 +23,7 @@
 const http = require('http');
 const path = require('path');
 const { getConfigPathGuardError } = require('../utils/paths.js');
+const { getReceiverUrl } = require('../utils/receiver-url.js');
 
 const updateDsPrimitivesTool = {
   name: 'update_ds_primitives',
@@ -77,7 +78,7 @@ function handleUpdateDsPrimitives(args) {
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return Promise.resolve(guardError);
 
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || 'http://localhost:1337';
+  const receiverUrl = getReceiverUrl();
 
   let readDsConfig;
   try {

@@ -38,7 +38,7 @@ module.exports = (async () => {
       doctorReport: {
         receiverRunning: false,
         pluginConnected: false,
-        receiverUrl: "http://127.0.0.1:1337",
+        receiverUrl: "http://127.0.0.1:17337",
         activeSessionId: null,
       },
     });

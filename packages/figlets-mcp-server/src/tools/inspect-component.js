@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { inspectComponentData } = require("../figlets-core.js");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 
 const inspectComponentTool = {
   name: "inspect_component",
@@ -47,7 +48,7 @@ function _attemptInspect(receiverUrl) {
 }
 
 function handleInspectComponent() {
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const receiverUrl = getReceiverUrl();
   const MAX_RETRIES = 3;
   const RETRY_DELAY_MS = 1500;
 

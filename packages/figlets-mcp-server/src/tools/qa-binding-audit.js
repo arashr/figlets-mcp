@@ -1,4 +1,5 @@
 const http = require("http");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 
 const qaBindingAuditTool = {
   name: "qa_binding_audit",
@@ -25,7 +26,7 @@ const qaBindingAuditTool = {
 };
 
 function handleQaBindingAudit(args = {}) {
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || "http://localhost:1337";
+  const receiverUrl = getReceiverUrl();
   const payload = { fix: !!args.fix };
   if (typeof args.max_nodes === "number") payload.maxNodes = args.max_nodes;
   if (typeof args.deadline_ms === "number") payload.deadlineMs = args.deadline_ms;

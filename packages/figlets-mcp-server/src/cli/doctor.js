@@ -2,6 +2,7 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { checkPort, RECEIVER_PORT } = require("../utils/ensure-receiver.js");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 
 const LOCAL_DIR = process.env.FIGLETS_LOCAL_DIR || path.resolve(__dirname, "../../../.local");
 const DATA_PATH = path.join(LOCAL_DIR, "figma-data.json");
@@ -36,7 +37,7 @@ function _fileInfo(filePath) {
 }
 
 async function getDoctorReport() {
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || `http://127.0.0.1:${RECEIVER_PORT}`;
+  const receiverUrl = getReceiverUrl();
   let receiverPort = RECEIVER_PORT;
   try {
     receiverPort = Number(new URL(receiverUrl).port || RECEIVER_PORT);

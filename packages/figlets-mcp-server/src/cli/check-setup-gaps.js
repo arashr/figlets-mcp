@@ -1,5 +1,6 @@
 const http = require("http");
 const { checkPort, RECEIVER_PORT } = require("../utils/ensure-receiver.js");
+const { getReceiverUrl } = require("../utils/receiver-url.js");
 const { getActiveFileKey } = require("../utils/paths.js");
 const { handleSyncFigmaData } = require("../tools/sync-figma-data.js");
 const { handleRefreshDsConfigFromFigma } = require("../tools/refresh-ds-config-from-figma.js");
@@ -27,7 +28,7 @@ function _getJson(url, timeoutMs) {
 }
 
 async function _readBridgeHealth() {
-  const receiverUrl = process.env.FIGLETS_RECEIVER_URL || `http://127.0.0.1:${RECEIVER_PORT}`;
+  const receiverUrl = getReceiverUrl();
   let receiverPort = RECEIVER_PORT;
   try {
     receiverPort = Number(new URL(receiverUrl).port || RECEIVER_PORT);

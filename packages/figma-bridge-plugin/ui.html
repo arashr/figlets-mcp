@@ -411,6 +411,8 @@
   let _isLogOpen = false;
   let _hasQaReport = false;
   var _currentFileKey = '';
+  const RECEIVER_URL = 'http://localhost:17337';
+  const RECEIVER_LABEL = 'localhost:17337';
   const _capabilities = [
     'extract-all',
     'extract-selection',
@@ -629,7 +631,7 @@
 
     try {
       const res = await fetch(
-        'http://localhost:1337/poll?sessionId=' +
+        RECEIVER_URL + '/poll?sessionId=' +
         encodeURIComponent(_sessionId) +
         '&capabilities=' +
         encodeURIComponent(_capabilities.join(',')) +
@@ -755,7 +757,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-showcase?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-showcase?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -765,7 +767,7 @@
         _appendLog(msg.data.error ? 'Showcase build returned an error.' : 'Showcase result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send showcase result to receiver.');
       }
       isExtracting = false;
@@ -777,7 +779,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-doc-build?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-doc-build?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -787,7 +789,7 @@
         _appendLog(msg.data.error ? 'Doc build failed in plugin.' : 'Doc build result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send doc build result to receiver.');
       }
       isExtracting = false;
@@ -799,7 +801,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-ds-setup?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-ds-setup?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -809,7 +811,7 @@
         _appendLog(msg.data.error ? 'DS setup failed in plugin.' : 'DS setup result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send DS setup result to receiver.');
       }
       isExtracting = false;
@@ -821,7 +823,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-update-primitives?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-update-primitives?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -831,7 +833,7 @@
         _appendLog(msg.data.error ? 'Primitives update failed in plugin.' : 'Primitives update result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send primitives update result to receiver.');
       }
       isExtracting = false;
@@ -843,7 +845,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-update-tokens?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-update-tokens?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -853,7 +855,7 @@
         _appendLog(msg.data.error ? 'Token update failed in plugin.' : 'Token update result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send token update result to receiver.');
       }
       isExtracting = false;
@@ -865,7 +867,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-setup-repairs?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-setup-repairs?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -875,7 +877,7 @@
         _appendLog(msg.data.error ? 'Setup repair failed in plugin.' : 'Setup repair result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send setup repair result to receiver.');
       }
       isExtracting = false;
@@ -887,7 +889,7 @@
       _disarmWatchdog();
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-reset-figlets-file?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-reset-figlets-file?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -897,7 +899,7 @@
         _appendLog(msg.data.error ? 'Reset failed in plugin.' : 'Reset result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send reset result to receiver.');
       }
       isExtracting = false;
@@ -920,7 +922,7 @@
 
       document.getElementById('status').innerText = 'Sending result...';
       try {
-        await fetch('http://localhost:1337/sync-qa-audit?fileKey=' + encodeURIComponent(_currentFileKey), {
+        await fetch(RECEIVER_URL + '/sync-qa-audit?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -930,7 +932,7 @@
         _appendLog(msg.data.error ? 'QA audit failed in plugin.' : 'QA audit result sent to receiver.');
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send QA audit result to receiver.');
       }
       isExtracting = false;
@@ -944,7 +946,7 @@
       const endpoint = msg.type === 'selection-extracted' ? '/sync-selection' : '/sync';
 
       try {
-        const response = await fetch('http://localhost:1337' + endpoint + '?fileKey=' + encodeURIComponent(_currentFileKey), {
+        const response = await fetch(RECEIVER_URL + endpoint + '?fileKey=' + encodeURIComponent(_currentFileKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
           body: JSON.stringify(msg.data)
@@ -962,7 +964,7 @@
         }
       } catch (err) {
         document.getElementById('status').innerText = 'Connection failed';
-        document.getElementById('substatus').innerText = 'Could not reach localhost:1337';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send payload to receiver.');
       }
 

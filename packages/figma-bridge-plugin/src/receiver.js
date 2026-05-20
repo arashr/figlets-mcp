@@ -2,7 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 1337;
+const DEFAULT_PORT = 17337;
+const PORT = Number(process.env.FIGLETS_RECEIVER_PORT || DEFAULT_PORT);
 const DEST_DIR = process.env.FIGLETS_LOCAL_DIR || path.resolve(__dirname, '../../../.local');
 
 let pendingPollResponse = null;

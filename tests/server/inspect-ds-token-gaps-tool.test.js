@@ -33,6 +33,16 @@ function elevationVariables() {
   ];
 }
 
+function typographyVariables() {
+  return [
+    variable("type-body-md-size", "type/body/md/size"),
+    variable("type-body-md-line-height", "type/body/md/line-height"),
+    variable("type-body-md-weight", "type/body/md/weight"),
+    variable("type-body-md-tracking", "type/body/md/tracking"),
+    variable("type-body-md-family", "type/body/md/family", "STRING"),
+  ];
+}
+
 const DS = {
   collections: {
     primitives: "1. Primitives",
@@ -209,6 +219,56 @@ module.exports = (() => {
     assert.ok(
       !directElevationStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation-styles"),
       "direct elevation-styles requests should not be flagged as unsupported apply scope"
+    );
+  }
+
+  {
+    const typographyStyles = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [{ name: "3. Typography" }],
+      variables: typographyVariables(),
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["typography"],
+    });
+    assert.strictEqual(typographyStyles.summary.missingVariableCount, 0);
+    assert.strictEqual(typographyStyles.summary.missingStyleCount, 1);
+    assert.ok(
+      typographyStyles.tokenGaps.some(gap => gap.category === "typography" && gap.name === "type/body/md"),
+      "broad typography should still report missing text-style gaps"
+    );
+    assert.deepStrictEqual(
+      typographyStyles.repairPlan.applyInput.categories,
+      ["typography-styles"],
+      "planner should narrow broad typography style-only gaps to the approved typography-styles apply slice"
+    );
+    assert.ok(
+      typographyStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
+      "broad typography should remain a product-gap category even when a narrow style slice is available"
+    );
+  }
+
+  {
+    const directTypographyStyles = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [{ name: "3. Typography" }],
+      variables: typographyVariables(),
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["typography-styles"],
+    });
+    assert.strictEqual(directTypographyStyles.summary.missingVariableCount, 0);
+    assert.strictEqual(directTypographyStyles.summary.missingStyleCount, 1);
+    assert.deepStrictEqual(
+      directTypographyStyles.repairPlan.applyInput.categories,
+      ["typography-styles"],
+      "typography-styles should be directly apply-supported without enabling broad typography"
+    );
+    assert.ok(
+      !directTypographyStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography-styles"),
+      "direct typography-styles requests should not be flagged as unsupported apply scope"
     );
   }
 

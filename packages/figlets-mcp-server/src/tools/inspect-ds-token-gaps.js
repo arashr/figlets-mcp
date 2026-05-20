@@ -23,7 +23,7 @@ const inspectDsTokenGapsTool = {
       categories: {
         type: "array",
         items: { type: "string" },
-        description: "Optional config-backed categories to inspect. Phase 3A supports non-color categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, elevation, elevation-variables, and elevation-styles."
+        description: "Optional config-backed categories to inspect. Phase 3A supports non-color categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, typography-styles, elevation, elevation-variables, and elevation-styles."
       },
       include_existing_updates: {
         type: "boolean",
@@ -45,9 +45,9 @@ const DEFAULT_CATEGORIES = [
   "elevation",
 ];
 
-const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES.concat(["typography-variables", "elevation-variables", "elevation-styles"]));
+const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES.concat(["typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]));
 const KNOWN_COLOR_CATEGORIES = new Set(["primitive-color", "color-semantics"]);
-const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "elevation-variables", "elevation-styles"]);
+const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -130,7 +130,7 @@ function _requiredCollectionForCategory(ds, category) {
   if (category === "spacing-semantics" || category === "radius" || category === "border-width") {
     return ds && ds.collections && ds.collections.spacing || "4. Spacing";
   }
-  if (category === "typography" || category === "typography-variables") return ds && ds.collections && ds.collections.typography || "3. Typography";
+  if (category === "typography" || category === "typography-variables" || category === "typography-styles") return ds && ds.collections && ds.collections.typography || "3. Typography";
   if (category === "elevation" || category === "elevation-variables" || category === "elevation-styles") return ds && ds.collections && ds.collections.elevation || "5. Elevation";
   return null;
 }
@@ -238,12 +238,14 @@ function _expectedTypographyTokens(ds, options = {}) {
   const collection = ds.collections && ds.collections.typography || "3. Typography";
   for (const role of Object.keys(scale).sort()) {
     const base = prefix + "/" + role;
-    for (const leaf of ["size", "line-height", "weight", "tracking"]) {
-      _pushExpected(expected, options.category || "typography", "variable", base + "/" + leaf, { expectedType: "FLOAT", collection });
+    if (!options.stylesOnly) {
+      for (const leaf of ["size", "line-height", "weight", "tracking"]) {
+        _pushExpected(expected, options.category || "typography", "variable", base + "/" + leaf, { expectedType: "FLOAT", collection });
+      }
+      _pushExpected(expected, options.category || "typography", "variable", base + "/family", { expectedType: "STRING", collection, optional: true });
     }
-    _pushExpected(expected, options.category || "typography", "variable", base + "/family", { expectedType: "STRING", collection, optional: true });
     if (!options.variablesOnly) {
-      _pushExpected(expected, "typography", "style", _textStyleName(ds, role), {
+      _pushExpected(expected, options.category || "typography", "style", _textStyleName(ds, role), {
         styleType: "TEXT",
         collection: "local text styles",
       });
@@ -286,6 +288,7 @@ function _expectedForCategory(ds, category) {
   }
   if (category === "typography") return _expectedTypographyTokens(ds);
   if (category === "typography-variables") return _expectedTypographyTokens(ds, { variablesOnly: true, category: "typography-variables" });
+  if (category === "typography-styles") return _expectedTypographyTokens(ds, { stylesOnly: true, category: "typography-styles" });
   if (category === "elevation") return _expectedElevationTokens(ds);
   if (category === "elevation-variables") return _expectedElevationTokens(ds, { variablesOnly: true, category: "elevation-variables" });
   if (category === "elevation-styles") return _expectedElevationTokens(ds, { stylesOnly: true, category: "elevation-styles" });
@@ -453,6 +456,9 @@ function _buildRepairPlan(context) {
     const hasTypographyVariableWork = (context.missingVariables || []).some(gap => gap.category === "typography")
       || (context.typeMismatches || []).some(gap => gap.category === "typography");
     if (hasTypographyVariableWork) applyCategorySet.add("typography-variables");
+    const hasTypographyStyleWork = (context.missingStyles || []).some(gap => gap.category === "typography")
+      || (context.typeMismatches || []).some(gap => gap.category === "typography" && gap.kind === "style");
+    if (hasTypographyStyleWork && !hasTypographyVariableWork) applyCategorySet.add("typography-styles");
   }
   if (categories.indexOf("elevation") >= 0 && !foundationBlocked.has("elevation")) {
     const hasElevationVariableWork = (context.missingVariables || []).some(gap => gap.category === "elevation")

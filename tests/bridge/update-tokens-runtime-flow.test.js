@@ -94,6 +94,17 @@ module.exports = (async () => {
   const effectStyles = [
     { id: "existing-effect-1", name: "elevation/1", effects: [{ type: "DROP_SHADOW", radius: 99 }] },
   ];
+  const textStyles = [
+    {
+      id: "existing-text-body-md",
+      name: "type/body/md",
+      fontName: { family: "Inter", style: "Regular" },
+      boundVariables: {},
+      setBoundVariable(property, variable) {
+        this.boundVariables[property] = { id: variable.id, type: variable.resolvedType };
+      },
+    },
+  ];
 
   const figma = {
     variables: {
@@ -125,6 +136,25 @@ module.exports = (async () => {
       const style = { id: `created-effect-${effectStyles.length}`, name: "", effects: [] };
       effectStyles.push(style);
       return style;
+    },
+    async getLocalTextStylesAsync() {
+      return textStyles;
+    },
+    createTextStyle() {
+      const style = {
+        id: `created-text-${textStyles.length}`,
+        name: "",
+        boundVariables: {},
+        setBoundVariable(property, variable) {
+          this.boundVariables[property] = { id: variable.id, type: variable.resolvedType };
+        },
+      };
+      textStyles.push(style);
+      return style;
+    },
+    async loadFontAsync(font) {
+      if (font.family === "Inter" && (font.style === "Regular" || font.style === "Medium")) return;
+      throw new Error(`Font unavailable: ${font.family} ${font.style}`);
     },
   };
 
@@ -168,24 +198,35 @@ module.exports = (async () => {
     typography: {
       scale: {
         "body/md": { sizes: [14, 14, 16], lineHeights: [20, 20, 24], weight: 400, tracking: 0 },
+        "label/md": { sizes: [12, 14, 14], lineHeights: [16, 18, 18], weight: 500, tracking: 0 },
       },
     },
   };
 
   const result = await context.module.exports._updateDsTokens({
     DS,
-    categories: ["spacing-semantics", "typography-variables", "elevation-variables", "elevation-styles"],
+    categories: ["spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"],
     createMissing: true,
     dryRun: false,
   });
 
   assert.ok(!result.error, result.error);
-  assertJsonEqual(result.categories, ["spacing-semantics", "typography-variables", "elevation-variables", "elevation-styles"]);
+  assertJsonEqual(result.categories, ["spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
   assert.strictEqual(result.report["spacing-semantics"].createdVariables.length, 1);
-  assert.strictEqual(result.report["typography-variables"].createdVariables.length, 4);
+  assert.strictEqual(result.report["typography-variables"].createdVariables.length, 9);
   assert.strictEqual(result.report["typography-variables"].updatedVariables.length, 1);
   assert.strictEqual(result.report["typography-variables"].createdStyles.length, 0);
   assert.strictEqual(result.report["typography-variables"].refreshedStyles.length, 0);
+  assert.strictEqual(result.report["typography-styles"].createdVariables.length, 0);
+  assert.strictEqual(result.report["typography-styles"].updatedVariables.length, 0);
+  assert.strictEqual(result.report["typography-styles"].createdStyles.length, 1);
+  assert.strictEqual(result.report["typography-styles"].refreshedStyles.length, 1);
+  assert.strictEqual(result.report["typography-styles"].refreshedStyles[0].id, "existing-text-body-md");
+  assertJsonEqual(
+    result.report["typography-styles"].refreshedStyles[0].boundVariables,
+    ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "lineHeight"]
+  );
+  assert.strictEqual(result.report["typography-styles"].fontLoadFailures.length, 0);
   assert.strictEqual(result.report["elevation-variables"].createdVariables.length, 9);
   assert.strictEqual(result.report["elevation-variables"].updatedVariables.length, 1);
   assert.strictEqual(result.report["elevation-variables"].createdStyles.length, 0);
@@ -225,6 +266,18 @@ module.exports = (async () => {
   assert.ok(family, "family variable should be created when a font primitive exists");
   assertJsonEqual(family.valuesByMode.mobile, { type: "VARIABLE_ALIAS", id: "font-sans" });
   assertJsonEqual(family.scopes, ["FONT_FAMILY"]);
+
+  const bodyTextStyle = textStyles.find(style => style.name === "type/body/md");
+  assert.ok(bodyTextStyle, "existing text style should be refreshed in place");
+  assert.strictEqual(bodyTextStyle.id, "existing-text-body-md", "existing text style ID should be preserved");
+  assertJsonEqual(bodyTextStyle.boundVariables.fontSize, { id: "existing-size", type: "FLOAT" });
+  assertJsonEqual(bodyTextStyle.boundVariables.lineHeight, { id: lineHeight.id, type: "FLOAT" });
+  assertJsonEqual(bodyTextStyle.boundVariables.fontFamily, { id: family.id, type: "STRING" });
+
+  const labelTextStyle = textStyles.find(style => style.name === "type/label/md");
+  assert.ok(labelTextStyle, "missing text style should be created");
+  assertJsonEqual(labelTextStyle.fontName, { family: "Inter", style: "Medium" });
+  assertJsonEqual(labelTextStyle.boundVariables.fontWeight, { id: byName.get("type/label/md/weight").id, type: "FLOAT" });
 
   const elevationOffset = byName.get("elevation/xs/offset-y");
   assert.ok(elevationOffset, "elevation offset variable should be created");

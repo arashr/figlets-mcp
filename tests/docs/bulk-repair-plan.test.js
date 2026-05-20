@@ -13,8 +13,8 @@ assert.ok(
   "Phase 3 plan should block broad high-risk categories until their strategies are implemented"
 );
 assert.ok(
-  plan.includes("The narrow `typography-variables` category is the approved first typography slice"),
-  "Typography variable apply should be documented as the only approved typography apply slice"
+  plan.includes("The narrow `typography-variables` and `typography-styles` categories are the approved typography slices"),
+  "Approved typography apply slices should be documented narrowly"
 );
 assert.ok(
   plan.includes("`typography-variables`") && plan.includes("No text styles"),
@@ -25,10 +25,10 @@ assert.ok(
   "Text-style apply strategy should require font-loading failure reporting"
 );
 assert.ok(
-  plan.includes("Typography Text-Style Apply Strategy Draft") &&
-    plan.includes("new narrow category such as `typography-styles`") &&
+  plan.includes("Typography Text-Style Apply Strategy") &&
+    plan.includes("The text-style apply slice uses the narrow category `typography-styles`") &&
     plan.includes("figma.loadFontAsync"),
-  "Typography text-style apply should have a pinned narrow strategy before implementation"
+  "Typography text-style apply should have a pinned narrow strategy after implementation"
 );
 assert.ok(
   plan.includes("missingTypographyVariable") &&
@@ -41,7 +41,7 @@ assert.ok(
   "Elevation apply strategy should split variables from effect styles"
 );
 assert.ok(
-  plan.includes("approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `elevation-variables`, and `elevation-styles` only") &&
+  plan.includes("approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles` only") &&
     plan.includes("Elevation collection FLOAT variables `elevation/<key>/{offset-y,radius}`"),
   "Current surface table should include the elevation apply slices"
 );
@@ -58,6 +58,6 @@ assert.ok(
   "Elevation style strategy should require structured prerequisite/failure reporting"
 );
 assert.ok(
-  plan.includes("dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category`"),
+  plan.includes("Dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category` product-gap notes for broad `typography` and broad `elevation`"),
   "Plan should preserve product-gap reporting for broad typography/elevation until future apply slices land"
 );

@@ -4,9 +4,21 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-20 — Phase 3D typography text-style apply slice]
+
+**Status:** Implemented the next narrow token-completion apply slice as `typography-styles`. Broad `typography` remains dry-run/product-gap scope; `update_ds_tokens({ dry_run:false, categories:["typography"] })` is still rejected as unsupported apply scope.
+
+**Planner contract:** `inspect_ds_token_gaps` still previews broad typography variables and text styles. When broad typography variable gaps exist, `repairPlan.applyInput.categories` includes `typography-variables` only. Once required typography variables exist and broad typography has only local text-style gaps, the planner narrows apply input to `typography-styles`.
+
+**Apply behavior:** `update_ds_tokens({ dry_run:false, categories:["typography-styles"] })` targets only local text styles derived from `DS.typography.scale` and `DS.naming.textStyle`. It creates missing text styles, refreshes existing styles in place to preserve IDs, loads fonts through `figma.loadFontAsync(...)` before touching style font properties, binds supported text-style fields to existing typography variables, reports `fontLoadFailures` per style, and reports structured prerequisite/binding warnings such as `missingTypographyVariable`, `missingFontFamilyVariable`, and `unsupportedTextStyleBinding`.
+
+**Boundary:** The slice does not create variables, primitive typography, modes, effect styles, arbitrary text styles, broad typography writes, or prune/delete operations. If required typography variables are absent, styles are not silently created as raw-only text styles.
+
+**Tests updated:** Planner, server allow/reject behavior, bridge policy, fake-Figma runtime flow, docs-plan coverage, and integration proxy now cover `typography-styles`. The integration proxy exercises inspect -> dry-run -> variable apply -> reinspect -> style dry-run -> style apply -> final reinspect across spacing, typography, and elevation slices.
+
 ### [2026-05-20 — Typography text-style strategy checkpoint]
 
-**Status:** Added the `typography-styles` strategy draft without enabling text-style writes. Broad `typography` remains rejected for `update_ds_tokens({ dry_run:false })`, and the future narrow `typography-styles` category is also still rejected until implementation lands.
+**Status:** Historical checkpoint before the implementation above. Added the `typography-styles` strategy draft without enabling text-style writes. At this checkpoint, broad `typography` remained rejected for `update_ds_tokens({ dry_run:false })`, and the future narrow `typography-styles` category was also still rejected until implementation landed.
 
 **Strategy pinned:** Future text-style create/refresh must target config-derived local text styles only, preserve existing style IDs, require matching typography variables, load fonts with `figma.loadFontAsync(...)` before touching style font properties, report per-style `fontLoadFailures`, and surface structured prerequisite/binding failures such as `missingTypographyVariable`, `missingFontFamilyVariable`, and `unsupportedTextStyleBinding`.
 

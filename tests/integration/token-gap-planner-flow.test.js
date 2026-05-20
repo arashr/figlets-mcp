@@ -286,7 +286,7 @@ module.exports = (async () => {
     );
     assert.ok(
       reinspected.tokenGaps.some(gap => gap.category === "typography" && gap.gapType === "missing-style"),
-      "text styles should remain visible as unsupported apply scope after typography variable apply"
+      "text styles should remain visible after typography variable apply"
     );
     assert.ok(
       !reinspected.tokenGaps.some(gap => gap.category === "elevation" && gap.gapType === "missing-variable"),
@@ -298,19 +298,20 @@ module.exports = (async () => {
     );
     assert.deepStrictEqual(
       reinspected.repairPlan.applyInput.categories,
-      ["elevation-styles"],
-      "once elevation variables exist, planner should offer the narrow elevation-styles apply slice"
+      ["elevation-styles", "typography-styles"],
+      "once prerequisite variables exist, planner should offer the narrow style apply slices"
     );
 
     const styleDryRun = handleUpdateDsTokens({
       config_path: configPath,
       figmaDataPath,
-      categories: ["elevation-styles"],
+      categories: ["elevation-styles", "typography-styles"],
       create_missing: true,
       dry_run: true,
     });
     assert.ok(!styleDryRun.error, styleDryRun.error);
     assert.strictEqual(styleDryRun.report["elevation-styles"].wouldCreateStyles.length, 6);
+    assert.strictEqual(styleDryRun.report["typography-styles"].wouldCreateStyles.length, 1);
 
     let receivedStyleBody = null;
     const mockStyleServer = http.createServer((req, res) => {
@@ -354,8 +355,25 @@ module.exports = (async () => {
                 fontLoadFailures: [],
                 bindingWarnings: [],
               },
+              "typography-styles": {
+                entries: 1,
+                wouldCreateVariables: [],
+                createdVariables: [],
+                wouldUpdateVariables: [],
+                updatedVariables: [],
+                wouldCreateStyles: [],
+                createdStyles: [
+                  { name: "type/body/md", id: "text-style-1", boundVariables: ["fontSize", "lineHeight", "letterSpacing", "fontFamily", "fontWeight"] },
+                ],
+                wouldRefreshStyles: [],
+                refreshedStyles: [],
+                unmatched: [],
+                typeMismatch: [],
+                fontLoadFailures: [],
+                bindingWarnings: [],
+              },
             },
-            message: "elevation-styles: 6 changed",
+            message: "elevation-styles: 6 changed; typography-styles: 1 changed",
           },
         }));
       });
@@ -369,7 +387,7 @@ module.exports = (async () => {
       const appliedStyles = await handleUpdateDsTokens(reinspected.repairPlan.applyInput);
       assert.ok(!appliedStyles.error, appliedStyles.error);
       assert.strictEqual(appliedStyles.dryRun, false);
-      assert.deepStrictEqual(receivedStyleBody.categories, ["elevation-styles"]);
+      assert.deepStrictEqual(receivedStyleBody.categories, ["elevation-styles", "typography-styles"]);
     } finally {
       await new Promise(resolve => mockStyleServer.close(resolve));
       delete process.env.FIGLETS_RECEIVER_URL;
@@ -384,6 +402,7 @@ module.exports = (async () => {
         { name: "elevation/4" },
         { name: "elevation/5" },
       ],
+      textStyles: [{ name: "type/body/md" }],
     });
     writeSnapshot(figmaDataPath, finalSnapshot);
 
@@ -398,8 +417,8 @@ module.exports = (async () => {
       "elevation variables and effect styles should be resolved after both narrow applies"
     );
     assert.ok(
-      finalInspect.tokenGaps.some(gap => gap.category === "typography" && gap.gapType === "missing-style"),
-      "text styles should remain outside this elevation-focused slice"
+      !finalInspect.tokenGaps.some(gap => gap.category === "typography"),
+      "typography variables and text styles should be resolved after both narrow typography applies"
     );
   } finally {
     try { fs.unlinkSync(configPath); } catch (err) {}

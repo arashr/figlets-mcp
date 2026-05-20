@@ -11,7 +11,7 @@ const { inspectDsTokenGapsFromConfigAndFigmaData } = require("./inspect-ds-token
 const updateDsTokensTool = {
   name: "update_ds_tokens",
   description:
-    "Preview and apply narrow config-backed token completion for non-color token categories. dry_run=true reports missing variables/styles, type mismatches, and unsupported categories without mutating Figma. Phase 3C/3D apply support is intentionally limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles.",
+    "Preview and apply narrow config-backed token completion for non-color token categories. dry_run=true reports missing variables/styles, type mismatches, and unsupported categories without mutating Figma. Phase 3C/3D apply support is intentionally limited to radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles.",
   inputSchema: {
     type: "object",
     properties: {
@@ -26,7 +26,7 @@ const updateDsTokensTool = {
       categories: {
         type: "array",
         items: { type: "string" },
-        description: "Optional categories to preview. Phase 3B supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, elevation, elevation-variables, and elevation-styles."
+        description: "Optional categories to preview. Phase 3B supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, typography-styles, elevation, elevation-variables, and elevation-styles."
       },
       create_missing: {
         type: "boolean",
@@ -34,7 +34,7 @@ const updateDsTokensTool = {
       },
       dry_run: {
         type: "boolean",
-        description: "When true, report what would happen without mutating Figma. When false, Phase 3C/3D apply support is limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles."
+        description: "When true, report what would happen without mutating Figma. When false, Phase 3C/3D apply support is limited to radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles."
       },
       prune: {
         type: "object",
@@ -51,7 +51,7 @@ const updateDsTokensTool = {
   }
 };
 
-const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "elevation-variables", "elevation-styles"]);
+const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -175,7 +175,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
   const categories = _requestedCategories(args);
   if (!categories.length) {
     return {
-      error: "categories is required for update_ds_tokens apply. Phase 3C/3D supports only radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles.",
+      error: "categories is required for update_ds_tokens apply. Phase 3C/3D supports only radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles.",
       dryRun: false,
       configPath,
       supportedApplyCategories: Array.from(APPLY_CATEGORIES).sort(),
@@ -184,7 +184,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
   const unsupported = _applyUnsupportedCategories(categories);
   if (unsupported.length) {
     return {
-      error: "update_ds_tokens apply support is limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles in Phase 3C/3D.",
+      error: "update_ds_tokens apply support is limited to radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles in Phase 3C/3D.",
       dryRun: false,
       configPath,
       categories: categories.filter(category => APPLY_CATEGORIES.has(category)),
@@ -192,7 +192,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
       missingCapabilityNotes: unsupported.map(category => ({
         kind: "unsupported-apply-category",
         category,
-        reason: "Phase 3C/3D apply support covers radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles only. Other config-backed token categories remain dry-run/product-gap scope.",
+        reason: "Phase 3C/3D apply support covers radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles only. Other config-backed token categories remain dry-run/product-gap scope.",
         productGap: true,
       })),
     };

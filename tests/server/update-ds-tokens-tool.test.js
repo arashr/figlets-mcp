@@ -62,7 +62,7 @@ fs.writeFileSync(figmaDataPath, JSON.stringify(figmaData, null, 2), "utf8");
 module.exports = (async () => {
   try {
     assert.strictEqual(updateDsTokensTool.name, "update_ds_tokens");
-    assert.ok(updateDsTokensTool.description.includes("radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles"));
+    assert.ok(updateDsTokensTool.description.includes("radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles"));
     assert.ok(updateDsTokensTool.inputSchema.properties.prune, "schema should expose prune options");
 
     {
@@ -101,7 +101,7 @@ module.exports = (async () => {
       );
       assert.ok(/would create/.test(result.message), "message should summarize would-create work");
       assert.strictEqual(result.applySupported, true);
-      assert.deepStrictEqual(result.supportedApplyCategories, ["border-width", "elevation-styles", "elevation-variables", "radius", "spacing-semantics", "typography-variables"]);
+      assert.deepStrictEqual(result.supportedApplyCategories, ["border-width", "elevation-styles", "elevation-variables", "radius", "spacing-semantics", "typography-styles", "typography-variables"]);
     }
 
     {
@@ -148,7 +148,7 @@ module.exports = (async () => {
         categories: ["typography"],
         dry_run: false,
       });
-      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles/.test(result.error), "unsupported apply categories should be explicit");
+      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables\/text styles, elevation variables, and elevation effect styles/.test(result.error), "unsupported apply categories should be explicit");
       assert.strictEqual(result.dryRun, false);
       assert.deepStrictEqual(result.unknownCategories, ["typography"]);
     }
@@ -160,7 +160,7 @@ module.exports = (async () => {
         categories: ["typography", "elevation", "primitive-typography", "primitive-shadow"],
         dry_run: false,
       });
-      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles/.test(result.error));
+      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables\/text styles, elevation variables, and elevation effect styles/.test(result.error));
       assert.strictEqual(result.dryRun, false);
       assert.deepStrictEqual(result.categories, []);
       assert.deepStrictEqual(result.unknownCategories, ["typography", "elevation", "primitive-typography", "primitive-shadow"]);
@@ -171,27 +171,69 @@ module.exports = (async () => {
       );
     }
 
-    {
-      const result = handleUpdateDsTokens({
-        config_path: configPath,
-        figmaDataPath,
-        categories: ["typography-styles"],
-        dry_run: false,
+    await (async () => {
+      let receivedBody = null;
+      const mockServer = http.createServer((req, res) => {
+        if (req.method === "POST" && req.url === "/request-update-tokens") {
+          let body = "";
+          req.on("data", chunk => { body += chunk.toString(); });
+          req.on("end", () => {
+            receivedBody = JSON.parse(body);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              success: true,
+              result: {
+                dryRun: false,
+                categories: ["typography-styles"],
+                unknownCategories: [],
+                report: {
+                  "typography-styles": {
+                    entries: 1,
+                    createdVariables: [],
+                    updatedVariables: [],
+                    wouldCreateVariables: [],
+                    wouldUpdateVariables: [],
+                    createdStyles: [{ name: "type/body/md", id: "style-1", boundVariables: ["fontSize", "lineHeight", "letterSpacing"] }],
+                    refreshedStyles: [],
+                    unmatched: [],
+                    typeMismatch: [],
+                    fontLoadFailures: [],
+                    bindingWarnings: [],
+                  },
+                },
+                message: "typography-styles: 1 changed",
+              }
+            }));
+          });
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
       });
-      assert.ok(
-        result.error && /limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles/.test(result.error),
-        "typography-styles apply should stay disabled until font-loading strategy implementation lands"
-      );
-      assert.deepStrictEqual(result.unknownCategories, ["typography-styles"]);
-      assert.ok(
-        result.missingCapabilityNotes.some(note =>
-          note.kind === "unsupported-apply-category" &&
-          note.category === "typography-styles" &&
-          note.productGap === true
-        ),
-        "typography-styles should be surfaced as future product scope, not silently ignored"
-      );
-    }
+
+      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
+      const { port } = mockServer.address();
+      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+
+      try {
+        const result = await handleUpdateDsTokens({
+          config_path: configPath,
+          categories: ["typography-styles"],
+          create_missing: true,
+          dry_run: false,
+        });
+        assert.ok(!result.error, result.error);
+        assert.strictEqual(result.dryRun, false);
+        assert.deepStrictEqual(result.categories, ["typography-styles"]);
+        assert.strictEqual(result.applySupported, true);
+        assert.ok(receivedBody && receivedBody.DS, "typography-styles apply should send DS to bridge");
+        assert.deepStrictEqual(receivedBody.categories, ["typography-styles"]);
+        assert.strictEqual(receivedBody.dryRun, false);
+      } finally {
+        await new Promise(resolve => mockServer.close(resolve));
+        delete process.env.FIGLETS_RECEIVER_URL;
+      }
+    })();
 
     await (async () => {
       let receivedBody = null;

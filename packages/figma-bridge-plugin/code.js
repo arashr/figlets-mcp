@@ -6172,7 +6172,7 @@ async function _updateDsTokens(payload) {
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : [];
-  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true, 'typography-variables': true, 'elevation-variables': true, 'elevation-styles': true };
+  var supported = { 'radius': true, 'border-width': true, 'spacing-semantics': true, 'typography-variables': true, 'typography-styles': true, 'elevation-variables': true, 'elevation-styles': true };
   var categories = [];
   var unknown = [];
   var needsSpacing = false;
@@ -6184,12 +6184,12 @@ async function _updateDsTokens(payload) {
     if (supported[cat]) {
       categories.push(cat);
       if (cat === 'radius' || cat === 'border-width' || cat === 'spacing-semantics') needsSpacing = true;
-      if (cat === 'typography-variables') needsTypography = true;
+      if (cat === 'typography-variables' || cat === 'typography-styles') needsTypography = true;
       if (cat === 'elevation-variables' || cat === 'elevation-styles') needsElevation = true;
     }
     else unknown.push(cat);
   }
-  var applyOrder = { 'radius': 1, 'border-width': 2, 'spacing-semantics': 3, 'typography-variables': 4, 'elevation-variables': 5, 'elevation-styles': 6 };
+  var applyOrder = { 'radius': 1, 'border-width': 2, 'spacing-semantics': 3, 'typography-variables': 4, 'typography-styles': 5, 'elevation-variables': 6, 'elevation-styles': 7 };
   categories.sort(function(a, b) { return (applyOrder[a] || 99) - (applyOrder[b] || 99); });
 
   var allColls = await figma.variables.getLocalVariableCollectionsAsync();
@@ -6308,6 +6308,8 @@ async function _updateDsTokens(payload) {
   var elevationModeOrder = elevationColl ? _modeOrderForCollection(elevationColl) : [];
   var allVariablesByName = {};
   for (var avn = 0; avn < allVars.length; avn++) allVariablesByName[allVars[avn].name] = allVars[avn];
+  var allVariablesById = {};
+  for (var avid = 0; avid < allVars.length; avid++) allVariablesById[allVars[avid].id] = allVars[avid];
 
   function _resolveSpaceValue(rawVal) {
     var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
@@ -6382,6 +6384,7 @@ async function _updateDsTokens(payload) {
           _setVariableScopesForName(existing, entry.name, entry.type);
           byName[entry.name] = existing;
           allVariablesByName[entry.name] = existing;
+          allVariablesById[existing.id] = existing;
           idToName[existing.id] = existing.name;
           for (var cm = 0; cm < modeOrder.length; cm++) {
             var desiredCreateValue = _desiredForMode(entry, modeOrder[cm].bpIndex);
@@ -6428,6 +6431,193 @@ async function _updateDsTokens(payload) {
         existing.setValueForMode(modeOrder[sm].modeId, _desiredForMode(entry, modeOrder[sm].bpIndex));
       }
       catReport.updatedVariables.push(_tokenUpdateChangedItem(existing, item, modeOrder, idToName));
+    }
+
+    if (category === 'typography-styles') {
+      var scale = DS && DS.typography && DS.typography.scale ? DS.typography.scale : {};
+      var typePrefix = _typePrefixForTokenUpdate(DS);
+      var textStylePattern = DS && DS.naming && DS.naming.textStyle ? DS.naming.textStyle : 'type/{role}/{size}';
+      var fallbackFamilies = DS && DS.typography && DS.typography.families ? DS.typography.families : {};
+      var fallbackFamily = fallbackFamilies.sans || 'Inter';
+      var typoRoles = Object.keys(scale).sort();
+      var localTextStyles = await figma.getLocalTextStylesAsync();
+      var textStyleByName = {};
+      for (var tsi = 0; tsi < localTextStyles.length; tsi++) {
+        if (localTextStyles[tsi] && localTextStyles[tsi].name) textStyleByName[localTextStyles[tsi].name] = localTextStyles[tsi];
+      }
+
+      function _textStyleNameForUpdate(role) {
+        var parts = String(role).split('/');
+        var size = parts.length > 1 ? parts[parts.length - 1] : role;
+        var roleName = textStylePattern.indexOf('{size}') >= 0 && parts.length > 1
+          ? parts.slice(0, -1).join('/')
+          : role;
+        return String(textStylePattern).replace('{role}', roleName).replace('{size}', size);
+      }
+
+      function _textStyleItem(name) {
+        return { name: name, kind: 'style', styleType: 'TEXT', collection: 'local text styles' };
+      }
+
+      function _textStyleValueAtMode(values, fallbackValue) {
+        if (Array.isArray(values) && values.length) return values[values.length - 1] != null ? values[values.length - 1] : fallbackValue;
+        return fallbackValue;
+      }
+
+      function _firstVariableValue(variable) {
+        if (!variable || !variable.valuesByMode) return null;
+        var modeIds = Object.keys(variable.valuesByMode);
+        if (!modeIds.length) return null;
+        return variable.valuesByMode[modeIds[0]];
+      }
+
+      function _resolveVariableLiteral(variable, depth) {
+        if (!variable || depth > 8) return null;
+        var value = _firstVariableValue(variable);
+        if (value && value.type === 'VARIABLE_ALIAS') {
+          var aliased = allVariablesById[value.id] || (figma.variables.getVariableById ? figma.variables.getVariableById(value.id) : null);
+          return _resolveVariableLiteral(aliased, depth + 1);
+        }
+        return value;
+      }
+
+      function _fontStyleCandidates(weight) {
+        var map = {
+          400: ['Regular'],
+          500: ['Medium', 'Regular'],
+          600: ['Semi Bold', 'Semibold', 'SemiBold', 'Medium', 'Regular'],
+          700: ['Bold', 'Semi Bold', 'Semibold', 'SemiBold', 'Regular'],
+        };
+        return map[weight] || ['Regular'];
+      }
+
+      async function _loadFontForTypographyStyle(family, weight) {
+        var candidates = _fontStyleCandidates(weight);
+        for (var csi = 0; csi < candidates.length; csi++) {
+          var font = { family: family, style: candidates[csi] };
+          try {
+            await figma.loadFontAsync(font);
+            return { loadedFont: font, attemptedStyles: candidates.slice(0, csi + 1) };
+          } catch (fontErr) {}
+        }
+        return { loadedFont: null, attemptedStyles: candidates };
+      }
+
+      function _bindTextStyleVariable(style, property, variable, styleName, variableName) {
+        if (!variable) return false;
+        try {
+          style.setBoundVariable(property, variable);
+          return true;
+        } catch (bindErr) {
+          catReport.bindingWarnings.push({
+            kind: 'unsupportedTextStyleBinding',
+            styleName: styleName,
+            name: variableName,
+            property: property,
+            reason: bindErr && bindErr.message ? bindErr.message : 'Figma did not accept this text-style variable binding.',
+          });
+        }
+        return false;
+      }
+
+      function _textStyleDetail(style, loadedFont) {
+        var fields = Object.keys(style.boundVariables || {}).sort();
+        return {
+          name: style.name,
+          kind: 'style',
+          styleType: 'TEXT',
+          collection: 'local text styles',
+          id: style.id || null,
+          fontName: loadedFont || style.fontName || null,
+          boundVariables: fields,
+        };
+      }
+
+      for (var tri = 0; tri < typoRoles.length; tri++) {
+        var role = typoRoles[tri];
+        var roleDef = scale[role] || {};
+        var styleName = _textStyleNameForUpdate(role);
+        var tokenBase = typePrefix + '/' + role;
+        var styleItem = _textStyleItem(styleName);
+        catReport.entries += 1;
+        var existingTextStyle = textStyleByName[styleName];
+
+        if (!existingTextStyle) {
+          if (!createMissing) {
+            catReport.unmatched.push(styleItem);
+            continue;
+          }
+          if (dryRun) {
+            catReport.wouldCreateStyles.push(styleItem);
+            continue;
+          }
+        } else if (dryRun) {
+          catReport.wouldRefreshStyles.push(styleItem);
+          continue;
+        }
+
+        var sizeVarName = tokenBase + '/size';
+        var lineHeightVarName = tokenBase + '/line-height';
+        var weightVarName = tokenBase + '/weight';
+        var trackingVarName = tokenBase + '/tracking';
+        var familyVarName = tokenBase + '/family';
+        var requiredVarNames = [sizeVarName, lineHeightVarName, weightVarName, trackingVarName];
+        var missingRequiredTypographyVariable = false;
+        for (var rvi = 0; rvi < requiredVarNames.length; rvi++) {
+          if (!allVariablesByName[requiredVarNames[rvi]]) {
+            catReport.bindingWarnings.push({ kind: 'missingTypographyVariable', styleName: styleName, name: requiredVarNames[rvi] });
+            missingRequiredTypographyVariable = true;
+          }
+        }
+        if (missingRequiredTypographyVariable) {
+          catReport.unmatched.push(styleItem);
+          continue;
+        }
+
+        var familyVar = allVariablesByName[familyVarName];
+        var resolvedFamily = familyVar ? _resolveVariableLiteral(familyVar, 0) : null;
+        if (typeof resolvedFamily !== 'string' || !resolvedFamily) {
+          catReport.bindingWarnings.push({ kind: 'missingFontFamilyVariable', styleName: styleName, name: familyVarName, fallbackFamily: fallbackFamily });
+          resolvedFamily = fallbackFamily;
+        }
+
+        var weightValue = _resolveVariableLiteral(allVariablesByName[weightVarName], 0);
+        var numericWeight = typeof weightValue === 'number' ? weightValue : (roleDef.weight || 400);
+        var loadResult = await _loadFontForTypographyStyle(resolvedFamily, numericWeight);
+        if (!loadResult.loadedFont) {
+          catReport.fontLoadFailures.push({
+            styleName: styleName,
+            family: resolvedFamily,
+            attemptedStyles: loadResult.attemptedStyles,
+            reason: 'Could not load a Figma font for this typography style.',
+          });
+          catReport.unmatched.push(styleItem);
+          continue;
+        }
+
+        var targetTextStyle = existingTextStyle || figma.createTextStyle();
+        targetTextStyle.name = styleName;
+        try { targetTextStyle.fontName = loadResult.loadedFont; } catch (fontSetErr) {}
+
+        var fontSize = _textStyleValueAtMode(roleDef.sizes, _resolveVariableLiteral(allVariablesByName[sizeVarName], 0));
+        var lineHeight = _textStyleValueAtMode(roleDef.lineHeights, _resolveVariableLiteral(allVariablesByName[lineHeightVarName], 0));
+        var tracking = roleDef.tracking != null ? roleDef.tracking : _resolveVariableLiteral(allVariablesByName[trackingVarName], 0);
+        if (typeof fontSize === 'number') targetTextStyle.fontSize = fontSize;
+        if (typeof lineHeight === 'number') targetTextStyle.lineHeight = { value: lineHeight, unit: 'PIXELS' };
+        targetTextStyle.letterSpacing = { value: typeof tracking === 'number' ? tracking : 0, unit: 'PIXELS' };
+
+        _bindTextStyleVariable(targetTextStyle, 'fontSize', allVariablesByName[sizeVarName], styleName, sizeVarName);
+        _bindTextStyleVariable(targetTextStyle, 'lineHeight', allVariablesByName[lineHeightVarName], styleName, lineHeightVarName);
+        _bindTextStyleVariable(targetTextStyle, 'letterSpacing', allVariablesByName[trackingVarName], styleName, trackingVarName);
+        _bindTextStyleVariable(targetTextStyle, 'fontFamily', allVariablesByName[familyVarName], styleName, familyVarName);
+        _bindTextStyleVariable(targetTextStyle, 'fontWeight', allVariablesByName[weightVarName], styleName, weightVarName);
+
+        if (existingTextStyle) catReport.refreshedStyles.push(_textStyleDetail(targetTextStyle, loadResult.loadedFont));
+        else catReport.createdStyles.push(_textStyleDetail(targetTextStyle, loadResult.loadedFont));
+      }
+
+      report[category] = catReport;
+      continue;
     }
 
     if (category === 'elevation-styles') {

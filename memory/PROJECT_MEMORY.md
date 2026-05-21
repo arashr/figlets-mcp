@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-21 — Stale MCP host check for update_ds_tokens apply]
+
+**Status:** Closed the roadmap stale-host item. Current `main` returns resolved `update_ds_tokens` apply results through the registered MCP callback when invoked from a fresh stdio `figlets-mcp` process, not `{}`.
+
+**Live validation:** Bridge on `http://localhost:17337`, Figlets Test `local_mpcspbgz_7gq8yy0l`, plugin connected with `update-tokens`. Script `scripts/live-validate-mcp-update-ds-tokens-callback.js` spawned a new MCP server and called `tools/call` → `update_ds_tokens({ dry_run: false, categories: ["elevation-styles"] })`. Result: `elevation-styles: 6 changed`, 6 refreshed effect styles, 0 `bindingWarnings`. No unresolved-Promise/`{}` symptom.
+
+**Regression:** `tests/server/update-ds-tokens-mcp-callback.test.js` (mock receiver) still passes in the supported-runtime suite (**73/73**).
+
+**Operational note:** Prior Codex/Cursor sessions that kept an old app-managed Figlets MCP process could still return `{}` or reject new categories while direct handlers and a fresh stdio MCP session worked. If that mismatch reappears, reconnect/restart the host MCP session; do not chase it as a repo regression when the script and regression test pass.
+
+**Next product/engineering step:** Resume roadmap product-gap work from `docs/bulk-repair-api-implementation-plan.md` (adapter wording, optional follow-ups in the surface table).
+
 ### [2026-05-21 — Missing-foundation guided token repair slice]
 
 **Status:** Implemented the next roadmap slice after Phase 3C/3D: `inspect_ds_token_gaps` now turns absent required token collections into a guided foundation repair plan instead of leaving them as future product-gap notes. Missing collection notes now carry `repairTool: "apply_ds_foundation_repairs"`, `repairReady: true`, and `productGap: false` when Figlets can safely plan the collection shell.
@@ -28,7 +40,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Verification:** Supported-runtime tests pass **71/71** (includes `tests/bridge/receiver-dev-bridge.test.js`).
 
-**Next product/engineering step:** Missing-foundation guided repair when token completion finds absent collections (for example no Spacing/Typography/Elevation collection), optional dry-run refresh preview for already-complete files, and document/clarify the `update_ds_tokens` vs `update_ds_primitives` boundary. Reconnect/restart the app-managed Figlets MCP host and re-check `update_ds_tokens` MCP callback live if that session was stale.
+**Next product/engineering step (historical):** Missing-foundation guided repair, dry-run refresh preview, and `update_ds_tokens` / `update_ds_primitives` boundary documentation were completed in later 2026-05-21 slices. Stale MCP host re-check was completed separately on 2026-05-21.
 
 ### [2026-05-20 — Phase 3D typography text-style apply slice]
 

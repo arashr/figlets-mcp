@@ -4,6 +4,12 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-21 — Phase 5 workflow guidance sync]
+
+**Status:** Completed Phase 5 from the bulk-repair roadmap. Agent Interface now exposes `bulkRepairRouting` rules and a `token-gap-completion` workflow. Root, adapter, and plugin entrypoints document when to use setup repairs vs `inspect_ds_token_gaps` / `update_ds_tokens` vs `qa_binding_audit` `fixableNow` apply.
+
+**Tests:** `tests/docs/phase5-workflow-guidance.test.js` plus extended agent-interface, root entrypoint, and plugin tests.
+
 ### [2026-05-21 — Phase 4 qa_binding_audit fixability]
 
 **Status:** Implemented Phase 4 bulk-fix clarity for `qa_binding_audit`. Each violation now includes `fixability`, aggregated `byFixability` counts, and a top-level `repairPlan` pointing agents to `qa_binding_audit({ fix: true })` only after approval.

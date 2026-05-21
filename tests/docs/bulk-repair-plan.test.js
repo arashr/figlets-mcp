@@ -96,3 +96,9 @@ assert.ok(
     plan.includes("repairPlan"),
   "Plan should record Phase 4 qa_binding_audit fixability work"
 );
+assert.ok(
+  plan.includes("**Done:** Phase 5") &&
+    plan.includes("token-gap-completion") &&
+    plan.includes("bulkRepairRouting"),
+  "Plan should record Phase 5 workflow guidance sync"
+);

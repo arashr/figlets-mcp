@@ -69,6 +69,10 @@ try {
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_tokens")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_foundation_repairs")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("qa_binding_audit")));
+    assert.ok(Array.isArray(start.hardRules.bulkRepairRouting) && start.hardRules.bulkRepairRouting.length >= 4);
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("repairPlan.applyInput")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("fixableNow")));
+    assert.ok(start.responseContract.bulkUpdateRule.includes("inspect_ds_token_gaps"));
     assert.ok(start.hardRules.appliesTo.includes("design-system review"));
     assert.ok(start.hardRules.forbiddenUnlessDesignerExplicitlyAsksOutOfBounds.some(item => item.includes("custom scripts")));
     assert.ok(start.hardRules.forbiddenUnlessDesignerExplicitlyAsksOutOfBounds.some(item => item.includes("figma-data.json")));
@@ -123,6 +127,27 @@ try {
   }
 
   {
+    const route = routeIntent("add missing typography and spacing tokens");
+    assert.strictEqual(route.workflow.id, "token-gap-completion");
+  }
+
+  {
+    const guide = getWorkflowGuide("token-gap-completion");
+    assert.ok(guide.steps.some(step => step.tool === "inspect_ds_token_gaps"));
+    assert.ok(guide.steps.some(step => step.tool === "update_ds_tokens" && step.requiresApproval === true));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_foundation_repairs"));
+  }
+
+  {
+    const qaGuide = getWorkflowGuide("qa-binding-audit");
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("fixableNow")));
+    assert.ok(qaGuide.errors.some(item => item.includes("needsExistingToken")));
+    const handled = handleFigletsWorkflowGuide({ workflow_id: "qa-binding-audit" });
+    assert.ok(handled.bulkRepairRouting.length >= 4);
+    assert.ok(handled.presentationRule.includes("byFixability"));
+  }
+
+  {
     const guide = getWorkflowGuide("health-check");
     const tools = guide.steps.map(step => step.tool).filter(Boolean);
     assert.deepStrictEqual(tools, [
@@ -154,7 +179,8 @@ try {
     assert.strictEqual(handled.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(handled.hardRules.bulkDesignSystemUpdatesAreInScope, true);
     assert.ok(handled.message.includes("use the named Figlets tools/scripts only"));
-    assert.ok(handled.message.includes("structured bulk repair payloads"));
+    assert.ok(handled.message.includes("bulkRepairRouting"));
+    assert.ok(handled.message.includes("structured repairPlan payloads"));
     assert.ok(handled.presentationRule.includes("designerPresentation"));
     assert.ok(handled.presentationRule.includes("Avoid technical verification matrices"));
   }

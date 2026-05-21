@@ -63,6 +63,9 @@ assert.ok(/workflow guide is mandatory/i.test(skillBody), "skill body must make 
 assert.ok(/do not write custom scripts/i.test(skillBody), "skill body must forbid ad hoc scripts for designer review");
 assert.ok(/product\/tool gap/i.test(skillBody), "skill body must report missing Figlets data as a product/tool gap");
 assert.ok(/bulk design-system updates as Figlets scope/i.test(skillBody), "skill body must keep bulk DS updates in Figlets scope");
+assert.ok(skillBody.includes("repairPlan.optionalApplyInput"), "skill body must document optional bulk apply payloads");
+assert.ok(skillBody.includes("inspect_ds_token_gaps"), "skill body must mention token-gap planner");
+assert.ok(skillBody.includes("fixableNow"), "skill body must document binding-audit fixableNow boundary");
 assert.ok(/gaps cannot be fixed as a dead end/i.test(skillBody), "skill body must avoid dead-end bulk repair wording");
 assert.ok(!/repo edit|plugin edit/i.test(skillBody) || /not.*developer-mode|do not offer developer-mode/i.test(skillBody), "skill body must not offer developer-mode options");
 assert.ok(/setup --hosts=codex-plugin --yes/.test(skillBody), "skill body should point to the Codex setup target when Figlets is unavailable");

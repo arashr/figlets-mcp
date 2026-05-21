@@ -61,7 +61,7 @@ Do not broaden the Figlets introduction with generic Figma authoring capabilitie
 
 Never offer "Plugin / MCP server code", repo editing, plugin editing, or arbitrary Figma create/delete/move actions in the designer-facing menu. Those are developer tasks, not Figlets designer workflow options.
 
-Bulk design-system updates are part of Figlets when the change can be expressed as a structured, designer-approved payload. Use the workflow's bulk-capable tools and data: `inspect_ds_setup_gaps.repairPlan.applyInput` with `apply_ds_setup_repairs`, `update_ds_primitives`, and `qa_binding_audit({ fix: true })`. If a designer asks for a bulk repair that Figlets cannot yet plan or apply, call that out as a Figlets product/tool gap or proposed feature scope instead of saying the gaps cannot be fixed. Do not write custom scripts to fill that gap in Designer Mode.
+Bulk design-system updates are part of Figlets when the change can be expressed as a structured, designer-approved payload. Inspect first. If `repairPlan.applyInput` is non-empty, ask approval and pass it to the named `repairPlan.tool`. If `repairPlan.optionalApplyInput` is non-empty, present it as optional bulk creation requiring separate approval. Use `inspect_ds_setup_gaps.repairPlan` with `apply_ds_setup_repairs` for semantic setup; `inspect_ds_token_gaps` with `apply_ds_foundation_repairs` and `update_ds_tokens` for config-backed token completion; `update_ds_primitives` for primitive/color-semantic updates; `qa_binding_audit` read-only first, then `qa_binding_audit({ fix: true })` only for `fixableNow` after reading `byFixability`. Do not create tokens from binding-audit findings. If Figlets cannot plan or apply a bulk repair, call it a product/tool gap instead of saying the gaps cannot be fixed. Do not write custom scripts to fill that gap in Designer Mode.
 
 ---
 
@@ -88,9 +88,17 @@ Bulk design-system updates are part of Figlets when the change can be expressed 
 ### QA binding audit
 1. Ask the user to select the frame/component to QA, or confirm that auditing the current page is intended.
 2. Call `qa_binding_audit` with `fix: false`.
-3. Summarize unbound raw values by type: color, spacing, border, typography.
-4. Treat suggestions as semantic binding suggestions, not hex/value guesses. Color, spacing, radius, and border suggestions are variable-first; typography may prefer text styles because they bundle variable-backed type decisions. If a violation has no suggestion, report that the DS lacks a matching variable/style and raw values would remain.
-5. If the user asks to fix everything, call `qa_binding_audit` with `fix: true`; report fixed and failed counts.
+3. Summarize `byFixability` and `repairPlan.counts` in plain language. Explain each violation's `fixability`: `fixableNow` can be bulk-bound after approval; `needsExistingToken` should route to `inspect_ds_token_gaps`; `needsDesignerDecision` needs an explicit designer choice.
+4. Treat suggestions as semantic binding suggestions, not hex/value guesses. Color, spacing, radius, and border suggestions are variable-first; typography may prefer exact text-style matches when available.
+5. If the designer approves binding fixes, call `qa_binding_audit` with `fix: true` to apply only `fixableNow` items; report fixed and failed counts. Do not use binding audit to create missing tokens.
+
+### Config-backed token completion
+1. Call `sync_figma_data` if the file snapshot may be stale.
+2. Call `inspect_ds_token_gaps` and summarize gaps using `repairPlan` and `missingCapabilityNotes`.
+3. Dry-run with `update_ds_tokens` using `repairPlan.previewInput` before any apply.
+4. If `repairPlan.foundationRepairPlan.applyInput` is present, ask approval, call `apply_ds_foundation_repairs`, sync, and reinspect before token apply.
+5. After approval, call `update_ds_tokens` with only `repairPlan.applyInput` categories.
+6. Re-run `inspect_ds_token_gaps` to verify remaining gaps.
 
 ### Build token showcase
 1. Tell the designer: "I'll check what this file exposes, then build the showcase sections that apply. Please keep the Figlets Bridge plugin open in Figma."

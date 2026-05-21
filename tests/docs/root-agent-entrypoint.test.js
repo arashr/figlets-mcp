@@ -29,4 +29,7 @@ for (const file of files) {
   assert.ok(content.includes("Check my design system"), `${file} should list designer menu items`);
   assert.ok(content.includes("Export DESIGN.md"), `${file} should list designer menu items`);
   assert.ok(content.includes("## Developer Mode"), `${file} should preserve a developer path`);
+  assert.ok(content.includes("repairPlan.optionalApplyInput"), `${file} should document optional bulk apply payloads`);
+  assert.ok(content.includes("inspect_ds_token_gaps"), `${file} should route token completion through inspect_ds_token_gaps`);
+  assert.ok(content.includes("fixableNow"), `${file} should document qa_binding_audit fixableNow apply boundary`);
 }

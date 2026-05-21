@@ -48,7 +48,7 @@ const DEFAULT_CATEGORIES = [
 const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES.concat(["typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]));
 const KNOWN_COLOR_CATEGORIES = new Set(["primitive-color", "color-semantics"]);
 const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
-const PRIMITIVE_APPLY_CATEGORIES = new Set(["primitive-typography"]);
+const PRIMITIVE_APPLY_CATEGORIES = new Set(["primitive-typography", "primitive-shadow"]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;

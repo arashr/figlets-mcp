@@ -106,7 +106,7 @@ Current roadmap:
 9. **Done:** Phase 4 `qa_binding_audit` bulk-fix clarity. Violations expose `fixability` (`fixableNow`, `needsExistingToken`, `needsDesignerDecision`, `unsupported`), top-level `byFixability` counts, and `repairPlan` with `applyInput: { fix: true }`. Semantic color variables and exact text-style matches are `fixableNow`; role-only typography stays `needsDesignerDecision`; missing exact spacing/border variables are `needsExistingToken`. `fix: true` applies only `fixableNow`.
 10. **Done:** Phase 5 workflow guidance. Agent Interface `bulkRepairRouting`, new `token-gap-completion` workflow, and synced root/adapter/plugin docs now route setup repairs, token completion, primitive updates, and binding QA without tool-name dumping. Regression: `tests/docs/phase5-workflow-guidance.test.js`, extended agent-interface and plugin entrypoint tests.
 11. **Next (product gaps, not new narrow slices):** Continue from the surface table below for net-new planner/apply gaps.
-12. **Still unsupported by design (product-gap only):** Broad `typography`, broad `elevation`, `primitive-typography`, `primitive-shadow`, prune/delete apply, and collection mode creation inside `update_ds_tokens`.
+12. **Still unsupported by design (product-gap only):** Broad `typography`, broad `elevation`, prune/delete apply, and collection mode creation inside `update_ds_tokens`. Primitive `primitive-typography` and `primitive-shadow` apply via `update_ds_primitives` (not `update_ds_tokens` apply).
 
 For Phase 3, start with read-only planning and missing-capability reporting. Do not begin by creating broad mutation support.
 

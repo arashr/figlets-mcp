@@ -5763,10 +5763,39 @@ var UPDATE_PRIMITIVE_SPECS = {
   'primitive-typography': function (DS) {
     return _primitiveTypographyEntries(DS);
   },
+  'primitive-shadow': function (DS) {
+    return _primitiveShadowEntries(DS);
+  },
   'color-semantics': function () {
     return null;
   },
 };
+
+function _primitiveShadowEntries(DS) {
+  var entries = [];
+  if (!DS) return entries;
+  var shadows = [
+    { name: 'shadow/1/offset-y', value: 1 },
+    { name: 'shadow/1/radius', value: 2 },
+    { name: 'shadow/2/offset-y', value: 4 },
+    { name: 'shadow/2/radius', value: 8 },
+    { name: 'shadow/3/offset-y', value: 8 },
+    { name: 'shadow/3/radius', value: 16 },
+    { name: 'shadow/4/offset-y', value: 12 },
+    { name: 'shadow/4/radius', value: 24 },
+    { name: 'shadow/5/offset-y', value: 16 },
+    { name: 'shadow/5/radius', value: 32 },
+    { name: 'shadow/ambient/2/radius', value: 8 },
+    { name: 'shadow/ambient/3/radius', value: 12 },
+    { name: 'shadow/ambient/4/radius', value: 16 },
+    { name: 'shadow/ambient/5/radius', value: 20 },
+  ];
+  var si;
+  for (si = 0; si < shadows.length; si++) {
+    entries.push({ name: shadows[si].name, type: 'FLOAT', value: shadows[si].value });
+  }
+  return entries;
+}
 
 function _primitiveTypographyEntries(DS) {
   var entries = [];

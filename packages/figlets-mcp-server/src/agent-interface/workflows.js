@@ -46,8 +46,8 @@ const DESIGNER_FLOW_HARD_RULES = {
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
     "inspect_ds_token_gaps.repairPlan.previewInput / repairPlan.applyInput → update_ds_tokens for config-backed non-color token dry-run preview and narrow approved apply",
-    "update_ds_primitives with categories color, spacing, color-semantics, and primitive-typography for config-backed primitive values, primitive typography tokens, and Color collection semantic alias updates",
-    "inspect_ds_token_gaps.repairPlan.primitiveRepairPlan → update_ds_primitives for approved primitive-typography create/update in the Primitives collection",
+    "update_ds_primitives with categories color, spacing, color-semantics, primitive-typography, and primitive-shadow for config-backed primitive values, primitive typography/shadow tokens, and Color collection semantic alias updates",
+    "inspect_ds_token_gaps.repairPlan.primitiveRepairPlan → update_ds_primitives for approved primitive-typography or primitive-shadow create/update in the Primitives collection",
     "qa_binding_audit repairPlan with applyInput { fix: true } for fixableNow binding fixes only after reading byFixability",
   ],
   bulkRepairRouting: [

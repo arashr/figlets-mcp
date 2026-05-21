@@ -46,6 +46,10 @@ module.exports = (() => {
     "bridge should support primitive-typography via update_ds_primitives"
   );
   assert.ok(
+    /['"]primitive-shadow['"]:\s*function/.test(source) && /_primitiveShadowEntries/.test(source),
+    "bridge should support primitive-shadow via update_ds_primitives"
+  );
+  assert.ok(
     /:\s*\['color',\s*'spacing',\s*'color-semantics'\]/.test(fn),
     "default update_ds_primitives categories should stay color/spacing/semantics only"
   );

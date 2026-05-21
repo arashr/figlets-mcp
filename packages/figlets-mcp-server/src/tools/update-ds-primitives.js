@@ -15,7 +15,7 @@
  * Use this when ramps or other primitive values change but the rest of the
  * design system has not. For first-time creation, use apply_ds_setup.
  *
- * Categories supported today: "color", "spacing", "color-semantics", "primitive-typography".
+ * Categories supported today: "color", "spacing", "color-semantics", "primitive-typography", "primitive-shadow".
  * The plugin's UPDATE_PRIMITIVE_SPECS map is the source of truth for the full
  * set; unknown categories are reported back, never silently ignored.
  */
@@ -28,7 +28,7 @@ const { getReceiverUrl } = require('../utils/receiver-url.js');
 const updateDsPrimitivesTool = {
   name: 'update_ds_primitives',
   description:
-    'Update existing variable values and semantic aliases in place, without recreating collections or breaking bindings. Pass dry_run=true first to report proposed updates and missing variables for designer confirmation. Pass a prepared design-system.config.js path and an optional list of categories (e.g. ["color"], ["spacing"], ["color-semantics"], ["primitive-typography"]). Use after re-running prepare_ds_config to push changed primitive values, primitive typography tokens in the Primitives collection, and Color collection aliases into Figma.',
+    'Update existing variable values and semantic aliases in place, without recreating collections or breaking bindings. Pass dry_run=true first to report proposed updates and missing variables for designer confirmation. Pass a prepared design-system.config.js path and an optional list of categories (e.g. ["color"], ["spacing"], ["color-semantics"], ["primitive-typography"], ["primitive-shadow"]). Use after re-running prepare_ds_config to push changed primitive values, primitive typography and shadow tokens in the Primitives collection, and Color collection aliases into Figma.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -39,7 +39,7 @@ const updateDsPrimitivesTool = {
       categories: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Optional list of categories to update. Supported today: "color", "spacing", "color-semantics", "primitive-typography". Defaults to color, spacing, and color-semantics when omitted.',
+        description: 'Optional list of categories to update. Supported today: "color", "spacing", "color-semantics", "primitive-typography", "primitive-shadow". Defaults to color, spacing, and color-semantics when omitted.',
       },
       create_missing: {
         type: 'boolean',
@@ -103,11 +103,13 @@ function handleUpdateDsPrimitives(args) {
   const needsColor = requestedCategories.some(cat => cat === 'color' || cat === 'color-semantics');
   const needsSpacing = requestedCategories.includes('spacing');
   const needsPrimitiveTypography = requestedCategories.includes('primitive-typography');
+  const needsPrimitiveShadow = requestedCategories.includes('primitive-shadow');
+  const needsPrimitiveGenerator = needsPrimitiveTypography || needsPrimitiveShadow;
 
   if (needsColor && (!ds.color || !ds.color.ramps || !ds.color.ramps.length)) {
     return Promise.resolve({ error: 'Config is missing DS.color.ramps. Run prepare_ds_config first.' });
   }
-  if (needsSpacing && !ds.primitives) {
+  if ((needsSpacing || needsPrimitiveGenerator) && !ds.primitives) {
     return Promise.resolve({ error: 'Config is missing DS.primitives. Run prepare_ds_config first.' });
   }
   if (needsPrimitiveTypography && (!ds.typography || !ds.typography.scale)) {

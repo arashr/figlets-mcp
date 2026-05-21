@@ -137,7 +137,7 @@ When the designer flips `DS.color.contrastAlgorithm`, expect `failCount` to chan
 1. Run `sync_figma_data`, then `refresh_ds_config_from_figma` to update existing config entries from current Figma values without creating new config tokens or mutating Figma.
 2. Ask the user to keep the Figlets Bridge plugin open in Figma Desktop.
 3. Run `inspect_ds_setup_gaps` to report additive repair candidates from current Figma state without mutating Figma or config.
-4. Ask which categories they want updated. Today: `color`, `spacing`, `color-semantics`, and `primitive-typography` when `inspect_ds_token_gaps.repairPlan.primitiveRepairPlan` applies. If they don't say, default to `color`, `spacing`, and `color-semantics`.
+4. Ask which categories they want updated. Today: `color`, `spacing`, `color-semantics`, and `primitive-typography` / `primitive-shadow` when `inspect_ds_token_gaps.repairPlan.primitiveRepairPlan` applies. If they don't say, default to `color`, `spacing`, and `color-semantics`.
 5. For setup repair gaps, ask the designer which proposed repairs to apply, then call `apply_ds_setup_repairs` with only those approved repairs.
 6. For config-backed value updates, run `prepare_ds_config` and call `update_ds_primitives` first with `dry_run: true` and the intended `create_missing` setting. Report `wouldCreateNames`, `wouldCreate`, `wouldUpdate`, `unmatched`, and substitutions, then ask the designer what to apply.
 7. Only after confirmation, call `update_ds_primitives` again with `dry_run: false` and the designer-approved categories/options.

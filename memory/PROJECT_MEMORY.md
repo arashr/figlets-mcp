@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-21 — primitive-shadow apply via update_ds_primitives]
+
+**Status:** Extended the primitive apply slice started with `primitive-typography`. `update_ds_primitives` now supports `primitive-shadow` for config-backed `shadow/*` FLOAT primitives in the Primitives collection. `inspect_ds_token_gaps` routes gaps through `repairPlan.primitiveRepairPlan` for both primitive categories.
+
+**Live validation:** Figlets Test (`local_mpcspbgz_7gq8yy0l`) already had all shadow primitives; dry-run reported 14 unchanged. Unit test covers missing `shadow/5/radius` → `primitiveRepairPlan`.
+
+### [2026-05-21 — primitive-typography apply via update_ds_primitives]
+
+**Status:** `update_ds_primitives` supports `primitive-typography`. Live Figlets Test: created six numeric `type/size/*` primitives; reinspect clean.
+
+**Commit:** `959dd72`.
+
 ### [2026-05-21 — Phase 5 workflow guidance sync]
 
 **Status:** Completed Phase 5 from the bulk-repair roadmap. Agent Interface now exposes `bulkRepairRouting` rules and a `token-gap-completion` workflow. Root, adapter, and plugin entrypoints document when to use setup repairs vs `inspect_ds_token_gaps` / `update_ds_tokens` vs `qa_binding_audit` `fixableNow` apply.

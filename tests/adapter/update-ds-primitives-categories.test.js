@@ -31,3 +31,7 @@ assert.ok(
   workflows.includes("primitive-typography"),
   "agent-interface bulk surfaces should name primitive-typography apply routing"
 );
+assert.ok(
+  workflows.includes("primitive-shadow"),
+  "agent-interface bulk surfaces should name primitive-shadow apply routing"
+);

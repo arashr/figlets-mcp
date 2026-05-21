@@ -365,6 +365,37 @@ module.exports = (() => {
   }
 
   {
+    const shadowDs = Object.assign({}, DS, {
+      color: {
+        ramps: [{ folder: "color/neutral", steps: [[500, 0.5, 0.5, 0.5]] }],
+      },
+    });
+    const primitiveShadow = inspectDsTokenGapsFromConfigAndFigmaData(shadowDs, {
+      collections: [{ name: "1. Primitives" }],
+      variables: [variable("shadow-1-offset", "shadow/1/offset-y")],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["primitive-shadow"],
+    });
+    assert.ok(
+      primitiveShadow.tokenGaps.some(gap => gap.name === "shadow/5/radius"),
+      "planner should detect missing shadow primitive variables"
+    );
+    assert.strictEqual(primitiveShadow.repairPlan.primitiveRepairPlan.tool, "update_ds_primitives");
+    assert.deepStrictEqual(
+      primitiveShadow.repairPlan.primitiveRepairPlan.applyInput.categories,
+      ["primitive-shadow"]
+    );
+    assert.ok(
+      !primitiveShadow.repairPlan.missingCapabilityNotes.some(note =>
+        note.kind === "unsupported-apply-category" && note.category === "primitive-shadow"
+      )
+    );
+  }
+
+  {
     const missingFoundation = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
       collections: [{ name: "1. Primitives" }],
       variables: [],

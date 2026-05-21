@@ -304,7 +304,7 @@ server.tool(
   updateDsPrimitivesTool.description,
   {
     config_path: z.string().describe("Absolute path to design-system.config.js (must have been prepared by prepare_ds_config)."),
-    categories: z.array(z.string()).optional().describe('Optional list of primitive categories to update. Supported today: "color", "spacing", "color-semantics". Defaults to all supported categories.'),
+    categories: z.array(z.string()).optional().describe('Optional list of primitive categories to update. Supported today: "color", "spacing", "color-semantics", "primitive-typography". Defaults to color, spacing, and color-semantics when omitted.'),
     create_missing: z.boolean().optional().describe("When true, create missing primitive or semantic variables inside existing collections before setting values. Existing variable IDs are preserved."),
     dry_run: z.boolean().optional().describe("When true, report variables that would be created or updated but do not mutate Figma. Use before create_missing repairs for designer confirmation."),
     prune_off_scale: z.boolean().optional().describe("When true, delete primitive color variables whose step number is not in the configured scale."),

@@ -5760,10 +5760,105 @@ var UPDATE_PRIMITIVE_SPECS = {
     }
     return entries;
   },
+  'primitive-typography': function (DS) {
+    return _primitiveTypographyEntries(DS);
+  },
   'color-semantics': function () {
     return null;
   },
 };
+
+function _primitiveTypographyEntries(DS) {
+  var entries = [];
+  if (!DS || !DS.typography) return entries;
+  var tp = (DS.naming && DS.naming.typePrefix) ? DS.naming.typePrefix : 'type';
+  var ff = (DS.naming && DS.naming.fontFamily) ? DS.naming.fontFamily : 'font/{variant}';
+  var weights = [
+    { name: tp + '/weight/regular', value: 400 },
+    { name: tp + '/weight/medium', value: 500 },
+    { name: tp + '/weight/semibold', value: 600 },
+    { name: tp + '/weight/bold', value: 700 },
+  ];
+  var lineHeights = [
+    { name: tp + '/line-height/tight', value: 1.2 },
+    { name: tp + '/line-height/snug', value: 1.35 },
+    { name: tp + '/line-height/normal', value: 1.5 },
+    { name: tp + '/line-height/relaxed', value: 1.65 },
+    { name: tp + '/line-height/loose', value: 1.8 },
+  ];
+  var tracking = [
+    { name: tp + '/tracking/tight', value: -0.02 },
+    { name: tp + '/tracking/snug', value: -0.01 },
+    { name: tp + '/tracking/normal', value: 0 },
+    { name: tp + '/tracking/open', value: 0.01 },
+    { name: tp + '/tracking/wide', value: 0.02 },
+    { name: tp + '/tracking/wider', value: 0.05 },
+    { name: tp + '/tracking/widest', value: 0.1 },
+  ];
+  var sizes = [
+    { name: tp + '/size/2xs', value: 10 },
+    { name: tp + '/size/xs', value: 12 },
+    { name: tp + '/size/sm', value: 14 },
+    { name: tp + '/size/md', value: 16 },
+    { name: tp + '/size/lg', value: 18 },
+    { name: tp + '/size/xl', value: 20 },
+    { name: tp + '/size/2xl', value: 24 },
+    { name: tp + '/size/3xl', value: 30 },
+    { name: tp + '/size/4xl', value: 36 },
+    { name: tp + '/size/5xl', value: 48 },
+    { name: tp + '/size/6xl', value: 60 },
+    { name: tp + '/size/7xl', value: 72 },
+  ];
+  var stdSizes = {};
+  var stdTracking = {};
+  var si;
+  for (si = 0; si < sizes.length; si++) stdSizes[sizes[si].value] = true;
+  for (si = 0; si < tracking.length; si++) stdTracking[tracking[si].value] = true;
+  if (DS.typography.scale) {
+    var scaleKeys = Object.keys(DS.typography.scale);
+    var extraSizes = {};
+    var extraTracking = {};
+    for (si = 0; si < scaleKeys.length; si++) {
+      var role = DS.typography.scale[scaleKeys[si]];
+      var szList = role && role.sizes ? role.sizes : [];
+      var szi;
+      for (szi = 0; szi < szList.length; szi++) {
+        if (!stdSizes[szList[szi]]) extraSizes[szList[szi]] = true;
+      }
+      if (role && typeof role.tracking === 'number' && !stdTracking[role.tracking]) {
+        extraTracking[role.tracking] = true;
+      }
+    }
+    var extraSizeKeys = Object.keys(extraSizes).sort(function (a, b) { return Number(a) - Number(b); });
+    for (si = 0; si < extraSizeKeys.length; si++) {
+      sizes.push({ name: tp + '/size/' + extraSizeKeys[si], value: Number(extraSizeKeys[si]) });
+    }
+    var extraTrackingKeys = Object.keys(extraTracking).sort(function (a, b) { return Number(a) - Number(b); });
+    for (si = 0; si < extraTrackingKeys.length; si++) {
+      tracking.push({ name: tp + '/tracking/' + extraTrackingKeys[si], value: Number(extraTrackingKeys[si]) });
+    }
+  }
+  for (si = 0; si < weights.length; si++) {
+    entries.push({ name: weights[si].name, type: 'FLOAT', value: weights[si].value });
+  }
+  for (si = 0; si < sizes.length; si++) {
+    entries.push({ name: sizes[si].name, type: 'FLOAT', value: sizes[si].value });
+  }
+  for (si = 0; si < lineHeights.length; si++) {
+    entries.push({ name: lineHeights[si].name, type: 'FLOAT', value: lineHeights[si].value });
+  }
+  for (si = 0; si < tracking.length; si++) {
+    entries.push({ name: tracking[si].name, type: 'FLOAT', value: tracking[si].value });
+  }
+  var sans = (DS.typography.families && DS.typography.families.sans) ? DS.typography.families.sans : 'Inter';
+  var mono = (DS.typography.families && DS.typography.families.mono) ? DS.typography.families.mono : 'JetBrains Mono';
+  entries.push({ name: ff.replace('{variant}', 'sans'), type: 'STRING', value: sans });
+  entries.push({ name: ff.replace('{variant}', 'mono'), type: 'STRING', value: mono });
+  if (DS.typography.families && DS.typography.families.serif) {
+    entries.push({ name: ff.replace('{variant}', 'serif'), type: 'STRING', value: DS.typography.families.serif });
+  }
+  return entries;
+}
 
 function _colorEqual(a, b) {
   if (!a || !b) return false;
@@ -5876,7 +5971,7 @@ async function _updateDsPrimitives(payload) {
   var pruneUnusedRamps = !!(payload && payload.pruneUnusedRamps);
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
-    : Object.keys(UPDATE_PRIMITIVE_SPECS);
+    : ['color', 'spacing', 'color-semantics'];
 
   var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
 

@@ -48,6 +48,7 @@ const DEFAULT_CATEGORIES = [
 const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES.concat(["typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]));
 const KNOWN_COLOR_CATEGORIES = new Set(["primitive-color", "color-semantics"]);
 const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
+const PRIMITIVE_APPLY_CATEGORIES = new Set(["primitive-typography"]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -442,7 +443,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const typeMismatches = tokenGaps.filter(gap => gap.gapType === "type-mismatch");
   const categoriesWithGaps = Array.from(supportedCategoriesWithGaps).sort();
   for (const category of categoriesWithGaps) {
-    if (APPLY_CATEGORIES.has(category)) continue;
+    if (APPLY_CATEGORIES.has(category) || PRIMITIVE_APPLY_CATEGORIES.has(category)) continue;
     missingCapabilityNotes.push({
       kind: "unsupported-apply-category",
       category,
@@ -514,6 +515,13 @@ function _buildRepairPlan(context) {
     if (hasElevationStyleWork && !hasElevationVariableWork) applyCategorySet.add("elevation-styles");
   }
   const applyCategories = Array.from(applyCategorySet).sort();
+  const primitiveApplyCategories = categories
+    .filter(category => PRIMITIVE_APPLY_CATEGORIES.has(category))
+    .filter(category =>
+      (context.missingVariables || []).some(gap => gap.category === category)
+      || (context.typeMismatches || []).some(gap => gap.category === category)
+    )
+    .sort();
   const total = (context.missingVariables || []).length + (context.missingStyles || []).length + (context.typeMismatches || []).length;
   const previewInput = {
     config_path: context.configPath,
@@ -539,11 +547,37 @@ function _buildRepairPlan(context) {
     })),
   };
 
+  const primitiveRepairPlan = primitiveApplyCategories.length
+    ? {
+      tool: "update_ds_primitives",
+      approvalRequired: true,
+      previewInput: {
+        config_path: context.configPath,
+        categories: primitiveApplyCategories,
+        create_missing: true,
+        dry_run: true,
+      },
+      applyInput: {
+        config_path: context.configPath,
+        categories: primitiveApplyCategories,
+        create_missing: true,
+        dry_run: false,
+      },
+      counts: {
+        categories: primitiveApplyCategories.length,
+      },
+      designerSummary: "Figlets can create or update primitive typography variables in "
+        + (context.configPath ? "the configured Primitives collection" : "Primitives")
+        + " for: " + primitiveApplyCategories.join(", ") + ".",
+    }
+    : null;
+
   return {
     tool: "update_ds_tokens",
     approvalRequired: true,
     previewInput,
     applyInput,
+    primitiveRepairPlan,
     optionalPreviewInput: {
       config_path: context.configPath,
       categories: [],
@@ -582,7 +616,7 @@ function _buildRepairPlan(context) {
     missingCapabilityNotes: context.missingCapabilityNotes || [],
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
-      ? "Show repairPlan.designerPresentation in plain language. If repairPlan.foundationRepairPlan.applyInput.collections is non-empty, ask for approval and run apply_ds_foundation_repairs before update_ds_tokens apply. Run update_ds_tokens with repairPlan.previewInput to get the dry-run report. Only repairPlan.applyInput categories are token-apply-supported now, and they still require explicit designer approval after preview. Other categories remain dry-run/product-gap scope."
+      ? "Show repairPlan.designerPresentation in plain language. If repairPlan.foundationRepairPlan.applyInput.collections is non-empty, ask for approval and run apply_ds_foundation_repairs before token/primitive apply. If repairPlan.primitiveRepairPlan is present, run update_ds_primitives with its previewInput, show the dry-run report, ask for approval, then run primitiveRepairPlan.applyInput before or alongside update_ds_tokens apply when both are ready. Run update_ds_tokens with repairPlan.previewInput for semantic token slices. Only repairPlan.applyInput categories are token-apply-supported now, and they still require explicit designer approval after preview. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
       : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
 }
@@ -735,4 +769,5 @@ module.exports = {
   handleInspectDsTokenGaps,
   inspectDsTokenGapsFromConfigAndFigmaData,
   _buildRepairPlan,
+  PRIMITIVE_APPLY_CATEGORIES,
 };

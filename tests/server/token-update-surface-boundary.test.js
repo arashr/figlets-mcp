@@ -60,7 +60,7 @@ fs.writeFileSync(figmaDataPath, JSON.stringify(figmaData, null, 2), "utf8");
 module.exports = (async () => {
   try {
     assert.ok(
-      updateDsPrimitivesTool.inputSchema.properties.categories.description.includes('"color", "spacing", "color-semantics"'),
+      updateDsPrimitivesTool.inputSchema.properties.categories.description.includes("primitive-typography"),
       "update_ds_primitives should advertise primitive/color-semantic categories"
     );
     assert.ok(

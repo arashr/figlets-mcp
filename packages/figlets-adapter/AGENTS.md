@@ -97,8 +97,9 @@ Bulk design-system updates are part of Figlets when the change can be expressed 
 2. Call `inspect_ds_token_gaps` and summarize gaps using `repairPlan` and `missingCapabilityNotes`.
 3. Dry-run with `update_ds_tokens` using `repairPlan.previewInput` before any apply.
 4. If `repairPlan.foundationRepairPlan.applyInput` is present, ask approval, call `apply_ds_foundation_repairs`, sync, and reinspect before token apply.
-5. After approval, call `update_ds_tokens` with only `repairPlan.applyInput` categories.
-6. Re-run `inspect_ds_token_gaps` to verify remaining gaps.
+5. If `repairPlan.primitiveRepairPlan` is present, dry-run with `update_ds_primitives` using `primitiveRepairPlan.previewInput`, ask approval, then call `update_ds_primitives` with `primitiveRepairPlan.applyInput`.
+6. After approval, call `update_ds_tokens` with only `repairPlan.applyInput` categories.
+7. Re-run `inspect_ds_token_gaps` to verify remaining gaps.
 
 ### Build token showcase
 1. Tell the designer: "I'll check what this file exposes, then build the showcase sections that apply. Please keep the Figlets Bridge plugin open in Figma."
@@ -136,7 +137,7 @@ When the designer flips `DS.color.contrastAlgorithm`, expect `failCount` to chan
 1. Run `sync_figma_data`, then `refresh_ds_config_from_figma` to update existing config entries from current Figma values without creating new config tokens or mutating Figma.
 2. Ask the user to keep the Figlets Bridge plugin open in Figma Desktop.
 3. Run `inspect_ds_setup_gaps` to report additive repair candidates from current Figma state without mutating Figma or config.
-4. Ask which categories to update. Today: `color`, `spacing`, `color-semantics`. If unspecified, default to all supported categories.
+4. Ask which categories to update. Today: `color`, `spacing`, `color-semantics`, and `primitive-typography` when `inspect_ds_token_gaps.repairPlan.primitiveRepairPlan` applies. If unspecified, default to `color`, `spacing`, and `color-semantics`.
 5. For setup repair gaps, ask the designer which proposed repairs to apply, then call `apply_ds_setup_repairs` with only those approved repairs.
 6. For config-backed value updates, run `prepare_ds_config` and call `update_ds_primitives` first with `dry_run: true` and the intended `create_missing` setting. Report `wouldCreateNames`, `wouldCreate`, `wouldUpdate`, `unmatched`, and substitutions, then ask the designer what to apply.
 7. Only after confirmation, call `update_ds_primitives` again with `dry_run: false` and the designer-approved categories/options.

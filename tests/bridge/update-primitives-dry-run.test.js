@@ -40,4 +40,13 @@ module.exports = (() => {
   assert.ok(removeIndex > 0, "update path should still be able to prune when confirmed");
   const beforeRemove = fn.slice(Math.max(0, removeIndex - 220), removeIndex);
   assert.ok(/if \(dryRun\)/.test(beforeRemove), "remove path should be guarded by a dry-run branch");
+
+  assert.ok(
+    /['"]primitive-typography['"]:\s*function/.test(source) && /_primitiveTypographyEntries/.test(source),
+    "bridge should support primitive-typography via update_ds_primitives"
+  );
+  assert.ok(
+    /:\s*\['color',\s*'spacing',\s*'color-semantics'\]/.test(fn),
+    "default update_ds_primitives categories should stay color/spacing/semantics only"
+  );
 })();

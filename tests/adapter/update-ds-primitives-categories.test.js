@@ -17,6 +17,10 @@ for (const file of files) {
     /Today:\s*`color`,\s*`spacing`,\s*`color-semantics`/.test(content),
     `${file} primitive update workflow should list color, spacing, and color-semantics`
   );
+  assert.ok(
+    content.includes("primitive-typography"),
+    `${file} should document primitive-typography on update_ds_primitives or token-gap routing`
+  );
 }
 
 const workflows = fs.readFileSync(
@@ -24,6 +28,6 @@ const workflows = fs.readFileSync(
   "utf-8"
 );
 assert.ok(
-  workflows.includes("color, spacing, and color-semantics"),
-  "agent-interface bulk surfaces should name all update_ds_primitives categories"
+  workflows.includes("primitive-typography"),
+  "agent-interface bulk surfaces should name primitive-typography apply routing"
 );

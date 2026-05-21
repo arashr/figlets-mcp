@@ -327,6 +327,44 @@ module.exports = (() => {
   }
 
   {
+    const primDs = Object.assign({}, DS, {
+      color: {
+        ramps: [{ folder: "color/neutral", steps: [[500, 0.5, 0.5, 0.5]] }],
+      },
+      typography: {
+        families: { sans: "Inter", mono: "JetBrains Mono" },
+        scale: {
+          "display/lg": { sizes: [57, 57, 57], lineHeights: [64, 64, 64], weight: 400, tracking: -0.02 },
+        },
+      },
+    });
+    const primitiveTypography = inspectDsTokenGapsFromConfigAndFigmaData(primDs, {
+      collections: [{ name: "1. Primitives" }],
+      variables: [variable("type-size-md", "type/size/md")],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["primitive-typography"],
+    });
+    assert.ok(
+      primitiveTypography.tokenGaps.some(gap => gap.name === "type/size/57"),
+      "planner should detect missing numeric primitive size from typography scale"
+    );
+    assert.strictEqual(primitiveTypography.repairPlan.primitiveRepairPlan.tool, "update_ds_primitives");
+    assert.deepStrictEqual(
+      primitiveTypography.repairPlan.primitiveRepairPlan.applyInput.categories,
+      ["primitive-typography"]
+    );
+    assert.ok(
+      !primitiveTypography.repairPlan.missingCapabilityNotes.some(note =>
+        note.kind === "unsupported-apply-category" && note.category === "primitive-typography"
+      ),
+      "primitive-typography should route to update_ds_primitives instead of a token apply product gap"
+    );
+  }
+
+  {
     const missingFoundation = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
       collections: [{ name: "1. Primitives" }],
       variables: [],

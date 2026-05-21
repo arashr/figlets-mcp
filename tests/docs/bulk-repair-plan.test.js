@@ -67,3 +67,10 @@ assert.ok(
     plan.includes("Do not make setup call MCP tools internally; share bridge/core helpers underneath them instead."),
   "Plan should require conscious extension vs new-surface decisions before adding more repair tools"
 );
+assert.ok(
+  plan.includes("Compatibility decision:") &&
+    plan.includes("Keep `update_ds_primitives` working as the primitive/color-semantic compatibility surface.") &&
+    plan.includes("Keep `update_ds_tokens` as the config-backed non-color token-completion surface.") &&
+    plan.includes("Do not make `update_ds_primitives` call `update_ds_tokens` now."),
+  "Plan should pin the update_ds_tokens/update_ds_primitives compatibility decision"
+);

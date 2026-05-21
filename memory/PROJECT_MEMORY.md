@@ -2242,3 +2242,34 @@ Fixes shipped:
 - Document and test the boundary between `update_ds_tokens` and `update_ds_primitives` so future work checks existing surfaces before creating parallel ones.
 - Improve dry-run observability for in-place style refreshes on already-complete files.
 - Reconnect/restart stale app-managed MCP hosts when live namespace behavior disagrees with direct current-repo handlers.
+
+### [2026-05-21 — token/primitives boundary checkpoint]
+
+**Objective completed:** Made the `update_ds_tokens` / `update_ds_primitives` compatibility decision explicit and regression-tested.
+
+**Decision:**
+
+- Keep `update_ds_primitives` as the primitive/color-semantic compatibility surface:
+  - `color`
+  - `spacing`
+  - `color-semantics`
+- Keep `update_ds_tokens` as the config-backed non-color token-completion surface:
+  - `radius`
+  - `border-width`
+  - `spacing-semantics`
+  - `typography-variables`
+  - `typography-styles`
+  - `elevation-variables`
+  - `elevation-styles`
+- Do not make `update_ds_primitives` call `update_ds_tokens` now. The tools have different category names, result shapes, bridge endpoints, and designer approval boundaries.
+
+**Tests:**
+
+- Added `tests/server/token-update-surface-boundary.test.js`.
+- Updated `tests/docs/bulk-repair-plan.test.js` so the compatibility decision cannot drift back into an undecided Option A/Option B state.
+- Full supported-runtime suite passed: `73/73`.
+
+**Remaining next items:**
+
+- Dry-run refresh preview for in-place text/effect style refreshes on already-complete files.
+- Stale app-managed MCP host reconnect/restart check for live tool namespace behavior.

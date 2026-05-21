@@ -19,7 +19,7 @@ Current status as of 2026-05-21:
 - Phase 3B is complete: `update_ds_tokens({ dry_run: true })` previews missing variables/styles and type mismatches without Figma writes.
 - **Phase 3C/3D (narrow apply slices): complete.** The approved apply path covers `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles`. Semantic spacing apply resolves primitive-spacing aliases when the primitive variable exists and maps responsive config values onto existing Spacing-collection modes without creating modes. Typography variable apply targets the existing Typography collection only; `typography-styles` targets config-derived local text styles only, preserves existing style IDs, loads fonts before style mutation, and requires matching typography variables. Elevation variable apply targets the existing Elevation collection only; `elevation-styles` targets only local effect styles named `elevation/0` through `elevation/5`, preserving existing style IDs and binding effect fields where prerequisite variables exist. Broad `typography` and broad `elevation` remain rejected as direct apply scope.
 - **Missing-foundation guided repair is implemented.** `inspect_ds_token_gaps` now emits `repairPlan.foundationRepairPlan.applyInput` when a required collection is absent, and `apply_ds_foundation_repairs` creates only the approved configured collection shells and modes. It does not create variables, styles, primitives, or arbitrary Figma objects. The intended continuation is sync → reinspect → `update_ds_tokens` dry-run/apply for the unblocked token categories.
-- Latest local verification: supported-runtime test suite passed **72/72**, and `git diff --check` is clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, exercising the foundation-repair handoff plus all seven narrow apply slices end to end.
+- Latest local verification: supported-runtime test suite passed **73/73**, and `git diff --check` is clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, exercising the foundation-repair handoff plus all seven narrow apply slices end to end. `tests/server/token-update-surface-boundary.test.js` pins the `update_ds_tokens` / `update_ds_primitives` ownership boundary.
 - Live disposable-file validation confirmed the missing-foundation handoff on Figlets Test (`local_mpcspbgz_7gq8yy0l`) through the current repo receiver on `http://localhost:17337`: a temporary configured Spacing collection plus a temporary radius token made `inspect_ds_token_gaps({ categories: ["radius"] })` report `foundationRepairPlan.applyInput.collections` and keep `repairPlan.applyInput.categories` empty; `apply_ds_foundation_repairs` created only that collection with Mobile/Tablet/Desktop modes; after sync/reinspect, no missing-foundation gap remained and `repairPlan.applyInput.categories` was `["radius"]` for the temporary `space/radius/*` token. The temporary config edit was restored. This validates the intended sequence: inspect → approve foundation shell → apply foundation → sync → reinspect → preview/apply token category.
 - Follow-up observability slice: `update_ds_tokens` bridge apply results now include changed-variable details for variables the tool creates or updates, including variable id, scopes, collection, mode names, and alias target names when the written value is a variable alias. This is intentionally not a broad inventory/debug API.
 - Live disposable-file validation confirmed `elevation-variables` end to end after the file was prepared with an existing `5. Elevation` collection and missing elevation semantic variables: inspect found 10 missing variables + 6 missing effect styles, apply created the 10 variables only, final reinspect showed 0 missing variables and 6 remaining effect-style gaps, no styles were created/refreshed, and broad `elevation` apply stayed unsupported. A separate live observability check confirmed changed-variable report items include id, scopes, mode names, and alias target names through the real `update_ds_tokens` bridge path.
@@ -99,11 +99,11 @@ Current roadmap:
 3. **Done:** Phase 3B - add `update_ds_tokens` dry-run preview.
 4. **Done:** Phase 3C/3D narrow apply slices (`radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, `elevation-styles`) with live validation on Figlets Test.
 5. **Done:** Missing-foundation guided repair for absent required collections. This is separate from broad setup: it creates approved collection shells/modes only, then hands back to token preview/apply after sync and reinspect.
-6. **Next (product gaps, not new narrow slices):**
-   - **`update_ds_tokens` vs `update_ds_primitives`:** Document and test the compatibility boundary so agents know which tool owns which category.
+6. **Done:** `update_ds_tokens` / `update_ds_primitives` compatibility boundary is documented and test-backed. Keep `update_ds_primitives` as the primitive/color-semantic compatibility surface for `color`, `spacing`, and `color-semantics`; keep `update_ds_tokens` as the non-color token-completion surface. Do not make one tool call the other unless a future migration preserves both approval contracts and result shapes.
+7. **Next (product gaps, not new narrow slices):**
    - **Dry-run refresh preview:** Optionally teach snapshot dry-run to preview in-place style refreshes on complete files, matching live bridge behavior.
    - **Stale MCP host check:** Reconnect/restart the app-managed Figlets MCP session and confirm `update_ds_tokens` apply returns resolved results through the registered MCP callback (not `{}`).
-7. **Still unsupported by design (product-gap only):** Broad `typography`, broad `elevation`, `primitive-typography`, `primitive-shadow`, prune/delete apply, and collection mode creation inside `update_ds_tokens`.
+8. **Still unsupported by design (product-gap only):** Broad `typography`, broad `elevation`, `primitive-typography`, `primitive-shadow`, prune/delete apply, and collection mode creation inside `update_ds_tokens`.
 
 For Phase 3, start with read-only planning and missing-capability reporting. Do not begin by creating broad mutation support.
 
@@ -717,15 +717,16 @@ Modify:
 - `packages/figlets-mcp-server/src/agent-interface/workflows.js`
 - Adapter/plugin docs and tests
 
-Compatibility:
+Compatibility decision:
 
-- Keep `update_ds_primitives` working.
-- Option A: leave `update_ds_primitives` as-is and document it as the legacy primitive/color-semantic updater.
-- Option B: make it call the new `update_ds_tokens` handler with category mapping:
-  - `color` -> `primitive-color`
-  - `spacing` -> `primitive-spacing`
-  - `color-semantics` -> `color-semantics`
-- If choosing Option B, add regression tests that the old argument names and result shape remain stable.
+- Keep `update_ds_primitives` working as the primitive/color-semantic compatibility surface.
+- `update_ds_primitives` owns:
+  - `color` for primitive color ramp variables in `DS.collections.primitives`
+  - `spacing` for primitive spacing variables in `DS.collections.primitives`
+  - `color-semantics` for Color collection semantic aliases
+- Keep `update_ds_tokens` as the config-backed non-color token-completion surface.
+- `update_ds_tokens` apply owns only the approved non-color slices: `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles`.
+- Do not make `update_ds_primitives` call `update_ds_tokens` now. Their approval contracts, category names, result shapes, and bridge endpoints differ. A future migration can wrap one through the other only if tests preserve the old arguments/result shape and the designer approval boundary remains explicit.
 
 #### Plugin Endpoint Work
 

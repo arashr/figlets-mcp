@@ -10,6 +10,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Live validation:** Figlets Test (`local_mpcspbgz_7gq8yy0l`) already had all shadow primitives; dry-run reported 14 unchanged. Unit test covers missing `shadow/5/radius` → `primitiveRepairPlan`.
 
+**Commit:** `3741a7a`.
+
 ### [2026-05-21 — primitive-typography apply via update_ds_primitives]
 
 **Status:** `update_ds_primitives` supports `primitive-typography`. Live Figlets Test: created six numeric `type/size/*` primitives; reinspect clean.

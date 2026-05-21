@@ -273,6 +273,37 @@ module.exports = (() => {
   }
 
   {
+    const existingStyleRefreshes = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [{ name: "3. Typography" }, { name: "5. Elevation" }],
+      variables: typographyVariables().concat(elevationVariables()),
+      textStyles: [{ name: "type/body/md" }],
+      effectStyles: [
+        { name: "elevation/0" },
+        { name: "elevation/1" },
+        { name: "elevation/2" },
+        { name: "elevation/3" },
+        { name: "elevation/4" },
+        { name: "elevation/5" },
+      ],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["typography-styles", "elevation-styles"],
+      include_existing_style_refreshes: true,
+    });
+    assert.strictEqual(existingStyleRefreshes.summary.missingStyleCount, 0);
+    assert.deepStrictEqual(existingStyleRefreshes.tokenGaps, []);
+    assert.deepStrictEqual(
+      existingStyleRefreshes.existingUpdates.map(item => item.name),
+      ["type/body/md", "elevation/0", "elevation/1", "elevation/2", "elevation/3", "elevation/4", "elevation/5"],
+      "planner should expose existing config-derived style refresh candidates when requested"
+    );
+    assert.ok(
+      existingStyleRefreshes.existingUpdates.every(item => item.gapType === "existing-style-refresh"),
+      "style refresh candidates should be a narrow existing update signal"
+    );
+  }
+
+  {
     const cleanSetup = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
       collections: [{ name: "4. Spacing" }],
       variables: [

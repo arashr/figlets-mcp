@@ -128,6 +128,11 @@ function _buildDryRunReport(plannerResult, options) {
       }));
     }
   }
+  for (const update of plannerResult.existingUpdates || []) {
+    if (update.gapType === "existing-style-refresh") {
+      _pushCategoryItem(report, update.category, "wouldRefreshStyles", _toPreviewItem(update));
+    }
+  }
 
   return report;
 }
@@ -138,10 +143,13 @@ function _messageForReport(report, unknownCategories, createMissing) {
   for (const category of categories) {
     const item = report[category];
     const createCount = item.wouldCreateVariables.length + item.wouldCreateStyles.length;
+    const refreshCount = item.wouldRefreshStyles.length;
     const missingCount = item.unmatched.length;
     const mismatchCount = item.typeMismatch.length;
     if (createMissing) {
-      parts.push(`${category}: ${createCount} would create, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
+      const createPart = `${createCount} would create`;
+      const refreshPart = refreshCount ? `, ${refreshCount} would refresh` : "";
+      parts.push(`${category}: ${createPart}${refreshPart}, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
     } else {
       parts.push(`${category}: ${missingCount} missing, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
     }
@@ -334,6 +342,7 @@ function handleUpdateDsTokens(args = {}) {
     configPath,
     categories: args.categories,
     include_existing_updates: false,
+    include_existing_style_refreshes: true,
   });
   const report = _buildDryRunReport(plannerResult, { create_missing: args.create_missing });
   const unknownCategories = (plannerResult.categories && plannerResult.categories.unsupported) || [];

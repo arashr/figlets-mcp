@@ -401,6 +401,11 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         if (!styleSet.has(item.name)) {
           tokenGaps.push(Object.assign({}, item, { gapType: "missing-style" }));
           supportedCategoriesWithGaps.add(category);
+        } else if (options.include_existing_style_refreshes) {
+          existingUpdates.push(Object.assign({}, item, {
+            gapType: "existing-style-refresh",
+            reason: "This config-derived style already exists and the approved style apply slice can refresh it in place while preserving the style ID.",
+          }));
         }
         continue;
       }

@@ -142,6 +142,63 @@ module.exports = (async () => {
     }
 
     {
+      const completeStyleDataPath = path.join(tmp, "figma-data-complete-styles.json");
+      const completeStyleData = {
+        variables: [
+          variable("type-body-md-size", "type/body/md/size"),
+          variable("type-body-md-line-height", "type/body/md/line-height"),
+          variable("type-body-md-weight", "type/body/md/weight"),
+          variable("type-body-md-tracking", "type/body/md/tracking"),
+          variable("type-body-md-family", "type/body/md/family", "STRING"),
+          variable("elevation-xs-offset", "elevation/xs/offset-y"),
+          variable("elevation-xs-radius", "elevation/xs/radius"),
+          variable("elevation-sm-offset", "elevation/sm/offset-y"),
+          variable("elevation-sm-radius", "elevation/sm/radius"),
+          variable("elevation-md-offset", "elevation/md/offset-y"),
+          variable("elevation-md-radius", "elevation/md/radius"),
+          variable("elevation-lg-offset", "elevation/lg/offset-y"),
+          variable("elevation-lg-radius", "elevation/lg/radius"),
+          variable("elevation-xl-offset", "elevation/xl/offset-y"),
+          variable("elevation-xl-radius", "elevation/xl/radius"),
+        ],
+        textStyles: [{ name: "type/body/md" }],
+        effectStyles: [
+          { name: "elevation/0" },
+          { name: "elevation/1" },
+          { name: "elevation/2" },
+          { name: "elevation/3" },
+          { name: "elevation/4" },
+          { name: "elevation/5" },
+        ],
+      };
+      fs.writeFileSync(completeStyleDataPath, JSON.stringify(completeStyleData, null, 2), "utf8");
+      const result = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath: completeStyleDataPath,
+        categories: ["typography-styles", "elevation-styles"],
+        create_missing: true,
+        dry_run: true,
+      });
+      assert.ok(!result.error, result.error);
+      assert.deepStrictEqual(result.report["typography-styles"].wouldCreateStyles, []);
+      assert.deepStrictEqual(
+        result.report["typography-styles"].wouldRefreshStyles.map(item => item.name),
+        ["type/body/md"],
+        "dry-run should preview existing config-derived text style refreshes"
+      );
+      assert.deepStrictEqual(result.report["elevation-styles"].wouldCreateStyles, []);
+      assert.deepStrictEqual(
+        result.report["elevation-styles"].wouldRefreshStyles.map(item => item.name),
+        ["elevation/0", "elevation/1", "elevation/2", "elevation/3", "elevation/4", "elevation/5"],
+        "dry-run should preview existing config-derived effect style refreshes"
+      );
+      assert.ok(
+        /would refresh/.test(result.message),
+        "dry-run message should summarize refresh candidates"
+      );
+    }
+
+    {
       const result = handleUpdateDsTokens({
         config_path: configPath,
         figmaDataPath,

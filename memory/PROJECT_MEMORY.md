@@ -2271,5 +2271,27 @@ Fixes shipped:
 
 **Remaining next items:**
 
-- Dry-run refresh preview for in-place text/effect style refreshes on already-complete files.
+- Stale app-managed MCP host reconnect/restart check for live tool namespace behavior.
+
+### [2026-05-21 — style refresh dry-run observability]
+
+**Objective completed:** Fixed the already-complete-file dry-run blind spot for approved style slices.
+
+**What changed:**
+
+- `inspect_ds_token_gaps` can now emit a narrow `existing-style-refresh` signal for config-derived styles that already exist when an internal caller asks for style refresh candidates.
+- `update_ds_tokens({ dry_run: true })` asks for that signal and formats it as `report[category].wouldRefreshStyles`.
+- This applies to config-derived local text/effect styles such as:
+  - `typography-styles` from `DS.typography.scale` and `DS.naming.textStyle`
+  - `elevation-styles` for `elevation/0` through `elevation/5`
+- This is not arbitrary style diffing. It does not compare every style property and does not inventory unrelated Figma styles; it only previews that the approved style apply slice can refresh already-existing Figlets-owned styles in place.
+
+**Tests:**
+
+- Updated `tests/server/inspect-ds-token-gaps-tool.test.js` to pin the planner's narrow existing-style refresh signal.
+- Updated `tests/server/update-ds-tokens-tool.test.js` to pin `wouldRefreshStyles` for complete `typography-styles` and `elevation-styles` dry-runs.
+- Targeted tests passed for `inspect-ds-token-gaps`, `update-ds-tokens`, and the integration token-gap planner flow.
+
+**Remaining next item:**
+
 - Stale app-managed MCP host reconnect/restart check for live tool namespace behavior.

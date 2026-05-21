@@ -74,3 +74,9 @@ assert.ok(
     plan.includes("Do not make `update_ds_primitives` call `update_ds_tokens` now."),
   "Plan should pin the update_ds_tokens/update_ds_primitives compatibility decision"
 );
+assert.ok(
+  plan.includes("Dry-run refresh preview is implemented:") &&
+    plan.includes("wouldRefreshStyles") &&
+    plan.includes("it does not compare arbitrary style properties or become a broad style inventory"),
+  "Plan should record the narrow style refresh dry-run observability boundary"
+);

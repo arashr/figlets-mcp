@@ -7,8 +7,8 @@ Planning artifact and roadmap for bulk-repair API work. This document is intenti
 Current status as of 2026-05-21:
 
 - Branch: `main`
-- Latest checkpoint commit: current `HEAD` - Preview style refreshes in token dry runs.
-- Prior checkpoints: `e0b7186` (token/primitives boundary), `9b30bba` (foundation live validation log), `8336f80` (guided foundation token repairs), `084a1bf` (Phase 3C/3D log update), `dd19333` (developer-only text-style prep gate), `d1e528c` / `1d39915` (typography-styles live validation), `21ff89d` (typography-styles implementation).
+- Latest checkpoint commit: `d76040c` (`3741a7a` primitive-shadow, `959dd72` primitive-typography, `b3cadf5` Phase 5 workflow guidance).
+- Prior checkpoints: `e953c5d` (Phase 4 qa_binding_audit fixability), `86f700a` (stale MCP callback validation), `e0b7186` (token/primitives boundary), `8336f80` (guided foundation token repairs), `dd19333` (typography-styles live validation prep).
 - Phase 0 is complete: agents are taught that structured bulk updates are Figlets scope and missing planner/apply surfaces are product gaps.
 - Phase 1A is complete: missing icon roles for complete bg+foreground families can become apply-ready when Figlets derives accessible aliases.
 - Phase 1B is complete: passive border/outline/stroke repairs are exposed through `repairPlan.optionalApplyInput` when optional, including DS-wide suppressed cases and single advisory planned repairs.
@@ -29,6 +29,7 @@ Current status as of 2026-05-21:
 - Live disposable-file validation for `typography-styles` on Figlets Test (`local_mpcspbgz_7gq8yy0l`): bridge on `http://localhost:17337`, direct current-repo handlers. Prepared state removed `type/body/md` while typography variables stayed complete. Inspect reported 1 missing text style and routed `applyInput.categories` to `["typography-styles"]` only. Dry-run previewed creating `type/body/md`; live apply created that style and refreshed the other 14 config-derived text styles with Inter font load success, variable bindings on supported fields, and no `fontLoadFailures` or `bindingWarnings`; final reinspect showed 0 broad typography gaps. An earlier pass on the already-complete file confirmed refresh-in-place for all 15 styles with preserved ids. Repeatable prep: `scripts/live-validate-typography-styles.js` via developer-only bridge `request-remove-text-styles` (`FIGLETS_DEV_BRIDGE=1` on the receiver; returns 404 in designer flows; not in plugin capabilities). Commit `dd19333` gates that prep command.
 - **Dry-run refresh preview is implemented:** On already-complete files, `update_ds_tokens({ dry_run: true, categories: ["typography-styles", "elevation-styles"] })` now reports config-derived existing local text/effect styles under `wouldRefreshStyles`. This mirrors the live bridge's in-place refresh behavior while staying narrow: it does not compare arbitrary style properties or become a broad style inventory.
 - **Stale MCP host check is complete (2026-05-21):** A fresh stdio `figlets-mcp` session on current `main` called `update_ds_tokens({ dry_run: false, categories: ["elevation-styles"] })` through the registered MCP `tools/call` path against the live bridge on `http://localhost:17337` (Figlets Test `local_mpcspbgz_7gq8yy0l`, plugin session with `update-tokens`). The callback returned a resolved apply payload (`elevation-styles: 6 changed`, 6 refreshed styles, 0 `bindingWarnings`), not `{}` and not an unresolved Promise. Repeatable script: `scripts/live-validate-mcp-update-ds-tokens-callback.js`. Regression coverage remains `tests/server/update-ds-tokens-mcp-callback.test.js` (mock receiver). If an app-managed MCP namespace still returns `{}` or rejects newly supported categories while this script passes, treat that as a stale host/session reload issue, not a repo regression.
+- **Primitive apply slices (2026-05-21):** `update_ds_primitives` now supports `primitive-typography` and `primitive-shadow` in the Primitives collection. `inspect_ds_token_gaps` emits `repairPlan.primitiveRepairPlan` with `tool: "update_ds_primitives"` for those categories. Live Figlets Test (`local_mpcspbgz_7gq8yy0l`): typography apply created six numeric `type/size/*` variables (`959dd72`); shadow dry-run reported 14 unchanged because setup already created all `shadow/*` primitives (`3741a7a`). `update_ds_tokens` still previews broad primitive categories but does not apply them.
 
 Validation finding on 2026-05-19: a live Figma Desktop bridge run on a disposable file confirmed the planner, dry-run, and bridge apply behavior for `radius`, `border-width`, `spacing-semantics`, and `typography-variables`. It also found that the MCP `update_ds_tokens` apply call returned `{}` because the server registration stringified the async `handleUpdateDsTokens(...)` Promise without awaiting it. Fixed by awaiting `handleUpdateDsTokens(args || {})` in `packages/figlets-mcp-server/src/index.js` and adding `tests/server/update-ds-tokens-mcp-callback.test.js` to assert the registered MCP tool returns the resolved apply result.
 
@@ -72,10 +73,10 @@ Use this table before adding anything new.
 |---|---|---:|---|
 | `inspect_ds_setup_gaps` | Read-only semantic color setup QA, contrast QA, missing role planning, standardized `repairPlan.applyInput`, `repairPlan.optionalApplyInput`, `repairPlan.missingCapabilityNotes`, and `repairPlan.designerPresentation` generation | No | Focused on color semantics. Does not cover typography, spacing, radius, border-width, or elevation completeness. |
 | `apply_ds_setup_repairs` | Applies approved missing foreground repairs, alias updates, and missing color role creations including icon, passive border/outline/stroke, and focus-border roles | Yes | Color-only. It applies explicit approved payloads and does not independently discover or plan repairs. |
-| `inspect_ds_token_gaps` | Read-only config-backed non-color token-gap planner. Emits `repairPlan.previewInput`, filtered `repairPlan.applyInput`, missing-capability notes, and designer presentation | No | Does not infer tokens from page usage. Preview supports broader non-color categories than apply. |
+| `inspect_ds_token_gaps` | Read-only config-backed non-color token-gap planner. Emits `repairPlan.previewInput`, filtered `repairPlan.applyInput`, `repairPlan.primitiveRepairPlan`, `repairPlan.foundationRepairPlan`, missing-capability notes, and designer presentation | No | Does not infer tokens from page usage. Preview supports broader non-color categories than apply. Primitive gaps route to `update_ds_primitives`; semantic token gaps route to `update_ds_tokens`. |
 | `apply_ds_foundation_repairs` | Applies approved missing foundation collection shells from `inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput` | Yes | Creates only configured collection shells and modes. It does not create variables/styles or perform broad setup. |
 | `update_ds_tokens` | Dry-run preview for config-backed non-color completion; approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles` only | Optional | Apply support is intentionally limited to Spacing collection FLOAT variables `space/radius/*`, `space/border/*`, responsive `space/<semantic>/*` (aliasing primitive spacing when present), Typography collection variables `type/<role>/{size,line-height,weight,tracking,family}`, local text styles derived from `DS.typography.scale`, Elevation collection FLOAT variables `elevation/<key>/{offset-y,radius}`, and local effect styles `elevation/0..5`. No mode creation, prune/delete apply, broad typography/elevation apply, primitive typography/shadow apply, or arbitrary style mutation. |
-| `update_ds_primitives` | Updates config-backed primitive color and primitive spacing values, and color semantic aliases, preserving variable IDs | Yes | Name is narrow and implementation assumes primitive collection except `color-semantics`. It does not handle typography, semantic spacing/radius/border-width, or elevation. |
+| `update_ds_primitives` | Updates config-backed primitive color, spacing, typography, and shadow values, plus Color collection semantic aliases, preserving variable IDs | Yes | Categories: `color`, `spacing`, `color-semantics`, `primitive-typography`, `primitive-shadow`. Default apply categories remain `color`, `spacing`, `color-semantics` when omitted. Does not handle semantic spacing/radius/border-width, semantic typography, or elevation. |
 | `qa_binding_audit` | Audits selected/page nodes for raw unbound values and can fix high-confidence bindings | Optional | Binds to existing variables/styles only. It does not create missing tokens. Typography suggestions are conservative and may not be fixed automatically. |
 | `apply_ds_setup` | Creates or merges the configured design-system collections and styles | Yes | Broad setup tool, not a narrow repair planner. It has no dry-run merge-only contract. Use carefully after designer approval. |
 
@@ -100,13 +101,15 @@ Current roadmap:
 3. **Done:** Phase 3B - add `update_ds_tokens` dry-run preview.
 4. **Done:** Phase 3C/3D narrow apply slices (`radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, `elevation-styles`) with live validation on Figlets Test.
 5. **Done:** Missing-foundation guided repair for absent required collections. This is separate from broad setup: it creates approved collection shells/modes only, then hands back to token preview/apply after sync and reinspect.
-6. **Done:** `update_ds_tokens` / `update_ds_primitives` compatibility boundary is documented and test-backed. Keep `update_ds_primitives` as the primitive/color-semantic compatibility surface for `color`, `spacing`, and `color-semantics`; keep `update_ds_tokens` as the non-color token-completion surface. Do not make one tool call the other unless a future migration preserves both approval contracts and result shapes.
+6. **Done:** `update_ds_tokens` / `update_ds_primitives` compatibility boundary is documented and test-backed. Keep `update_ds_primitives` as the primitive/color-semantic compatibility surface for `color`, `spacing`, `color-semantics`, `primitive-typography`, and `primitive-shadow`; keep `update_ds_tokens` as the non-color semantic token-completion surface. Do not make one tool call the other unless a future migration preserves both approval contracts and result shapes.
 7. **Done:** Dry-run refresh preview for existing config-derived `typography-styles` and `elevation-styles`; complete files now show `wouldRefreshStyles` candidates without broad property diffing.
 8. **Done:** Stale MCP host check. Fresh stdio `figlets-mcp` + live bridge validation confirmed `update_ds_tokens` apply returns resolved results through the registered MCP callback (not `{}`). See `scripts/live-validate-mcp-update-ds-tokens-callback.js` and log entry above.
 9. **Done:** Phase 4 `qa_binding_audit` bulk-fix clarity. Violations expose `fixability` (`fixableNow`, `needsExistingToken`, `needsDesignerDecision`, `unsupported`), top-level `byFixability` counts, and `repairPlan` with `applyInput: { fix: true }`. Semantic color variables and exact text-style matches are `fixableNow`; role-only typography stays `needsDesignerDecision`; missing exact spacing/border variables are `needsExistingToken`. `fix: true` applies only `fixableNow`.
 10. **Done:** Phase 5 workflow guidance. Agent Interface `bulkRepairRouting`, new `token-gap-completion` workflow, and synced root/adapter/plugin docs now route setup repairs, token completion, primitive updates, and binding QA without tool-name dumping. Regression: `tests/docs/phase5-workflow-guidance.test.js`, extended agent-interface and plugin entrypoint tests.
-11. **Next (product gaps, not new narrow slices):** Continue from the surface table below for net-new planner/apply gaps.
-12. **Still unsupported by design (product-gap only):** Broad `typography`, broad `elevation`, prune/delete apply, and collection mode creation inside `update_ds_tokens`. Primitive `primitive-typography` and `primitive-shadow` apply via `update_ds_primitives` (not `update_ds_tokens` apply).
+11. **Done:** `primitive-typography` apply via `update_ds_primitives` + `inspect_ds_token_gaps.repairPlan.primitiveRepairPlan`. Live-validated on Figlets Test (`959dd72`).
+12. **Done:** `primitive-shadow` apply via `update_ds_primitives` + `primitiveRepairPlan`. Live dry-run on Figlets Test showed 14 unchanged (`3741a7a`).
+13. **Next (product gaps, not new narrow slices):** Broad `typography` / `elevation` one-shot orchestration, then prune/delete apply, then collection mode creation in `update_ds_tokens`.
+14. **Still unsupported by design (product-gap only):** Broad `typography` and broad `elevation` direct apply in `update_ds_tokens`; prune/delete apply; collection mode creation inside `update_ds_tokens`. Primitive categories apply only through `update_ds_primitives`, not `update_ds_tokens` apply.
 
 For Phase 3, start with read-only planning and missing-capability reporting. Do not begin by creating broad mutation support.
 
@@ -129,7 +132,7 @@ Tasks:
 
 1. Add a concise bulk capability map to the Agent Interface payload.
    - Include `inspect_ds_setup_gaps.repairPlan.applyInput -> apply_ds_setup_repairs`.
-   - Include `update_ds_primitives` with categories `color`, `spacing`, and `color-semantics`.
+   - Include `update_ds_primitives` with categories `color`, `spacing`, `color-semantics`, `primitive-typography`, and `primitive-shadow`, plus `inspect_ds_token_gaps.repairPlan.primitiveRepairPlan`.
    - Include `qa_binding_audit({ fix: true })` for high-confidence binding fixes.
    - State that missing planner/apply surfaces are product gaps, not impossible tasks.
 
@@ -475,7 +478,7 @@ Tests:
 - Server allow-list accepts `typography-styles` and still rejects broad `typography`.
 - Bridge policy test confirms `typography-styles` uses `figma.loadFontAsync(...)`, does not create variables or modes, and does not touch effect styles.
 - Runtime fake-Figma test verifies missing style creation, existing style refresh with ID preservation, font loading, style-level font failures, binding summaries, and structured warnings for unsupported text-style binding fields.
-- Integration proxy covers inspect -> dry-run -> apply -> sync/reinspect, leaving broad `primitive-typography` still unsupported.
+- Integration proxy covers inspect -> dry-run -> apply -> sync/reinspect for narrow typography token/style slices. Primitive typography/shadow apply is covered by `update_ds_primitives` + `primitiveRepairPlan` tests (`959dd72`, `3741a7a`).
 
 Elevation should also be split:
 
@@ -521,7 +524,7 @@ Tests required before implementation, now covered:
 - Server allow-list accepts `elevation-styles` and still rejects broad `elevation`.
 - Bridge policy test confirms `elevation-styles` uses `figma.variables.setBoundVariableForEffect(...)`, does not create variables or modes, and does not touch text styles.
 - Runtime fake-Figma test verifies missing style creation, existing style refresh with ID preservation, effect binding summaries, and structured warnings for missing shadow color/ambient radius prerequisites.
-- Integration proxy covers inspect -> dry-run -> apply -> sync/reinspect, leaving broad `elevation` gaps resolved only for styles and broad `primitive-shadow` still unsupported.
+- Integration proxy covers inspect -> dry-run -> apply -> sync/reinspect, leaving broad `elevation` gaps resolved only for styles via narrow `elevation-variables` / `elevation-styles` slices.
 
 Dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category` product-gap notes for broad `typography` and broad `elevation`. `inspect_ds_token_gaps` may include `typography-variables` in `repairPlan.applyInput` when broad `typography` variable gaps are present, and `typography-styles` only once required typography variables already exist and text-style gaps remain. It may include `elevation-variables` in `repairPlan.applyInput` when broad `elevation` variable gaps are present, and `elevation-styles` only once required elevation variables already exist and style gaps remain.
 
@@ -732,6 +735,8 @@ Compatibility decision:
   - `color` for primitive color ramp variables in `DS.collections.primitives`
   - `spacing` for primitive spacing variables in `DS.collections.primitives`
   - `color-semantics` for Color collection semantic aliases
+  - `primitive-typography` for `type/*` and `font/*` primitives derived from config
+  - `primitive-shadow` for `shadow/*` FLOAT primitives derived from config
 - Keep `update_ds_tokens` as the config-backed non-color token-completion surface.
 - `update_ds_tokens` apply owns only the approved non-color slices: `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles`.
 - Do not make `update_ds_primitives` call `update_ds_tokens` now. Their approval contracts, category names, result shapes, and bridge endpoints differ. A future migration can wrap one through the other only if tests preserve the old arguments/result shape and the designer approval boundary remains explicit.

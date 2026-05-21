@@ -102,3 +102,9 @@ assert.ok(
     plan.includes("bulkRepairRouting"),
   "Plan should record Phase 5 workflow guidance sync"
 );
+assert.ok(
+  plan.includes("**Done:** `primitive-typography`") &&
+    plan.includes("**Done:** `primitive-shadow`") &&
+    plan.includes("primitiveRepairPlan"),
+  "Plan should record primitive apply slices on update_ds_primitives"
+);

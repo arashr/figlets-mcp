@@ -25,9 +25,19 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-21] Primitive token gaps route through primitiveRepairPlan on update_ds_primitives
+
+**Decision:** Config-backed primitive typography and shadow gaps discovered by `inspect_ds_token_gaps` apply through `repairPlan.primitiveRepairPlan` → `update_ds_primitives` with categories `primitive-typography` and `primitive-shadow`. They do not use `update_ds_tokens` apply even though the token planner can dry-run preview those categories.
+
+**Why:** `update_ds_primitives` already owns the Primitives collection and preserves variable IDs for color/spacing work. Primitive typography (`type/*`, `font/*`) and shadow (`shadow/*`) belong in the same approval boundary. Keeping semantic token apply on `update_ds_tokens` avoids mixing foundation primitives with Typography/Spacing/Elevation collection writes in one mutation tool.
+
+**Live validation:** Figlets Test (`local_mpcspbgz_7gq8yy0l`) on `http://localhost:17337`. Typography apply created six numeric `type/size/*` variables; shadow primitives were already complete (dry-run 14 unchanged).
+
+---
+
 ## [2026-05-18] Bulk design-system repairs are Figlets scope when structured
 
-**Decision:** Agents should treat bulk design-system updates as in-scope for Figlets when the operation can be represented as a structured, designer-approved payload. Existing bulk-capable surfaces include `inspect_ds_setup_gaps.repairPlan.applyInput` passed to `apply_ds_setup_repairs`, `update_ds_primitives` for config-backed primitive/color-semantic updates, and `qa_binding_audit({ fix: true })` for high-confidence binding fixes.
+**Decision:** Agents should treat bulk design-system updates as in-scope for Figlets when the operation can be represented as a structured, designer-approved payload. Existing bulk-capable surfaces include `inspect_ds_setup_gaps.repairPlan.applyInput` passed to `apply_ds_setup_repairs`, `inspect_ds_token_gaps.repairPlan` / `primitiveRepairPlan` with `update_ds_primitives` and `update_ds_tokens`, and `qa_binding_audit({ fix: true })` for high-confidence binding fixes.
 
 **Why:** The designer experience should not stop at "here are the gaps, but we can't fix them" when the repair is deterministic and suitable for a Figlets tool. Figlets should own safe bulk repair planning/application for design-system operations, while avoiding a generic arbitrary Figma-authoring promise.
 

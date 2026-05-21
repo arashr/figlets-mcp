@@ -42,13 +42,13 @@ Active context for the project so future sessions can recover quickly without re
 
 **Operational note:** Prior Codex/Cursor sessions that kept an old app-managed Figlets MCP process could still return `{}` or reject new categories while direct handlers and a fresh stdio MCP session worked. If that mismatch reappears, reconnect/restart the host MCP session; do not chase it as a repo regression when the script and regression test pass.
 
-**Next product/engineering step:** Resume roadmap product-gap work from `docs/bulk-repair-api-implementation-plan.md` (net-new planner/apply gaps in the surface table).
+**Next product/engineering step:** Broad `typography` / `elevation` orchestration in `update_ds_tokens`, then prune/delete apply, then collection mode creation. See roadmap items 13–14 in `docs/bulk-repair-api-implementation-plan.md`. Primitive `primitive-typography` and `primitive-shadow` apply are done (`959dd72`, `3741a7a`).
 
 ### [2026-05-21 — Agent bulk surfaces and update_ds_primitives category docs]
 
-**Status:** Closed Phase 0 follow-up for less-capable-agent guidance. `DESIGNER_FLOW_HARD_RULES.supportedBulkUpdateSurfaces` now names token-gap surfaces (`inspect_ds_token_gaps` → `apply_ds_foundation_repairs` / `update_ds_tokens`) and lists `update_ds_primitives` categories explicitly as `color`, `spacing`, and `color-semantics`. Adapter `AGENTS.md` / `CLAUDE.md` already documented all three; added `tests/adapter/update-ds-primitives-categories.test.js` so regressions fail if `color-semantics` drops from adapter or agent-interface wording.
+**Status:** Closed Phase 0 follow-up for less-capable-agent guidance. `DESIGNER_FLOW_HARD_RULES.supportedBulkUpdateSurfaces` now names token-gap surfaces (`inspect_ds_token_gaps` → `apply_ds_foundation_repairs` / `update_ds_tokens` / `primitiveRepairPlan`) and lists `update_ds_primitives` categories including `primitive-typography` and `primitive-shadow` (2026-05-21 slices). Adapter `AGENTS.md` / `CLAUDE.md` document `color`, `spacing`, `color-semantics`, and primitive categories when `primitiveRepairPlan` applies.
 
-**Tests:** Extended `tests/server/agent-interface-tool.test.js` for token bulk surfaces and primitive categories. Supported-runtime suite passes **74/74**.
+**Tests:** `tests/adapter/update-ds-primitives-categories.test.js`. Supported-runtime suite passes **76/76** on current `main`.
 
 ### [2026-05-21 — Missing-foundation guided token repair slice]
 
@@ -64,7 +64,7 @@ Active context for the project so future sessions can recover quickly without re
 
 ### [2026-05-20 — Phase 3C/3D narrow token apply slices complete]
 
-**Status:** The planned narrow `update_ds_tokens` apply set is implemented, live-validated on Figlets Test (`local_mpcspbgz_7gq8yy0l`), and covered by tests. Approved apply categories: `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, `elevation-styles`. Broad `typography`, broad `elevation`, `primitive-typography`, `primitive-shadow`, prune/delete, and mode creation remain out of scope by design.
+**Status (historical snapshot before primitive apply slices):** The planned narrow `update_ds_tokens` apply set is implemented, live-validated on Figlets Test (`local_mpcspbgz_7gq8yy0l`), and covered by tests. Approved `update_ds_tokens` apply categories: `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, `elevation-styles`. **Superseded for primitives:** `primitive-typography` and `primitive-shadow` now apply via `update_ds_primitives` (`959dd72`, `3741a7a`). Still out of scope: broad `typography`, broad `elevation` direct apply in `update_ds_tokens`, prune/delete, and mode creation.
 
 **Latest commits:** `dd19333` (dev-only gate for `remove-text-styles`), `d1e528c` + `1d39915` (typography-styles live validation logs), `21ff89d` (typography-styles implementation).
 
@@ -204,7 +204,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Apply behavior:** `update_ds_tokens({ dry_run:false, categories:["typography-variables"] })` targets only the existing Typography collection. It creates/updates `type/<role>/{size,line-height,weight,tracking,family}` variables, maps responsive values onto existing Typography modes, preserves variable IDs/scopes, aliases primitive type/font variables when available, does not create modes, and does not create or refresh text styles.
 
-**Tests updated:** Server, bridge policy, and E2E proxy tests now cover `typography-variables`; broad `typography`, `elevation`, `primitive-typography`, and `primitive-shadow` remain blocked in apply unless future slices deliberately change that contract.
+**Tests updated:** Server, bridge policy, and E2E proxy tests cover `typography-variables`. Primitive categories apply via `update_ds_primitives` as of `959dd72` / `3741a7a`, not `update_ds_tokens` apply.
 
 ---
 
@@ -214,9 +214,9 @@ Active context for the project so future sessions can recover quickly without re
 
 **Plan update:** `docs/bulk-repair-api-implementation-plan.md` now has "Typography And Elevation Apply Readiness Notes". Typography must split into a variables-only slice before text-style create/refresh. Elevation must split into elevation variables before effect-style create/refresh. Text styles require explicit font-loading behavior and `fontLoadFailures`; effect styles require an explicit shadow-color/semantic-color prerequisite strategy.
 
-**Test pin:** `tests/docs/bulk-repair-plan.test.js` asserts the readiness notes stay in the product plan. `tests/server/update-ds-tokens-tool.test.js` asserts `typography`, `elevation`, `primitive-typography`, and `primitive-shadow` still return `unsupported-apply-category` product-gap notes for `dry_run:false`.
+**Test pin:** `tests/docs/bulk-repair-plan.test.js` asserts the readiness notes stay in the product plan. `tests/server/update-ds-tokens-tool.test.js` asserts broad/high-risk categories stay blocked for **`update_ds_tokens` apply**; primitive categories use **`update_ds_primitives`** + `primitiveRepairPlan` instead.
 
-**Important:** Do not enable these categories in `APPLY_CATEGORIES` until their variable/style strategies and focused tests are implemented. This preserves the current product shape: dry-run is useful, apply is narrow and approval-gated.
+**Important:** Semantic token apply remains narrow and approval-gated on `update_ds_tokens`. Primitive typography/shadow apply landed on `update_ds_primitives` in May 2026.
 
 ---
 

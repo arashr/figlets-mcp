@@ -24,6 +24,14 @@ async function runTests() {
               deadlineMs: 45000,
               violationCount: 2,
               byType: { color: 1, spacing: 1 },
+              byFixability: { fixableNow: 1, needsExistingToken: 0, needsDesignerDecision: 0, unsupported: 0 },
+              repairPlan: {
+                tool: "qa_binding_audit",
+                approvalRequired: true,
+                applyInput: { fix: true },
+                counts: { fixableNow: 1, needsExistingToken: 0, needsDesignerDecision: 0, unsupported: 0 },
+                agentInstruction: "Ask before applying fixable bindings"
+              },
               violations: [
                 {
                   nodeId: "1:2",
@@ -31,7 +39,8 @@ async function runTests() {
                   property: "Fill color",
                   rawValue: "rgb(255,255,255)",
                   type: "color",
-                  suggestion: { kind: "variable", name: "color/surface/default" }
+                  fixability: "fixableNow",
+                  suggestion: { kind: "variable", name: "color/surface/default", confidence: "high", id: "var-1" }
                 }
               ]
             }
@@ -60,6 +69,9 @@ async function runTests() {
       assert.strictEqual(data.violationCount, 2);
       assert.deepStrictEqual(data.byType, { color: 1, spacing: 1 });
       assert.strictEqual(data.violations[0].suggestion.name, "color/surface/default");
+      assert.strictEqual(data.violations[0].fixability, "fixableNow");
+      assert.strictEqual(data.repairPlan.tool, "qa_binding_audit");
+      assert.strictEqual(data.byFixability.fixableNow, 1);
       assert.ok(data.message.includes("2 violation(s)"));
     } finally {
       await new Promise(resolve => mockServer.close(resolve));
@@ -83,7 +95,23 @@ async function runTests() {
 	              fixedCount: 1,
 	              failedCount: 1,
 	              fixed: [{ nodeId: "1:2", property: "paddingTop", boundTo: "space/component/md" }],
-	              failed: [{ nodeId: "1:3", property: "Fill color", reason: "LOW_CONFIDENCE" }]
+	              byFixability: { fixableNow: 0, needsExistingToken: 0, needsDesignerDecision: 1, unsupported: 0 },
+              repairPlan: {
+                tool: "qa_binding_audit",
+                approvalRequired: true,
+                applyInput: { fix: true },
+                counts: { fixableNow: 0, needsExistingToken: 0, needsDesignerDecision: 1, unsupported: 0 }
+              },
+              violations: [
+                {
+                  nodeId: "1:3",
+                  property: "Fill color",
+                  type: "color",
+                  fixability: "needsDesignerDecision",
+                  suggestion: { kind: "variable", name: "color/surface/default", confidence: "medium" }
+                }
+              ],
+              failed: [{ nodeId: "1:3", property: "Fill color", reason: "LOW_CONFIDENCE" }]
 	            }
 	          }));
         });

@@ -4,6 +4,14 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-21 — Phase 4 qa_binding_audit fixability]
+
+**Status:** Implemented Phase 4 bulk-fix clarity for `qa_binding_audit`. Each violation now includes `fixability`, aggregated `byFixability` counts, and a top-level `repairPlan` pointing agents to `qa_binding_audit({ fix: true })` only after approval.
+
+**Behavior:** Semantic color variables and exact text-style property matches are `fixableNow` (high confidence). Exact spacing/border/radius variables were already high-confidence. Missing exact variables are `needsExistingToken`. Role/name-based typography suggestions stay `needsDesignerDecision` (medium confidence). `fix: true` skips non-`fixableNow` violations.
+
+**Tests:** `tests/bridge/qa-binding-audit-fixability.test.js`, extended policy/server/integration QA tests. Supported-runtime suite passes **75/75**.
+
 ### [2026-05-21 — Stale MCP host check for update_ds_tokens apply]
 
 **Status:** Closed the roadmap stale-host item. Current `main` returns resolved `update_ds_tokens` apply results through the registered MCP callback when invoked from a fresh stdio `figlets-mcp` process, not `{}`.

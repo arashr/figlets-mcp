@@ -90,3 +90,9 @@ assert.ok(
     plan.includes("tests/adapter/update-ds-primitives-categories.test.js"),
   "Plan should record adapter color-semantics wording guardrails"
 );
+assert.ok(
+  plan.includes("**Done:** Phase 4 `qa_binding_audit` bulk-fix clarity") &&
+    plan.includes("fixability") &&
+    plan.includes("repairPlan"),
+  "Plan should record Phase 4 qa_binding_audit fixability work"
+);

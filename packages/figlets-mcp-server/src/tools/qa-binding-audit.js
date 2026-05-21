@@ -4,7 +4,7 @@ const { getReceiverUrl } = require("../utils/receiver-url.js");
 const qaBindingAuditTool = {
   name: "qa_binding_audit",
   description:
-    "Audits the current Figma selection, or the current page if nothing is selected, for unbound design-system properties. Checks raw fills, strokes, stroke weights, corner radius, auto-layout spacing, and typography. Suggestions use the shared semantic binding policy: color, spacing, radius, and border bind to variables first; typography prefers text styles when available because they can bundle variable-backed type decisions; otherwise warn and keep raw values. Requires the Figlets Bridge plugin open in Figma Desktop.",
+    "Audits the current Figma selection, or the current page if nothing is selected, for unbound design-system properties. Checks raw fills, strokes, stroke weights, corner radius, auto-layout spacing, and typography. Each violation includes fixability (fixableNow, needsExistingToken, needsDesignerDecision, unsupported) and repairPlan guidance for bulk-safe binding fixes. fix: true applies only fixableNow items. color, spacing, radius, and border bind to variables first; typography uses exact text-style matches when possible. Requires the Figlets Bridge plugin open in Figma Desktop.",
   inputSchema: {
     type: "object",
     properties: {
@@ -73,6 +73,13 @@ function handleQaBindingAudit(args = {}) {
                   deadlineMs: result.deadlineMs || 0,
                   violationCount: result.violationCount || 0,
                   byType: result.byType || {},
+                  byFixability: result.byFixability || {
+                    fixableNow: 0,
+                    needsExistingToken: 0,
+                    needsDesignerDecision: 0,
+                    unsupported: 0
+                  },
+                  repairPlan: result.repairPlan || null,
                   fixApplied: !!result.fixApplied,
                   fixedCount: result.fixedCount || 0,
                   failedCount: result.failedCount || 0,

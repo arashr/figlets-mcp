@@ -18,7 +18,30 @@ assert.ok(
 
 assert.ok(
   code.includes("if (suggestion.confidence !== 'high') return 'LOW_CONFIDENCE';"),
-  "fix=true must only apply high-confidence suggestions"
+  "fix apply must reject non-high-confidence suggestions at bind time"
+);
+
+assert.ok(
+  code.includes("function _fixabilityForViolation(violation)") &&
+    code.includes("violation.fixability = _fixabilityForViolation(violation)") &&
+    code.includes("if (v.fixability !== 'fixableNow') continue") &&
+    code.includes("byFixability: byFixability") &&
+    code.includes("repairPlan: repairPlan") &&
+    code.includes("tool: 'qa_binding_audit'"),
+  "QA audit must classify fixability, expose repairPlan, and apply fix=true only for fixableNow"
+);
+
+assert.ok(
+  code.includes("function _exactTextStyleForNode(node)") &&
+    code.includes("Exact text style match by font family, size, line height, and tracking") &&
+    code.includes("Role/name-based text style suggestion"),
+  "Typography QA must distinguish exact text-style matches from role-only suggestions"
+);
+
+assert.ok(
+  code.includes("variable ? 'high' : 'none'") &&
+    code.includes("Semantic color variable \""),
+  "Semantic color suggestions with a resolved variable must be high-confidence fixableNow candidates"
 );
 
 assert.ok(

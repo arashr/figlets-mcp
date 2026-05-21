@@ -32,9 +32,17 @@ const FAKE_QA_RESULT = {
   violationCount: 1,
   byType: { color: 1 },
   fixApplied: true,
-  fixedCount: 0,
-  failedCount: 1,
-  failed: [{ nodeId: "1:2", property: "Fill color", reason: "LOW_CONFIDENCE" }],
+  fixedCount: 1,
+  failedCount: 0,
+  fixed: [{ nodeId: "1:2", property: "Fill color", boundTo: "color/surface/default" }],
+  failed: [],
+  byFixability: { fixableNow: 1, needsExistingToken: 0, needsDesignerDecision: 0, unsupported: 0 },
+  repairPlan: {
+    tool: "qa_binding_audit",
+    approvalRequired: true,
+    applyInput: { fix: true },
+    counts: { fixableNow: 1, needsExistingToken: 0, needsDesignerDecision: 0, unsupported: 0 }
+  },
   violations: [
     {
       nodeId: "1:2",
@@ -43,7 +51,8 @@ const FAKE_QA_RESULT = {
       property: "Fill color",
       rawValue: "rgb(255,255,255)",
       type: "color",
-      suggestion: { kind: "variable", name: "color/surface/default", confidence: "medium" }
+      fixability: "fixableNow",
+      suggestion: { kind: "variable", name: "color/surface/default", confidence: "high", id: "var-color-1" }
     }
   ]
 };
@@ -110,8 +119,10 @@ module.exports = new Promise((resolve, reject) => {
         const parsed = JSON.parse(toolResult.content[0].text);
         assert.strictEqual(parsed.scope, "selection");
         assert.strictEqual(parsed.violationCount, 1);
-        assert.strictEqual(parsed.failedCount, 1);
-        assert.strictEqual(parsed.failed[0].reason, "LOW_CONFIDENCE");
+        assert.strictEqual(parsed.failedCount, 0);
+        assert.strictEqual(parsed.fixedCount, 1);
+        assert.strictEqual(parsed.violations[0].fixability, "fixableNow");
+        assert.strictEqual(parsed.repairPlan.counts.fixableNow, 1);
         assert.strictEqual(parsed.violations[0].suggestion.name, "color/surface/default");
 
         cleanup(receiver, resolve);

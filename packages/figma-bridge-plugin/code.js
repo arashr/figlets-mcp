@@ -1075,6 +1075,44 @@ async function _runQaBindingAudit(opts) {
     };
   }
 
+  function _scalarTypoMatch(nodeValue, styleValue) {
+    if (nodeValue === figma.mixed || styleValue === undefined || styleValue === null) return true;
+    if (!nodeValue || !styleValue) return false;
+    if (typeof nodeValue === 'object' && typeof styleValue === 'object') {
+      if (nodeValue.unit !== styleValue.unit) return false;
+      return Math.abs(Number(nodeValue.value) - Number(styleValue.value)) < 0.01;
+    }
+    return false;
+  }
+
+  function _exactTextStyleForNode(node) {
+    if (node.type !== 'TEXT' || node.fontSize === figma.mixed || node.fontName === figma.mixed) return null;
+    const nodeFont = node.fontName;
+    for (let i = 0; i < _ds.textStyles.length; i++) {
+      const style = _ds.textStyles[i];
+      if (typeof style.fontSize !== 'number' || Math.abs(style.fontSize - node.fontSize) > 0.01) continue;
+      const styleFont = style.fontName;
+      if (!styleFont || !nodeFont || styleFont.family !== nodeFont.family || styleFont.style !== nodeFont.style) continue;
+      if (!_scalarTypoMatch(node.lineHeight, style.lineHeight)) continue;
+      if (!_scalarTypoMatch(node.letterSpacing, style.letterSpacing)) continue;
+      return style;
+    }
+    return null;
+  }
+
+  function _fixabilityForViolation(violation) {
+    const suggestion = violation.suggestion || {};
+    if (suggestion.confidence === 'high' && suggestion.id) return 'fixableNow';
+    if (suggestion.kind === 'none' || suggestion.confidence === 'none' || !suggestion.id) {
+      if (violation.type === 'color' || violation.type === 'spacing' || violation.type === 'border' || violation.type === 'typography') {
+        return 'needsExistingToken';
+      }
+      return 'unsupported';
+    }
+    if (suggestion.confidence === 'medium') return 'needsDesignerDecision';
+    return 'unsupported';
+  }
+
   function _nameText(node) {
     return String((node && node.name) || '').toLowerCase();
   }
@@ -1103,8 +1141,10 @@ async function _runQaBindingAudit(opts) {
   function _colorSuggestion(node, property) {
     const role = _colorRoleFor(node, property);
     const variable = _ds.colorRoles[role] || null;
-    return _suggestion('variable', variable, variable ? 'medium' : 'none',
-      variable ? 'Suggested from semantic role "' + role + '".' : 'No semantic color variable found for role "' + role + '".');
+    return _suggestion('variable', variable, variable ? 'high' : 'none',
+      variable
+        ? 'Semantic color variable "' + variable.name + '" matches role "' + role + '".'
+        : 'No semantic color variable found for role "' + role + '". Use token completion if a new color token is needed.');
   }
 
   function _textRolePatterns(node) {
@@ -1116,6 +1156,16 @@ async function _runQaBindingAudit(opts) {
   }
 
   function _typographySuggestion(node) {
+    const exactStyle = _exactTextStyleForNode(node);
+    if (exactStyle) {
+      return {
+        kind: 'textStyle',
+        name: exactStyle.name,
+        id: exactStyle.id,
+        confidence: 'high',
+        reason: 'Exact text style match by font family, size, line height, and tracking.'
+      };
+    }
     const match = _textRolePatterns(node);
     const binding = _ds.pickTypographyBinding(match.role, match.patterns);
     if (binding.kind === 'style' && binding.style) {
@@ -1124,15 +1174,17 @@ async function _runQaBindingAudit(opts) {
         name: binding.style.name,
         id: binding.style.id,
         confidence: 'medium',
-        reason: 'Text styles have priority; matched role "' + match.role + '".'
+        reason: 'Role/name-based text style suggestion for "' + match.role + '"; not an exact property match.'
       };
     }
     if (binding.kind === 'variables' && binding.variables) {
       const variable = binding.variables.sizeVar || binding.variables.lineHeightVar || binding.variables.weightVar || binding.variables.familyVar;
       return _suggestion('typographyVariables', variable, variable ? 'medium' : 'none',
-        variable ? 'Typography variables found for role "' + match.role + '".' : binding.warning);
+        variable
+          ? 'Typography variables found for role "' + match.role + '"; review before binding raw text fields.'
+          : binding.warning);
     }
-    return { kind: 'none', confidence: 'none', reason: binding.warning };
+    return { kind: 'none', confidence: 'none', reason: binding.warning || 'No typography style or variables found; use inspect_ds_token_gaps if new tokens are needed.' };
   }
 
   function _pushViolation(node, property, rawValue, type, details) {
@@ -1148,6 +1200,7 @@ async function _runQaBindingAudit(opts) {
     };
     if (details.fillIndex !== undefined) violation.fillIndex = details.fillIndex;
     if (details.strokeIndex !== undefined) violation.strokeIndex = details.strokeIndex;
+    violation.fixability = _fixabilityForViolation(violation);
     violations.push(violation);
     return violation;
   }
@@ -1318,7 +1371,7 @@ async function _runQaBindingAudit(opts) {
   if (shouldFix) {
     for (let i = 0; i < violations.length; i++) {
       const v = violations[i];
-      if (!v.suggestion || v.suggestion.confidence !== 'high') continue;
+      if (v.fixability !== 'fixableNow') continue;
       const result = _applyQaFix(v);
       if (result === 'OK') fixed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, boundTo: v.suggestion.name });
       else failed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, reason: result });
@@ -1326,7 +1379,34 @@ async function _runQaBindingAudit(opts) {
   }
 
   const byType = {};
-  for (let i = 0; i < violations.length; i++) byType[violations[i].type] = (byType[violations[i].type] || 0) + 1;
+  const byFixability = {
+    fixableNow: 0,
+    needsExistingToken: 0,
+    needsDesignerDecision: 0,
+    unsupported: 0
+  };
+  for (let i = 0; i < violations.length; i++) {
+    const v = violations[i];
+    byType[v.type] = (byType[v.type] || 0) + 1;
+    if (byFixability[v.fixability] !== undefined) byFixability[v.fixability]++;
+    else byFixability.unsupported++;
+  }
+
+  const repairPlan = {
+    tool: 'qa_binding_audit',
+    approvalRequired: true,
+    applyInput: { fix: true },
+    counts: {
+      fixableNow: byFixability.fixableNow,
+      needsExistingToken: byFixability.needsExistingToken,
+      needsDesignerDecision: byFixability.needsDesignerDecision,
+      unsupported: byFixability.unsupported
+    },
+    agentInstruction:
+      'Ask before applying fixable bindings with qa_binding_audit({ fix: true }). fix: true applies only fixableNow violations. ' +
+      'For needsExistingToken, use inspect_ds_token_gaps and the approved token-completion tools before rebinding. ' +
+      'For needsDesignerDecision, explain the suggestion reason and let the designer choose or adjust the layer.'
+  };
 
   return {
     scope: scopeLabel,
@@ -1341,6 +1421,8 @@ async function _runQaBindingAudit(opts) {
     deadlineMs: deadlineMs,
     violationCount: violations.length,
     byType: byType,
+    byFixability: byFixability,
+    repairPlan: repairPlan,
     fixApplied: shouldFix,
     fixedCount: fixed.length,
     failedCount: failed.length,

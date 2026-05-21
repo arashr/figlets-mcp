@@ -80,3 +80,13 @@ assert.ok(
     plan.includes("it does not compare arbitrary style properties or become a broad style inventory"),
   "Plan should record the narrow style refresh dry-run observability boundary"
 );
+assert.ok(
+  plan.includes("Stale MCP host check is complete") &&
+    plan.includes("scripts/live-validate-mcp-update-ds-tokens-callback.js"),
+  "Plan should record completed stale MCP host validation"
+);
+assert.ok(
+  plan.includes("**Done:** Fix stale adapter wording for `update_ds_primitives`") &&
+    plan.includes("tests/adapter/update-ds-primitives-categories.test.js"),
+  "Plan should record adapter color-semantics wording guardrails"
+);

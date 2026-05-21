@@ -60,6 +60,14 @@ try {
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("optionalApplyInput")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("missingCapabilityNotes")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_primitives")));
+    assert.ok(
+      start.hardRules.supportedBulkUpdateSurfaces.some(item =>
+        item.includes("update_ds_primitives") && item.includes("color-semantics")
+      ),
+      "bulk surfaces should list update_ds_primitives categories including color-semantics"
+    );
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_tokens")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_foundation_repairs")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("qa_binding_audit")));
     assert.ok(start.hardRules.appliesTo.includes("design-system review"));
     assert.ok(start.hardRules.forbiddenUnlessDesignerExplicitlyAsksOutOfBounds.some(item => item.includes("custom scripts")));

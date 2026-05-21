@@ -45,7 +45,8 @@ const DESIGNER_FLOW_HARD_RULES = {
     "inspect_ds_setup_gaps.repairPlan.optionalApplyInput → apply_ds_setup_repairs for separately approved optional convention-level role creation",
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
-    "update_ds_primitives for config-backed primitive value and color-semantic alias updates",
+    "inspect_ds_token_gaps.repairPlan.previewInput / repairPlan.applyInput → update_ds_tokens for config-backed non-color token dry-run preview and narrow approved apply",
+    "update_ds_primitives with categories color, spacing, and color-semantics for config-backed primitive value and Color collection semantic alias updates",
     "qa_binding_audit({ fix: true }) for high-confidence binding fixes",
   ],
   designerPresentationRule:

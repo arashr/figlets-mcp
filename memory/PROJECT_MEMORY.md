@@ -14,7 +14,13 @@ Active context for the project so future sessions can recover quickly without re
 
 **Operational note:** Prior Codex/Cursor sessions that kept an old app-managed Figlets MCP process could still return `{}` or reject new categories while direct handlers and a fresh stdio MCP session worked. If that mismatch reappears, reconnect/restart the host MCP session; do not chase it as a repo regression when the script and regression test pass.
 
-**Next product/engineering step:** Resume roadmap product-gap work from `docs/bulk-repair-api-implementation-plan.md` (adapter wording, optional follow-ups in the surface table).
+**Next product/engineering step:** Resume roadmap product-gap work from `docs/bulk-repair-api-implementation-plan.md` (net-new planner/apply gaps in the surface table).
+
+### [2026-05-21 — Agent bulk surfaces and update_ds_primitives category docs]
+
+**Status:** Closed Phase 0 follow-up for less-capable-agent guidance. `DESIGNER_FLOW_HARD_RULES.supportedBulkUpdateSurfaces` now names token-gap surfaces (`inspect_ds_token_gaps` → `apply_ds_foundation_repairs` / `update_ds_tokens`) and lists `update_ds_primitives` categories explicitly as `color`, `spacing`, and `color-semantics`. Adapter `AGENTS.md` / `CLAUDE.md` already documented all three; added `tests/adapter/update-ds-primitives-categories.test.js` so regressions fail if `color-semantics` drops from adapter or agent-interface wording.
+
+**Tests:** Extended `tests/server/agent-interface-tool.test.js` for token bulk surfaces and primitive categories. Supported-runtime suite passes **74/74**.
 
 ### [2026-05-21 — Missing-foundation guided token repair slice]
 

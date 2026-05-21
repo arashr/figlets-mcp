@@ -61,3 +61,9 @@ assert.ok(
   plan.includes("Dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category` product-gap notes for broad `typography` and broad `elevation`"),
   "Plan should preserve product-gap reporting for broad typography/elevation until future apply slices land"
 );
+assert.ok(
+  plan.includes("Architecture Guardrail For New Repair Work") &&
+    plan.includes("Can an existing planner/apply surface be extended with a narrow category?") &&
+    plan.includes("Do not make setup call MCP tools internally; share bridge/core helpers underneath them instead."),
+  "Plan should require conscious extension vs new-surface decisions before adding more repair tools"
+);

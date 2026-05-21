@@ -633,7 +633,9 @@ module.exports = (async () => {
               missingCapabilityNotes: [{
                 kind: "missing-foundation-collection",
                 collection: "4. Spacing",
-                productGap: true,
+                repairTool: "apply_ds_foundation_repairs",
+                repairReady: true,
+                productGap: false,
               }],
             },
           }));
@@ -651,8 +653,12 @@ module.exports = (async () => {
         const result = await handleUpdateDsTokens({ config_path: configPath, categories: ["radius"], dry_run: false });
         assert.ok(result.error && /Spacing collection/.test(result.error), "plugin result error should be preserved");
         assert.ok(
-          result.missingCapabilityNotes.some(note => note.kind === "missing-foundation-collection" && note.productGap === true),
-          "missing foundation notes should survive the server bridge response"
+          result.missingCapabilityNotes.some(note =>
+            note.kind === "missing-foundation-collection" &&
+            note.repairTool === "apply_ds_foundation_repairs" &&
+            note.productGap === false
+          ),
+          "missing foundation guided repair notes should survive the server bridge response"
         );
       } finally {
         await new Promise(resolve => mockServer.close(resolve));

@@ -361,7 +361,7 @@ function handleUpdateDsTokens(args = {}) {
     },
     applySupported: true,
     supportedApplyCategories: Array.from(APPLY_CATEGORIES).sort(),
-    nextStep: "Show this dry-run report to the designer. If they approve radius, border-width, semantic spacing, typography variable, elevation variable, or elevation effect-style updates, call update_ds_tokens with dry_run:false for only those approved categories. Text styles, broad elevation, and other categories remain dry-run only.",
+    nextStep: "Show this dry-run report to the designer. If missingCapabilityNotes includes missing-foundation-collection, use inspect_ds_token_gaps.repairPlan.foundationRepairPlan and apply_ds_foundation_repairs after approval before token apply. If they approve radius, border-width, semantic spacing, typography variable/text-style, elevation variable, or elevation effect-style updates, call update_ds_tokens with dry_run:false for only those approved categories. Broad typography/elevation and other categories remain dry-run only.",
   };
 }
 

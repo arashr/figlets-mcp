@@ -327,6 +327,23 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'apply-foundation-repairs') {
+    try {
+      _appendSessionLog('Executing apply_ds_foundation_repairs.');
+      const result = await _applyDsFoundationRepairs(msg.data || {});
+      figma.ui.postMessage({ type: 'foundation-repairs-done', fileKey: _getFigletsFileKey(), data: result });
+      if (result && result.error) {
+        _appendSessionLog('apply_ds_foundation_repairs failed: ' + result.error);
+      } else {
+        _appendSessionLog('Completed apply_ds_foundation_repairs.');
+        figma.notify('Foundation repairs applied.');
+      }
+    } catch (err) {
+      _appendSessionLog('apply_ds_foundation_repairs failed: ' + err.message);
+      figma.ui.postMessage({ type: 'foundation-repairs-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
   if (msg.type === 'reset-figlets-file') {
     try {
       _appendSessionLog('Executing reset_figlets_file.');
@@ -4653,6 +4670,68 @@ async function _applyVariableScopesToCollection(collectionId, opts) {
   return scoped;
 }
 
+function _configuredCollectionName(DS, kind) {
+  var collections = DS && DS.collections ? DS.collections : {};
+  if (kind === 'primitives') return collections.primitives || '1. Primitives';
+  if (kind === 'color') return collections.color || '2. Color';
+  if (kind === 'typography') return collections.typography || '3. Typography';
+  if (kind === 'spacing') return collections.spacing || '4. Spacing';
+  if (kind === 'elevation') return collections.elevation || '5. Elevation';
+  return null;
+}
+
+function _configuredBreakpointModes(DS) {
+  return (DS && DS.breakpoints && Array.isArray(DS.breakpoints.modes) && DS.breakpoints.modes.length)
+    ? DS.breakpoints.modes
+    : ['Mobile', 'Tablet', 'Desktop'];
+}
+
+function _configuredInitialMode(DS, kind) {
+  if (kind === 'color') return 'Light';
+  if (kind === 'typography' || kind === 'spacing') return _configuredBreakpointModes(DS)[0];
+  return 'Default';
+}
+
+function _configuredFoundationModes(DS, kind) {
+  if (kind === 'typography' || kind === 'spacing') return _configuredBreakpointModes(DS);
+  if (kind === 'color') return ['Light', 'Dark'];
+  return [_configuredInitialMode(DS, kind)];
+}
+
+function _findVariableCollectionByName(collections, name) {
+  for (var i = 0; i < collections.length; i++) {
+    if (collections[i].name === name) return collections[i];
+  }
+  return null;
+}
+
+function _ensureCollectionModes(collection, modeNames) {
+  var map = {};
+  var createdModes = [];
+  for (var i = 0; i < modeNames.length; i++) {
+    var modeName = String(modeNames[i] || '').trim();
+    if (!modeName) continue;
+    var existingModeId = null;
+    for (var j = 0; j < collection.modes.length; j++) {
+      if (collection.modes[j].name === modeName) {
+        existingModeId = collection.modes[j].modeId;
+        break;
+      }
+    }
+    if (existingModeId !== null) {
+      map[modeName] = existingModeId;
+    } else if (i === 0 && collection.modes[0]) {
+      collection.renameMode(collection.modes[0].modeId, modeName);
+      map[modeName] = collection.modes[0].modeId;
+      createdModes.push(modeName);
+    } else {
+      map[modeName] = collection.addMode(modeName);
+      createdModes.push(modeName);
+    }
+  }
+  return { map: map, createdModes: createdModes };
+}
+
 // ── DS Setup implementation ──────────────────────────────────────────────────
 // Creates all 5 variable collections from a prepared DS config payload.
 // Input: the full DS object (from design-system.config.js after running prepare_ds_config).
@@ -4678,26 +4757,21 @@ async function _applyDsSetup(DS) {
 
   async function getOrCreateCollection(name, initialMode) {
     var existing = await figma.variables.getLocalVariableCollectionsAsync();
-    for (var i = 0; i < existing.length; i++) {
-      if (existing[i].name === name) {
-        // Collection exists — check if it has any variables at all
-        var allVars = await figma.variables.getLocalVariablesAsync();
-        var varCount = 0;
-        for (var j = 0; j < allVars.length; j++) {
-          if (allVars[j].variableCollectionId === existing[i].id) { varCount++; break; }
-        }
-        if (varCount > 0) return { collection: existing[i], existed: true };
-        // Empty shell — rename the first mode and treat as new
-        if (initialMode && existing[i].modes[0]) {
-          existing[i].renameMode(existing[i].modes[0].modeId, initialMode);
-        }
-        return { collection: existing[i], existed: false };
+    var matched = _findVariableCollectionByName(existing, name);
+    if (matched) {
+      // Collection exists — check if it has any variables at all
+      var allVars = await figma.variables.getLocalVariablesAsync();
+      var varCount = 0;
+      for (var j = 0; j < allVars.length; j++) {
+        if (allVars[j].variableCollectionId === matched.id) { varCount++; break; }
       }
+      if (varCount > 0) return { collection: matched, existed: true };
+      // Empty shell — rename the first mode and treat as new
+      if (initialMode) _ensureCollectionModes(matched, [initialMode]);
+      return { collection: matched, existed: false };
     }
     var coll = figma.variables.createVariableCollection(name);
-    if (initialMode && coll.modes[0]) {
-      coll.renameMode(coll.modes[0].modeId, initialMode);
-    }
+    if (initialMode) _ensureCollectionModes(coll, [initialMode]);
     return { collection: coll, existed: false };
   }
 
@@ -4714,22 +4788,7 @@ async function _applyDsSetup(DS) {
   }
 
   function buildModeMap(collection, modeNames) {
-    var map = {};
-    for (var i = 0; i < modeNames.length; i++) {
-      var modeName = modeNames[i];
-      var existingModeId = null;
-      for (var j = 0; j < collection.modes.length; j++) {
-        if (collection.modes[j].name === modeName) { existingModeId = collection.modes[j].modeId; break; }
-      }
-      if (existingModeId !== null) {
-        map[modeName] = existingModeId;
-      } else if (i === 0 && collection.modes[0]) {
-        map[modeName] = collection.modes[0].modeId;
-      } else {
-        map[modeName] = collection.addMode(modeName);
-      }
-    }
-    return map;
+    return _ensureCollectionModes(collection, modeNames).map;
   }
 
   async function _loadFontForTextStyle(family, style) {
@@ -4825,8 +4884,8 @@ async function _applyDsSetup(DS) {
 
   // ── Collection 1 — Primitives ─────────────────────────────────────────────
 
-  var primName = (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives';
-  var _primRes = await getOrCreateCollection(primName, 'Default');
+  var primName = _configuredCollectionName(DS, 'primitives');
+  var _primRes = await getOrCreateCollection(primName, _configuredInitialMode(DS, 'primitives'));
   var primColl = _primRes.collection;
   var primModeId = primColl.modes[0].modeId;
 
@@ -4974,8 +5033,8 @@ async function _applyDsSetup(DS) {
 
   // ── Collection 2 — Color Semantics ────────────────────────────────────────
 
-  var semName = (DS.collections && DS.collections.color) ? DS.collections.color : '2. Color';
-  var _semRes = await getOrCreateCollection(semName, 'Light');
+  var semName = _configuredCollectionName(DS, 'color');
+  var _semRes = await getOrCreateCollection(semName, _configuredInitialMode(DS, 'color'));
   var semColl = _semRes.collection;
 
   // Check if Color collection's vars are missing aliases (created before Primitives had ramp vars)
@@ -5166,9 +5225,9 @@ async function _applyDsSetup(DS) {
 
   // ── Collection 3 — Typography ─────────────────────────────────────────────
 
-  var typoName = (DS.collections && DS.collections.typography) ? DS.collections.typography : '3. Typography';
-  var modes3 = (DS.breakpoints && DS.breakpoints.modes) ? DS.breakpoints.modes : ['Mobile', 'Tablet', 'Desktop'];
-  var _typoRes = await getOrCreateCollection(typoName, modes3[0]);
+  var typoName = _configuredCollectionName(DS, 'typography');
+  var modes3 = _configuredBreakpointModes(DS);
+  var _typoRes = await getOrCreateCollection(typoName, _configuredInitialMode(DS, 'typography'));
   var typoColl = _typoRes.collection;
   var _typoMergeMap = await buildVarMap(typoColl.id);
   var _typoNeedsMerge = false;
@@ -5299,8 +5358,8 @@ async function _applyDsSetup(DS) {
 
   // ── Collection 4 — Spacing ────────────────────────────────────────────────
 
-  var spacingName = (DS.collections && DS.collections.spacing) ? DS.collections.spacing : '4. Spacing';
-  var _spacingRes = await getOrCreateCollection(spacingName, modes3[0]);
+  var spacingName = _configuredCollectionName(DS, 'spacing');
+  var _spacingRes = await getOrCreateCollection(spacingName, _configuredInitialMode(DS, 'spacing'));
   var spacingColl = _spacingRes.collection;
   var _spaceMergeMap = await buildVarMap(spacingColl.id);
   var _spacingNeedsMerge = false;
@@ -5392,8 +5451,8 @@ async function _applyDsSetup(DS) {
 
   // ── Collection 5 — Elevation (Effect Styles) ─────────────────────────────
 
-  var elevName = (DS.collections && DS.collections.elevation) ? DS.collections.elevation : '5. Elevation';
-  var _elevRes = await getOrCreateCollection(elevName, 'Default');
+  var elevName = _configuredCollectionName(DS, 'elevation');
+  var _elevRes = await getOrCreateCollection(elevName, _configuredInitialMode(DS, 'elevation'));
   var elevColl = _elevRes.collection;
 
   if (_elevRes.existed) {
@@ -5512,6 +5571,66 @@ async function _applyDsSetup(DS) {
     message: built.length > 0
       ? 'Created: ' + built.join(', ') + (skipped.length ? '. Skipped: ' + skipped.join(', ') : '')
       : 'All collections already exist. ' + skipped.join(', '),
+  };
+}
+
+async function _applyDsFoundationRepairs(payload) {
+  payload = payload || {};
+  var DS = payload.DS || {};
+  var requested = Array.isArray(payload.collections) ? payload.collections : [];
+  var allowed = {
+    primitives: _configuredCollectionName(DS, 'primitives'),
+    spacing: _configuredCollectionName(DS, 'spacing'),
+    typography: _configuredCollectionName(DS, 'typography'),
+    elevation: _configuredCollectionName(DS, 'elevation'),
+  };
+
+  var createdCollections = [];
+  var existingCollections = [];
+  var skippedCollections = [];
+  var seen = {};
+
+  for (var ri = 0; ri < requested.length; ri++) {
+    var item = requested[ri] || {};
+    var kind = String(item.kind || '');
+    var name = String(item.name || '');
+    if (!allowed[kind] || allowed[kind] !== name) {
+      skippedCollections.push({ kind: kind, name: name, reason: 'Collection is not an approved config-backed foundation repair.' });
+      continue;
+    }
+    if (seen[kind]) continue;
+    seen[kind] = true;
+
+    var modes = _configuredFoundationModes(DS, kind);
+    var collections = await figma.variables.getLocalVariableCollectionsAsync();
+    var existing = _findVariableCollectionByName(collections, name);
+    if (existing) {
+      var existingModeResult = _ensureCollectionModes(existing, modes);
+      existingCollections.push({
+        kind: kind,
+        name: name,
+        id: existing.id,
+        createdModes: existingModeResult.createdModes,
+      });
+    } else {
+      var collection = figma.variables.createVariableCollection(name);
+      var createdModeResult = _ensureCollectionModes(collection, modes);
+      createdCollections.push({
+        kind: kind,
+        name: name,
+        id: collection.id,
+        createdModes: createdModeResult.createdModes,
+      });
+    }
+  }
+
+  return {
+    createdCollections: createdCollections,
+    existingCollections: existingCollections,
+    skippedCollections: skippedCollections,
+    message: createdCollections.length || existingCollections.length
+      ? 'Foundation repairs applied. Continue with sync_figma_data, then inspect_ds_token_gaps/update_ds_tokens.'
+      : 'No foundation repairs were applied.',
   };
 }
 
@@ -6274,8 +6393,10 @@ async function _updateDsTokens(payload) {
       missingCapabilityNotes: [{
         kind: 'missing-foundation-collection',
         collection: spacingName,
-        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing token completion. That guided repair path is future product scope.',
-        productGap: true,
+        repairTool: 'apply_ds_foundation_repairs',
+        repairReady: true,
+        reason: 'Run the designer-approved foundation repair plan from inspect_ds_token_gaps before continuing token completion. update_ds_tokens does not create collections directly.',
+        productGap: false,
       }],
       report: {},
     };
@@ -6293,8 +6414,10 @@ async function _updateDsTokens(payload) {
       missingCapabilityNotes: [{
         kind: 'missing-foundation-collection',
         collection: typographyName,
-        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing typography variable completion. That guided repair path is future product scope.',
-        productGap: true,
+        repairTool: 'apply_ds_foundation_repairs',
+        repairReady: true,
+        reason: 'Run the designer-approved foundation repair plan from inspect_ds_token_gaps before continuing typography token completion. update_ds_tokens does not create collections directly.',
+        productGap: false,
       }],
       report: {},
     };
@@ -6312,8 +6435,10 @@ async function _updateDsTokens(payload) {
       missingCapabilityNotes: [{
         kind: 'missing-foundation-collection',
         collection: elevationName,
-        reason: 'Figlets should offer a designer-approved partial setup repair for this foundation collection before continuing elevation variable or effect-style completion. That guided repair path is future product scope.',
-        productGap: true,
+        repairTool: 'apply_ds_foundation_repairs',
+        repairReady: true,
+        reason: 'Run the designer-approved foundation repair plan from inspect_ds_token_gaps before continuing elevation token completion. update_ds_tokens does not create collections directly.',
+        productGap: false,
       }],
       report: {},
     };

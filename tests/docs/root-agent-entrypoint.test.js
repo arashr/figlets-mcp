@@ -22,6 +22,9 @@ for (const file of files) {
   assert.ok(content.includes("I should not approximate this flow with raw Figma tools"), `${file} should reject raw-tool fallback`);
   assert.ok(content.includes("Do not read `memory/PROJECT_MEMORY.md`"), `${file} should block project memory before designer intro`);
   assert.ok(content.includes("Do not offer developer work"), `${file} should block developer options in designer mode`);
+  assert.ok(content.includes("Architecture guardrail"), `${file} should require architecture awareness in Developer Mode`);
+  assert.ok(content.includes("check the existing bulk-capable surfaces"), `${file} should tell developer agents to inspect existing surfaces before adding parallel repair paths`);
+  assert.ok(content.includes("do not duplicate setup/update logic casually"), `${file} should discourage accidental divergent implementations`);
   assert.ok(content.includes("Plugin / MCP server code") === false, `${file} should not offer plugin code as a menu item`);
   assert.ok(content.includes("Check my design system"), `${file} should list designer menu items`);
   assert.ok(content.includes("Export DESIGN.md"), `${file} should list designer menu items`);

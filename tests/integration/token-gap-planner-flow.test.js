@@ -86,7 +86,12 @@ module.exports = (async () => {
     });
     assert.ok(!inspected.error, inspected.error);
     assert.deepStrictEqual(inspected.repairPlan.previewInput.categories, ["border-width", "elevation", "radius", "spacing-semantics", "typography"]);
-    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"]);
+    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "elevation-variables", "radius", "spacing-semantics"]);
+    assert.deepStrictEqual(
+      inspected.repairPlan.foundationRepairPlan.applyInput.collections,
+      [{ kind: "typography", name: "3. Typography", modes: ["Mobile", "Tablet", "Desktop"] }],
+      "missing Typography collection should be routed through foundation repair before token apply"
+    );
     assert.ok(
       inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
       "typography should remain a dry-run/product-gap category"
@@ -115,6 +120,31 @@ module.exports = (async () => {
     assert.ok(dryRun.report.typography.wouldCreateStyles.length > 0);
     assert.ok(dryRun.report.elevation.wouldCreateVariables.length > 0);
     assert.ok(dryRun.report.elevation.wouldCreateStyles.length > 0);
+
+    const afterFoundationSnapshot = Object.assign({}, initialSnapshot, {
+      collections: initialSnapshot.collections.concat([{
+        id: "typography",
+        name: "3. Typography",
+        modes: [
+          { id: "t1", modeId: "t1", name: "Mobile" },
+          { id: "t2", modeId: "t2", name: "Tablet" },
+          { id: "t3", modeId: "t3", name: "Desktop" },
+        ],
+        variableIds: [],
+      }]),
+    });
+    writeSnapshot(figmaDataPath, afterFoundationSnapshot);
+    const reinspectedAfterFoundation = handleInspectDsTokenGaps({
+      config_path: configPath,
+      figmaDataPath,
+      categories: ["radius", "border-width", "spacing-semantics", "typography", "elevation"],
+    });
+    assert.ok(!reinspectedAfterFoundation.error, reinspectedAfterFoundation.error);
+    assert.deepStrictEqual(
+      reinspectedAfterFoundation.repairPlan.applyInput.categories,
+      ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"],
+      "foundation repair should unblock the narrow typography variable apply slice"
+    );
 
     let receivedBody = null;
     const mockServer = http.createServer((req, res) => {
@@ -237,7 +267,7 @@ module.exports = (async () => {
     process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
 
     try {
-      const applied = await handleUpdateDsTokens(inspected.repairPlan.applyInput);
+      const applied = await handleUpdateDsTokens(reinspectedAfterFoundation.repairPlan.applyInput);
       assert.ok(!applied.error, applied.error);
       assert.strictEqual(applied.dryRun, false);
       assert.deepStrictEqual(receivedBody.categories, ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"]);
@@ -247,7 +277,7 @@ module.exports = (async () => {
       delete process.env.FIGLETS_RECEIVER_URL;
     }
 
-    const updatedSnapshot = Object.assign({}, initialSnapshot, {
+    const updatedSnapshot = Object.assign({}, afterFoundationSnapshot, {
       variables: [
         variable("space-radius-md", "space/radius/md"),
         variable("space-radius-lg", "space/radius/lg"),

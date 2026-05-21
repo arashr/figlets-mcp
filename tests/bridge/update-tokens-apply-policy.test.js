@@ -56,10 +56,19 @@ module.exports = (() => {
   assert.ok(fn.includes("figma.variables.createVariable"), "approved apply can create missing spacing variables");
   assert.ok(fn.includes("_setVariableScopesForName(existing, entry.name, entry.type)"), "existing variables should preserve IDs and refresh scopes");
   assert.ok(fn.includes("existing.setValueForMode"), "approved apply can update existing variable values");
-  assert.ok(fn.includes("missing-foundation-collection"), "missing foundation should be reported as product-gap scope");
+  assert.ok(fn.includes("missing-foundation-collection"), "missing foundation should be reported as guided repair scope");
   assert.ok(!fn.includes("Run apply_ds_setup first"), "missing foundation should not hard-code a setup-first halt");
+  assert.ok(code.includes("function _configuredCollectionName(DS, kind)"), "bridge should share configured collection names across setup/repair paths");
+  assert.ok(code.includes("function _configuredFoundationModes(DS, kind)"), "bridge should share configured foundation mode rules");
+  assert.ok(code.includes("return _ensureCollectionModes(collection, modeNames).map"), "setup should use the shared mode helper instead of a parallel mode builder");
+  assert.ok(code.includes("async function _applyDsFoundationRepairs"), "bridge should expose a narrow foundation repair helper");
+  assert.ok(code.includes("createVariableCollection(name)"), "foundation repair can create approved collection shells");
+  assert.ok(code.includes("Collection is not an approved config-backed foundation repair"), "foundation repair should reject arbitrary collections");
 
   assert.ok(ui.includes("'update-tokens'"), "UI should advertise update-tokens capability");
+  assert.ok(ui.includes("'foundation-repairs'"), "UI should advertise foundation-repairs capability");
+  assert.ok(ui.includes("data.command === 'apply-foundation-repairs'"), "UI should dispatch foundation repair commands");
+  assert.ok(ui.includes("sync-foundation-repairs"), "UI should post foundation repair results back to receiver");
   assert.ok(ui.includes("data.command === 'update-tokens'"), "UI should dispatch update-tokens commands");
   assert.ok(ui.includes("sync-update-tokens"), "UI should post update token results back to receiver");
   assert.ok(ui.includes("http://localhost:17337"), "UI should use the Figlets-specific bridge port");
@@ -68,6 +77,9 @@ module.exports = (() => {
   assert.ok(receiver.includes("const DEFAULT_PORT = 17337"), "receiver should default to the Figlets-specific bridge port");
   assert.ok(receiver.includes("FIGLETS_RECEIVER_PORT"), "receiver should allow local port override");
   assert.ok(receiver.includes("/request-update-tokens"), "receiver should expose request-update-tokens");
+  assert.ok(receiver.includes("/request-foundation-repairs"), "receiver should expose request-foundation-repairs");
+  assert.ok(receiver.includes("/sync-foundation-repairs"), "receiver should accept sync-foundation-repairs results");
+  assert.ok(receiver.includes("_pluginHasCapability('foundation-repairs')"), "receiver should gate foundation repairs on advertised capability");
   assert.ok(receiver.includes("/sync-update-tokens"), "receiver should accept sync-update-tokens results");
   assert.ok(receiver.includes("_pluginHasCapability('update-tokens')"), "receiver should gate token updates on advertised capability");
 })();

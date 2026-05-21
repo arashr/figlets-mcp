@@ -14,6 +14,7 @@ const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require("./tools/up
 const { inspectDsSetupGapsTool, handleInspectDsSetupGaps } = require("./tools/inspect-ds-setup-gaps.js");
 const { inspectDsTokenGapsTool, handleInspectDsTokenGaps } = require("./tools/inspect-ds-token-gaps.js");
 const { updateDsTokensTool, handleUpdateDsTokens } = require("./tools/update-ds-tokens.js");
+const { applyDsFoundationRepairsTool, handleApplyDsFoundationRepairs } = require("./tools/apply-ds-foundation-repairs.js");
 const { applyDsSetupRepairsTool, handleApplyDsSetupRepairs } = require("./tools/apply-ds-setup-repairs.js");
 const { refreshDsConfigFromFigmaTool, handleRefreshDsConfigFromFigma } = require("./tools/refresh-ds-config-from-figma.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
@@ -422,7 +423,7 @@ server.tool(
   {
     config_path: z.string().describe("Absolute path to design-system.config.js."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
-    categories: z.array(z.string()).optional().describe("Optional categories to preview. Phase 3B supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, elevation, and elevation-variables."),
+    categories: z.array(z.string()).optional().describe("Optional categories to preview. Supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, typography-styles, elevation, elevation-variables, and elevation-styles."),
     create_missing: z.boolean().optional().describe("When true, missing variables/styles are reported as wouldCreate*. When false, they remain unmatched/missing only."),
     dry_run: z.boolean().optional().describe("When true, preview without mutating Figma. dry_run=false is limited to approved narrow token categories."),
     prune: z.object({
@@ -433,6 +434,37 @@ server.tool(
   async (args) => {
     try {
       const result = await handleUpdateDsTokens(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- apply_ds_foundation_repairs ---
+server.tool(
+  applyDsFoundationRepairsTool.name,
+  applyDsFoundationRepairsTool.description,
+  {
+    config_path: z.string().describe("Absolute path to design-system.config.js."),
+    collections: z.array(z.object({
+      kind: z.enum(["primitives", "spacing", "typography", "elevation"]).describe("Configured foundation collection kind."),
+      name: z.string().describe("Configured collection name copied from inspect_ds_token_gaps."),
+      modes: z.array(z.string()).optional().describe("Mode names copied from inspect_ds_token_gaps; the server recomputes expected modes from config before sending to Figma.")
+    })).describe("Approved missing foundation collection shells copied from inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput.collections.")
+  },
+  async (args) => {
+    try {
+      const result = await handleApplyDsFoundationRepairs(args || {});
       if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

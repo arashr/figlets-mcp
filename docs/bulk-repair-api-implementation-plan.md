@@ -18,7 +18,8 @@ Current status as of 2026-05-20:
 - Phase 3A is complete: `inspect_ds_token_gaps` is a read-only config-backed non-color token-gap planner.
 - Phase 3B is complete: `update_ds_tokens({ dry_run: true })` previews missing variables/styles and type mismatches without Figma writes.
 - **Phase 3C/3D (narrow apply slices): complete.** The approved apply path covers `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles`. Semantic spacing apply resolves primitive-spacing aliases when the primitive variable exists and maps responsive config values onto existing Spacing-collection modes without creating modes. Typography variable apply targets the existing Typography collection only; `typography-styles` targets config-derived local text styles only, preserves existing style IDs, loads fonts before style mutation, and requires matching typography variables. Elevation variable apply targets the existing Elevation collection only; `elevation-styles` targets only local effect styles named `elevation/0` through `elevation/5`, preserving existing style IDs and binding effect fields where prerequisite variables exist. Broad `typography` and broad `elevation` remain rejected as direct apply scope.
-- Latest local verification: supported-runtime test suite passed **71/71**, and `git diff --check` is clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, exercising all seven narrow apply slices end to end.
+- **Missing-foundation guided repair is implemented.** `inspect_ds_token_gaps` now emits `repairPlan.foundationRepairPlan.applyInput` when a required collection is absent, and `apply_ds_foundation_repairs` creates only the approved configured collection shells and modes. It does not create variables, styles, primitives, or arbitrary Figma objects. The intended continuation is sync → reinspect → `update_ds_tokens` dry-run/apply for the unblocked token categories.
+- Latest local verification: supported-runtime test suite passed **72/72**, and `git diff --check` is clean. The automated E2E-style token flow is `tests/integration/token-gap-planner-flow.test.js`, exercising the foundation-repair handoff plus all seven narrow apply slices end to end.
 - Follow-up observability slice: `update_ds_tokens` bridge apply results now include changed-variable details for variables the tool creates or updates, including variable id, scopes, collection, mode names, and alias target names when the written value is a variable alias. This is intentionally not a broad inventory/debug API.
 - Live disposable-file validation confirmed `elevation-variables` end to end after the file was prepared with an existing `5. Elevation` collection and missing elevation semantic variables: inspect found 10 missing variables + 6 missing effect styles, apply created the 10 variables only, final reinspect showed 0 missing variables and 6 remaining effect-style gaps, no styles were created/refreshed, and broad `elevation` apply stayed unsupported. A separate live observability check confirmed changed-variable report items include id, scopes, mode names, and alias target names through the real `update_ds_tokens` bridge path.
 - Live disposable-file validation confirmed `elevation-styles` against the already-complete disposable file by refreshing existing local effect styles in place. Direct apply through the current repo handler refreshed `elevation/0` through `elevation/5`, preserved style IDs, reported bound key-shadow fields `color`, `offsetY`, and `radius`, reported bound ambient fields `color` and `radius`, emitted no `bindingWarnings`, and final sync/reinspect showed no broad elevation gaps. The connected MCP tool host was stale and still rejected `elevation-styles`; restart/reconnect the MCP host before treating that as a repo regression.
@@ -70,10 +71,21 @@ Use this table before adding anything new.
 | `inspect_ds_setup_gaps` | Read-only semantic color setup QA, contrast QA, missing role planning, standardized `repairPlan.applyInput`, `repairPlan.optionalApplyInput`, `repairPlan.missingCapabilityNotes`, and `repairPlan.designerPresentation` generation | No | Focused on color semantics. Does not cover typography, spacing, radius, border-width, or elevation completeness. |
 | `apply_ds_setup_repairs` | Applies approved missing foreground repairs, alias updates, and missing color role creations including icon, passive border/outline/stroke, and focus-border roles | Yes | Color-only. It applies explicit approved payloads and does not independently discover or plan repairs. |
 | `inspect_ds_token_gaps` | Read-only config-backed non-color token-gap planner. Emits `repairPlan.previewInput`, filtered `repairPlan.applyInput`, missing-capability notes, and designer presentation | No | Does not infer tokens from page usage. Preview supports broader non-color categories than apply. |
+| `apply_ds_foundation_repairs` | Applies approved missing foundation collection shells from `inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput` | Yes | Creates only configured collection shells and modes. It does not create variables/styles or perform broad setup. |
 | `update_ds_tokens` | Dry-run preview for config-backed non-color completion; approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles` only | Optional | Apply support is intentionally limited to Spacing collection FLOAT variables `space/radius/*`, `space/border/*`, responsive `space/<semantic>/*` (aliasing primitive spacing when present), Typography collection variables `type/<role>/{size,line-height,weight,tracking,family}`, local text styles derived from `DS.typography.scale`, Elevation collection FLOAT variables `elevation/<key>/{offset-y,radius}`, and local effect styles `elevation/0..5`. No mode creation, prune/delete apply, broad typography/elevation apply, primitive typography/shadow apply, or arbitrary style mutation. |
 | `update_ds_primitives` | Updates config-backed primitive color and primitive spacing values, and color semantic aliases, preserving variable IDs | Yes | Name is narrow and implementation assumes primitive collection except `color-semantics`. It does not handle typography, semantic spacing/radius/border-width, or elevation. |
 | `qa_binding_audit` | Audits selected/page nodes for raw unbound values and can fix high-confidence bindings | Optional | Binds to existing variables/styles only. It does not create missing tokens. Typography suggestions are conservative and may not be fixed automatically. |
 | `apply_ds_setup` | Creates or merges the configured design-system collections and styles | Yes | Broad setup tool, not a narrow repair planner. It has no dry-run merge-only contract. Use carefully after designer approval. |
+
+## Architecture Guardrail For New Repair Work
+
+Before adding a new Figlets tool or bridge mutation branch, check the surface table above and decide explicitly:
+
+1. Can an existing planner/apply surface be extended with a narrow category?
+2. Is this just a missing helper inside setup/token repair that should be shared?
+3. Is a new public tool needed because the designer approval boundary is different?
+
+Prefer shared pure helpers for collection names, configured modes, token entry names, and style names. Keep public tools separate when their approval contracts differ. In particular, `apply_ds_setup` remains the broad bootstrap/merge tool, while `apply_ds_foundation_repairs` and `update_ds_tokens` are narrow repair/update surfaces. Do not make setup call MCP tools internally; share bridge/core helpers underneath them instead.
 
 ## Recommended Implementation Order
 
@@ -86,7 +98,6 @@ Current roadmap:
 3. **Done:** Phase 3B - add `update_ds_tokens` dry-run preview.
 4. **Done:** Phase 3C/3D narrow apply slices (`radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, `elevation-styles`) with live validation on Figlets Test.
 5. **Next (product gaps, not new narrow slices):**
-   - **Missing-foundation guided repair:** When token completion finds an absent required collection, surface a designer-approved partial setup path instead of only "run setup first" (`missing-foundation-collection` → future guided repair).
    - **`update_ds_tokens` vs `update_ds_primitives`:** Document and test the compatibility boundary so agents know which tool owns which category.
    - **Dry-run refresh preview:** Optionally teach snapshot dry-run to preview in-place style refreshes on complete files, matching live bridge behavior.
    - **Stale MCP host check:** Reconnect/restart the app-managed Figlets MCP session and confirm `update_ds_tokens` apply returns resolved results through the registered MCP callback (not `{}`).
@@ -416,7 +427,7 @@ Typography should be split into two slices:
    - Create/update only `type/<role>/{size,line-height,weight,tracking}` FLOAT variables and optionally `type/<role>/family` STRING variables when config and primitives give a safe source.
    - Preserve existing variable IDs and scopes.
    - Map responsive values onto existing Typography modes only; do not create modes in the token updater.
-   - Report a missing Typography collection as `missing-foundation-collection` / future partial setup scope, not as a hard stop.
+   - Report a missing Typography collection as `missing-foundation-collection` with `repairTool: "apply_ds_foundation_repairs"`, not as a hard stop.
    - Do not create or refresh text styles in this slice.
 
 2. **Done:** **Text style create/refresh** via `typography-styles`.
@@ -464,7 +475,7 @@ Elevation should also be split:
    - Alias primitive `shadow/<level>/{offset-y,radius}` variables when they exist; otherwise use generated numeric FLOAT values.
    - Preserve existing variable IDs and scopes.
    - Map values onto existing Elevation modes only; do not create modes in the token updater.
-   - Report a missing Elevation collection as `missing-foundation-collection` / future partial setup scope, not as a hard stop.
+   - Report a missing Elevation collection as `missing-foundation-collection` with `repairTool: "apply_ds_foundation_repairs"`, not as a hard stop.
    - Do not create effect styles in this slice.
 
 2. **Done:** **Effect style create/refresh** via `elevation-styles`.
@@ -511,7 +522,7 @@ Important boundary:
 - This phase is config-backed only.
 - Do not infer new typography, spacing, radius, border-width, or elevation tokens from arbitrary page usage in the first version.
 - Raw page usage should continue through `qa_binding_audit`, which binds to existing tokens/styles.
-- Missing foundation setup, such as an absent collection needed by a token category, is a product flow gap rather than a reason to abandon the designer. For the current phase, report the missing foundation clearly and do not silently create it inside a narrow token updater. After the current feature plan lands, add a guided partial setup repair that asks the designer to approve the required foundation creation/merge and then continues the token update in the same run.
+- Missing foundation setup, such as an absent collection needed by a token category, is handled by `inspect_ds_token_gaps.repairPlan.foundationRepairPlan` → `apply_ds_foundation_repairs`. Do not silently create collections inside `update_ds_tokens`; the foundation repair is a separate designer-approved step that creates collection shells/modes only, then the agent syncs, reinspects, previews, and applies the token update.
 
 #### Recommended New Tools
 
@@ -589,8 +600,16 @@ Output:
       create_missing: true,
       dry_run: false
     },
+    foundationRepairPlan: {
+      tool: "apply_ds_foundation_repairs",
+      approvalRequired: true,
+      applyInput: {
+        config_path: "/path/design-system.config.js",
+        collections: []
+      }
+    },
     counts: {},
-    agentInstruction: "Run update_ds_tokens with previewInput, show the dry-run report, ask for approval, then run applyInput for apply-supported categories only."
+    agentInstruction: "If foundationRepairPlan has collections, ask for approval and run apply_ds_foundation_repairs first. Then run update_ds_tokens with previewInput, show the dry-run report, ask for approval, and run applyInput for apply-supported categories only."
   },
   topFindings: {},
   tokenGaps: []

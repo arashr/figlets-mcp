@@ -14,6 +14,7 @@ const modules = [
   "../../packages/figlets-mcp-server/src/tools/update-ds-primitives.js",
   "../../packages/figlets-mcp-server/src/tools/inspect-ds-token-gaps.js",
   "../../packages/figlets-mcp-server/src/tools/update-ds-tokens.js",
+  "../../packages/figlets-mcp-server/src/tools/apply-ds-foundation-repairs.js",
 ];
 
 for (const mod of modules) delete require.cache[require.resolve(mod)];
@@ -28,6 +29,7 @@ const { handleApplyDsSetup } = require("../../packages/figlets-mcp-server/src/to
 const { handleUpdateDsPrimitives } = require("../../packages/figlets-mcp-server/src/tools/update-ds-primitives.js");
 const { handleInspectDsTokenGaps } = require("../../packages/figlets-mcp-server/src/tools/inspect-ds-token-gaps.js");
 const { handleUpdateDsTokens } = require("../../packages/figlets-mcp-server/src/tools/update-ds-tokens.js");
+const { handleApplyDsFoundationRepairs } = require("../../packages/figlets-mcp-server/src/tools/apply-ds-foundation-repairs.js");
 
 function assertGuard(result, label) {
   assert.ok(result && result.error, label + " should refuse the flat config");
@@ -43,6 +45,7 @@ module.exports = Promise.all([
   handleUpdateDsPrimitives({ config_path: flatConfigPath }).then(result => assertGuard(result, "update_ds_primitives")),
   Promise.resolve(handleInspectDsTokenGaps({ config_path: flatConfigPath, figmaData: { variables: [] } })).then(result => assertGuard(result, "inspect_ds_token_gaps")),
   Promise.resolve(handleUpdateDsTokens({ config_path: flatConfigPath, figmaData: { variables: [] }, dry_run: true })).then(result => assertGuard(result, "update_ds_tokens")),
+  handleApplyDsFoundationRepairs({ config_path: flatConfigPath, collections: [{ kind: "spacing", name: "4. Spacing" }] }).then(result => assertGuard(result, "apply_ds_foundation_repairs")),
 ]).then(() => {
   fs.writeFileSync(path.join(tmp, "active-file.json"), JSON.stringify({ fileKey: "local_abc123", updatedAt: "now" }));
   const namespacedConfigPath = path.join(tmp, "local_abc123", "design-system.config.js");

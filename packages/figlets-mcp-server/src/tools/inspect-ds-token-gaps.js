@@ -8,7 +8,7 @@ const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/p
 const inspectDsTokenGapsTool = {
   name: "inspect_ds_token_gaps",
   description:
-    "Read-only planner for config-backed non-color token gaps in the active Figma snapshot. Compares design-system.config.js to existing variables/styles, reports missing typography, spacing, radius, border-width, shadow, and elevation items, and emits update_ds_tokens dry-run preview input plus future apply input. Never mutates Figma, config, or bridge state.",
+    "Read-only planner for config-backed non-color token gaps in the active Figma snapshot. Compares design-system.config.js to existing variables/styles, reports missing typography, spacing, radius, border-width, shadow, and elevation items, and emits update_ds_tokens dry-run/apply input plus apply_ds_foundation_repairs input when required collections are absent. Never mutates Figma, config, or bridge state.",
   inputSchema: {
     type: "object",
     properties: {
@@ -133,6 +133,33 @@ function _requiredCollectionForCategory(ds, category) {
   if (category === "typography" || category === "typography-variables" || category === "typography-styles") return ds && ds.collections && ds.collections.typography || "3. Typography";
   if (category === "elevation" || category === "elevation-variables" || category === "elevation-styles") return ds && ds.collections && ds.collections.elevation || "5. Elevation";
   return null;
+}
+
+function _foundationKindForCategory(category) {
+  if (category === "primitive-spacing" || category === "primitive-typography" || category === "primitive-shadow") return "primitives";
+  if (category === "spacing-semantics" || category === "radius" || category === "border-width") return "spacing";
+  if (category === "typography" || category === "typography-variables" || category === "typography-styles") return "typography";
+  if (category === "elevation" || category === "elevation-variables" || category === "elevation-styles") return "elevation";
+  return null;
+}
+
+function _foundationModesForKind(ds, kind) {
+  if (kind === "primitives" || kind === "elevation") return ["Default"];
+  const modes = ds && ds.breakpoints && Array.isArray(ds.breakpoints.modes) && ds.breakpoints.modes.length
+    ? ds.breakpoints.modes
+    : ["Mobile", "Tablet", "Desktop"];
+  return modes.map(mode => String(mode || "").trim()).filter(Boolean);
+}
+
+function _foundationRepairForCategory(ds, category, collection) {
+  const kind = _foundationKindForCategory(category);
+  if (!kind || !collection) return null;
+  return {
+    kind,
+    name: collection,
+    modes: _foundationModesForKind(ds, kind),
+    reason: "Create the configured " + collection + " collection shell and modes so approved token completion can add the missing variables/styles next.",
+  };
 }
 
 function _sanitizeStep(step) {
@@ -306,6 +333,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const tokenGaps = [];
   const existingUpdates = [];
   const missingCapabilityNotes = [];
+  const foundationRepairs = [];
+  const foundationRepairKeys = new Set();
   const supportedCategoriesWithGaps = new Set();
   const foundationBlockedApplyCategories = new Set();
   const supportedCategories = [];
@@ -336,14 +365,24 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     supportedCategories.push(category);
     const requiredCollection = _requiredCollectionForCategory(ds, category);
     if (collectionNames && requiredCollection && !collectionNames.has(requiredCollection)) {
+      const foundationRepair = _foundationRepairForCategory(ds, category, requiredCollection);
+      if (foundationRepair) {
+        const repairKey = foundationRepair.kind + "\n" + foundationRepair.name;
+        if (!foundationRepairKeys.has(repairKey)) {
+          foundationRepairKeys.add(repairKey);
+          foundationRepairs.push(foundationRepair);
+        }
+      }
       missingCapabilityNotes.push({
         kind: "missing-foundation-collection",
         category,
         collection: requiredCollection,
-        reason: "This token category needs a configured foundation collection that is not present in the synced Figma snapshot. Current token completion can preview the gaps, but the guided partial setup repair path is future product scope.",
-        productGap: true,
+        repairTool: "apply_ds_foundation_repairs",
+        repairReady: Boolean(foundationRepair),
+        reason: "This token category needs a configured foundation collection that is not present in the synced Figma snapshot. Figlets can create the missing collection shell after designer approval, then continue token completion.",
+        productGap: false,
       });
-      if (APPLY_CATEGORIES.has(category)) foundationBlockedApplyCategories.add(category);
+      foundationBlockedApplyCategories.add(category);
     }
     const expected = _expectedForCategory(ds, category);
     for (const item of expected) {
@@ -410,6 +449,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     configPath: options.configPath || null,
     categoriesWithGaps,
     foundationBlockedApplyCategories: Array.from(foundationBlockedApplyCategories),
+    foundationRepairs,
     missingCapabilityNotes,
     includeExistingUpdates: !!options.include_existing_updates,
     missingVariables,
@@ -484,6 +524,15 @@ function _buildRepairPlan(context) {
     include_existing_updates: false,
     dry_run: false,
   };
+  const foundationCollections = context.foundationRepairs || [];
+  const foundationApplyInput = {
+    config_path: context.configPath,
+    collections: foundationCollections.map(item => ({
+      kind: item.kind,
+      name: item.name,
+      modes: item.modes,
+    })),
+  };
 
   return {
     tool: "update_ds_tokens",
@@ -504,6 +553,17 @@ function _buildRepairPlan(context) {
       include_existing_updates: false,
       dry_run: false,
     },
+    foundationRepairPlan: {
+      tool: "apply_ds_foundation_repairs",
+      approvalRequired: true,
+      applyInput: foundationApplyInput,
+      counts: {
+        collections: foundationCollections.length,
+      },
+      designerSummary: foundationCollections.length
+        ? "Figlets can create " + foundationCollections.length + " missing foundation collection shell" + (foundationCollections.length === 1 ? "" : "s") + " before the token update. This creates configured collections and modes only; it does not create variables or styles until the next approved update_ds_tokens step."
+        : "No missing foundation collection repair is needed.",
+    },
     counts: {
       missingVariables: (context.missingVariables || []).length,
       missingStyles: (context.missingStyles || []).length,
@@ -511,12 +571,13 @@ function _buildRepairPlan(context) {
       total,
       applySupportedCategories: applyCategories.length,
       optionalTotal: 0,
+      foundationCollections: foundationCollections.length,
       missingCapabilityNotes: (context.missingCapabilityNotes || []).length,
     },
     missingCapabilityNotes: context.missingCapabilityNotes || [],
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
-      ? "Show repairPlan.designerPresentation in plain language. Run update_ds_tokens with repairPlan.previewInput to get the dry-run report. Only repairPlan.applyInput categories are apply-supported now, and they still require explicit designer approval after preview. Other categories remain dry-run/product-gap scope."
+      ? "Show repairPlan.designerPresentation in plain language. If repairPlan.foundationRepairPlan.applyInput.collections is non-empty, ask for approval and run apply_ds_foundation_repairs before update_ds_tokens apply. Run update_ds_tokens with repairPlan.previewInput to get the dry-run report. Only repairPlan.applyInput categories are token-apply-supported now, and they still require explicit designer approval after preview. Other categories remain dry-run/product-gap scope."
       : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
 }
@@ -525,6 +586,7 @@ function _buildDesignerPresentation(context, total) {
   const missingVariables = context.missingVariables || [];
   const missingStyles = context.missingStyles || [];
   const notes = context.missingCapabilityNotes || [];
+  const foundationRepairs = context.foundationRepairs || [];
   const lines = [];
   const sections = [];
 
@@ -547,11 +609,21 @@ function _buildDesignerPresentation(context, total) {
   }
 
   if (notes.length) {
-    lines.push(`${notes.length} requested item${notes.length === 1 ? " is" : "s are"} still Figlets product/tool gap scope.`);
-    sections.push({
-      title: "Product gap",
-      message: "Some requested categories or update comparisons are not supported by this read-only Phase 3A planner yet.",
-    });
+    const productGapNotes = notes.filter(note => note.productGap);
+    if (foundationRepairs.length) {
+      lines.push(`${foundationRepairs.length} missing foundation collection${foundationRepairs.length === 1 ? "" : "s"} can be created after approval before token completion continues.`);
+      sections.push({
+        title: "Foundation repair",
+        message: `Figlets can create ${foundationRepairs.map(item => item.name).join(", ")} as collection shell${foundationRepairs.length === 1 ? "" : "s"} with configured modes.`,
+      });
+    }
+    if (productGapNotes.length) {
+      lines.push(`${productGapNotes.length} requested item${productGapNotes.length === 1 ? " is" : "s are"} still Figlets product/tool gap scope.`);
+      sections.push({
+        title: "Product gap",
+        message: "Some requested categories or update comparisons are not supported by this read-only Phase 3A planner yet.",
+      });
+    }
   }
 
   return {
@@ -567,7 +639,8 @@ function _buildDesignerPresentation(context, total) {
     summaryCounts: {
       readyToPreview: total,
       optional: 0,
-      productGaps: notes.length,
+      foundationRepairs: foundationRepairs.length,
+      productGaps: notes.filter(note => note.productGap).length,
     },
   };
 }

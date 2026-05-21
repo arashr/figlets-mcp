@@ -48,6 +48,8 @@ Use Developer Mode only when the user asks to edit this repository, debug code, 
 
 In Developer Mode, read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, and the relevant source files before editing.
 
+Architecture guardrail: before adding a new public Figlets tool, bridge mutation branch, or parallel repair path, check the existing bulk-capable surfaces in `docs/bulk-repair-api-implementation-plan.md`. Decide explicitly whether to extend an existing planner/apply surface, extract shared helpers, or create a new surface because the designer approval boundary is genuinely different. Prefer shared pure helpers for collection names, configured modes, token entry names, and style names; do not duplicate setup/update logic casually.
+
 ## Default
 
 If the request is ambiguous but mentions Figlets as a product or a Figma design system, default to Designer Mode.

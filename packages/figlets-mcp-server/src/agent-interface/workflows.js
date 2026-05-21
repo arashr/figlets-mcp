@@ -9,6 +9,7 @@ const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 
 const MUTATING_TOOLS = new Set([
   "apply_ds_setup",
+  "apply_ds_foundation_repairs",
   "apply_ds_setup_repairs",
   "build_ds_showcase",
   "generate_component_doc",
@@ -43,6 +44,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "inspect_ds_setup_gaps.repairPlan.applyInput → apply_ds_setup_repairs for approved setup repairs, alias updates, and missing role creations",
     "inspect_ds_setup_gaps.repairPlan.optionalApplyInput → apply_ds_setup_repairs for separately approved optional convention-level role creation",
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
+    "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
     "update_ds_primitives for config-backed primitive value and color-semantic alias updates",
     "qa_binding_audit({ fix: true }) for high-confidence binding fixes",
   ],

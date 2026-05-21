@@ -310,9 +310,16 @@ module.exports = (() => {
         note.kind === "missing-foundation-collection" &&
         note.category === "radius" &&
         note.collection === "4. Spacing" &&
-        note.productGap === true
+        note.repairTool === "apply_ds_foundation_repairs" &&
+        note.repairReady === true &&
+        note.productGap === false
       ),
-      "missing Spacing collection should be reported as future guided setup scope"
+      "missing Spacing collection should be reported as guided foundation repair scope"
+    );
+    assert.deepStrictEqual(
+      missingFoundation.repairPlan.foundationRepairPlan.applyInput.collections,
+      [{ kind: "spacing", name: "4. Spacing", modes: ["Mobile", "Tablet", "Desktop"] }],
+      "missing foundation should expose an approval-ready partial setup repair payload"
     );
     assert.deepStrictEqual(
       missingFoundation.repairPlan.previewInput.categories,

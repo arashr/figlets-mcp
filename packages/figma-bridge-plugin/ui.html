@@ -422,6 +422,7 @@
     'qa-audit',
     'update-primitives',
     'update-tokens',
+    'foundation-repairs',
     'setup-repairs',
     'reset-figlets-file'
   ];
@@ -696,6 +697,13 @@
           document.getElementById('substatus').innerText = 'Applying approved radius/border variables.';
           _appendLog('Received command: update_ds_tokens.');
           parent.postMessage({ pluginMessage: { type: 'update-tokens', data: data.data } }, '*');
+        } else if (data.command === 'apply-foundation-repairs') {
+          isExtracting = true;
+          _armWatchdog('Foundation repairs', 60000);
+          document.getElementById('status').innerText = 'Applying foundation repairs...';
+          document.getElementById('substatus').innerText = 'Creating approved collection shells.';
+          _appendLog('Received command: apply_ds_foundation_repairs.');
+          parent.postMessage({ pluginMessage: { type: 'apply-foundation-repairs', data: data.data } }, '*');
         } else if (data.command === 'apply-setup-repairs') {
           isExtracting = true;
           _armWatchdog('Setup repairs', 60000);
@@ -865,6 +873,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send token update result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'foundation-repairs-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch(RECEIVER_URL + '/sync-foundation-repairs?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Foundation repair failed.' : 'Foundation repaired.';
+        _appendLog(msg.data.error ? 'Foundation repair failed in plugin.' : 'Foundation repair result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
+        _appendLog('Failed to send foundation repair result to receiver.');
       }
       isExtracting = false;
       poll();

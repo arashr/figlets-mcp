@@ -22,6 +22,7 @@ let pendingQaAuditRequest = null;
 let pendingUpdatePrimitivesRequest = null;
 let pendingUpdateTokensRequest = null;
 let pendingSetupRepairsRequest = null;
+let pendingFoundationRepairsRequest = null;
 let pendingResetRequest = null;
 let pendingRemoveTextStylesRequest = null;
 let pendingSyncPreviousFileKey = null;
@@ -486,6 +487,66 @@ const server = http.createServer((req, res) => {
   }
 
   // 6e. MCP Agent calls this to apply designer-approved setup repairs.
+  if (req.method === 'POST' && pathname === '/request-foundation-repairs') {
+    if (pendingPollResponse) {
+      if (!_pluginHasCapability('foundation-repairs')) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'The Figlets Bridge plugin is connected but does not advertise the foundation-repairs command. Reload the plugin in Figma Desktop so it loads the latest local code.',
+          activeSessionId: pendingPollSessionId || null,
+          pluginCapabilities: activePluginCapabilities
+        }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'apply-foundation-repairs', data: payload }));
+        _clearPendingPoll();
+
+        pendingFoundationRepairsRequest = res;
+
+        const foundationRepairTimer = setTimeout(() => {
+          if (pendingFoundationRepairsRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Foundation repair timed out.' }));
+            pendingFoundationRepairsRequest = null;
+          }
+        }, 60000);
+        if (foundationRepairTimer.unref) foundationRepairTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-foundation-repairs') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingFoundationRepairsRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingFoundationRepairsRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingFoundationRepairsRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingFoundationRepairsRequest = null;
+      }
+    });
+    return;
+  }
+
+  // 6f. MCP Agent calls this to apply designer-approved setup repairs.
   if (req.method === 'POST' && pathname === '/request-setup-repairs') {
     if (pendingPollResponse) {
       if (!_pluginHasCapability('setup-repairs')) {

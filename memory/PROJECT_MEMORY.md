@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-21 — Missing-foundation guided token repair slice]
+
+**Status:** Implemented the next roadmap slice after Phase 3C/3D: `inspect_ds_token_gaps` now turns absent required token collections into a guided foundation repair plan instead of leaving them as future product-gap notes. Missing collection notes now carry `repairTool: "apply_ds_foundation_repairs"`, `repairReady: true`, and `productGap: false` when Figlets can safely plan the collection shell.
+
+**New tool:** `apply_ds_foundation_repairs` creates only approved configured variable collection shells and modes from `repairPlan.foundationRepairPlan.applyInput.collections`. It validates collection kind/name against the active config, recomputes expected modes from config, and rejects arbitrary collection names. It does not create variables, styles, primitives, or arbitrary Figma objects. After this repair, the intended flow is sync, reinspect, dry-run preview, then approved `update_ds_tokens` apply for the now-unblocked categories.
+
+**Bridge/UI/receiver:** Added `foundation-repairs` capability, `/request-foundation-repairs` and `/sync-foundation-repairs`, UI polling dispatch/result handling, and plugin handler `_applyDsFoundationRepairs`. `update_ds_tokens` still refuses to create missing collections inside narrow token apply.
+
+**Boundary refactor:** Added shared bridge helpers for configured collection names, breakpoint modes, foundation modes, collection lookup, and mode creation. `apply_ds_setup` and `apply_ds_foundation_repairs` now share those helpers instead of maintaining parallel collection/mode rules. Added an "Architecture Guardrail For New Repair Work" section to the roadmap and mirrored it in root `AGENTS.md`/`CLAUDE.md`: before adding a new repair tool/branch, decide whether to extend an existing planner/apply surface, extract a shared helper, or create a new public tool because the designer approval boundary is different.
+
+**Tests/docs:** Added server coverage for the new tool, planner assertions for `foundationRepairPlan`, MCP tools/list exposure, config-path guard coverage, bridge policy pins, and roadmap/adapter updates. Supported-runtime test suite passes **72/72**.
+
 ### [2026-05-20 — Phase 3C/3D narrow token apply slices complete]
 
 **Status:** The planned narrow `update_ds_tokens` apply set is implemented, live-validated on Figlets Test (`local_mpcspbgz_7gq8yy0l`), and covered by tests. Approved apply categories: `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, `elevation-styles`. Broad `typography`, broad `elevation`, `primitive-typography`, `primitive-shadow`, prune/delete, and mode creation remain out of scope by design.

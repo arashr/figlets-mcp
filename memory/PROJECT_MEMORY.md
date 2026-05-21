@@ -2213,3 +2213,32 @@ Fixes shipped:
 - `/Users/arash/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /usr/local/bin/npm --scripts-prepend-node-path=true test` → 66/66 passed.
 - `node --check packages/figma-bridge-plugin/code.js` passed; no `??`/`?.`/`**` in the plugin diff.
 - `git diff --check` clean.
+
+### [2026-05-21 — missing-foundation guided token repair]
+
+**Objective completed:** Added the guided partial-setup path used when `inspect_ds_token_gaps` finds an absent required collection, without letting narrow token apply silently create foundations.
+
+**What changed:**
+
+- `inspect_ds_token_gaps` now emits `repairPlan.foundationRepairPlan.applyInput.collections` for missing required non-color foundations and marks those findings as repair-ready through `apply_ds_foundation_repairs`.
+- New MCP/server tool `apply_ds_foundation_repairs` validates approved collection repairs against the active design-system config, then asks the bridge to create only configured collection shells and modes.
+- Bridge support was added through `/request-foundation-repairs`, `/sync-foundation-repairs`, plugin capability `foundation-repairs`, and plugin command `apply-foundation-repairs`.
+- The bridge implementation creates configured collections/modes only; it does not create variables, styles, primitives, or arbitrary objects.
+- Shared bridge helpers now keep setup and foundation repair aligned for configured collection names and modes, instead of growing parallel collection/mode rules.
+- Root and adapter agent docs now include an architecture guardrail: before adding a repair surface, decide whether to extend an existing planner/apply surface, extract a shared helper, or create a new public tool because the approval boundary differs.
+
+**Validation:**
+
+- Full supported-runtime test suite passed: `72/72`.
+- Live disposable-file validation on Figlets Test (`local_mpcspbgz_7gq8yy0l`) passed through the current repo receiver on `http://localhost:17337`.
+  - Temporary config pointed Spacing to a unique missing collection and added a unique temporary radius token.
+  - Before repair, `inspect_ds_token_gaps({ categories: ["radius"] })` emitted the spacing foundation repair and kept token `applyInput.categories` empty.
+  - `apply_ds_foundation_repairs` created only the temporary collection with Mobile/Tablet/Desktop modes.
+  - After sync/reinspect, the missing-foundation gap was gone and token `applyInput.categories` became `["radius"]` for the temporary `space/radius/*` token.
+  - The temporary config edit was restored.
+
+**Next product/tech-debt items:**
+
+- Document and test the boundary between `update_ds_tokens` and `update_ds_primitives` so future work checks existing surfaces before creating parallel ones.
+- Improve dry-run observability for in-place style refreshes on already-complete files.
+- Reconnect/restart stale app-managed MCP hosts when live namespace behavior disagrees with direct current-repo handlers.

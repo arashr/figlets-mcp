@@ -20,10 +20,9 @@
  * set; unknown categories are reported back, never silently ignored.
  */
 
-const http = require('http');
 const path = require('path');
+const { requestBridgePost } = require('../bridges/bridge-request.js');
 const { getConfigPathGuardError } = require('../utils/paths.js');
-const { getReceiverUrl } = require('../utils/receiver-url.js');
 
 const updateDsPrimitivesTool = {
   name: 'update_ds_primitives',
@@ -78,8 +77,6 @@ function handleUpdateDsPrimitives(args) {
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return Promise.resolve(guardError);
 
-  const receiverUrl = getReceiverUrl();
-
   let readDsConfig;
   try {
     ({ readDsConfig } = require("../figlets-core.js").dsConfig);
@@ -116,76 +113,57 @@ function handleUpdateDsPrimitives(args) {
     return Promise.resolve({ error: 'Config is missing DS.typography.scale. Run prepare_ds_config first.' });
   }
 
-  const body = JSON.stringify({ DS: ds, categories: categories, createMissing: createMissing, dryRun: dryRun, pruneOffScale: pruneOffScale, pruneUnusedRamps: pruneUnusedRamps });
-
-  return new Promise((resolve) => {
-    const req = http.request(`${receiverUrl}/request-update-primitives`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode === 200) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (e) {}
-          const result = parsed.result || {};
-          resolve({
-            collection: result.collection,
-            dryRun: !!result.dryRun,
-            categories: result.categories || [],
-            unknownCategories: result.unknownCategories || [],
-            report: result.report || {},
-            pruned: result.pruned || 0,
-            wouldPrune: result.wouldPrune || 0,
-            message: result.message || 'Primitives update complete.',
-            configPath: resolvedPath,
-            error: result.error,
-          });
-        } else if (res.statusCode === 503) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (e) {}
-          const retryHint = parsed.pluginRecentlySeen
-            ? 'The plugin was connected recently and may be finishing another action; wait a moment, then try again.'
-            : 'Open the Figlets Bridge plugin in Figma Desktop and try again.';
-          resolve({
-            error: `Figma plugin is not listening for primitive updates. ${retryHint}`,
-            activeSessionId: parsed.activeSessionId || null,
-          });
-        } else if (res.statusCode === 504) {
-          resolve({ error: 'Primitive update timed out — try again with the plugin open.' });
-        } else if (res.statusCode === 409) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (e) {}
-          resolve({
-            error: parsed.error || 'The Figlets Bridge plugin is connected but does not advertise the primitive-update command. If you are developing Figlets, reload the plugin from Figma Desktop so it loads the latest local code.',
-            activeSessionId: parsed.activeSessionId || null,
-            pluginCapabilities: parsed.pluginCapabilities || [],
-          });
-        } else {
-          resolve({ error: `Unexpected status ${res.statusCode}` });
-        }
-      });
-    });
-
-    req.setTimeout(65000, () => {
-      req.destroy();
-      resolve({ error: 'Request timed out. The plugin may still be updating — check Figma.' });
-    });
-
-    req.on('error', (err) => {
-      if (err.code === 'ECONNREFUSED') {
-        resolve({ error: 'Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP host.' });
-      } else {
-        resolve({ error: err.message });
-      }
-    });
-
-    req.write(body);
-    req.end();
+  return requestBridgePost('/request-update-primitives', {
+    DS: ds,
+    categories: categories,
+    createMissing: createMissing,
+    dryRun: dryRun,
+    pruneOffScale: pruneOffScale,
+    pruneUnusedRamps: pruneUnusedRamps,
+  }, {
+    bridgeHookFile: args.bridgeHookFile,
+    transport: args.bridgeTransport,
+  }).then((response) => {
+    if (response.connectionError) {
+      return { error: response.connectionError };
+    }
+    const statusCode = response.statusCode;
+    const parsed = response.data || {};
+    if (statusCode === 200) {
+      const result = parsed.result || {};
+      return {
+        collection: result.collection,
+        dryRun: !!result.dryRun,
+        categories: result.categories || [],
+        unknownCategories: result.unknownCategories || [],
+        report: result.report || {},
+        pruned: result.pruned || 0,
+        wouldPrune: result.wouldPrune || 0,
+        message: result.message || 'Primitives update complete.',
+        configPath: resolvedPath,
+        error: result.error,
+      };
+    }
+    if (statusCode === 503) {
+      const retryHint = parsed.pluginRecentlySeen
+        ? 'The plugin was connected recently and may be finishing another action; wait a moment, then try again.'
+        : 'Open the Figlets Bridge plugin in Figma Desktop and try again.';
+      return {
+        error: `Figma plugin is not listening for primitive updates. ${retryHint}`,
+        activeSessionId: parsed.activeSessionId || null,
+      };
+    }
+    if (statusCode === 504) {
+      return { error: 'Primitive update timed out — try again with the plugin open.' };
+    }
+    if (statusCode === 409) {
+      return {
+        error: parsed.error || 'The Figlets Bridge plugin is connected but does not advertise the primitive-update command. If you are developing Figlets, reload the plugin from Figma Desktop so it loads the latest local code.',
+        activeSessionId: parsed.activeSessionId || null,
+        pluginCapabilities: parsed.pluginCapabilities || [],
+      };
+    }
+    return { error: `Unexpected status ${statusCode}` };
   });
 }
 

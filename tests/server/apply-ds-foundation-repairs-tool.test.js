@@ -1,9 +1,13 @@
 const assert = require("assert");
 const fs = require("fs");
-const http = require("http");
 const os = require("os");
 const path = require("path");
-
+const {
+  createBridgeHookFile,
+  installBridgeHook,
+  readBridgeHookCapture,
+  setBridgeHookRoute,
+} = require("../helpers/bridge-hook.js");
 const {
   applyDsFoundationRepairsTool,
   handleApplyDsFoundationRepairs,
@@ -22,6 +26,9 @@ const DS = {
 module.exports = (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-foundation-repairs-"));
   const configPath = path.join(tmp, "design-system.config.js");
+  const capturePath = path.join(tmp, "capture.json");
+  const hookPath = createBridgeHookFile(tmp);
+  const uninstallHook = installBridgeHook(hookPath);
   fs.writeFileSync(configPath, "const DS = " + JSON.stringify(DS, null, 2) + ";\n", "utf8");
 
   try {
@@ -39,50 +46,33 @@ module.exports = (async () => {
       assert.ok(result.error && /Unsupported foundation repair collection/.test(result.error), "server should reject non-config collection names");
     }
 
-    const mockServer = http.createServer((req, res) => {
-      if (req.method === "POST" && req.url === "/request-foundation-repairs") {
-        let body = "";
-        req.on("data", chunk => { body += chunk; });
-        req.on("end", () => {
-          const payload = JSON.parse(body);
-          assert.deepStrictEqual(
-            payload.collections,
-            [{ kind: "spacing", name: "4. Spacing", modes: ["Mobile", "Desktop"] }],
-            "server should send config-derived modes, not arbitrary caller modes"
-          );
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({
-            success: true,
-            result: {
-              createdCollections: [{ kind: "spacing", name: "4. Spacing", id: "coll1" }],
-              existingCollections: [],
-              skippedCollections: [],
-              message: "Foundation repairs applied.",
-            },
-          }));
-        });
-        return;
-      }
-      res.writeHead(404);
-      res.end();
+    setBridgeHookRoute(hookPath, "/request-foundation-repairs", {
+      capturePath,
+      json: {
+        success: true,
+        result: {
+          createdCollections: [{ kind: "spacing", name: "4. Spacing", id: "coll1" }],
+          existingCollections: [],
+          skippedCollections: [],
+          message: "Foundation repairs applied.",
+        },
+      },
     });
 
-    await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-    const { port } = mockServer.address();
-    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-    try {
-      const result = await handleApplyDsFoundationRepairs({
-        config_path: configPath,
-        collections: [{ kind: "spacing", name: "4. Spacing", modes: ["Made Up"] }],
-      });
-      assert.ok(!result.error, result.error);
-      assert.deepStrictEqual(result.createdCollections, [{ kind: "spacing", name: "4. Spacing", id: "coll1" }]);
-    } finally {
-      await new Promise(resolve => mockServer.close(resolve));
-      delete process.env.FIGLETS_RECEIVER_URL;
-    }
+    const result = await handleApplyDsFoundationRepairs({
+      config_path: configPath,
+      collections: [{ kind: "spacing", name: "4. Spacing", modes: ["Made Up"] }],
+    });
+    assert.ok(!result.error, result.error);
+    assert.deepStrictEqual(result.createdCollections, [{ kind: "spacing", name: "4. Spacing", id: "coll1" }]);
+    const payload = readBridgeHookCapture(capturePath);
+    assert.deepStrictEqual(
+      payload.collections,
+      [{ kind: "spacing", name: "4. Spacing", modes: ["Mobile", "Desktop"] }],
+      "server should send config-derived modes, not arbitrary caller modes"
+    );
   } finally {
+    uninstallHook();
     try { fs.unlinkSync(configPath); } catch (err) {}
     try { fs.rmdirSync(tmp); } catch (err) {}
   }

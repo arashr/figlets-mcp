@@ -6540,15 +6540,26 @@ async function _updateDsTokens(payload) {
   var needsTypography = false;
   var needsElevation = false;
 
+  function _orchestrationSlices(cat) {
+    if (cat === 'typography') return ['typography-variables', 'typography-styles'];
+    if (cat === 'elevation') return ['elevation-variables', 'elevation-styles'];
+    return [cat];
+  }
+
   for (var ri = 0; ri < requested.length; ri++) {
     var cat = requested[ri];
-    if (supported[cat]) {
-      categories.push(cat);
-      if (cat === 'radius' || cat === 'border-width' || cat === 'spacing-semantics') needsSpacing = true;
-      if (cat === 'typography-variables' || cat === 'typography-styles') needsTypography = true;
-      if (cat === 'elevation-variables' || cat === 'elevation-styles') needsElevation = true;
+    var slices = _orchestrationSlices(cat);
+    for (var si = 0; si < slices.length; si++) {
+      var slice = slices[si];
+      if (!supported[slice]) {
+        if (slice === cat) unknown.push(cat);
+        continue;
+      }
+      if (categories.indexOf(slice) < 0) categories.push(slice);
+      if (slice === 'radius' || slice === 'border-width' || slice === 'spacing-semantics') needsSpacing = true;
+      if (slice === 'typography-variables' || slice === 'typography-styles') needsTypography = true;
+      if (slice === 'elevation-variables' || slice === 'elevation-styles') needsElevation = true;
     }
-    else unknown.push(cat);
   }
   var applyOrder = { 'radius': 1, 'border-width': 2, 'spacing-semantics': 3, 'typography-variables': 4, 'typography-styles': 5, 'elevation-variables': 6, 'elevation-styles': 7 };
   categories.sort(function(a, b) { return (applyOrder[a] || 99) - (applyOrder[b] || 99); });

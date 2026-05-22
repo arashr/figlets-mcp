@@ -1,13 +1,28 @@
 const assert = require("assert");
 const fs = require("fs");
-const http = require("http");
 const os = require("os");
 const path = require("path");
+const {
+  createBridgeHookFile,
+  installBridgeHook,
+  readBridgeHookCapture,
+  setBridgeHookRoute,
+} = require("../helpers/bridge-hook.js");
 
 const {
   updateDsTokensTool,
   handleUpdateDsTokens,
 } = require("../../packages/figlets-mcp-server/src/tools/update-ds-tokens.js");
+
+function stubUpdateTokensRoute(hookPath, capturePath, result, options) {
+  setBridgeHookRoute(hookPath, "/request-update-tokens", {
+    capturePath,
+    statusCode: options && options.statusCode,
+    json: options && options.statusCode && options.statusCode !== 200
+      ? options.json
+      : { success: true, result },
+  });
+}
 
 function variable(id, name, type) {
   return {
@@ -60,9 +75,11 @@ fs.writeFileSync(configPath, "const DS = " + JSON.stringify(DS, null, 2) + ";\n"
 fs.writeFileSync(figmaDataPath, JSON.stringify(figmaData, null, 2), "utf8");
 
 module.exports = (async () => {
+  const hookPath = createBridgeHookFile(tmp);
+  const uninstallHook = installBridgeHook(hookPath);
   try {
     assert.strictEqual(updateDsTokensTool.name, "update_ds_tokens");
-    assert.ok(updateDsTokensTool.description.includes("radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles"));
+    assert.ok(updateDsTokensTool.description.includes("broad typography/elevation orchestration"));
     assert.ok(updateDsTokensTool.inputSchema.properties.prune, "schema should expose prune options");
 
     {
@@ -101,7 +118,10 @@ module.exports = (async () => {
       );
       assert.ok(/would create/.test(result.message), "message should summarize would-create work");
       assert.strictEqual(result.applySupported, true);
-      assert.deepStrictEqual(result.supportedApplyCategories, ["border-width", "elevation-styles", "elevation-variables", "radius", "spacing-semantics", "typography-styles", "typography-variables"]);
+      assert.deepStrictEqual(
+        result.supportedApplyCategories,
+        ["border-width", "elevation", "elevation-styles", "elevation-variables", "radius", "spacing-semantics", "typography", "typography-styles", "typography-variables"]
+      );
     }
 
     {
@@ -199,530 +219,390 @@ module.exports = (async () => {
     }
 
     {
-      const result = handleUpdateDsTokens({
+      const capturePath = path.join(tmp, "capture-orchestration.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["typography-variables", "typography-styles"],
+        unknownCategories: [],
+        report: {
+          "typography-variables": {
+            entries: 4,
+            createdVariables: [{ name: "type/body/md/line-height" }],
+            updatedVariables: [],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            wouldCreateStyles: [],
+            wouldRefreshStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+            bindingWarnings: [],
+          },
+          "typography-styles": {
+            entries: 1,
+            createdVariables: [],
+            updatedVariables: [],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [{ name: "type/body/md", id: "style-orch-1" }],
+            wouldCreateStyles: [],
+            wouldRefreshStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+            bindingWarnings: [],
+          },
+        },
+        message: "typography-variables: 1 changed; typography-styles: 1 changed",
+      });
+      const result = await handleUpdateDsTokens({
         config_path: configPath,
         figmaDataPath,
         categories: ["typography"],
         dry_run: false,
       });
-      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables\/text styles, elevation variables, and elevation effect styles/.test(result.error), "unsupported apply categories should be explicit");
+      assert.ok(!result.error, result.error);
       assert.strictEqual(result.dryRun, false);
-      assert.deepStrictEqual(result.unknownCategories, ["typography"]);
+      assert.deepStrictEqual(result.requestedCategories, ["typography"]);
+      assert.deepStrictEqual(result.orchestratedFrom, ["typography"]);
+      assert.deepStrictEqual(readBridgeHookCapture(capturePath).categories, ["typography-variables", "typography-styles"]);
     }
 
     {
       const result = handleUpdateDsTokens({
         config_path: configPath,
         figmaDataPath,
-        categories: ["typography", "elevation", "primitive-typography", "primitive-shadow"],
+        categories: ["primitive-typography", "primitive-shadow"],
         dry_run: false,
       });
-      assert.ok(result.error && /limited to radius, border-width, semantic spacing, typography variables\/text styles, elevation variables, and elevation effect styles/.test(result.error));
+      assert.ok(result.error && /typography\/elevation orchestration/.test(result.error));
       assert.strictEqual(result.dryRun, false);
-      assert.deepStrictEqual(result.categories, []);
-      assert.deepStrictEqual(result.unknownCategories, ["typography", "elevation", "primitive-typography", "primitive-shadow"]);
+      assert.deepStrictEqual(result.unknownCategories, ["primitive-typography", "primitive-shadow"]);
       assert.deepStrictEqual(
         result.missingCapabilityNotes.map(note => note.category),
-        ["typography", "elevation", "primitive-typography", "primitive-shadow"],
-        "typography/elevation-style categories should remain explicit apply product gaps until their strategies land"
+        ["primitive-typography", "primitive-shadow"],
+        "primitive categories should remain explicit apply product gaps on update_ds_tokens"
       );
     }
 
-    await (async () => {
-      let receivedBody = null;
-      const mockServer = http.createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/request-update-tokens") {
-          let body = "";
-          req.on("data", chunk => { body += chunk.toString(); });
-          req.on("end", () => {
-            receivedBody = JSON.parse(body);
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-              success: true,
-              result: {
-                dryRun: false,
-                categories: ["typography-styles"],
-                unknownCategories: [],
-                report: {
-                  "typography-styles": {
-                    entries: 1,
-                    createdVariables: [],
-                    updatedVariables: [],
-                    wouldCreateVariables: [],
-                    wouldUpdateVariables: [],
-                    createdStyles: [{ name: "type/body/md", id: "style-1", boundVariables: ["fontSize", "lineHeight", "letterSpacing"] }],
-                    refreshedStyles: [],
-                    unmatched: [],
-                    typeMismatch: [],
-                    fontLoadFailures: [],
-                    bindingWarnings: [],
-                  },
-                },
-                message: "typography-styles: 1 changed",
-              }
-            }));
-          });
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
+    {
+      const capturePath = path.join(tmp, "capture-typography-styles.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["typography-styles"],
+        unknownCategories: [],
+        report: {
+          "typography-styles": {
+            entries: 1,
+            createdVariables: [],
+            updatedVariables: [],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [{ name: "type/body/md", id: "style-1", boundVariables: ["fontSize", "lineHeight", "letterSpacing"] }],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+            bindingWarnings: [],
+          },
+        },
+        message: "typography-styles: 1 changed",
       });
-
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-      try {
-        const result = await handleUpdateDsTokens({
-          config_path: configPath,
-          categories: ["typography-styles"],
-          create_missing: true,
-          dry_run: false,
-        });
-        assert.ok(!result.error, result.error);
-        assert.strictEqual(result.dryRun, false);
-        assert.deepStrictEqual(result.categories, ["typography-styles"]);
-        assert.strictEqual(result.applySupported, true);
-        assert.ok(receivedBody && receivedBody.DS, "typography-styles apply should send DS to bridge");
-        assert.deepStrictEqual(receivedBody.categories, ["typography-styles"]);
-        assert.strictEqual(receivedBody.dryRun, false);
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
-
-    await (async () => {
-      let receivedBody = null;
-      const mockServer = http.createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/request-update-tokens") {
-          let body = "";
-          req.on("data", chunk => { body += chunk.toString(); });
-          req.on("end", () => {
-            receivedBody = JSON.parse(body);
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-              success: true,
-              result: {
-                dryRun: false,
-                categories: ["elevation-styles"],
-                unknownCategories: [],
-                report: {
-                  "elevation-styles": {
-                    entries: 6,
-                    createdVariables: [],
-                    updatedVariables: [],
-                    wouldCreateVariables: [],
-                    wouldUpdateVariables: [],
-                    createdStyles: [{ name: "elevation/1", id: "style-1", effectCount: 1 }],
-                    refreshedStyles: [{ name: "elevation/0", id: "existing-style-0", effectCount: 0 }],
-                    unmatched: [],
-                    typeMismatch: [],
-                    fontLoadFailures: [],
-                    bindingWarnings: [{
-                      kind: "missingShadowColorVariable",
-                      name: "color/shadow/ambient",
-                      styleName: "elevation/2",
-                    }],
-                  },
-                },
-                message: "elevation-styles: 2 changed",
-              }
-            }));
-          });
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["typography-styles"],
+        create_missing: true,
+        dry_run: false,
       });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(result.dryRun, false);
+      assert.deepStrictEqual(result.categories, ["typography-styles"]);
+      assert.strictEqual(result.applySupported, true);
+      assert.ok(receivedBody.DS, "typography-styles apply should send DS to bridge hook");
+      assert.deepStrictEqual(receivedBody.categories, ["typography-styles"]);
+      assert.strictEqual(receivedBody.dryRun, false);
+    }
 
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-      try {
-        const result = await handleUpdateDsTokens({
-          config_path: configPath,
-          categories: ["elevation-styles"],
-          create_missing: true,
-          dry_run: false,
-        });
-        assert.ok(!result.error, result.error);
-        assert.strictEqual(result.dryRun, false);
-        assert.deepStrictEqual(result.categories, ["elevation-styles"]);
-        assert.strictEqual(result.applySupported, true);
-        assert.deepStrictEqual(
-          result.report["elevation-styles"].bindingWarnings[0].kind,
-          "missingShadowColorVariable",
-          "server should preserve bridge binding warnings for designer review"
-        );
-        assert.ok(receivedBody && receivedBody.DS, "elevation-styles apply should send DS to bridge");
-        assert.deepStrictEqual(receivedBody.categories, ["elevation-styles"]);
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
-
-    await (async () => {
-      let receivedBody = null;
-      const mockServer = http.createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/request-update-tokens") {
-          let body = "";
-          req.on("data", chunk => { body += chunk.toString(); });
-          req.on("end", () => {
-            receivedBody = JSON.parse(body);
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-              success: true,
-              result: {
-                dryRun: false,
-                categories: ["elevation-variables"],
-                unknownCategories: [],
-                report: {
-                  "elevation-variables": {
-                    entries: 10,
-                    createdVariables: [{
-                      name: "elevation/xs/offset-y",
-                      scopes: ["EFFECT_FLOAT"],
-                      valuesByMode: [{
-                        modeId: "value",
-                        modeName: "Value",
-                        value: { type: "VARIABLE_ALIAS", id: "shadow-1-offset", name: "shadow/1/offset-y" },
-                      }],
-                    }],
-                    updatedVariables: [{
-                      name: "elevation/xs/radius",
-                      scopes: ["EFFECT_FLOAT"],
-                      valuesByMode: [{
-                        modeId: "value",
-                        modeName: "Value",
-                        value: { type: "VARIABLE_ALIAS", id: "shadow-1-radius", name: "shadow/1/radius" },
-                      }],
-                    }],
-                    wouldCreateVariables: [],
-                    wouldUpdateVariables: [],
-                    createdStyles: [],
-                    refreshedStyles: [],
-                    unmatched: [],
-                    typeMismatch: [],
-                    fontLoadFailures: [],
-                  },
-                },
-                message: "elevation-variables: 2 changed",
-              }
-            }));
-          });
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
+    {
+      const capturePath = path.join(tmp, "capture-elevation-styles.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["elevation-styles"],
+        unknownCategories: [],
+        report: {
+          "elevation-styles": {
+            entries: 6,
+            createdVariables: [],
+            updatedVariables: [],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [{ name: "elevation/1", id: "style-1", effectCount: 1 }],
+            refreshedStyles: [{ name: "elevation/0", id: "existing-style-0", effectCount: 0 }],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+            bindingWarnings: [{
+              kind: "missingShadowColorVariable",
+              name: "color/shadow/ambient",
+              styleName: "elevation/2",
+            }],
+          },
+        },
+        message: "elevation-styles: 2 changed",
       });
-
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-      try {
-        const result = await handleUpdateDsTokens({
-          config_path: configPath,
-          categories: ["elevation-variables"],
-          create_missing: true,
-          dry_run: false,
-        });
-        assert.ok(!result.error, result.error);
-        assert.strictEqual(result.dryRun, false);
-        assert.deepStrictEqual(result.categories, ["elevation-variables"]);
-        assert.strictEqual(result.applySupported, true);
-        assert.deepStrictEqual(
-          result.report["elevation-variables"].createdVariables[0].valuesByMode[0].value.name,
-          "shadow/1/offset-y",
-          "server should preserve bridge alias target details for changed variables"
-        );
-        assert.ok(receivedBody && receivedBody.DS, "elevation-variables apply should send DS to bridge");
-        assert.deepStrictEqual(receivedBody.categories, ["elevation-variables"]);
-        assert.strictEqual(receivedBody.dryRun, false);
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
-
-    await (async () => {
-      let receivedBody = null;
-      const mockServer = http.createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/request-update-tokens") {
-          let body = "";
-          req.on("data", chunk => { body += chunk.toString(); });
-          req.on("end", () => {
-            receivedBody = JSON.parse(body);
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-              success: true,
-              result: {
-                dryRun: false,
-                categories: ["radius", "border-width"],
-                unknownCategories: [],
-                report: {
-                  radius: {
-                    entries: 1,
-                    createdVariables: [{ name: "space/radius/md" }],
-                    updatedVariables: [],
-                    wouldCreateVariables: [],
-                    wouldUpdateVariables: [],
-                    createdStyles: [],
-                    refreshedStyles: [],
-                    unmatched: [],
-                    typeMismatch: [],
-                    fontLoadFailures: [],
-                  },
-                  "border-width": {
-                    entries: 1,
-                    createdVariables: [],
-                    updatedVariables: [{ name: "space/border/default" }],
-                    wouldCreateVariables: [],
-                    wouldUpdateVariables: [],
-                    createdStyles: [],
-                    refreshedStyles: [],
-                    unmatched: [],
-                    typeMismatch: [],
-                    fontLoadFailures: [],
-                  },
-                },
-                message: "radius: 1 changed; border-width: 1 changed",
-              }
-            }));
-          });
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["elevation-styles"],
+        create_missing: true,
+        dry_run: false,
       });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(result.dryRun, false);
+      assert.deepStrictEqual(result.categories, ["elevation-styles"]);
+      assert.strictEqual(result.applySupported, true);
+      assert.deepStrictEqual(
+        result.report["elevation-styles"].bindingWarnings[0].kind,
+        "missingShadowColorVariable",
+        "server should preserve bridge binding warnings for designer review"
+      );
+      assert.ok(receivedBody.DS, "elevation-styles apply should send DS to bridge hook");
+      assert.deepStrictEqual(receivedBody.categories, ["elevation-styles"]);
+    }
 
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-      try {
-        const result = await handleUpdateDsTokens({
-          config_path: configPath,
-          categories: ["radius", "border-width"],
-          create_missing: true,
-          dry_run: false,
-        });
-        assert.ok(!result.error, result.error);
-        assert.strictEqual(result.dryRun, false);
-        assert.deepStrictEqual(result.categories, ["radius", "border-width"]);
-        assert.strictEqual(result.applySupported, true);
-        assert.ok(receivedBody && receivedBody.DS, "apply should send DS to bridge");
-        assert.deepStrictEqual(receivedBody.categories, ["radius", "border-width"]);
-        assert.strictEqual(receivedBody.createMissing, true);
-        assert.strictEqual(receivedBody.dryRun, false);
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
-
-    await (async () => {
-      let receivedBody = null;
-      const mockServer = http.createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/request-update-tokens") {
-          let body = "";
-          req.on("data", chunk => { body += chunk.toString(); });
-          req.on("end", () => {
-            receivedBody = JSON.parse(body);
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-              success: true,
-              result: {
-                dryRun: false,
-                categories: ["typography-variables"],
-                unknownCategories: [],
-                report: {
-                  "typography-variables": {
-                    entries: 5,
-                    createdVariables: [{ name: "type/body/md/line-height" }],
-                    updatedVariables: [{ name: "type/body/md/size" }],
-                    wouldCreateVariables: [],
-                    wouldUpdateVariables: [],
-                    createdStyles: [],
-                    refreshedStyles: [],
-                    unmatched: [],
-                    typeMismatch: [],
-                    fontLoadFailures: [],
-                  },
-                },
-                message: "typography-variables: 2 changed",
-              }
-            }));
-          });
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
+    {
+      const capturePath = path.join(tmp, "capture-elevation-variables.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["elevation-variables"],
+        unknownCategories: [],
+        report: {
+          "elevation-variables": {
+            entries: 10,
+            createdVariables: [{
+              name: "elevation/xs/offset-y",
+              scopes: ["EFFECT_FLOAT"],
+              valuesByMode: [{
+                modeId: "value",
+                modeName: "Value",
+                value: { type: "VARIABLE_ALIAS", id: "shadow-1-offset", name: "shadow/1/offset-y" },
+              }],
+            }],
+            updatedVariables: [{
+              name: "elevation/xs/radius",
+              scopes: ["EFFECT_FLOAT"],
+              valuesByMode: [{
+                modeId: "value",
+                modeName: "Value",
+                value: { type: "VARIABLE_ALIAS", id: "shadow-1-radius", name: "shadow/1/radius" },
+              }],
+            }],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+          },
+        },
+        message: "elevation-variables: 2 changed",
       });
-
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-      try {
-        const result = await handleUpdateDsTokens({
-          config_path: configPath,
-          categories: ["typography-variables"],
-          create_missing: true,
-          dry_run: false,
-        });
-        assert.ok(!result.error, result.error);
-        assert.strictEqual(result.dryRun, false);
-        assert.deepStrictEqual(result.categories, ["typography-variables"]);
-        assert.strictEqual(result.applySupported, true);
-        assert.ok(receivedBody && receivedBody.DS, "typography-variables apply should send DS to bridge");
-        assert.deepStrictEqual(receivedBody.categories, ["typography-variables"]);
-        assert.strictEqual(receivedBody.dryRun, false);
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
-
-    await (async () => {
-      let receivedBody = null;
-      const mockServer = http.createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/request-update-tokens") {
-          let body = "";
-          req.on("data", chunk => { body += chunk.toString(); });
-          req.on("end", () => {
-            receivedBody = JSON.parse(body);
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-              success: true,
-              result: {
-                dryRun: false,
-                categories: ["spacing-semantics"],
-                unknownCategories: [],
-                report: {
-                  "spacing-semantics": {
-                    entries: 1,
-                    createdVariables: [{ name: "space/component/md" }],
-                    updatedVariables: [],
-                    wouldCreateVariables: [],
-                    wouldUpdateVariables: [],
-                    createdStyles: [],
-                    refreshedStyles: [],
-                    unmatched: [],
-                    typeMismatch: [],
-                    fontLoadFailures: [],
-                  },
-                },
-                message: "spacing-semantics: 1 changed",
-              }
-            }));
-          });
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["elevation-variables"],
+        create_missing: true,
+        dry_run: false,
       });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(result.dryRun, false);
+      assert.deepStrictEqual(result.categories, ["elevation-variables"]);
+      assert.strictEqual(result.applySupported, true);
+      assert.deepStrictEqual(
+        result.report["elevation-variables"].createdVariables[0].valuesByMode[0].value.name,
+        "shadow/1/offset-y",
+        "server should preserve bridge alias target details for changed variables"
+      );
+      assert.ok(receivedBody.DS, "elevation-variables apply should send DS to bridge hook");
+      assert.deepStrictEqual(receivedBody.categories, ["elevation-variables"]);
+      assert.strictEqual(receivedBody.dryRun, false);
+    }
 
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
+    {
+      const capturePath = path.join(tmp, "capture-radius-border.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["radius", "border-width"],
+        unknownCategories: [],
+        report: {
+          radius: {
+            entries: 1,
+            createdVariables: [{ name: "space/radius/md" }],
+            updatedVariables: [],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+          },
+          "border-width": {
+            entries: 1,
+            createdVariables: [],
+            updatedVariables: [{ name: "space/border/default" }],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+          },
+        },
+        message: "radius: 1 changed; border-width: 1 changed",
+      });
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["radius", "border-width"],
+        create_missing: true,
+        dry_run: false,
+      });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(result.dryRun, false);
+      assert.deepStrictEqual(result.categories, ["radius", "border-width"]);
+      assert.strictEqual(result.applySupported, true);
+      assert.ok(receivedBody.DS, "apply should send DS to bridge hook");
+      assert.deepStrictEqual(receivedBody.categories, ["radius", "border-width"]);
+      assert.strictEqual(receivedBody.createMissing, true);
+      assert.strictEqual(receivedBody.dryRun, false);
+    }
 
-      try {
-        const result = await handleUpdateDsTokens({
-          config_path: configPath,
-          categories: ["spacing-semantics"],
-          create_missing: true,
-          dry_run: false,
-        });
-        assert.ok(!result.error, result.error);
-        assert.strictEqual(result.dryRun, false);
-        assert.deepStrictEqual(result.categories, ["spacing-semantics"]);
-        assert.strictEqual(result.applySupported, true);
-        assert.ok(receivedBody && receivedBody.DS, "spacing-semantics apply should send DS to bridge");
-        assert.deepStrictEqual(receivedBody.categories, ["spacing-semantics"]);
-        assert.strictEqual(receivedBody.dryRun, false);
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
+    {
+      const capturePath = path.join(tmp, "capture-typography-variables.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["typography-variables"],
+        unknownCategories: [],
+        report: {
+          "typography-variables": {
+            entries: 5,
+            createdVariables: [{ name: "type/body/md/line-height" }],
+            updatedVariables: [{ name: "type/body/md/size" }],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+          },
+        },
+        message: "typography-variables: 2 changed",
+      });
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["typography-variables"],
+        create_missing: true,
+        dry_run: false,
+      });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(result.dryRun, false);
+      assert.deepStrictEqual(result.categories, ["typography-variables"]);
+      assert.strictEqual(result.applySupported, true);
+      assert.ok(receivedBody.DS, "typography-variables apply should send DS to bridge hook");
+      assert.deepStrictEqual(receivedBody.categories, ["typography-variables"]);
+      assert.strictEqual(receivedBody.dryRun, false);
+    }
 
-    await (async () => {
-      const mockServer = http.createServer((req, res) => {
-        res.writeHead(409, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
+    {
+      const capturePath = path.join(tmp, "capture-spacing-semantics.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["spacing-semantics"],
+        unknownCategories: [],
+        report: {
+          "spacing-semantics": {
+            entries: 1,
+            createdVariables: [{ name: "space/component/md" }],
+            updatedVariables: [],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+          },
+        },
+        message: "spacing-semantics: 1 changed",
+      });
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        create_missing: true,
+        dry_run: false,
+      });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(result.dryRun, false);
+      assert.deepStrictEqual(result.categories, ["spacing-semantics"]);
+      assert.strictEqual(result.applySupported, true);
+      assert.ok(receivedBody.DS, "spacing-semantics apply should send DS to bridge hook");
+      assert.deepStrictEqual(receivedBody.categories, ["spacing-semantics"]);
+      assert.strictEqual(receivedBody.dryRun, false);
+    }
+
+    {
+      stubUpdateTokensRoute(hookPath, null, {}, {
+        statusCode: 409,
+        json: {
           error: "The Figlets Bridge plugin is connected but does not advertise the token-update command.",
           activeSessionId: "figlets-old",
           pluginCapabilities: ["update-primitives"],
-        }));
+        },
       });
+      const result = await handleUpdateDsTokens({ config_path: configPath, categories: ["radius"], dry_run: false });
+      assert.ok(result.error && /token-update/.test(result.error), "409 should explain stale plugin capability");
+      assert.strictEqual(result.activeSessionId, "figlets-old");
+      assert.deepStrictEqual(result.pluginCapabilities, ["update-primitives"]);
+    }
 
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-      try {
-        const result = await handleUpdateDsTokens({ config_path: configPath, categories: ["radius"], dry_run: false });
-        assert.ok(result.error && /token-update/.test(result.error), "409 should explain stale plugin capability");
-        assert.strictEqual(result.activeSessionId, "figlets-old");
-        assert.deepStrictEqual(result.pluginCapabilities, ["update-primitives"]);
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
-
-    await (async () => {
-      const mockServer = http.createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/request-update-tokens") {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({
-            success: true,
-            result: {
-              dryRun: false,
-              categories: ["radius"],
-              unknownCategories: [],
-              report: {},
-              error: "Spacing collection \"4. Spacing\" is not present in this Figma file, so this narrow token update did not make changes.",
-              missingCapabilityNotes: [{
-                kind: "missing-foundation-collection",
-                collection: "4. Spacing",
-                repairTool: "apply_ds_foundation_repairs",
-                repairReady: true,
-                productGap: false,
-              }],
-            },
-          }));
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
+    {
+      stubUpdateTokensRoute(hookPath, null, {
+        dryRun: false,
+        categories: ["radius"],
+        unknownCategories: [],
+        report: {},
+        error: "Spacing collection \"4. Spacing\" is not present in this Figma file, so this narrow token update did not make changes.",
+        missingCapabilityNotes: [{
+          kind: "missing-foundation-collection",
+          collection: "4. Spacing",
+          repairTool: "apply_ds_foundation_repairs",
+          repairReady: true,
+          productGap: false,
+        }],
       });
-
-      await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-      const { port } = mockServer.address();
-      process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-      try {
-        const result = await handleUpdateDsTokens({ config_path: configPath, categories: ["radius"], dry_run: false });
-        assert.ok(result.error && /Spacing collection/.test(result.error), "plugin result error should be preserved");
-        assert.ok(
-          result.missingCapabilityNotes.some(note =>
-            note.kind === "missing-foundation-collection" &&
-            note.repairTool === "apply_ds_foundation_repairs" &&
-            note.productGap === false
-          ),
-          "missing foundation guided repair notes should survive the server bridge response"
-        );
-      } finally {
-        await new Promise(resolve => mockServer.close(resolve));
-        delete process.env.FIGLETS_RECEIVER_URL;
-      }
-    })();
+      const result = await handleUpdateDsTokens({ config_path: configPath, categories: ["radius"], dry_run: false });
+      assert.ok(result.error && /Spacing collection/.test(result.error), "plugin result error should be preserved");
+      assert.ok(
+        result.missingCapabilityNotes.some(note =>
+          note.kind === "missing-foundation-collection" &&
+          note.repairTool === "apply_ds_foundation_repairs" &&
+          note.productGap === false
+        ),
+        "missing foundation guided repair notes should survive the server bridge response"
+      );
+    }
   } finally {
+    uninstallHook();
     try { fs.unlinkSync(configPath); } catch (err) {}
     try { fs.unlinkSync(figmaDataPath); } catch (err) {}
     try { fs.rmdirSync(tmp); } catch (err) {}

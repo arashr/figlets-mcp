@@ -1,8 +1,13 @@
 const assert = require("assert");
 const fs = require("fs");
-const http = require("http");
 const os = require("os");
 const path = require("path");
+const {
+  createBridgeHookFile,
+  installBridgeHook,
+  readBridgeHookCapture,
+  setBridgeHookRoute,
+} = require("../helpers/bridge-hook.js");
 
 const {
   handleInspectDsTokenGaps,
@@ -78,6 +83,9 @@ module.exports = (async () => {
   writeConfig(configPath, DS);
   writeSnapshot(figmaDataPath, initialSnapshot);
 
+  const hookPath = createBridgeHookFile(tmp);
+  const uninstallHook = installBridgeHook(hookPath);
+
   try {
     const inspected = handleInspectDsTokenGaps({
       config_path: configPath,
@@ -86,23 +94,23 @@ module.exports = (async () => {
     });
     assert.ok(!inspected.error, inspected.error);
     assert.deepStrictEqual(inspected.repairPlan.previewInput.categories, ["border-width", "elevation", "radius", "spacing-semantics", "typography"]);
-    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "elevation-variables", "radius", "spacing-semantics"]);
+    assert.deepStrictEqual(inspected.repairPlan.applyInput.categories, ["border-width", "elevation", "radius", "spacing-semantics"]);
     assert.deepStrictEqual(
       inspected.repairPlan.foundationRepairPlan.applyInput.collections,
       [{ kind: "typography", name: "3. Typography", modes: ["Mobile", "Tablet", "Desktop"] }],
       "missing Typography collection should be routed through foundation repair before token apply"
     );
     assert.ok(
-      inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
-      "typography should remain a dry-run/product-gap category"
+      inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "missing-foundation-collection" && note.category === "typography"),
+      "missing typography collection should route through foundation repair before orchestration apply"
     );
     assert.ok(
       !inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "spacing-semantics"),
       "spacing-semantics should be apply-supported, not a product gap"
     );
     assert.ok(
-      inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
-      "broad elevation effect-style work should remain a dry-run/product-gap category"
+      !inspected.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
+      "broad elevation with variable gaps should be orchestration-capable once the elevation collection exists"
     );
 
     const dryRun = handleUpdateDsTokens(Object.assign({}, inspected.repairPlan.previewInput, {
@@ -142,140 +150,134 @@ module.exports = (async () => {
     assert.ok(!reinspectedAfterFoundation.error, reinspectedAfterFoundation.error);
     assert.deepStrictEqual(
       reinspectedAfterFoundation.repairPlan.applyInput.categories,
-      ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"],
-      "foundation repair should unblock the narrow typography variable apply slice"
+      ["border-width", "elevation", "radius", "spacing-semantics", "typography"],
+      "foundation repair should unblock broad typography and elevation orchestration when both variable and style gaps remain"
     );
 
-    let receivedBody = null;
-    const mockServer = http.createServer((req, res) => {
-      if (req.method !== "POST" || req.url !== "/request-update-tokens") {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-
-      let body = "";
-      req.on("data", chunk => { body += chunk.toString(); });
-      req.on("end", () => {
-        receivedBody = JSON.parse(body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: {
-            dryRun: false,
-            categories: receivedBody.categories,
-            unknownCategories: [],
-            report: {
-              radius: {
-                entries: 2,
-                wouldCreateVariables: [],
-                createdVariables: [
-                  { name: "space/radius/md" },
-                  { name: "space/radius/lg" },
-                ],
-                wouldUpdateVariables: [],
-                updatedVariables: [],
-                wouldCreateStyles: [],
-                createdStyles: [],
-                wouldRefreshStyles: [],
-                refreshedStyles: [],
-                unmatched: [],
-                typeMismatch: [],
-                fontLoadFailures: [],
-              },
-              "border-width": {
-                entries: 1,
-                wouldCreateVariables: [],
-                createdVariables: [{ name: "space/border/default" }],
-                wouldUpdateVariables: [],
-                updatedVariables: [],
-                wouldCreateStyles: [],
-                createdStyles: [],
-                wouldRefreshStyles: [],
-                refreshedStyles: [],
-                unmatched: [],
-                typeMismatch: [],
-                fontLoadFailures: [],
-              },
-              "spacing-semantics": {
-                entries: 1,
-                wouldCreateVariables: [],
-                createdVariables: [{ name: "space/component/md" }],
-                wouldUpdateVariables: [],
-                updatedVariables: [],
-                wouldCreateStyles: [],
-                createdStyles: [],
-                wouldRefreshStyles: [],
-                refreshedStyles: [],
-                unmatched: [],
-                typeMismatch: [],
-                fontLoadFailures: [],
-              },
-              "typography-variables": {
-                entries: 5,
-                wouldCreateVariables: [],
-                createdVariables: [
-                  { name: "type/body/md/size" },
-                  { name: "type/body/md/line-height" },
-                  { name: "type/body/md/weight" },
-                  { name: "type/body/md/tracking" },
-                ],
-                wouldUpdateVariables: [],
-                updatedVariables: [],
-                wouldCreateStyles: [],
-                createdStyles: [],
-                wouldRefreshStyles: [],
-                refreshedStyles: [],
-                unmatched: [{ name: "type/body/md/family" }],
-                typeMismatch: [],
-                fontLoadFailures: [],
-              },
-              "elevation-variables": {
-                entries: 10,
-                wouldCreateVariables: [],
-                createdVariables: [
-                  { name: "elevation/xs/offset-y" },
-                  { name: "elevation/xs/radius" },
-                  { name: "elevation/sm/offset-y" },
-                  { name: "elevation/sm/radius" },
-                  { name: "elevation/md/offset-y" },
-                  { name: "elevation/md/radius" },
-                  { name: "elevation/lg/offset-y" },
-                  { name: "elevation/lg/radius" },
-                  { name: "elevation/xl/offset-y" },
-                  { name: "elevation/xl/radius" },
-                ],
-                wouldUpdateVariables: [],
-                updatedVariables: [],
-                wouldCreateStyles: [],
-                createdStyles: [],
-                wouldRefreshStyles: [],
-                refreshedStyles: [],
-                unmatched: [],
-                typeMismatch: [],
-                fontLoadFailures: [],
-              },
+    const variableApplyCapture = path.join(tmp, "capture-variable-apply.json");
+    setBridgeHookRoute(hookPath, "/request-update-tokens", {
+      capturePath: variableApplyCapture,
+      json: {
+        success: true,
+        result: {
+          dryRun: false,
+          categories: [
+            "border-width",
+            "elevation-variables",
+            "elevation-styles",
+            "radius",
+            "spacing-semantics",
+            "typography-variables",
+            "typography-styles",
+          ],
+          unknownCategories: [],
+          report: {
+            radius: {
+              entries: 2,
+              wouldCreateVariables: [],
+              createdVariables: [
+                { name: "space/radius/md" },
+                { name: "space/radius/lg" },
+              ],
+              wouldUpdateVariables: [],
+              updatedVariables: [],
+              wouldCreateStyles: [],
+              createdStyles: [],
+              wouldRefreshStyles: [],
+              refreshedStyles: [],
+              unmatched: [],
+              typeMismatch: [],
+              fontLoadFailures: [],
             },
-            message: "radius: 2 changed; border-width: 1 changed; spacing-semantics: 1 changed; typography-variables: 4 changed; elevation-variables: 10 changed",
+            "border-width": {
+              entries: 1,
+              wouldCreateVariables: [],
+              createdVariables: [{ name: "space/border/default" }],
+              wouldUpdateVariables: [],
+              updatedVariables: [],
+              wouldCreateStyles: [],
+              createdStyles: [],
+              wouldRefreshStyles: [],
+              refreshedStyles: [],
+              unmatched: [],
+              typeMismatch: [],
+              fontLoadFailures: [],
+            },
+            "spacing-semantics": {
+              entries: 1,
+              wouldCreateVariables: [],
+              createdVariables: [{ name: "space/component/md" }],
+              wouldUpdateVariables: [],
+              updatedVariables: [],
+              wouldCreateStyles: [],
+              createdStyles: [],
+              wouldRefreshStyles: [],
+              refreshedStyles: [],
+              unmatched: [],
+              typeMismatch: [],
+              fontLoadFailures: [],
+            },
+            "typography-variables": {
+              entries: 5,
+              wouldCreateVariables: [],
+              createdVariables: [
+                { name: "type/body/md/size" },
+                { name: "type/body/md/line-height" },
+                { name: "type/body/md/weight" },
+                { name: "type/body/md/tracking" },
+              ],
+              wouldUpdateVariables: [],
+              updatedVariables: [],
+              wouldCreateStyles: [],
+              createdStyles: [],
+              wouldRefreshStyles: [],
+              refreshedStyles: [],
+              unmatched: [{ name: "type/body/md/family" }],
+              typeMismatch: [],
+              fontLoadFailures: [],
+            },
+            "elevation-variables": {
+              entries: 10,
+              wouldCreateVariables: [],
+              createdVariables: [
+                { name: "elevation/xs/offset-y" },
+                { name: "elevation/xs/radius" },
+                { name: "elevation/sm/offset-y" },
+                { name: "elevation/sm/radius" },
+                { name: "elevation/md/offset-y" },
+                { name: "elevation/md/radius" },
+                { name: "elevation/lg/offset-y" },
+                { name: "elevation/lg/radius" },
+                { name: "elevation/xl/offset-y" },
+                { name: "elevation/xl/radius" },
+              ],
+              wouldUpdateVariables: [],
+              updatedVariables: [],
+              wouldCreateStyles: [],
+              createdStyles: [],
+              wouldRefreshStyles: [],
+              refreshedStyles: [],
+              unmatched: [],
+              typeMismatch: [],
+              fontLoadFailures: [],
+            },
           },
-        }));
-      });
+          message: "radius: 2 changed; border-width: 1 changed; spacing-semantics: 1 changed; typography-variables: 4 changed; elevation-variables: 10 changed",
+        },
+      },
     });
 
-    await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-    const { port } = mockServer.address();
-    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-
-    try {
-      const applied = await handleUpdateDsTokens(reinspectedAfterFoundation.repairPlan.applyInput);
-      assert.ok(!applied.error, applied.error);
-      assert.strictEqual(applied.dryRun, false);
-      assert.deepStrictEqual(receivedBody.categories, ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"]);
-      assert.strictEqual(receivedBody.dryRun, false);
-    } finally {
-      await new Promise(resolve => mockServer.close(resolve));
-      delete process.env.FIGLETS_RECEIVER_URL;
-    }
+    const applied = await handleUpdateDsTokens(Object.assign({}, reinspectedAfterFoundation.repairPlan.applyInput, {
+      figmaDataPath,
+    }));
+    assert.ok(!applied.error, applied.error);
+    assert.strictEqual(applied.dryRun, false);
+    const receivedBody = readBridgeHookCapture(variableApplyCapture);
+    assert.deepStrictEqual(
+      receivedBody.categories,
+      ["border-width", "elevation-variables", "elevation-styles", "radius", "spacing-semantics", "typography-variables", "typography-styles"]
+    );
+    assert.strictEqual(receivedBody.dryRun, false);
 
     const updatedSnapshot = Object.assign({}, afterFoundationSnapshot, {
       variables: [
@@ -343,85 +345,65 @@ module.exports = (async () => {
     assert.strictEqual(styleDryRun.report["elevation-styles"].wouldCreateStyles.length, 6);
     assert.strictEqual(styleDryRun.report["typography-styles"].wouldCreateStyles.length, 1);
 
-    let receivedStyleBody = null;
-    const mockStyleServer = http.createServer((req, res) => {
-      if (req.method !== "POST" || req.url !== "/request-update-tokens") {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-
-      let body = "";
-      req.on("data", chunk => { body += chunk.toString(); });
-      req.on("end", () => {
-        receivedStyleBody = JSON.parse(body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: {
-            dryRun: false,
-            categories: receivedStyleBody.categories,
-            unknownCategories: [],
-            report: {
-              "elevation-styles": {
-                entries: 6,
-                wouldCreateVariables: [],
-                createdVariables: [],
-                wouldUpdateVariables: [],
-                updatedVariables: [],
-                wouldCreateStyles: [],
-                createdStyles: [
-                  { name: "elevation/0" },
-                  { name: "elevation/1" },
-                  { name: "elevation/2" },
-                  { name: "elevation/3" },
-                  { name: "elevation/4" },
-                  { name: "elevation/5" },
-                ],
-                wouldRefreshStyles: [],
-                refreshedStyles: [],
-                unmatched: [],
-                typeMismatch: [],
-                fontLoadFailures: [],
-                bindingWarnings: [],
-              },
-              "typography-styles": {
-                entries: 1,
-                wouldCreateVariables: [],
-                createdVariables: [],
-                wouldUpdateVariables: [],
-                updatedVariables: [],
-                wouldCreateStyles: [],
-                createdStyles: [
-                  { name: "type/body/md", id: "text-style-1", boundVariables: ["fontSize", "lineHeight", "letterSpacing", "fontFamily", "fontWeight"] },
-                ],
-                wouldRefreshStyles: [],
-                refreshedStyles: [],
-                unmatched: [],
-                typeMismatch: [],
-                fontLoadFailures: [],
-                bindingWarnings: [],
-              },
+    const styleApplyCapture = path.join(tmp, "capture-style-apply.json");
+    setBridgeHookRoute(hookPath, "/request-update-tokens", {
+      capturePath: styleApplyCapture,
+      json: {
+        success: true,
+        result: {
+          dryRun: false,
+          categories: ["elevation-styles", "typography-styles"],
+          unknownCategories: [],
+          report: {
+            "elevation-styles": {
+              entries: 6,
+              wouldCreateVariables: [],
+              createdVariables: [],
+              wouldUpdateVariables: [],
+              updatedVariables: [],
+              wouldCreateStyles: [],
+              createdStyles: [
+                { name: "elevation/0" },
+                { name: "elevation/1" },
+                { name: "elevation/2" },
+                { name: "elevation/3" },
+                { name: "elevation/4" },
+                { name: "elevation/5" },
+              ],
+              wouldRefreshStyles: [],
+              refreshedStyles: [],
+              unmatched: [],
+              typeMismatch: [],
+              fontLoadFailures: [],
+              bindingWarnings: [],
             },
-            message: "elevation-styles: 6 changed; typography-styles: 1 changed",
+            "typography-styles": {
+              entries: 1,
+              wouldCreateVariables: [],
+              createdVariables: [],
+              wouldUpdateVariables: [],
+              updatedVariables: [],
+              wouldCreateStyles: [],
+              createdStyles: [
+                { name: "type/body/md", id: "text-style-1", boundVariables: ["fontSize", "lineHeight", "letterSpacing", "fontFamily", "fontWeight"] },
+              ],
+              wouldRefreshStyles: [],
+              refreshedStyles: [],
+              unmatched: [],
+              typeMismatch: [],
+              fontLoadFailures: [],
+              bindingWarnings: [],
+            },
           },
-        }));
-      });
+          message: "elevation-styles: 6 changed; typography-styles: 1 changed",
+        },
+      },
     });
 
-    await new Promise(resolve => mockStyleServer.listen(0, "127.0.0.1", resolve));
-    const stylePort = mockStyleServer.address().port;
-    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${stylePort}`;
-
-    try {
-      const appliedStyles = await handleUpdateDsTokens(reinspected.repairPlan.applyInput);
-      assert.ok(!appliedStyles.error, appliedStyles.error);
-      assert.strictEqual(appliedStyles.dryRun, false);
-      assert.deepStrictEqual(receivedStyleBody.categories, ["elevation-styles", "typography-styles"]);
-    } finally {
-      await new Promise(resolve => mockStyleServer.close(resolve));
-      delete process.env.FIGLETS_RECEIVER_URL;
-    }
+    const appliedStyles = await handleUpdateDsTokens(reinspected.repairPlan.applyInput);
+    assert.ok(!appliedStyles.error, appliedStyles.error);
+    assert.strictEqual(appliedStyles.dryRun, false);
+    assert.deepStrictEqual(readBridgeHookCapture(styleApplyCapture).categories, ["elevation-styles", "typography-styles"]);
 
     const finalSnapshot = Object.assign({}, updatedSnapshot, {
       effectStyles: [
@@ -451,6 +433,7 @@ module.exports = (async () => {
       "typography variables and text styles should be resolved after both narrow typography applies"
     );
   } finally {
+    uninstallHook();
     try { fs.unlinkSync(configPath); } catch (err) {}
     try { fs.unlinkSync(figmaDataPath); } catch (err) {}
     try { fs.rmdirSync(tmp); } catch (err) {}

@@ -28,14 +28,13 @@ mkdirp(path.join(codexMarketplaceSource, ".agents", "plugins"));
 fs.writeFileSync(path.join(codexMarketplaceSource, ".agents", "plugins", "marketplace.json"), JSON.stringify({ name: "figlets-codex", plugins: [] }));
 
 function mkdirp(dirPath) {
-  if (fs.existsSync(dirPath)) return;
-  mkdirp(path.dirname(dirPath));
-  try {
-    fs.mkdirSync(dirPath);
-  } catch (err) {
-    if (err.code !== "EEXIST") throw err;
-  }
+  fs.mkdirSync(dirPath, { recursive: true });
 }
+
+// Cursor/agent sandboxes often deny creating a real ~/.cursor tree even under a fake
+// homeDir. Tests pass an explicit cursorConfigPath so setup behavior stays realistic
+// without touching a blocked directory name.
+const cursorConfigPath = path.join(home, "cursor-config", "mcp.json");
 
 try {
   {
@@ -162,21 +161,51 @@ try {
   }
 
   {
-    const cursorPath = path.join(home, ".cursor", "mcp.json");
-    mkdirp(path.dirname(cursorPath));
-    fs.writeFileSync(cursorPath, JSON.stringify({ mcpServers: { other: { command: "other-server" } } }, null, 2));
+    const blockedParent = path.join(TEMP_DIR, "blocked-parent");
+    fs.writeFileSync(blockedParent, "not-a-directory");
+    const blockedCursorPath = path.join(blockedParent, "nested/mcp.json");
+    const blockedPlan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["cursor"],
+      cursorConfigPath: blockedCursorPath,
+    });
+    assert.strictEqual(blockedPlan.targets[0].status, "would-update");
+    const blockedApplied = applySetupPlan(blockedPlan);
+    assert.strictEqual(blockedApplied.targets[0].status, "blocked");
+    assert.ok(
+      /cannot (write|create)/i.test(blockedApplied.targets[0].reason),
+      "setup should report blocked config writes instead of throwing"
+    );
 
-    const plan = getSetupPlan({ homeDir: home, cwd, platform: "darwin", hosts: ["cursor"] });
+    mkdirp(path.dirname(cursorConfigPath));
+    fs.writeFileSync(cursorConfigPath, JSON.stringify({ mcpServers: { other: { command: "other-server" } } }, null, 2));
+
+    const plan = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["cursor"],
+      cursorConfigPath,
+    });
+    assert.strictEqual(plan.targets[0].path, cursorConfigPath);
     assert.strictEqual(plan.targets[0].status, "would-update");
     const applied = applySetupPlan(plan);
     assert.strictEqual(applied.targets[0].status, "updated");
     assert.ok(applied.targets[0].backup, "existing config should be backed up before patching");
 
-    const updated = JSON.parse(fs.readFileSync(cursorPath, "utf-8"));
+    const updated = JSON.parse(fs.readFileSync(cursorConfigPath, "utf-8"));
     assert.strictEqual(updated.mcpServers.other.command, "other-server");
     assert.strictEqual(updated.mcpServers.figlets.command, "figlets-mcp");
 
-    const idempotent = getSetupPlan({ homeDir: home, cwd, platform: "darwin", hosts: ["cursor"] });
+    const idempotent = getSetupPlan({
+      homeDir: home,
+      cwd,
+      platform: "darwin",
+      hosts: ["cursor"],
+      cursorConfigPath,
+    });
     assert.strictEqual(idempotent.targets[0].status, "unchanged");
   }
 

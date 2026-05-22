@@ -4,6 +4,14 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-22 — broad typography/elevation orchestration in update_ds_tokens]
+
+**Status:** Completed roadmap item 13. `update_ds_tokens` apply now accepts broad `typography` and `elevation`. Server and bridge expand them into ordered narrow slices (`typography-variables` → `typography-styles`, `elevation-variables` → `elevation-styles`) in one approved call. `inspect_ds_token_gaps` emits broad categories in `repairPlan.applyInput` when both variable and style work exists; otherwise it keeps the existing narrow slice. Broad categories are no longer `unsupported-apply-category` product gaps.
+
+**Tests:** Updated planner, apply, integration, bridge policy, and bulk-repair plan regression tests.
+
+**Next:** Prune/delete apply and collection mode creation in `update_ds_tokens` (roadmap item 14). Live validation on Figlets Test still recommended before designer-facing claims.
+
 ### [2026-05-21 — primitive-shadow apply via update_ds_primitives]
 
 **Status:** Extended the primitive apply slice started with `primitive-typography`. `update_ds_primitives` now supports `primitive-shadow` for config-backed `shadow/*` FLOAT primitives in the Primitives collection. `inspect_ds_token_gaps` routes gaps through `repairPlan.primitiveRepairPlan` for both primitive categories.

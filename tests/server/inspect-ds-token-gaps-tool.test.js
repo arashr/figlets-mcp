@@ -107,12 +107,12 @@ module.exports = (() => {
     "include_existing_updates should be acknowledged as future diffing scope"
   );
   assert.ok(
-    result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
-    "dry-run-only categories should be explicit product gaps for apply"
+    !result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
+    "broad typography should be orchestration-capable instead of an apply product gap"
   );
   assert.ok(
-    result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
-    "elevation should remain a dry-run/product-gap apply category"
+    !result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
+    "broad elevation with both variable and style gaps should be orchestration-capable"
   );
   assert.ok(
     !result.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "spacing-semantics"),
@@ -131,8 +131,8 @@ module.exports = (() => {
   );
   assert.deepStrictEqual(
     result.repairPlan.applyInput.categories,
-    ["border-width", "elevation-variables", "radius", "spacing-semantics", "typography-variables"],
-    "applyInput should include only Phase 3C apply-supported categories, with typography/elevation narrowed to variables"
+    ["border-width", "elevation", "radius", "spacing-semantics", "typography-variables"],
+    "applyInput should use broad elevation orchestration when both variable and style gaps exist, and narrow typography when only variables are missing"
   );
   assert.strictEqual(result.repairPlan.applyInput.dry_run, false);
   assert.deepStrictEqual(result.repairPlan.optionalApplyInput.categories, []);
@@ -194,8 +194,8 @@ module.exports = (() => {
       "planner should narrow broad elevation style-only gaps to the approved elevation-styles apply slice"
     );
     assert.ok(
-      elevationStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
-      "broad elevation should remain a product-gap category even when a narrow style slice is available"
+      !elevationStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "elevation"),
+      "broad elevation should narrow to elevation-styles without an apply product gap"
     );
   }
 
@@ -244,8 +244,8 @@ module.exports = (() => {
       "planner should narrow broad typography style-only gaps to the approved typography-styles apply slice"
     );
     assert.ok(
-      typographyStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
-      "broad typography should remain a product-gap category even when a narrow style slice is available"
+      !typographyStyles.repairPlan.missingCapabilityNotes.some(note => note.kind === "unsupported-apply-category" && note.category === "typography"),
+      "broad typography should narrow to typography-styles without an apply product gap"
     );
   }
 

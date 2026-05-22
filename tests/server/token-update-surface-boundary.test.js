@@ -64,7 +64,7 @@ module.exports = (async () => {
       "update_ds_primitives should advertise primitive/color-semantic categories"
     );
     assert.ok(
-      updateDsTokensTool.description.includes("non-color token categories"),
+      updateDsTokensTool.description.includes("config-backed non-color token completion"),
       "update_ds_tokens should remain the non-color token-completion surface"
     );
 

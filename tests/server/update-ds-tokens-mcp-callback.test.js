@@ -1,14 +1,20 @@
 const assert = require("assert");
 const childProcess = require("child_process");
 const fs = require("fs");
-const http = require("http");
 const os = require("os");
 const path = require("path");
+const {
+  createBridgeHookFile,
+  readBridgeHookCapture,
+  setBridgeHookRoute,
+} = require("../helpers/bridge-hook.js");
 
 module.exports = (async () => {
   const root = path.resolve(__dirname, "../..");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-mcp-update-tokens-"));
   const configPath = path.join(tmp, "design-system.config.js");
+  const capturePath = path.join(tmp, "capture.json");
+  const hookPath = createBridgeHookFile(tmp);
   fs.writeFileSync(configPath, "const DS = " + JSON.stringify({
     collections: {
       spacing: "4. Spacing",
@@ -24,46 +30,31 @@ module.exports = (async () => {
     },
   }, null, 2) + ";\n", "utf8");
 
-  let receivedBody = null;
-  const mockServer = http.createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/request-update-tokens") {
-      let body = "";
-      req.on("data", chunk => { body += chunk.toString(); });
-      req.on("end", () => {
-        receivedBody = JSON.parse(body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: {
-            dryRun: false,
-            categories: ["radius"],
-            unknownCategories: [],
-            report: {
-              radius: {
-                entries: 1,
-                createdVariables: [{ name: "space/radius/md" }],
-                updatedVariables: [],
-                wouldCreateVariables: [],
-                wouldUpdateVariables: [],
-                createdStyles: [],
-                refreshedStyles: [],
-                unmatched: [],
-                typeMismatch: [],
-                fontLoadFailures: [],
-              },
-            },
-            message: "radius: 1 changed",
+  setBridgeHookRoute(hookPath, "/request-update-tokens", {
+    capturePath,
+    json: {
+      success: true,
+      result: {
+        dryRun: false,
+        categories: ["radius"],
+        unknownCategories: [],
+        report: {
+          radius: {
+            entries: 1,
+            createdVariables: [{ name: "space/radius/md" }],
+            updatedVariables: [],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
           },
-        }));
-      });
-      return;
-    }
-    res.writeHead(404);
-    res.end();
+        },
+        message: "radius: 1 changed",
+      },
+    },
   });
-
-  await new Promise(resolve => mockServer.listen(0, "127.0.0.1", resolve));
-  const { port } = mockServer.address();
 
   const child = childProcess.spawn(
     process.execPath,
@@ -71,7 +62,7 @@ module.exports = (async () => {
     {
       cwd: root,
       stdio: ["pipe", "pipe", "pipe"],
-      env: Object.assign({}, process.env, { FIGLETS_RECEIVER_URL: `http://localhost:${port}` }),
+      env: Object.assign({}, process.env, { FIGLETS_BRIDGE_HOOK_FILE: hookPath }),
     }
   );
 
@@ -83,8 +74,9 @@ module.exports = (async () => {
     if (settled) return;
     settled = true;
     child.kill();
-    mockServer.close(() => {});
     try { fs.unlinkSync(configPath); } catch (e) {}
+    try { fs.unlinkSync(capturePath); } catch (e) {}
+    try { fs.unlinkSync(hookPath); } catch (e) {}
     try { fs.rmdirSync(tmp); } catch (e) {}
     if (err) throw err;
   }
@@ -142,7 +134,8 @@ module.exports = (async () => {
           assert.strictEqual(payload.message, "radius: 1 changed");
           assert.ok(payload.report && payload.report.radius, "resolved apply report should be present");
           assert.ok(!payload.then, "registered MCP callback must not stringify an unresolved Promise");
-          assert.ok(receivedBody && receivedBody.DS, "MCP call should reach the mock bridge receiver");
+          const receivedBody = readBridgeHookCapture(capturePath);
+          assert.ok(receivedBody.DS, "MCP call should reach the bridge hook without binding localhost");
           resolve();
         } catch (err) {
           err.message += `\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`;

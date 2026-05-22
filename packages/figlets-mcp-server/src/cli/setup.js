@@ -119,9 +119,11 @@ function getKnownTargets(options) {
       ? _join(home, ".config", "Claude", "claude_desktop_config.json")
       : _join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
 
-  const cursorPath = platform === "win32"
-    ? _join(appData, "Cursor", "mcp.json")
-    : _join(home, ".cursor", "mcp.json");
+  const cursorPath = (options && options.cursorConfigPath)
+    ? options.cursorConfigPath
+    : platform === "win32"
+      ? _join(appData, "Cursor", "mcp.json")
+      : _join(home, ".cursor", "mcp.json");
 
   // The Claude Code plugin install target is always included so an explicit --hosts=claude-code-plugin
   // returns an actionable plan (with a clear manual reason) even when claude is missing. Whether it
@@ -479,12 +481,18 @@ function _backupPath(filePath) {
 
 function _mkdirp(dirPath) {
   if (!dirPath || fs.existsSync(dirPath)) return;
-  _mkdirp(path.dirname(dirPath));
-  try {
-    fs.mkdirSync(dirPath);
-  } catch (err) {
-    if (err.code !== "EEXIST") throw err;
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function _filesystemBlockedReason(err, filePath) {
+  if (!err || !err.code) return err && err.message ? err.message : "Unknown filesystem error.";
+  if (err.code === "EPERM" || err.code === "EACCES") {
+    return `Figlets cannot write ${filePath} on this machine (${err.code}). The agent environment may block that config path. Run figlets-mcp setup from a normal terminal session, or choose a host target whose config directory is writable.`;
   }
+  if (err.code === "ENOTDIR" || err.code === "ENOENT") {
+    return `Figlets cannot create the parent directory for ${filePath} (${err.code}). Check that the path is valid and writable.`;
+  }
+  return err.message;
 }
 
 function _writeWithBackup(filePath, text) {
@@ -499,12 +507,19 @@ function _writeWithBackup(filePath, text) {
 }
 
 function applyJsonPatch(plan) {
-  const current = _parseJsonOrEmpty(plan.path);
-  const rootKey = plan.rootKey || (plan.type === "json-servers" ? "servers" : "mcpServers");
-  current[rootKey] = current[rootKey] && typeof current[rootKey] === "object" ? current[rootKey] : {};
-  current[rootKey].figlets = plan.server || FIGLETS_SERVER;
-  const backup = _writeWithBackup(plan.path, JSON.stringify(current, null, 2) + "\n");
-  return Object.assign({}, plan, { status: "updated", backup });
+  try {
+    const current = _parseJsonOrEmpty(plan.path);
+    const rootKey = plan.rootKey || (plan.type === "json-servers" ? "servers" : "mcpServers");
+    current[rootKey] = current[rootKey] && typeof current[rootKey] === "object" ? current[rootKey] : {};
+    current[rootKey].figlets = plan.server || FIGLETS_SERVER;
+    const backup = _writeWithBackup(plan.path, JSON.stringify(current, null, 2) + "\n");
+    return Object.assign({}, plan, { status: "updated", backup });
+  } catch (err) {
+    return Object.assign({}, plan, {
+      status: "blocked",
+      reason: _filesystemBlockedReason(err, plan.path),
+    });
+  }
 }
 
 function applyTomlPatch(plan) {

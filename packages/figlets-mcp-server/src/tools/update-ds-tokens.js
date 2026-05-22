@@ -1,17 +1,20 @@
 "use strict";
 
 const fs = require("fs");
-const http = require("http");
 const path = require("path");
+const { requestBridgePost } = require("../bridges/bridge-request.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getConfigPathGuardError } = require("../utils/paths.js");
-const { getReceiverUrl } = require("../utils/receiver-url.js");
-const { inspectDsTokenGapsFromConfigAndFigmaData } = require("./inspect-ds-token-gaps.js");
+const {
+  expandTokenApplyCategories,
+  inspectDsTokenGapsFromConfigAndFigmaData,
+  ORCHESTRATION_APPLY_CATEGORIES,
+} = require("./inspect-ds-token-gaps.js");
 
 const updateDsTokensTool = {
   name: "update_ds_tokens",
   description:
-    "Preview and apply narrow config-backed token completion for non-color token categories. dry_run=true reports missing variables/styles, type mismatches, and unsupported categories without mutating Figma. Phase 3C/3D apply support is intentionally limited to radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles.",
+    "Preview and apply config-backed non-color token completion. dry_run=true reports missing variables/styles, type mismatches, and unsupported categories without mutating Figma. Apply supports radius, border-width, semantic spacing, narrow typography/elevation variable and style slices, and broad typography/elevation orchestration that runs variables then styles in one approved call.",
   inputSchema: {
     type: "object",
     properties: {
@@ -34,7 +37,7 @@ const updateDsTokensTool = {
       },
       dry_run: {
         type: "boolean",
-        description: "When true, report what would happen without mutating Figma. When false, Phase 3C/3D apply support is limited to radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles."
+        description: "When true, report what would happen without mutating Figma. When false, apply supports radius, border-width, semantic spacing, narrow typography/elevation slices, and broad typography/elevation orchestration."
       },
       prune: {
         type: "object",
@@ -52,6 +55,7 @@ const updateDsTokensTool = {
 };
 
 const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
+const SUPPORTED_APPLY_CATEGORIES = new Set([...APPLY_CATEGORIES, ...ORCHESTRATION_APPLY_CATEGORIES]);
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -176,33 +180,74 @@ function _requestedCategories(args) {
 }
 
 function _applyUnsupportedCategories(categories) {
-  return categories.filter(category => !APPLY_CATEGORIES.has(category));
+  return categories.filter(category => !SUPPORTED_APPLY_CATEGORIES.has(category));
+}
+
+function _resolveApplyCategories(args, configPath, ds) {
+  const requested = _requestedCategories(args);
+  const dataSource = args.figmaDataPath
+    ? loadFigmaDataSource({ figmaDataPath: args.figmaDataPath })
+    : (loadActiveFigmaDataSource(args) || loadFigmaDataSource(args));
+  if (!dataSource) {
+    return {
+      requested,
+      bridgeCategories: expandTokenApplyCategories(requested, null),
+      orchestratedFrom: requested.filter(category => ORCHESTRATION_APPLY_CATEGORIES.has(category)),
+    };
+  }
+  const plannerResult = inspectDsTokenGapsFromConfigAndFigmaData(ds, dataSource.figmaData, {
+    configPath,
+    categories: requested,
+    include_existing_updates: false,
+    include_existing_style_refreshes: false,
+  });
+  return {
+    requested,
+    bridgeCategories: expandTokenApplyCategories(requested, {
+      missingVariables: plannerResult.tokenGaps.filter(gap => gap.gapType === "missing-variable"),
+      missingStyles: plannerResult.tokenGaps.filter(gap => gap.gapType === "missing-style"),
+      typeMismatches: plannerResult.tokenGaps.filter(gap => gap.gapType === "type-mismatch"),
+    }),
+    orchestratedFrom: requested.filter(category => ORCHESTRATION_APPLY_CATEGORIES.has(category)),
+  };
 }
 
 function _handleApplyDsTokens(args, configPath, ds) {
   const categories = _requestedCategories(args);
   if (!categories.length) {
     return {
-      error: "categories is required for update_ds_tokens apply. Phase 3C/3D supports only radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles.",
+      error: "categories is required for update_ds_tokens apply. Supported apply categories include radius, border-width, semantic spacing, typography/elevation orchestration, and the narrow typography/elevation variable/style slices.",
       dryRun: false,
       configPath,
-      supportedApplyCategories: Array.from(APPLY_CATEGORIES).sort(),
+      supportedApplyCategories: Array.from(SUPPORTED_APPLY_CATEGORIES).sort(),
     };
   }
   const unsupported = _applyUnsupportedCategories(categories);
   if (unsupported.length) {
     return {
-      error: "update_ds_tokens apply support is limited to radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles in Phase 3C/3D.",
+      error: "update_ds_tokens apply support is limited to radius, border-width, semantic spacing, typography/elevation orchestration, and the narrow typography/elevation variable/style slices.",
       dryRun: false,
       configPath,
-      categories: categories.filter(category => APPLY_CATEGORIES.has(category)),
+      categories: categories.filter(category => SUPPORTED_APPLY_CATEGORIES.has(category)),
       unknownCategories: unsupported,
       missingCapabilityNotes: unsupported.map(category => ({
         kind: "unsupported-apply-category",
         category,
-        reason: "Phase 3C/3D apply support covers radius, border-width, semantic spacing, typography variables/text styles, elevation variables, and elevation effect styles only. Other config-backed token categories remain dry-run/product-gap scope.",
+        reason: "Apply support covers radius, border-width, semantic spacing, typography/elevation orchestration, and narrow typography/elevation slices. Primitive and color categories belong on update_ds_primitives; other categories remain dry-run/product-gap scope.",
         productGap: true,
       })),
+    };
+  }
+  const resolved = _resolveApplyCategories(args, configPath, ds);
+  if (!resolved.bridgeCategories.length) {
+    return {
+      dryRun: false,
+      configPath,
+      categories: resolved.requested,
+      bridgeCategories: [],
+      orchestratedFrom: resolved.orchestratedFrom,
+      message: "No apply-ready token categories were resolved from the requested scope.",
+      applySupported: true,
     };
   }
   if (args.prune && (args.prune.off_scale_color_steps || args.prune.unused_color_ramps)) {
@@ -218,81 +263,56 @@ function _handleApplyDsTokens(args, configPath, ds) {
     };
   }
 
-  const receiverUrl = getReceiverUrl();
-  const body = JSON.stringify({
+  return requestBridgePost("/request-update-tokens", {
     DS: ds,
-    categories,
+    categories: resolved.bridgeCategories,
     createMissing: args.create_missing !== false,
     dryRun: false,
-  });
-
-  return new Promise((resolve) => {
-    const req = http.request(`${receiverUrl}/request-update-tokens`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-      },
-    }, (res) => {
-      let data = "";
-      res.on("data", chunk => { data += chunk; });
-      res.on("end", () => {
-        if (res.statusCode === 200) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (err) {}
-          const result = parsed.result || {};
-          resolve({
-            dryRun: !!result.dryRun,
-            categories: result.categories || categories,
-            unknownCategories: result.unknownCategories || [],
-            report: result.report || {},
-            message: result.message || "Token update complete.",
-            configPath,
-            error: result.error,
-            missingCapabilityNotes: result.missingCapabilityNotes || [],
-            applySupported: true,
-          });
-        } else if (res.statusCode === 503) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (err) {}
-          const retryHint = parsed.pluginRecentlySeen
-            ? "The plugin was connected recently and may be finishing another action; wait a moment, then try again."
-            : "Open the Figlets Bridge plugin in Figma Desktop and try again.";
-          resolve({
-            error: `Figma plugin is not listening for token updates. ${retryHint}`,
-            activeSessionId: parsed.activeSessionId || null,
-          });
-        } else if (res.statusCode === 504) {
-          resolve({ error: "Token update timed out — try again with the plugin open." });
-        } else if (res.statusCode === 409) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (err) {}
-          resolve({
-            error: parsed.error || "The Figlets Bridge plugin is connected but does not advertise the token-update command. Reload the plugin from Figma Desktop so it loads the latest local code.",
-            activeSessionId: parsed.activeSessionId || null,
-            pluginCapabilities: parsed.pluginCapabilities || [],
-          });
-        } else {
-          resolve({ error: `Unexpected status ${res.statusCode}` });
-        }
-      });
-    });
-
-    req.setTimeout(65000, () => {
-      req.destroy();
-      resolve({ error: "Request timed out. The plugin may still be updating — check Figma." });
-    });
-
-    req.on("error", (err) => {
-      if (err.code === "ECONNREFUSED") {
-        resolve({ error: "Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP host." });
-      } else {
-        resolve({ error: err.message });
-      }
-    });
-
-    req.write(body);
-    req.end();
+  }, {
+    bridgeHookFile: args.bridgeHookFile,
+    transport: args.bridgeTransport,
+  }).then((response) => {
+    if (response.connectionError) {
+      return { error: response.connectionError };
+    }
+    const statusCode = response.statusCode;
+    const parsed = response.data || {};
+    if (statusCode === 200) {
+      const result = parsed.result || {};
+      return {
+        dryRun: !!result.dryRun,
+        categories: result.categories || resolved.bridgeCategories,
+        requestedCategories: resolved.requested,
+        orchestratedFrom: resolved.orchestratedFrom.length ? resolved.orchestratedFrom : undefined,
+        unknownCategories: result.unknownCategories || [],
+        report: result.report || {},
+        message: result.message || "Token update complete.",
+        configPath,
+        error: result.error,
+        missingCapabilityNotes: result.missingCapabilityNotes || [],
+        applySupported: true,
+      };
+    }
+    if (statusCode === 503) {
+      const retryHint = parsed.pluginRecentlySeen
+        ? "The plugin was connected recently and may be finishing another action; wait a moment, then try again."
+        : "Open the Figlets Bridge plugin in Figma Desktop and try again.";
+      return {
+        error: `Figma plugin is not listening for token updates. ${retryHint}`,
+        activeSessionId: parsed.activeSessionId || null,
+      };
+    }
+    if (statusCode === 504) {
+      return { error: "Token update timed out — try again with the plugin open." };
+    }
+    if (statusCode === 409) {
+      return {
+        error: parsed.error || "The Figlets Bridge plugin is connected but does not advertise the token-update command. Reload the plugin from Figma Desktop so it loads the latest local code.",
+        activeSessionId: parsed.activeSessionId || null,
+        pluginCapabilities: parsed.pluginCapabilities || [],
+      };
+    }
+    return { error: `Unexpected status ${statusCode}` };
   });
 }
 
@@ -369,8 +389,8 @@ function handleUpdateDsTokens(args = {}) {
       fileKey: dataSource.meta && dataSource.meta.fileKey || null,
     },
     applySupported: true,
-    supportedApplyCategories: Array.from(APPLY_CATEGORIES).sort(),
-    nextStep: "Show this dry-run report to the designer. If missingCapabilityNotes includes missing-foundation-collection, use inspect_ds_token_gaps.repairPlan.foundationRepairPlan and apply_ds_foundation_repairs after approval before token apply. If they approve radius, border-width, semantic spacing, typography variable/text-style, elevation variable, or elevation effect-style updates, call update_ds_tokens with dry_run:false for only those approved categories. Broad typography/elevation and other categories remain dry-run only.",
+    supportedApplyCategories: Array.from(SUPPORTED_APPLY_CATEGORIES).sort(),
+    nextStep: "Show this dry-run report to the designer. If missingCapabilityNotes includes missing-foundation-collection, use inspect_ds_token_gaps.repairPlan.foundationRepairPlan and apply_ds_foundation_repairs after approval before token apply. If they approve radius, border-width, semantic spacing, narrow typography/elevation slices, or broad typography/elevation orchestration, call update_ds_tokens with dry_run:false for those approved categories. Broad typography/elevation apply runs typography-variables then typography-styles (and elevation analog) in one call. Primitive/color categories belong on update_ds_primitives.",
   };
 }
 

@@ -41,7 +41,8 @@ assert.ok(
   "Elevation apply strategy should split variables from effect styles"
 );
 assert.ok(
-  plan.includes("approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles` only") &&
+  (plan.includes("approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles` only") ||
+    plan.includes("narrow typography/elevation slices, and broad `typography` / `elevation` orchestration")) &&
     plan.includes("Elevation collection FLOAT variables `elevation/<key>/{offset-y,radius}`"),
   "Current surface table should include the elevation apply slices"
 );
@@ -58,8 +59,9 @@ assert.ok(
   "Elevation style strategy should require structured prerequisite/failure reporting"
 );
 assert.ok(
-  plan.includes("Dry-run reports for broad typography/elevation are useful, but apply must keep returning `unsupported-apply-category` product-gap notes for broad `typography` and broad `elevation`"),
-  "Plan should preserve product-gap reporting for broad typography/elevation until future apply slices land"
+  plan.includes("**Done:** Broad `typography` / `elevation` one-shot orchestration") &&
+    plan.includes("typography-variables` then `typography-styles"),
+  "Plan should record completed broad typography/elevation orchestration apply"
 );
 assert.ok(
   plan.includes("Architecture Guardrail For New Repair Work") &&

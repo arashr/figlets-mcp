@@ -45,9 +45,10 @@ module.exports = (() => {
   assert.ok(fn.includes("missingShadowColorVariable"), "elevation-styles should report missing optional shadow color variables");
   assert.ok(fn.includes("unsupportedEffectBinding"), "elevation-styles should report binding API failures");
   assert.ok(
-    !fn.includes("'typography': true") &&
-      !fn.includes("'elevation': true"),
-    "broad typography/elevation must stay out of the current narrow apply slice"
+    fn.includes("function _orchestrationSlices(cat)") &&
+      fn.includes("if (cat === 'typography') return ['typography-variables', 'typography-styles']") &&
+      fn.includes("if (cat === 'elevation') return ['elevation-variables', 'elevation-styles']"),
+    "broad typography/elevation should expand into ordered narrow apply slices"
   );
   assert.ok(fn.includes("typographyName") && fn.includes("Typography collection"), "typography variables should target the Typography collection");
   assert.ok(fn.includes("type/body") === false, "typography variable apply should be config-driven, not hard-coded to one role");

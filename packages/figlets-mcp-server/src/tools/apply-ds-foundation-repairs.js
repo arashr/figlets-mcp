@@ -1,10 +1,9 @@
 "use strict";
 
 const fs = require("fs");
-const http = require("http");
 const path = require("path");
+const { requestBridgePost } = require("../bridges/bridge-request.js");
 const { getConfigPathGuardError } = require("../utils/paths.js");
-const { getReceiverUrl } = require("../utils/receiver-url.js");
 
 const applyDsFoundationRepairsTool = {
   name: "apply_ds_foundation_repairs",
@@ -125,74 +124,49 @@ function handleApplyDsFoundationRepairs(args = {}) {
     });
   }
 
-  const receiverUrl = getReceiverUrl();
-  const body = JSON.stringify({
+  return requestBridgePost("/request-foundation-repairs", {
     DS: ds,
     collections: normalized.collections,
-  });
-
-  return new Promise((resolve) => {
-    const req = http.request(`${receiverUrl}/request-foundation-repairs`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-      },
-    }, (res) => {
-      let data = "";
-      res.on("data", chunk => { data += chunk; });
-      res.on("end", () => {
-        if (res.statusCode === 200) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (err) {}
-          const result = parsed.result || {};
-          resolve({
-            createdCollections: result.createdCollections || [],
-            existingCollections: result.existingCollections || [],
-            skippedCollections: result.skippedCollections || [],
-            message: result.message || "Foundation repairs applied.",
-            configPath,
-            error: result.error,
-          });
-        } else if (res.statusCode === 503) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (err) {}
-          resolve({
-            error: parsed.error || "Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop and try again.",
-            activeSessionId: parsed.activeSessionId || null,
-            pluginCapabilities: parsed.pluginCapabilities || [],
-          });
-        } else if (res.statusCode === 504) {
-          resolve({ error: "Foundation repair timed out." });
-        } else if (res.statusCode === 409) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch (err) {}
-          resolve({
-            error: parsed.error || "The Figlets Bridge plugin does not advertise the foundation-repairs command. Reload the plugin in Figma Desktop.",
-            activeSessionId: parsed.activeSessionId || null,
-            pluginCapabilities: parsed.pluginCapabilities || [],
-          });
-        } else {
-          resolve({ error: `Unexpected status ${res.statusCode}` });
-        }
-      });
-    });
-
-    req.setTimeout(65000, () => {
-      req.destroy();
-      resolve({ error: "Request timed out. The plugin may still be applying foundation repairs." });
-    });
-
-    req.on("error", (err) => {
-      if (err.code === "ECONNREFUSED") {
-        resolve({ error: "Bridge receiver is not running. The MCP server should start it automatically; try restarting the MCP host." });
-      } else {
-        resolve({ error: err.message });
-      }
-    });
-
-    req.write(body);
-    req.end();
+  }, {
+    bridgeHookFile: args.bridgeHookFile,
+    transport: args.bridgeTransport,
+  }).then((response) => {
+    if (response.connectionError) {
+      return { error: response.connectionError, configPath };
+    }
+    const parsed = response.data || {};
+    const statusCode = response.statusCode;
+    if (statusCode === 200) {
+      const result = parsed.result || {};
+      return {
+        createdCollections: result.createdCollections || [],
+        existingCollections: result.existingCollections || [],
+        skippedCollections: result.skippedCollections || [],
+        message: result.message || "Foundation repairs applied.",
+        configPath,
+        error: result.error,
+      };
+    }
+    if (statusCode === 503) {
+      return {
+        error: parsed.error || "Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop and try again.",
+        activeSessionId: parsed.activeSessionId || null,
+        pluginCapabilities: parsed.pluginCapabilities || [],
+        configPath,
+      };
+    }
+    if (statusCode === 504) {
+      return { error: "Foundation repair timed out.", configPath };
+    }
+    if (statusCode === 409) {
+      return {
+        error: parsed.error || "The Figlets Bridge plugin does not advertise the foundation-repairs command. Reload the plugin in Figma Desktop.",
+        activeSessionId: parsed.activeSessionId || null,
+        pluginCapabilities: parsed.pluginCapabilities || [],
+        configPath,
+      };
+    }
+    return { error: `Unexpected status ${statusCode}`, configPath };
   });
 }
 

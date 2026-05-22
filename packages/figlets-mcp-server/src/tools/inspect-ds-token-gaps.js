@@ -48,7 +48,61 @@ const DEFAULT_CATEGORIES = [
 const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES.concat(["typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]));
 const KNOWN_COLOR_CATEGORIES = new Set(["primitive-color", "color-semantics"]);
 const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
+const ORCHESTRATION_APPLY_CATEGORIES = new Set(["typography", "elevation"]);
 const PRIMITIVE_APPLY_CATEGORIES = new Set(["primitive-typography", "primitive-shadow"]);
+
+function _typographyApplySlices(context) {
+  const hasTypographyVariableWork = (context.missingVariables || []).some(gap => gap.category === "typography")
+    || (context.typeMismatches || []).some(gap => gap.category === "typography");
+  const hasTypographyStyleWork = (context.missingStyles || []).some(gap => gap.category === "typography")
+    || (context.typeMismatches || []).some(gap => gap.category === "typography" && gap.kind === "style");
+  if (hasTypographyVariableWork && hasTypographyStyleWork) return ["typography-variables", "typography-styles"];
+  if (hasTypographyVariableWork) return ["typography-variables"];
+  if (hasTypographyStyleWork) return ["typography-styles"];
+  return [];
+}
+
+function _elevationApplySlices(context) {
+  const hasElevationVariableWork = (context.missingVariables || []).some(gap => gap.category === "elevation")
+    || (context.typeMismatches || []).some(gap => gap.category === "elevation");
+  const hasElevationStyleWork = (context.missingStyles || []).some(gap => gap.category === "elevation")
+    || (context.typeMismatches || []).some(gap => gap.category === "elevation" && gap.kind === "style");
+  if (hasElevationVariableWork && hasElevationStyleWork) return ["elevation-variables", "elevation-styles"];
+  if (hasElevationVariableWork) return ["elevation-variables"];
+  if (hasElevationStyleWork) return ["elevation-styles"];
+  return [];
+}
+
+function _defaultOrchestrationExpansion(category) {
+  if (category === "typography") return ["typography-variables", "typography-styles"];
+  if (category === "elevation") return ["elevation-variables", "elevation-styles"];
+  return [];
+}
+
+function expandTokenApplyCategories(requestedCategories, context) {
+  const expanded = [];
+  const seen = new Set();
+  for (const category of requestedCategories || []) {
+    if (ORCHESTRATION_APPLY_CATEGORIES.has(category)) {
+      const slices = (context && (context.missingVariables || context.missingStyles || context.typeMismatches))
+        ? (category === "typography" ? _typographyApplySlices(context) : _elevationApplySlices(context))
+        : _defaultOrchestrationExpansion(category);
+      const resolved = slices.length ? slices : _defaultOrchestrationExpansion(category);
+      for (const slice of resolved) {
+        if (!seen.has(slice)) {
+          seen.add(slice);
+          expanded.push(slice);
+        }
+      }
+      continue;
+    }
+    if (APPLY_CATEGORIES.has(category) && !seen.has(category)) {
+      seen.add(category);
+      expanded.push(category);
+    }
+  }
+  return expanded;
+}
 
 function _readDsConfig(configPath) {
   let readDsConfig;
@@ -443,11 +497,11 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const typeMismatches = tokenGaps.filter(gap => gap.gapType === "type-mismatch");
   const categoriesWithGaps = Array.from(supportedCategoriesWithGaps).sort();
   for (const category of categoriesWithGaps) {
-    if (APPLY_CATEGORIES.has(category) || PRIMITIVE_APPLY_CATEGORIES.has(category)) continue;
+    if (APPLY_CATEGORIES.has(category) || PRIMITIVE_APPLY_CATEGORIES.has(category) || ORCHESTRATION_APPLY_CATEGORIES.has(category)) continue;
     missingCapabilityNotes.push({
       kind: "unsupported-apply-category",
       category,
-      reason: "update_ds_tokens apply support is currently limited to radius, border-width, semantic spacing, typography variables, elevation variables, and elevation effect styles. This broad category can be dry-run previewed, but cannot be written directly by the Phase 3C/3D apply path.",
+      reason: "update_ds_tokens apply support is currently limited to radius, border-width, semantic spacing, typography/elevation orchestration, and the narrow typography/elevation variable/style slices. This category can be dry-run previewed, but cannot be written directly.",
       productGap: true,
     });
   }
@@ -499,20 +553,14 @@ function _buildRepairPlan(context) {
   const foundationBlocked = new Set(context.foundationBlockedApplyCategories || []);
   const applyCategorySet = new Set(categories.filter(category => APPLY_CATEGORIES.has(category) && !foundationBlocked.has(category)));
   if (categories.indexOf("typography") >= 0 && !foundationBlocked.has("typography")) {
-    const hasTypographyVariableWork = (context.missingVariables || []).some(gap => gap.category === "typography")
-      || (context.typeMismatches || []).some(gap => gap.category === "typography");
-    if (hasTypographyVariableWork) applyCategorySet.add("typography-variables");
-    const hasTypographyStyleWork = (context.missingStyles || []).some(gap => gap.category === "typography")
-      || (context.typeMismatches || []).some(gap => gap.category === "typography" && gap.kind === "style");
-    if (hasTypographyStyleWork && !hasTypographyVariableWork) applyCategorySet.add("typography-styles");
+    const typographySlices = _typographyApplySlices(context);
+    if (typographySlices.length === 2) applyCategorySet.add("typography");
+    else typographySlices.forEach(slice => applyCategorySet.add(slice));
   }
   if (categories.indexOf("elevation") >= 0 && !foundationBlocked.has("elevation")) {
-    const hasElevationVariableWork = (context.missingVariables || []).some(gap => gap.category === "elevation")
-      || (context.typeMismatches || []).some(gap => gap.category === "elevation");
-    if (hasElevationVariableWork) applyCategorySet.add("elevation-variables");
-    const hasElevationStyleWork = (context.missingStyles || []).some(gap => gap.category === "elevation")
-      || (context.typeMismatches || []).some(gap => gap.category === "elevation" && gap.kind === "style");
-    if (hasElevationStyleWork && !hasElevationVariableWork) applyCategorySet.add("elevation-styles");
+    const elevationSlices = _elevationApplySlices(context);
+    if (elevationSlices.length === 2) applyCategorySet.add("elevation");
+    else elevationSlices.forEach(slice => applyCategorySet.add(slice));
   }
   const applyCategories = Array.from(applyCategorySet).sort();
   const primitiveApplyCategories = categories
@@ -616,7 +664,7 @@ function _buildRepairPlan(context) {
     missingCapabilityNotes: context.missingCapabilityNotes || [],
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
-      ? "Show repairPlan.designerPresentation in plain language. If repairPlan.foundationRepairPlan.applyInput.collections is non-empty, ask for approval and run apply_ds_foundation_repairs before token/primitive apply. If repairPlan.primitiveRepairPlan is present, run update_ds_primitives with its previewInput, show the dry-run report, ask for approval, then run primitiveRepairPlan.applyInput before or alongside update_ds_tokens apply when both are ready. Run update_ds_tokens with repairPlan.previewInput for semantic token slices. Only repairPlan.applyInput categories are token-apply-supported now, and they still require explicit designer approval after preview. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
+      ? "Show repairPlan.designerPresentation in plain language. If repairPlan.foundationRepairPlan.applyInput.collections is non-empty, ask for approval and run apply_ds_foundation_repairs before token/primitive apply. If repairPlan.primitiveRepairPlan is present, run update_ds_primitives with its previewInput, show the dry-run report, ask for approval, then run primitiveRepairPlan.applyInput before or alongside update_ds_tokens apply when both are ready. Run update_ds_tokens with repairPlan.previewInput for semantic token slices. repairPlan.applyInput may include broad typography or elevation when both variable and style work exist; update_ds_tokens runs typography-variables then typography-styles (and elevation analog) in one approved call. Narrow apply categories and orchestration categories still require explicit designer approval after preview. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
       : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
 }
@@ -769,5 +817,7 @@ module.exports = {
   handleInspectDsTokenGaps,
   inspectDsTokenGapsFromConfigAndFigmaData,
   _buildRepairPlan,
+  expandTokenApplyCategories,
+  ORCHESTRATION_APPLY_CATEGORIES,
   PRIMITIVE_APPLY_CATEGORIES,
 };

@@ -37,6 +37,7 @@ module.exports = new Promise((resolve, reject) => {
           const health = JSON.parse(healthBody);
           assert.strictEqual(health.ok, true);
           assert.strictEqual(health.receiver, "running");
+          assert.strictEqual(health.devBridgeEnabled, false);
           assert.strictEqual(health.pluginConnected, false);
           assert.deepStrictEqual(health.pluginCapabilities, []);
           assert.strictEqual(health.updatePrimitivesLive, false);

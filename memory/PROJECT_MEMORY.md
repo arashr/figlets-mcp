@@ -4,13 +4,29 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-22 — token prune + collection modes in update_ds_tokens]
+
+**Status:** Completed roadmap item 14. `update_ds_tokens` now supports approved off-config prune for managed token variables (`space/*`, `type/*`, `elevation/*` in their collections) and config-derived `type/*` text styles / `elevation/0..5` effect styles. Color ramp prune keys redirect to `update_ds_primitives`. **Prune apply requires `prune.config_authoritative=true`** after dry-run review because Figlets compares against the active config, not full Figma history. Apply supports `ensure_collection_modes` to add configured breakpoint modes on existing Spacing/Typography collections before responsive writes. `inspect_ds_token_gaps` reports `missing-foundation-modes`, sets `repairPlan.applyInput.ensure_collection_modes`, and blocks responsive apply until modes exist or approved ensure runs.
+
+**Live validation (Figlets Test `local_mpcspbgz_7gq8yy0l`, bridge `http://localhost:17337`):** `scripts/live-validate-token-prune-and-modes.js` — dry-run 12 off-config variable candidates; prune apply blocked without `config_authoritative`; `ensure_collection_modes` + elevation refresh; final reinspect clean. Destructive prune apply stays opt-in (`FIGLETS_LIVE_APPLY_PRUNE=1` + `config_authoritative`) because the disposable config is narrower than tokens created by full `apply_ds_setup`. `scripts/live-validate-ensure-collection-modes.js` — dev trim removed Tablet/Desktop from `4. Spacing`, inspect routed `ensure_collection_modes` and blocked `spacing-semantics`, apply recreated modes and cleared `missing-foundation-modes`. An earlier mistaken live prune apply deleted valid `space/radius/*` and `space/border/*` tokens; restored via `update_ds_tokens` radius/border-width apply.
+
+**Developer test prep:** `request-trim-collection-modes` and `request-remove-text-styles` are gated behind `FIGLETS_DEV_BRIDGE=1` (404 in designer flows). `ensureReceiverRunning` forwards `FIGLETS_DEV_BRIDGE` on spawn, restarts a receiver missing dev commands (LISTEN-only `lsof`), and `waitForPluginConnection` supports scripts after restart. `/health` exposes `devBridgeEnabled`.
+
+**Tests:** Extended planner, prune guard, integration snapshot modes, `tests/bridge/receiver.test.js` (`devBridgeEnabled`). Supported-runtime suite passes **77/77**.
+
+**Commit:** `71d9c47`.
+
+**Next:** No remaining Phase 3 token-completion product gaps in the current roadmap slice.
+
 ### [2026-05-22 — broad typography/elevation orchestration in update_ds_tokens]
 
 **Status:** Completed roadmap item 13. `update_ds_tokens` apply now accepts broad `typography` and `elevation`. Server and bridge expand them into ordered narrow slices (`typography-variables` → `typography-styles`, `elevation-variables` → `elevation-styles`) in one approved call. `inspect_ds_token_gaps` emits broad categories in `repairPlan.applyInput` when both variable and style work exists; otherwise it keeps the existing narrow slice. Broad categories are no longer `unsupported-apply-category` product gaps.
 
+**Live validation:** Figlets Test via `scripts/live-validate-broad-orchestration.js` (dev prep `request-remove-text-styles`, broad apply, reinspect). Artifacts under `.local/broad-orchestration-live-validation/`.
+
 **Tests:** Updated planner, apply, integration, bridge policy, and bulk-repair plan regression tests.
 
-**Next:** Prune/delete apply and collection mode creation in `update_ds_tokens` (roadmap item 14). Live validation on Figlets Test still recommended before designer-facing claims.
+**Commit:** `956155f` (orchestration); live validation scripts in `71d9c47`.
 
 ### [2026-05-21 — primitive-shadow apply via update_ds_primitives]
 
@@ -50,7 +66,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Operational note:** Prior Codex/Cursor sessions that kept an old app-managed Figlets MCP process could still return `{}` or reject new categories while direct handlers and a fresh stdio MCP session worked. If that mismatch reappears, reconnect/restart the host MCP session; do not chase it as a repo regression when the script and regression test pass.
 
-**Next product/engineering step:** Broad `typography` / `elevation` orchestration in `update_ds_tokens`, then prune/delete apply, then collection mode creation. See roadmap items 13–14 in `docs/bulk-repair-api-implementation-plan.md`. Primitive `primitive-typography` and `primitive-shadow` apply are done (`959dd72`, `3741a7a`).
+**Next product/engineering step (historical):** Broad `typography` / `elevation` orchestration and token prune/collection-mode ensure were completed 2026-05-22 (roadmap items 13–14). Primitive `primitive-typography` and `primitive-shadow` apply are done (`959dd72`, `3741a7a`).
 
 ### [2026-05-21 — Agent bulk surfaces and update_ds_primitives category docs]
 

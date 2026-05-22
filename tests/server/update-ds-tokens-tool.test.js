@@ -101,8 +101,8 @@ module.exports = (async () => {
       assert.deepStrictEqual(result.categories, ["typography", "radius"]);
       assert.deepStrictEqual(result.unknownCategories, ["made-up"]);
       assert.ok(
-        result.missingCapabilityNotes.some(note => note.kind === "unsupported-prune"),
-        "prune requests should be reported as unsupported in Phase 3B"
+        result.missingCapabilityNotes.some(note => note.kind === "unsupported-prune" && /update_ds_primitives/.test(note.reason)),
+        "color prune requests should redirect to update_ds_primitives"
       );
       assert.ok(
         result.report.typography.wouldCreateVariables.some(item => item.name === "type/body/md/line-height"),
@@ -121,6 +121,86 @@ module.exports = (async () => {
       assert.deepStrictEqual(
         result.supportedApplyCategories,
         ["border-width", "elevation", "elevation-styles", "elevation-variables", "radius", "spacing-semantics", "typography", "typography-styles", "typography-variables"]
+      );
+    }
+
+    {
+      const pruneFigmaDataPath = path.join(tmp, "figma-data-prune.json");
+      const pruneSnapshot = {
+        collections: [
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            modes: [{ id: "m1", modeId: "m1", name: "Mobile" }],
+            variableIds: ["space-component-md", "space-legacy"],
+          },
+          {
+            id: "typography",
+            name: "3. Typography",
+            modes: [{ id: "t1", modeId: "t1", name: "Mobile" }],
+            variableIds: ["type-body-size"],
+          },
+        ],
+        variables: [
+          variable("space-component-md", "space/component/md"),
+          variable("space-legacy", "space/legacy-token"),
+          variable("type-body-size", "type/body/md/size"),
+        ],
+        textStyles: [{ name: "type/body/md" }, { name: "type/body/legacy" }],
+        effectStyles: [{ name: "elevation/0" }, { name: "elevation/9" }],
+      };
+      fs.writeFileSync(pruneFigmaDataPath, JSON.stringify(pruneSnapshot, null, 2), "utf8");
+      const result = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath: pruneFigmaDataPath,
+        categories: ["spacing-semantics", "typography-styles", "elevation-styles"],
+        create_missing: true,
+        dry_run: true,
+        prune: {
+          off_config_variables: true,
+          off_config_text_styles: true,
+          off_config_effect_styles: true,
+        },
+      });
+      assert.ok(!result.error, result.error);
+      assert.ok(result.report.prune, "token prune dry-run should include prune report");
+      assert.ok(
+        result.report.prune.wouldPruneVariables.some(item => item.name === "space/legacy-token"),
+        "off-config spacing variables should be prune candidates"
+      );
+      assert.ok(
+        result.report.prune.wouldPruneTextStyles.some(item => item.name === "type/body/legacy"),
+        "off-config text styles should be prune candidates"
+      );
+      assert.ok(
+        result.report.prune.wouldPruneEffectStyles.some(item => item.name === "elevation/9"),
+        "off-config effect styles should be prune candidates"
+      );
+      assert.ok(!result.report.prune.wouldPruneEffectStyles.some(item => item.name === "elevation/0"));
+
+      const dryPruneGuarded = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath: pruneFigmaDataPath,
+        categories: ["radius"],
+        dry_run: true,
+        prune: { off_config_variables: true },
+      });
+      assert.ok(
+        dryPruneGuarded.missingCapabilityNotes.some(note => note.kind === "prune-requires-config-authoritative"),
+        "dry-run prune should warn that apply needs config_authoritative"
+      );
+
+      const blockedPruneApply = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath: pruneFigmaDataPath,
+        categories: ["radius"],
+        dry_run: false,
+        prune: { off_config_variables: true },
+      });
+      assert.ok(blockedPruneApply.error && /config_authoritative/i.test(blockedPruneApply.error));
+      assert.ok(
+        blockedPruneApply.missingCapabilityNotes.some(note => note.kind === "prune-requires-config-authoritative"),
+        "prune apply without config_authoritative should be blocked"
       );
     }
 

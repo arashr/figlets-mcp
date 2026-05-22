@@ -358,6 +358,18 @@ figma.ui.onmessage = async (msg) => {
   }
 
   // Developer-only bridge command (FIGLETS_DEV_BRIDGE=1). Not advertised in plugin capabilities.
+  if (msg.type === 'trim-collection-modes') {
+    try {
+      _appendSessionLog('Executing trim_collection_modes.');
+      const result = await _trimCollectionModesForDevPrep(msg.data || {});
+      figma.ui.postMessage({ type: 'figlets-trim-collection-modes-done', fileKey: _getFigletsFileKey(), data: result });
+      _appendSessionLog('Completed trim_collection_modes.');
+    } catch (err) {
+      _appendSessionLog('trim_collection_modes failed: ' + err.message);
+      figma.ui.postMessage({ type: 'figlets-trim-collection-modes-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
   if (msg.type === 'remove-text-styles') {
     try {
       _appendSessionLog('Executing remove_text_styles.');
@@ -963,6 +975,38 @@ async function _createDsBindingContext() {
     paint,
     bindVar
   };
+}
+
+async function _trimCollectionModesForDevPrep(opts) {
+  opts = opts || {};
+  var collectionName = String(opts.collectionName || '').trim();
+  var keepModeNames = Array.isArray(opts.keepModeNames) ? opts.keepModeNames.filter(Boolean) : [];
+  var result = { collectionName: collectionName, removedModes: [], keptModes: [] };
+  if (!collectionName) return { error: 'collectionName is required.' };
+  if (!keepModeNames.length) return { error: 'keepModeNames must include at least one mode to keep.' };
+
+  var collections = await figma.variables.getLocalVariableCollectionsAsync();
+  var collection = _findVariableCollectionByName(collections, collectionName);
+  if (!collection) return { error: 'Collection "' + collectionName + '" was not found.' };
+
+  var keepSet = {};
+  for (var ki = 0; ki < keepModeNames.length; ki++) keepSet[String(keepModeNames[ki])] = true;
+  for (var mi = collection.modes.length - 1; mi >= 0; mi--) {
+    var mode = collection.modes[mi];
+    var modeName = String(mode && mode.name || '');
+    if (keepSet[modeName]) {
+      result.keptModes.push(modeName);
+      continue;
+    }
+    try {
+      collection.removeMode(mode.modeId);
+      result.removedModes.push(modeName);
+    } catch (trimErr) {
+      result.error = trimErr.message;
+      return result;
+    }
+  }
+  return result;
 }
 
 async function _removeLocalTextStylesByName(names) {
@@ -6526,10 +6570,137 @@ function _tokenValueEq(a, b) {
   return a === b;
 }
 
+function _managedVariablePrefixesForCollection(DS, collectionName) {
+  var spacingName = (DS.collections && DS.collections.spacing) ? DS.collections.spacing : '4. Spacing';
+  var typographyName = (DS.collections && DS.collections.typography) ? DS.collections.typography : '3. Typography';
+  var elevationName = (DS.collections && DS.collections.elevation) ? DS.collections.elevation : '5. Elevation';
+  if (collectionName === spacingName) return ['space/'];
+  if (collectionName === typographyName) return [_typePrefixForTokenUpdate(DS) + '/'];
+  if (collectionName === elevationName) return ['elevation/'];
+  return [];
+}
+
+function _nameMatchesManagedPrefixes(name, prefixes) {
+  if (!prefixes || !prefixes.length) return false;
+  for (var mpi = 0; mpi < prefixes.length; mpi++) {
+    if (String(name || '').indexOf(prefixes[mpi]) === 0) return true;
+  }
+  return false;
+}
+
+function _expectedManagedNamesForPrune(DS, categories, pruneFlags) {
+  var variableSet = {};
+  var textStyleSet = {};
+  var effectStyleSet = {};
+  var pruneCategories = categories.slice();
+  if (pruneFlags.pruneTextStyles && pruneCategories.indexOf('typography-styles') < 0) pruneCategories.push('typography-styles');
+  if (pruneFlags.pruneEffectStyles && pruneCategories.indexOf('elevation-styles') < 0) pruneCategories.push('elevation-styles');
+  for (var ci = 0; ci < pruneCategories.length; ci++) {
+    var cat = pruneCategories[ci];
+    if (cat === 'typography' || cat === 'elevation') continue;
+    var entries = _tokenUpdateEntriesForCategory(DS, cat);
+    for (var ei = 0; ei < entries.length; ei++) variableSet[entries[ei].name] = true;
+  }
+  if (pruneFlags.pruneTextStyles) {
+    var scale = DS && DS.typography && DS.typography.scale ? DS.typography.scale : {};
+    var pattern = DS && DS.naming && DS.naming.textStyle ? DS.naming.textStyle : 'type/{role}/{size}';
+    var roles = Object.keys(scale);
+    for (var ti = 0; ti < roles.length; ti++) {
+      var role = roles[ti];
+      var parts = String(role).split('/');
+      var size = parts.length > 1 ? parts[parts.length - 1] : role;
+      var roleName = pattern.indexOf('{size}') >= 0 && parts.length > 1 ? parts.slice(0, -1).join('/') : role;
+      textStyleSet[pattern.replace('{role}', roleName).replace('{size}', size)] = true;
+    }
+  }
+  if (pruneFlags.pruneEffectStyles) {
+    for (var li = 0; li <= 5; li++) effectStyleSet['elevation/' + li] = true;
+  }
+  return { variableSet: variableSet, textStyleSet: textStyleSet, effectStyleSet: effectStyleSet };
+}
+
+async function _runTokenPrune(DS, categories, pruneFlags, dryRun, spacingName, typographyName, elevationName, allVars, allColls) {
+  var expected = _expectedManagedNamesForPrune(DS, categories, pruneFlags);
+  var result = {
+    wouldPruneVariables: [],
+    prunedVariables: [],
+    wouldPruneTextStyles: [],
+    prunedTextStyles: [],
+    wouldPruneEffectStyles: [],
+    prunedEffectStyles: [],
+  };
+  if (pruneFlags.pruneVariables) {
+    for (var vi = 0; vi < allVars.length; vi++) {
+      var variable = allVars[vi];
+      if (!variable || !variable.name) continue;
+      var collection = null;
+      for (var coli = 0; coli < allColls.length; coli++) {
+        if (allColls[coli].id === variable.variableCollectionId) {
+          collection = allColls[coli];
+          break;
+        }
+      }
+      if (!collection || !collection.name) continue;
+      var prefixes = _managedVariablePrefixesForCollection(DS, collection.name);
+      if (!_nameMatchesManagedPrefixes(variable.name, prefixes)) continue;
+      if (expected.variableSet[variable.name]) continue;
+      var item = { name: variable.name, kind: 'variable', collection: collection.name };
+      if (dryRun) result.wouldPruneVariables.push(item);
+      else {
+        try {
+          variable.remove();
+          result.prunedVariables.push(item);
+        } catch (pruneVarErr) {}
+      }
+    }
+  }
+  if (pruneFlags.pruneTextStyles) {
+    var textStyles = await figma.getLocalTextStylesAsync();
+    var typePrefix = _typePrefixForTokenUpdate(DS) + '/';
+    for (var tsi = 0; tsi < textStyles.length; tsi++) {
+      var textStyle = textStyles[tsi];
+      if (!textStyle || !textStyle.name) continue;
+      if (String(textStyle.name).indexOf(typePrefix) !== 0) continue;
+      if (expected.textStyleSet[textStyle.name]) continue;
+      var textItem = { name: textStyle.name, kind: 'style', styleType: 'TEXT', collection: 'local text styles' };
+      if (dryRun) result.wouldPruneTextStyles.push(textItem);
+      else {
+        try {
+          textStyle.remove();
+          result.prunedTextStyles.push(textItem);
+        } catch (pruneTextErr) {}
+      }
+    }
+  }
+  if (pruneFlags.pruneEffectStyles) {
+    var effectStyles = await figma.getLocalEffectStylesAsync();
+    for (var esi = 0; esi < effectStyles.length; esi++) {
+      var effectStyle = effectStyles[esi];
+      if (!effectStyle || !effectStyle.name) continue;
+      if (!/^elevation\/\d+$/.test(effectStyle.name)) continue;
+      if (expected.effectStyleSet[effectStyle.name]) continue;
+      var effectItem = { name: effectStyle.name, kind: 'style', styleType: 'EFFECT', collection: 'local effect styles' };
+      if (dryRun) result.wouldPruneEffectStyles.push(effectItem);
+      else {
+        try {
+          effectStyle.remove();
+          result.prunedEffectStyles.push(effectItem);
+        } catch (pruneEffectErr) {}
+      }
+    }
+  }
+  return result;
+}
+
 async function _updateDsTokens(payload) {
   var DS = (payload && payload.DS) || {};
   var createMissing = !(payload && payload.createMissing === false);
   var dryRun = !!(payload && payload.dryRun);
+  var ensureCollectionModes = !!(payload && payload.ensureCollectionModes);
+  var pruneOffConfigVariables = !!(payload && payload.pruneOffConfigVariables);
+  var pruneOffConfigTextStyles = !!(payload && payload.pruneOffConfigTextStyles);
+  var pruneOffConfigEffectStyles = !!(payload && payload.pruneOffConfigEffectStyles);
+  var pruneConfigAuthoritative = !!(payload && payload.pruneConfigAuthoritative);
   var requested = (payload && Array.isArray(payload.categories) && payload.categories.length > 0)
     ? payload.categories
     : [];
@@ -6675,6 +6846,24 @@ async function _updateDsTokens(payload) {
   if (primCollId) {
     for (var pvi = 0; pvi < allVars.length; pvi++) {
       if (allVars[pvi].variableCollectionId === primCollId) primByName[allVars[pvi].name] = allVars[pvi].id;
+    }
+  }
+
+  var ensuredModes = [];
+  if (ensureCollectionModes) {
+    if (!spacingColl) spacingColl = _collectionByName(spacingName);
+    if (spacingColl) {
+      var spacingModeEnsure = _ensureCollectionModes(spacingColl, _configuredFoundationModes(DS, 'spacing'));
+      if (spacingModeEnsure.createdModes.length) {
+        ensuredModes.push({ collection: spacingName, createdModes: spacingModeEnsure.createdModes });
+      }
+    }
+    if (!typographyColl) typographyColl = _collectionByName(typographyName);
+    if (typographyColl) {
+      var typographyModeEnsure = _ensureCollectionModes(typographyColl, _configuredFoundationModes(DS, 'typography'));
+      if (typographyModeEnsure.createdModes.length) {
+        ensuredModes.push({ collection: typographyName, createdModes: typographyModeEnsure.createdModes });
+      }
     }
   }
 
@@ -7157,11 +7346,61 @@ async function _updateDsTokens(payload) {
   }
   if (unknown.length) parts.push(unknown.length + ' unsupported categories');
 
+  var pruneReport = null;
+  if ((pruneOffConfigVariables || pruneOffConfigTextStyles || pruneOffConfigEffectStyles) && !dryRun && !pruneConfigAuthoritative) {
+    return {
+      error: 'Token prune apply requires prune.config_authoritative=true after dry-run review confirms the active config is authoritative.',
+      dryRun: false,
+      categories: categories,
+      unknownCategories: unknown,
+      missingCapabilityNotes: [{
+        kind: 'prune-requires-config-authoritative',
+        reason: 'Off-config token prune deletes managed variables/styles present in Figma but absent from the active config.',
+        productGap: false,
+      }],
+      report: report,
+    };
+  }
+  if (pruneOffConfigVariables || pruneOffConfigTextStyles || pruneOffConfigEffectStyles) {
+    pruneReport = await _runTokenPrune(
+      DS,
+      categories,
+      {
+        pruneVariables: pruneOffConfigVariables,
+        pruneTextStyles: pruneOffConfigTextStyles,
+        pruneEffectStyles: pruneOffConfigEffectStyles,
+      },
+      dryRun,
+      spacingName,
+      typographyName,
+      elevationName,
+      allVars,
+      allColls
+    );
+    var pruneCount = dryRun
+      ? pruneReport.wouldPruneVariables.length + pruneReport.wouldPruneTextStyles.length + pruneReport.wouldPruneEffectStyles.length
+      : pruneReport.prunedVariables.length + pruneReport.prunedTextStyles.length + pruneReport.prunedEffectStyles.length;
+    if (pruneCount) parts.push((dryRun ? 'would prune ' : 'pruned ') + pruneCount + ' off-config managed token item' + (pruneCount === 1 ? '' : 's'));
+  }
+  if (ensuredModes.length) {
+    var createdModeCount = 0;
+    for (var emi = 0; emi < ensuredModes.length; emi++) createdModeCount += ensuredModes[emi].createdModes.length;
+    if (createdModeCount) parts.push((dryRun ? 'would create ' : 'created ') + createdModeCount + ' collection mode' + (createdModeCount === 1 ? '' : 's'));
+  }
+
   return {
     dryRun: dryRun,
     categories: categories,
     unknownCategories: unknown,
     report: report,
+    prune: pruneReport,
+    ensuredModes: ensuredModes,
+    pruned: pruneReport && !dryRun
+      ? pruneReport.prunedVariables.length + pruneReport.prunedTextStyles.length + pruneReport.prunedEffectStyles.length
+      : 0,
+    wouldPrune: pruneReport && dryRun
+      ? pruneReport.wouldPruneVariables.length + pruneReport.wouldPruneTextStyles.length + pruneReport.wouldPruneEffectStyles.length
+      : 0,
     message: parts.length ? parts.join('; ') : 'No token updates requested.',
   };
 }

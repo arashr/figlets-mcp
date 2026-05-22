@@ -9,12 +9,13 @@ const {
   expandTokenApplyCategories,
   inspectDsTokenGapsFromConfigAndFigmaData,
   ORCHESTRATION_APPLY_CATEGORIES,
+  planTokenPruneFromSnapshot,
 } = require("./inspect-ds-token-gaps.js");
 
 const updateDsTokensTool = {
   name: "update_ds_tokens",
   description:
-    "Preview and apply config-backed non-color token completion. dry_run=true reports missing variables/styles, type mismatches, and unsupported categories without mutating Figma. Apply supports radius, border-width, semantic spacing, narrow typography/elevation variable and style slices, and broad typography/elevation orchestration that runs variables then styles in one approved call.",
+    "Preview and apply config-backed non-color token completion. dry_run=true reports missing variables/styles, type mismatches, optional off-config prune candidates, and unsupported categories without mutating Figma. Apply supports radius, border-width, semantic spacing, narrow typography/elevation variable and style slices, broad typography/elevation orchestration, optional ensure_collection_modes, and approved off-config prune/delete for managed token variables and config-derived text/effect styles.",
   inputSchema: {
     type: "object",
     properties: {
@@ -39,14 +40,25 @@ const updateDsTokensTool = {
         type: "boolean",
         description: "When true, report what would happen without mutating Figma. When false, apply supports radius, border-width, semantic spacing, narrow typography/elevation slices, and broad typography/elevation orchestration."
       },
+      ensure_collection_modes: {
+        type: "boolean",
+        description: "When true on apply, add configured breakpoint modes to existing Spacing and Typography collections before responsive token writes. Prefer inspect_ds_token_gaps.repairPlan.applyInput.ensure_collection_modes after designer approval."
+      },
       prune: {
         type: "object",
         properties: {
+          off_config_variables: { type: "boolean" },
+          off_config_text_styles: { type: "boolean" },
+          off_config_effect_styles: { type: "boolean" },
+          config_authoritative: {
+            type: "boolean",
+            description: "Required for dry_run:false when any token prune flag is set. Confirms the active config is the full source of truth for managed token variables and styles.",
+          },
           off_scale_color_steps: { type: "boolean" },
           unused_color_ramps: { type: "boolean" }
         },
         additionalProperties: false,
-        description: "Future prune options. Phase 3B reports them as unsupported rather than deleting anything."
+        description: "Optional approved prune scope. Token prune deletes managed off-config variables/styles only when config_authoritative is true on apply. Color ramp prune belongs on update_ds_primitives."
       }
     },
     required: ["config_path"],
@@ -143,7 +155,7 @@ function _buildDryRunReport(plannerResult, options) {
 
 function _messageForReport(report, unknownCategories, createMissing) {
   const parts = [];
-  const categories = Object.keys(report).sort();
+  const categories = Object.keys(report).filter(key => key !== "prune").sort();
   for (const category of categories) {
     const item = report[category];
     const createCount = item.wouldCreateVariables.length + item.wouldCreateStyles.length;
@@ -162,6 +174,33 @@ function _messageForReport(report, unknownCategories, createMissing) {
     parts.push(`${unknownCategories.length} unsupported categor${unknownCategories.length === 1 ? "y" : "ies"}`);
   }
   return parts.length ? parts.join("; ") : "No config-backed token changes would be made.";
+}
+
+function _normalizePruneOptions(prune) {
+  if (!prune || typeof prune !== "object") return {};
+  return {
+    off_config_variables: !!prune.off_config_variables,
+    off_config_text_styles: !!prune.off_config_text_styles,
+    off_config_effect_styles: !!prune.off_config_effect_styles,
+    config_authoritative: !!prune.config_authoritative,
+    off_scale_color_steps: !!prune.off_scale_color_steps,
+    unused_color_ramps: !!prune.unused_color_ramps,
+  };
+}
+
+function _legacyColorPruneRequested(prune) {
+  const normalized = _normalizePruneOptions(prune);
+  return normalized.off_scale_color_steps || normalized.unused_color_ramps;
+}
+
+function _tokenPruneRequested(prune) {
+  const normalized = _normalizePruneOptions(prune);
+  return normalized.off_config_variables || normalized.off_config_text_styles || normalized.off_config_effect_styles;
+}
+
+function _pruneCategoriesForRequest(args, plannerCategories) {
+  const requested = _requestedCategories(args);
+  return requested.length ? requested : (plannerCategories || []);
 }
 
 function _requestedCategories(args) {
@@ -250,16 +289,33 @@ function _handleApplyDsTokens(args, configPath, ds) {
       applySupported: true,
     };
   }
-  if (args.prune && (args.prune.off_scale_color_steps || args.prune.unused_color_ramps)) {
+  const prune = _normalizePruneOptions(args.prune);
+  const missingCapabilityNotes = [];
+  if (_legacyColorPruneRequested(prune)) {
+    missingCapabilityNotes.push({
+      kind: "unsupported-prune",
+      reason: "Color ramp prune belongs on update_ds_primitives with prune_off_scale or prune_unused_ramps. update_ds_tokens prune only covers off-config token variables and config-derived text/effect styles.",
+      productGap: false,
+    });
+  }
+  if (_tokenPruneRequested(prune) && !categories.length) {
     return {
-      error: "update_ds_tokens does not support prune/delete operations in Phase 3C.",
+      error: "categories is required when prune is requested so Figlets can compute the managed config-backed keep set.",
       dryRun: false,
       configPath,
-      missingCapabilityNotes: [{
-        kind: "unsupported-prune",
-        reason: "Prune/delete operations are intentionally outside this approved token-completion apply slice.",
-        productGap: true,
-      }],
+      missingCapabilityNotes,
+    };
+  }
+  if (_tokenPruneRequested(prune) && !prune.config_authoritative) {
+    return {
+      error: "Token prune apply requires prune.config_authoritative=true after the designer confirms the active config is the full source of truth for managed token variables and styles.",
+      dryRun: false,
+      configPath,
+      missingCapabilityNotes: missingCapabilityNotes.concat([{
+        kind: "prune-requires-config-authoritative",
+        reason: "Off-config token prune deletes managed variables/styles that exist in Figma but are absent from the active config. Set prune.config_authoritative=true only after dry-run review when the config is authoritative.",
+        productGap: false,
+      }]),
     };
   }
 
@@ -268,6 +324,11 @@ function _handleApplyDsTokens(args, configPath, ds) {
     categories: resolved.bridgeCategories,
     createMissing: args.create_missing !== false,
     dryRun: false,
+    ensureCollectionModes: args.ensure_collection_modes === true,
+    pruneOffConfigVariables: prune.off_config_variables,
+    pruneOffConfigTextStyles: prune.off_config_text_styles,
+    pruneOffConfigEffectStyles: prune.off_config_effect_styles,
+    pruneConfigAuthoritative: prune.config_authoritative,
   }, {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
@@ -286,10 +347,14 @@ function _handleApplyDsTokens(args, configPath, ds) {
         orchestratedFrom: resolved.orchestratedFrom.length ? resolved.orchestratedFrom : undefined,
         unknownCategories: result.unknownCategories || [],
         report: result.report || {},
+        prune: result.prune || undefined,
+        ensuredModes: result.ensuredModes || undefined,
+        pruned: result.pruned,
+        wouldPrune: result.wouldPrune,
         message: result.message || "Token update complete.",
         configPath,
         error: result.error,
-        missingCapabilityNotes: result.missingCapabilityNotes || [],
+        missingCapabilityNotes: missingCapabilityNotes.concat(result.missingCapabilityNotes || []),
         applySupported: true,
       };
     }
@@ -355,9 +420,7 @@ function handleUpdateDsTokens(args = {}) {
     };
   }
 
-  const pruneRequested = Boolean(args.prune && (
-    args.prune.off_scale_color_steps || args.prune.unused_color_ramps
-  ));
+  const prune = _normalizePruneOptions(args.prune);
   const plannerResult = inspectDsTokenGapsFromConfigAndFigmaData(ds, dataSource.figmaData, {
     configPath,
     categories: args.categories,
@@ -367,12 +430,29 @@ function handleUpdateDsTokens(args = {}) {
   const report = _buildDryRunReport(plannerResult, { create_missing: args.create_missing });
   const unknownCategories = (plannerResult.categories && plannerResult.categories.unsupported) || [];
   const missingCapabilityNotes = (plannerResult.repairPlan && plannerResult.repairPlan.missingCapabilityNotes || []).slice();
-  if (pruneRequested) {
+  if (_legacyColorPruneRequested(prune)) {
     missingCapabilityNotes.push({
       kind: "unsupported-prune",
-      reason: "update_ds_tokens Phase 3B is dry-run token completion only and does not plan or apply prune/delete operations.",
-      productGap: true,
+      reason: "Color ramp prune belongs on update_ds_primitives with prune_off_scale or prune_unused_ramps. update_ds_tokens prune only covers off-config token variables and config-derived text/effect styles.",
+      productGap: false,
     });
+  }
+  let pruneMessage = "";
+  if (_tokenPruneRequested(prune)) {
+    const pruneCategories = _pruneCategoriesForRequest(args, plannerResult.categories && plannerResult.categories.supported);
+    const prunePlan = planTokenPruneFromSnapshot(ds, dataSource.figmaData, pruneCategories, prune);
+    report.prune = prunePlan;
+    const pruneCount = prunePlan.wouldPruneVariables.length
+      + prunePlan.wouldPruneTextStyles.length
+      + prunePlan.wouldPruneEffectStyles.length;
+    if (pruneCount) pruneMessage = `; prune: ${pruneCount} off-config managed item${pruneCount === 1 ? "" : "s"} would delete`;
+    if (!prune.config_authoritative) {
+      missingCapabilityNotes.push({
+        kind: "prune-requires-config-authoritative",
+        reason: "Dry-run prune is informational only until the designer sets prune.config_authoritative=true on apply. Figlets compares against the active config, not the full Figma file history.",
+        productGap: false,
+      });
+    }
   }
 
   return {
@@ -381,7 +461,7 @@ function handleUpdateDsTokens(args = {}) {
     unknownCategories,
     report,
     missingCapabilityNotes,
-    message: _messageForReport(report, unknownCategories, args.create_missing !== false),
+    message: _messageForReport(report, unknownCategories, args.create_missing !== false) + pruneMessage,
     configPath,
     snapshot: {
       kind: dataSource.kind,
@@ -390,7 +470,7 @@ function handleUpdateDsTokens(args = {}) {
     },
     applySupported: true,
     supportedApplyCategories: Array.from(SUPPORTED_APPLY_CATEGORIES).sort(),
-    nextStep: "Show this dry-run report to the designer. If missingCapabilityNotes includes missing-foundation-collection, use inspect_ds_token_gaps.repairPlan.foundationRepairPlan and apply_ds_foundation_repairs after approval before token apply. If they approve radius, border-width, semantic spacing, narrow typography/elevation slices, or broad typography/elevation orchestration, call update_ds_tokens with dry_run:false for those approved categories. Broad typography/elevation apply runs typography-variables then typography-styles (and elevation analog) in one call. Primitive/color categories belong on update_ds_primitives.",
+    nextStep: "Show this dry-run report to the designer. If missingCapabilityNotes includes missing-foundation-collection or missing-foundation-modes, use inspect_ds_token_gaps.repairPlan.foundationRepairPlan and apply_ds_foundation_repairs after approval, or approved update_ds_tokens with ensure_collection_modes. If they approve radius, border-width, semantic spacing, narrow typography/elevation slices, or broad typography/elevation orchestration, call update_ds_tokens with dry_run:false for those approved categories. Approved off-config prune uses repairPlan/preview prune flags only. Broad typography/elevation apply runs typography-variables then typography-styles (and elevation analog) in one call. Primitive/color categories belong on update_ds_primitives.",
   };
 }
 

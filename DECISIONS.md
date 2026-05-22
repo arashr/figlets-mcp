@@ -25,6 +25,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-22] Token prune apply requires config_authoritative after dry-run review
+
+**Decision:** `update_ds_tokens` may dry-run off-config token prune candidates (`prune.off_config_variables`, `off_config_text_styles`, `off_config_effect_styles`) without extra flags. **Apply** with any of those flags set is rejected unless `prune.config_authoritative=true`. Color ramp prune keys stay on `update_ds_primitives`. Managed token prune deletes only variables/styles in Spacing/Typography/Elevation collections and config-derived `type/*` text styles / `elevation/0..5` effect styles.
+
+**Why:** Live validation on Figlets Test showed that comparing a narrow disposable config against a file built with full `apply_ds_setup` would delete valid in-file tokens (for example `space/radius/*` absent from the fixture config). Dry-run remains informational; the designer must explicitly confirm the active config is the full source of truth before destructive apply.
+
+**Collection modes:** `ensure_collection_modes` adds configured breakpoint modes on existing Spacing/Typography collections before responsive writes. `inspect_ds_token_gaps` blocks responsive categories until modes exist or approved ensure runs. Developer prep uses `request-trim-collection-modes` behind `FIGLETS_DEV_BRIDGE=1` (same gate as `request-remove-text-styles`).
+
+---
+
 ## [2026-05-21] Primitive token gaps route through primitiveRepairPlan on update_ds_primitives
 
 **Decision:** Config-backed primitive typography and shadow gaps discovered by `inspect_ds_token_gaps` apply through `repairPlan.primitiveRepairPlan` → `update_ds_primitives` with categories `primitive-typography` and `primitive-shadow`. They do not use `update_ds_tokens` apply even though the token planner can dry-run preview those categories.

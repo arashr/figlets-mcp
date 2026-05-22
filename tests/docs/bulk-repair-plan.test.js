@@ -42,7 +42,7 @@ assert.ok(
 );
 assert.ok(
   (plan.includes("approved apply for `radius`, `border-width`, `spacing-semantics`, `typography-variables`, `typography-styles`, `elevation-variables`, and `elevation-styles` only") ||
-    plan.includes("narrow typography/elevation slices, and broad `typography` / `elevation` orchestration")) &&
+    plan.includes("narrow typography/elevation slices, broad `typography` / `elevation` orchestration")) &&
     plan.includes("Elevation collection FLOAT variables `elevation/<key>/{offset-y,radius}`"),
   "Current surface table should include the elevation apply slices"
 );

@@ -426,10 +426,15 @@ server.tool(
     categories: z.array(z.string()).optional().describe("Optional categories to preview. Supports non-color config-backed categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, typography-styles, elevation, elevation-variables, and elevation-styles."),
     create_missing: z.boolean().optional().describe("When true, missing variables/styles are reported as wouldCreate*. When false, they remain unmatched/missing only."),
     dry_run: z.boolean().optional().describe("When true, preview without mutating Figma. dry_run=false is limited to approved narrow token categories."),
+    ensure_collection_modes: z.boolean().optional().describe("When true on apply, add configured breakpoint modes to existing Spacing and Typography collections before responsive token writes."),
     prune: z.object({
+      off_config_variables: z.boolean().optional(),
+      off_config_text_styles: z.boolean().optional(),
+      off_config_effect_styles: z.boolean().optional(),
+      config_authoritative: z.boolean().optional().describe("Required for dry_run:false when any token prune flag is set."),
       off_scale_color_steps: z.boolean().optional(),
       unused_color_ramps: z.boolean().optional()
-    }).optional().describe("Future prune options. Phase 3B reports them as unsupported rather than deleting anything.")
+    }).optional().describe("Optional approved prune scope. Token prune deletes managed off-config variables/styles only when config_authoritative is true on apply. Color ramp prune belongs on update_ds_primitives.")
   },
   async (args) => {
     try {

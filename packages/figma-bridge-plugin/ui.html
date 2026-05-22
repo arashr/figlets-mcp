@@ -726,6 +726,13 @@
           document.getElementById('substatus').innerText = 'Developer test prep only.';
           _appendLog('Received command: remove_text_styles (dev bridge).');
           parent.postMessage({ pluginMessage: { type: 'remove-text-styles', data: data.data || {} } }, '*');
+        } else if (data.command === 'trim-collection-modes') {
+          isExtracting = true;
+          _armWatchdog('Trim collection modes', 30000);
+          document.getElementById('status').innerText = 'Trimming collection modes...';
+          document.getElementById('substatus').innerText = 'Developer test prep only.';
+          _appendLog('Received command: trim_collection_modes (dev bridge).');
+          parent.postMessage({ pluginMessage: { type: 'trim-collection-modes', data: data.data || {} } }, '*');
         }
       }
     } catch (err) {
@@ -961,6 +968,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send text-style removal result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'figlets-trim-collection-modes-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch(RECEIVER_URL + '/sync-trim-collection-modes?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Mode trim failed.' : 'Collection modes trimmed.';
+        _appendLog(msg.data.error ? 'Collection mode trim failed in plugin.' : 'Collection mode trim result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
+        _appendLog('Failed to send collection mode trim result to receiver.');
       }
       isExtracting = false;
       poll();

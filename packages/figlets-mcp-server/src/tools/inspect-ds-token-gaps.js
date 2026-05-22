@@ -217,6 +217,149 @@ function _foundationRepairForCategory(ds, category, collection) {
   };
 }
 
+function _collectionRecordByName(figmaData, collectionName) {
+  const collections = Array.isArray(figmaData && figmaData.collections) ? figmaData.collections : [];
+  for (const collection of collections) {
+    if (collection && collection.name === collectionName) return collection;
+  }
+  return null;
+}
+
+function _collectionModeNames(collectionRecord) {
+  const modes = collectionRecord && Array.isArray(collectionRecord.modes) ? collectionRecord.modes : [];
+  return modes.map(mode => String(mode && mode.name || "").trim()).filter(Boolean);
+}
+
+function _missingFoundationModes(ds, kind, collectionName, figmaData) {
+  const record = _collectionRecordByName(figmaData, collectionName);
+  if (!record) return [];
+  const actualNames = _collectionModeNames(record);
+  if (!actualNames.length) return [];
+  const expected = _foundationModesForKind(ds, kind);
+  const actual = new Set(actualNames);
+  return expected.filter(mode => !actual.has(mode));
+}
+
+const PRUNE_VARIABLE_PREFIXES_BY_COLLECTION = {
+  spacing: ["space/"],
+  typography: null,
+  elevation: ["elevation/"],
+};
+
+function _variableCollectionNameMap(figmaData) {
+  const map = new Map();
+  const collections = Array.isArray(figmaData && figmaData.collections) ? figmaData.collections : [];
+  for (const collection of collections) {
+    if (!collection || !collection.name) continue;
+    const variableIds = Array.isArray(collection.variableIds) ? collection.variableIds : [];
+    for (const variableId of variableIds) map.set(variableId, collection.name);
+  }
+  return map;
+}
+
+function _expectedManagedNamesForCategories(ds, categories) {
+  const variableNames = new Set();
+  const textStyleNames = new Set();
+  const effectStyleNames = new Set();
+  for (const category of categories || []) {
+    for (const item of _expectedForCategory(ds, category)) {
+      if (!item || !item.name || item.kind === "unavailable-source") continue;
+      if (item.kind === "variable") variableNames.add(item.name);
+      if (item.kind === "style" && item.styleType === "TEXT") textStyleNames.add(item.name);
+      if (item.kind === "style" && item.styleType === "EFFECT") effectStyleNames.add(item.name);
+    }
+  }
+  return { variableNames, textStyleNames, effectStyleNames };
+}
+
+function _managedVariablePrefixes(ds, collectionName) {
+  if (collectionName === (ds && ds.collections && ds.collections.spacing) || collectionName === "4. Spacing") {
+    return PRUNE_VARIABLE_PREFIXES_BY_COLLECTION.spacing;
+  }
+  if (collectionName === (ds && ds.collections && ds.collections.typography) || collectionName === "3. Typography") {
+    return [_typePrefix(ds) + "/"];
+  }
+  if (collectionName === (ds && ds.collections && ds.collections.elevation) || collectionName === "5. Elevation") {
+    return PRUNE_VARIABLE_PREFIXES_BY_COLLECTION.elevation;
+  }
+  return [];
+}
+
+function _nameMatchesManagedPrefixes(name, prefixes) {
+  if (!prefixes || !prefixes.length) return false;
+  for (const prefix of prefixes) {
+    if (String(name || "").indexOf(prefix) === 0) return true;
+  }
+  return false;
+}
+
+function planTokenPruneFromSnapshot(ds, figmaData, categories, pruneOptions) {
+  const options = pruneOptions || {};
+  const pruneVariables = !!options.off_config_variables;
+  const pruneTextStyles = !!options.off_config_text_styles;
+  const pruneEffectStyles = !!options.off_config_effect_styles;
+  if (!pruneVariables && !pruneTextStyles && !pruneEffectStyles) {
+    return { wouldPruneVariables: [], wouldPruneTextStyles: [], wouldPruneEffectStyles: [] };
+  }
+
+  const expected = _expectedManagedNamesForCategories(ds, categories);
+  const collectionByVariableId = _variableCollectionNameMap(figmaData);
+  const wouldPruneVariables = [];
+  const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
+
+  if (pruneVariables) {
+    for (const variable of variables) {
+      if (!variable || !variable.name || !variable.id) continue;
+      const collectionName = collectionByVariableId.get(variable.id);
+      if (!collectionName) continue;
+      const prefixes = _managedVariablePrefixes(ds, collectionName);
+      if (!_nameMatchesManagedPrefixes(variable.name, prefixes)) continue;
+      if (expected.variableNames.has(variable.name)) continue;
+      wouldPruneVariables.push({
+        name: variable.name,
+        kind: "variable",
+        expectedType: variable.resolvedType || undefined,
+        collection: collectionName,
+      });
+    }
+  }
+
+  const wouldPruneTextStyles = [];
+  if (pruneTextStyles) {
+    const textStyles = Array.isArray(figmaData && figmaData.textStyles) ? figmaData.textStyles : [];
+    const typePrefix = _typePrefix(ds) + "/";
+    for (const style of textStyles) {
+      if (!style || !style.name) continue;
+      if (String(style.name).indexOf(typePrefix) !== 0) continue;
+      if (expected.textStyleNames.has(style.name)) continue;
+      wouldPruneTextStyles.push({
+        name: style.name,
+        kind: "style",
+        styleType: "TEXT",
+        collection: "local text styles",
+      });
+    }
+  }
+
+  const wouldPruneEffectStyles = [];
+  if (pruneEffectStyles) {
+    const effectStyles = Array.isArray(figmaData && figmaData.effectStyles) ? figmaData.effectStyles : [];
+    for (const style of effectStyles) {
+      if (!style || !style.name) continue;
+      if (!/^elevation\/\d+$/.test(style.name)) continue;
+      if (expected.effectStyleNames.has(style.name)) continue;
+      wouldPruneEffectStyles.push({
+        name: style.name,
+        kind: "style",
+        styleType: "EFFECT",
+        collection: "local effect styles",
+      });
+    }
+  }
+
+  return { wouldPruneVariables, wouldPruneTextStyles, wouldPruneEffectStyles };
+}
+
 function _sanitizeStep(step) {
   return String(step).replace(".", "-");
 }
@@ -438,6 +581,39 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         productGap: false,
       });
       foundationBlockedApplyCategories.add(category);
+    } else if (collectionNames && requiredCollection && collectionNames.has(requiredCollection)) {
+      const kind = _foundationKindForCategory(category);
+      const missingModes = kind ? _missingFoundationModes(ds, kind, requiredCollection, figmaData) : [];
+      if (missingModes.length) {
+        const foundationRepair = _foundationRepairForCategory(ds, category, requiredCollection);
+        if (foundationRepair) {
+          const repairKey = foundationRepair.kind + "\n" + foundationRepair.name;
+          if (!foundationRepairKeys.has(repairKey)) {
+            foundationRepairKeys.add(repairKey);
+            foundationRepairs.push(Object.assign({}, foundationRepair, {
+              missingModes,
+              reason: "Add configured breakpoint modes to " + requiredCollection + " before responsive token completion can map values correctly.",
+            }));
+          }
+        }
+        missingCapabilityNotes.push({
+          kind: "missing-foundation-modes",
+          category,
+          collection: requiredCollection,
+          missingModes,
+          repairTool: "apply_ds_foundation_repairs",
+          alternateRepairTool: "update_ds_tokens",
+          repairReady: Boolean(foundationRepair),
+          reason: "This token category needs configured breakpoint modes on " + requiredCollection + ". Run apply_ds_foundation_repairs after approval, or approved update_ds_tokens with ensure_collection_modes.",
+          productGap: false,
+        });
+        if (category === "spacing-semantics" || category === "typography-variables" || category === "typography-styles") {
+          foundationBlockedApplyCategories.add(category);
+        }
+        if (category === "typography") {
+          foundationBlockedApplyCategories.add("typography");
+        }
+      }
     }
     const expected = _expectedForCategory(ds, category);
     for (const item of expected) {
@@ -578,6 +754,9 @@ function _buildRepairPlan(context) {
     include_existing_updates: !!context.includeExistingUpdates,
     dry_run: true,
   };
+  const ensureCollectionModes = (context.foundationRepairs || []).some(item =>
+    Array.isArray(item.missingModes) && item.missingModes.length > 0
+  );
   const applyInput = {
     config_path: context.configPath,
     categories: applyCategories,
@@ -585,6 +764,7 @@ function _buildRepairPlan(context) {
     include_existing_updates: false,
     dry_run: false,
   };
+  if (ensureCollectionModes) applyInput.ensure_collection_modes = true;
   const foundationCollections = context.foundationRepairs || [];
   const foundationApplyInput = {
     config_path: context.configPath,
@@ -818,6 +998,7 @@ module.exports = {
   inspectDsTokenGapsFromConfigAndFigmaData,
   _buildRepairPlan,
   expandTokenApplyCategories,
+  planTokenPruneFromSnapshot,
   ORCHESTRATION_APPLY_CATEGORIES,
   PRIMITIVE_APPLY_CATEGORIES,
 };

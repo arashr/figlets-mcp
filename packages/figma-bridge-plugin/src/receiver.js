@@ -25,6 +25,7 @@ let pendingSetupRepairsRequest = null;
 let pendingFoundationRepairsRequest = null;
 let pendingResetRequest = null;
 let pendingRemoveTextStylesRequest = null;
+let pendingTrimCollectionModesRequest = null;
 let pendingSyncPreviousFileKey = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
@@ -108,6 +109,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       ok: true,
       receiver: 'running',
+      devBridgeEnabled: _devBridgeCommandsEnabled(),
       pluginConnected: Boolean(pendingPollResponse),
       pluginRecentlySeen: pluginRecentlySeen,
       activeSessionId: pendingPollSessionId || lastPluginSessionId || null,
@@ -713,6 +715,68 @@ const server = http.createServer((req, res) => {
         pendingRemoveTextStylesRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingRemoveTextStylesRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingRemoveTextStylesRequest = null;
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/request-trim-collection-modes') {
+    if (!_devBridgeCommandsEnabled()) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'trim-collection-modes is a developer-only bridge command and is disabled for designer flows.',
+        hint: 'Set FIGLETS_DEV_BRIDGE=1 on the bridge receiver process for local validation scripts only.',
+      }));
+      return;
+    }
+    if (pendingPollResponse) {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'trim-collection-modes', data: payload }));
+        _clearPendingPoll();
+
+        pendingTrimCollectionModesRequest = res;
+
+        const trimTimer = setTimeout(() => {
+          if (pendingTrimCollectionModesRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Collection mode trim timed out.' }));
+            pendingTrimCollectionModesRequest = null;
+          }
+        }, 30000);
+        if (trimTimer.unref) trimTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-trim-collection-modes') {
+    if (!_devBridgeCommandsEnabled()) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'trim-collection-modes sync is disabled outside developer bridge mode.' }));
+      return;
+    }
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingTrimCollectionModesRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingTrimCollectionModesRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingTrimCollectionModesRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingTrimCollectionModesRequest = null;
       }
     });
     return;

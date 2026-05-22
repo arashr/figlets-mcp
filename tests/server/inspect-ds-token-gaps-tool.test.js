@@ -437,6 +437,50 @@ module.exports = (() => {
     );
   }
 
+  {
+    const missingModes = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [
+        {
+          name: "4. Spacing",
+          modes: [{ name: "Value" }],
+          variableIds: ["space-component-md"],
+        },
+        {
+          name: "3. Typography",
+          modes: [{ name: "Mobile" }, { name: "Tablet" }],
+          variableIds: typographyVariables().map(item => item.id),
+        },
+      ],
+      variables: [
+        variable("space-component-md", "space/component/md"),
+      ].concat(typographyVariables()),
+      textStyles: [{ name: "type/body/md" }],
+      effectStyles: [{ name: "elevation/0" }],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["spacing-semantics", "typography"],
+    });
+    assert.ok(
+      missingModes.repairPlan.missingCapabilityNotes.some(note =>
+        note.kind === "missing-foundation-modes" &&
+        note.category === "spacing-semantics" &&
+        note.collection === "4. Spacing" &&
+        note.missingModes &&
+        note.missingModes.indexOf("Tablet") >= 0
+      ),
+      "missing breakpoint modes on an existing Spacing collection should be reported"
+    );
+    assert.strictEqual(missingModes.repairPlan.applyInput.ensure_collection_modes, true);
+    assert.ok(
+      !missingModes.repairPlan.applyInput.categories.includes("spacing-semantics"),
+      "responsive spacing apply should stay blocked until modes exist or ensure_collection_modes runs"
+    );
+    assert.ok(
+      missingModes.repairPlan.foundationRepairPlan.applyInput.collections.some(item => item.kind === "spacing"),
+      "missing modes should still route through foundation repair on the existing collection"
+    );
+  }
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-token-gaps-"));
   const configPath = path.join(tmp, "design-system.config.js");
   const figmaDataPath = path.join(tmp, "figma-data.json");

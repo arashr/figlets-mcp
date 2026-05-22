@@ -65,13 +65,17 @@ module.exports = (async () => {
       {
         id: "spacing",
         name: "4. Spacing",
-        modes: [{ id: "m1", modeId: "m1", name: "Value" }],
+        modes: [
+          { id: "m1", modeId: "m1", name: "Mobile" },
+          { id: "m2", modeId: "m2", name: "Tablet" },
+          { id: "m3", modeId: "m3", name: "Desktop" },
+        ],
         variableIds: [],
       },
       {
         id: "elevation",
         name: "5. Elevation",
-        modes: [{ id: "e1", modeId: "e1", name: "Value" }],
+        modes: [{ id: "e1", modeId: "e1", name: "Default" }],
         variableIds: [],
       },
     ],

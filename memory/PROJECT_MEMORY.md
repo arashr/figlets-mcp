@@ -14,7 +14,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Tests:** Extended planner, prune guard, integration snapshot modes, `tests/bridge/receiver.test.js` (`devBridgeEnabled`). Supported-runtime suite passes **77/77**.
 
-**Commit:** `71d9c47`.
+**Commit:** `7be330c`.
 
 **Next:** No remaining Phase 3 token-completion product gaps in the current roadmap slice.
 
@@ -26,7 +26,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Tests:** Updated planner, apply, integration, bridge policy, and bulk-repair plan regression tests.
 
-**Commit:** `956155f` (orchestration); live validation scripts in `71d9c47`.
+**Commit:** `956155f` (orchestration); live validation scripts in `7be330c`.
 
 ### [2026-05-21 — primitive-shadow apply via update_ds_primitives]
 

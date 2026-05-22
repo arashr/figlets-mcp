@@ -7,7 +7,7 @@ Planning artifact and roadmap for bulk-repair API work. This document is intenti
 Current status as of 2026-05-22:
 
 - Branch: `main`
-- Latest checkpoint commit: `71d9c47` (token prune + `ensure_collection_modes`, `config_authoritative` guard; prior `956155f` broad typography/elevation orchestration, `43f8e0e` bridge hook fail-closed).
+- Latest checkpoint commit: `7be330c` (token prune + `ensure_collection_modes`, `config_authoritative` guard; prior `956155f` broad typography/elevation orchestration, `43f8e0e` bridge hook fail-closed).
 - Prior checkpoints: `e953c5d` (Phase 4 qa_binding_audit fixability), `86f700a` (stale MCP callback validation), `e0b7186` (token/primitives boundary), `8336f80` (guided foundation token repairs), `dd19333` (typography-styles live validation prep).
 - Phase 0 is complete: agents are taught that structured bulk updates are Figlets scope and missing planner/apply surfaces are product gaps.
 - Phase 1A is complete: missing icon roles for complete bg+foreground families can become apply-ready when Figlets derives accessible aliases.

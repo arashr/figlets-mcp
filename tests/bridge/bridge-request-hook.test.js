@@ -33,8 +33,20 @@ module.exports = (async () => {
     assert.strictEqual(response.statusCode, 200);
     assert.strictEqual(response.data.result.message, "ok");
     assert.deepStrictEqual(readBridgeHookCapture(capturePath).categories, ["radius"]);
-  } finally {
+
     uninstall();
+    const missingHookPath = path.join(tmp, "missing-hook.json");
+    process.env.FIGLETS_BRIDGE_HOOK_FILE = missingHookPath;
+    const missing = await requestBridgePost("/request-update-tokens", {
+      categories: ["radius"],
+      dryRun: false,
+    });
+    assert.ok(missing.connectionError, "configured hook path must fail closed");
+    assert.ok(/does not exist/.test(missing.connectionError), missing.connectionError);
+    assert.ok(/FIGLETS_BRIDGE_HOOK_FILE/.test(missing.connectionError));
+    assert.strictEqual(missing.statusCode, 0);
+    delete process.env.FIGLETS_BRIDGE_HOOK_FILE;
+  } finally {
     try { fs.rmdirSync(tmp); } catch (err) {}
   }
 })();

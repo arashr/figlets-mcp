@@ -99,7 +99,15 @@ function requestBridgePost(routePath, body, options) {
 
   const hookPath = (options && options.bridgeHookFile)
     || process.env.FIGLETS_BRIDGE_HOOK_FILE;
-  if (hookPath && fs.existsSync(hookPath)) {
+  if (hookPath) {
+    if (!fs.existsSync(hookPath)) {
+      return Promise.resolve({
+        statusCode: 0,
+        data: {},
+        raw: "",
+        connectionError: `FIGLETS_BRIDGE_HOOK_FILE is set but the hook file does not exist: ${hookPath}. Fix the path or unset the variable instead of falling back to the live bridge receiver.`,
+      });
+    }
     return requestBridgeViaHook(hookPath, "POST", routePath, body);
   }
 

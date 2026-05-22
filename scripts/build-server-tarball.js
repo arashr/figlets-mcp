@@ -18,6 +18,7 @@ const childProcess = require("child_process");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SERVER_DIR = path.join(REPO_ROOT, "packages", "figlets-mcp-server");
 const CORE_DIR = path.join(REPO_ROOT, "packages", "figlets-core");
+const BRIDGE_RECEIVER_PATH = path.join(REPO_ROOT, "packages", "figma-bridge-plugin", "src", "receiver.js");
 const DIST_DIR = path.join(REPO_ROOT, "dist");
 
 function copyRecursive(src, dest) {
@@ -50,6 +51,8 @@ try {
     const from = path.join(SERVER_DIR, entry);
     if (fs.existsSync(from)) copyRecursive(from, path.join(stagingPkgDir, entry));
   }
+  fs.mkdirSync(path.join(stagingPkgDir, "src", "figma-bridge-plugin"), { recursive: true });
+  fs.copyFileSync(BRIDGE_RECEIVER_PATH, path.join(stagingPkgDir, "src", "figma-bridge-plugin", "receiver.js"));
 
   // Vendor @figlets/core into the staged package's node_modules and mark it as
   // a bundleDependency so npm pack ships it inside the tarball.
@@ -100,9 +103,10 @@ const list = childProcess.spawnSync("tar", ["-tzf", tarballPath], { encoding: "u
 const entries = (list.stdout || "").split("\n");
 const hasCore = entries.some(e => e.indexOf("node_modules/@figlets/core/src/index.js") !== -1);
 const hasServer = entries.some(e => e.indexOf("package/src/index.js") !== -1);
-if (!hasCore || !hasServer) {
+const hasReceiver = entries.some(e => e.indexOf("package/src/figma-bridge-plugin/receiver.js") !== -1);
+if (!hasCore || !hasServer || !hasReceiver) {
   process.stderr.write(
-    `Tarball is not self-contained (server=${hasServer}, bundled core=${hasCore}). Aborting.\n`
+    `Tarball is not self-contained (server=${hasServer}, bundled core=${hasCore}, receiver=${hasReceiver}). Aborting.\n`
   );
   process.exit(1);
 }

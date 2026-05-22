@@ -35,14 +35,28 @@ This document captures project gaps that are related to the bulk-repair API work
 
 ## Recommended Future Priority
 
+### Next Slice: Post-Phase-3 Reliability And Release Hardening
+
+Phase 3 token completion is closed. The next roadmap slice should protect that completed surface area in real host sessions before adding another broad product capability.
+
+Include these work packets:
+
+1. BNN-6 bridge reliability cleanup: migrate remaining high-value bridge-backed tests/tools toward `bridge-request.js` where hook transport removes localhost fragility.
+2. Release/package verification: cover G-005 with a checklist or CI-friendly script that runs `npm run build:server-tarball`, validates Claude/Codex plugin manifest version and tarball URL alignment, and smoke-starts the packed server.
+3. Host smoke coverage: cover G-003 with scripted smoke prompts/checks for Claude Code and Codex plugin flows after release packaging is verifiable.
+4. Guidance hygiene: keep BNN-8 active so root docs, plugin skills, and Agent Interface guidance stay aligned with completed bulk repair surfaces.
+
+Do not include `figlets_health_check` in this slice unless the hardening items above are explicitly deferred. It is the leading next product-capability candidate, but it is a new public read-only orchestration surface and should be planned separately under the bulk-surface guardrail.
+
+### Product-Capability Backlog After Hardening
+
 1. `figlets_health_check` orchestrator.
-2. `update_ds_tokens` / `inspect_ds_token_gaps` for config-backed non-color completion.
-3. Exact-match typography binding fixes.
-4. Host smoke tests for Claude Code and Codex plugin flows.
-5. Preview/test harness for showcase visual changes.
-6. Result pagination/detail tools for long findings.
+2. Exact-match typography binding fixes.
+3. Preview/test harness for showcase visual changes.
+4. Result pagination/detail tools for long findings.
+5. Config review report for imported-file bootstrap confidence.
+6. Elevation/effect audit beyond config-backed completion.
 
 ## Boundary Statement For Future Agents
 
 Figlets should become capable enough that agents do not write code for deterministic design-system operations. That does not mean Figlets should expose arbitrary Figma editing. The safe direction is many narrow, named, tested tools with structured arguments, read-only previews, explicit designer approval, and verification passes.
-

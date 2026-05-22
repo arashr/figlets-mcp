@@ -4,6 +4,26 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-22 — next roadmap slice after Phase 3 token completion]
+
+**Status:** BNN-10 defined the next slice as **Post-Phase-3 reliability and release hardening**. Phase 3 token completion stays closed; do not reopen token work without a concrete regression. The next slice should make the completed Figlets surfaces dependable for real designer sessions before starting another broad product-capability build.
+
+**Scope:** Focus on bridge transport cleanup, release/package verification, host smoke coverage, and keeping designer/agent guidance synchronized with the completed bulk repair surfaces. Existing Linear issues BNN-6 (bridge reliability cleanup) and BNN-8 (guidance hygiene) remain part of the slice. Additional Linear work packets should cover release packaging verification and host smoke prompts/checks.
+
+**Deferred next product capability:** `figlets_health_check` remains the leading product-capability candidate after this hardening slice. It should be treated as a new public read-only orchestration surface and must go through the bulk-surface guardrail before implementation.
+
+**Decision basis:** `docs/bulk-repair-api-implementation-plan.md` shows no remaining Phase 3 token-completion product gaps. `docs/future-figlets-gap-register.md` still names host smoke testing, bridge capability/version mismatch, release packaging drift, and instruction drift as risks that can break the designer experience even when unit tests pass.
+
+### [2026-05-22 — release/package verification for public GitHub repo]
+
+**Status:** BNN-11 added `npm run verify:release` as a CI-friendly release verification command. It rebuilds the self-contained server tarball, checks required tarball contents, extracts the packed package, validates package metadata, and runs a packed MCP `tools/list` smoke with bridge startup skipped. The smoke asserts key public tools are exposed from the packed release entrypoint.
+
+**Packaging fix:** The release tarball now bundles the local bridge receiver at `src/figma-bridge-plugin/receiver.js`, and `ensureReceiverRunning` resolves that bundled receiver before falling back to the monorepo path. This fixes a real packed-server startup gap found by the verifier: the prior tarball bundled `@figlets/core` but not the receiver file required by packaged `ensureReceiverRunning`.
+
+**Test support:** `FIGLETS_SKIP_RECEIVER=1` skips bridge receiver startup for MCP tool-list/package smoke tests that do not need live Figma or localhost. Runtime designer flows still start or reuse the receiver normally.
+
+**Verification:** `npm_config_cache=/private/tmp/figlets-npm-cache npm run verify:release` passed because the machine's default npm cache has root-owned files. Full supported-runtime `npm test` passed **78/78**, and `git diff --check` passed.
+
 ### [2026-05-22 — token prune + collection modes in update_ds_tokens]
 
 **Status:** Completed roadmap item 14. `update_ds_tokens` now supports approved off-config prune for managed token variables (`space/*`, `type/*`, `elevation/*` in their collections) and config-derived `type/*` text styles / `elevation/0..5` effect styles. Color ramp prune keys redirect to `update_ds_primitives`. **Prune apply requires `prune.config_authoritative=true`** after dry-run review because Figlets compares against the active config, not full Figma history. Apply supports `ensure_collection_modes` to add configured breakpoint modes on existing Spacing/Typography collections before responsive writes. `inspect_ds_token_gaps` reports `missing-foundation-modes`, sets `repairPlan.applyInput.ensure_collection_modes`, and blocks responsive apply until modes exist or approved ensure runs.

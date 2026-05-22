@@ -5,10 +5,25 @@ const { spawn, execSync } = require("child_process");
 const { getReceiverPort, getReceiverUrl } = require("./receiver-url.js");
 
 const RECEIVER_PORT = getReceiverPort();
-const RECEIVER_PATH = path.resolve(__dirname, "../../../figma-bridge-plugin/src/receiver.js");
+const RECEIVER_PATHS = [
+  path.resolve(__dirname, "../figma-bridge-plugin/receiver.js"),
+  path.resolve(__dirname, "../../../figma-bridge-plugin/src/receiver.js"),
+];
+const RECEIVER_PATH = RECEIVER_PATHS.find((candidate) => {
+  try {
+    return require("fs").existsSync(candidate);
+  } catch (err) {
+    return false;
+  }
+}) || RECEIVER_PATHS[0];
 
 function isDevBridgeRequested() {
   const raw = String(process.env.FIGLETS_DEV_BRIDGE || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+function isReceiverStartupSkipped() {
+  const raw = String(process.env.FIGLETS_SKIP_RECEIVER || "").trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes";
 }
 
@@ -103,6 +118,11 @@ function spawnReceiver() {
 }
 
 async function ensureReceiverRunning() {
+  if (isReceiverStartupSkipped()) {
+    process.stderr.write("[figlets] Bridge receiver startup skipped by FIGLETS_SKIP_RECEIVER\n");
+    return;
+  }
+
   const needsDevBridge = isDevBridgeRequested();
   const already = await checkPort(RECEIVER_PORT);
 
@@ -153,6 +173,7 @@ module.exports = {
   fetchReceiverHealth,
   waitForPluginConnection,
   isDevBridgeRequested,
+  isReceiverStartupSkipped,
   RECEIVER_PORT,
   RECEIVER_PATH,
 };

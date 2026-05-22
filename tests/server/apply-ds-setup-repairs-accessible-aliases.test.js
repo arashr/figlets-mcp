@@ -1,8 +1,13 @@
 const assert = require("assert");
 const fs = require("fs");
-const http = require("http");
 const os = require("os");
 const path = require("path");
+const {
+  createBridgeHookFile,
+  installBridgeHook,
+  readBridgeHookCapture,
+  setBridgeHookRoute,
+} = require("../helpers/bridge-hook.js");
 
 const {
   handleApplyDsSetupRepairs,
@@ -81,39 +86,28 @@ module.exports = (async () => {
   const snapshotPath = path.join(tmp, "figma-data.json");
   fs.writeFileSync(snapshotPath, JSON.stringify(makeSnapshot()), "utf8");
 
-  let receivedBody = null;
-  const mockServer = http.createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/request-setup-repairs") {
-      let body = "";
-      req.on("data", chunk => { body += chunk.toString(); });
-      req.on("end", () => {
-        receivedBody = JSON.parse(body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: {
-            created: [{
-              name: "color/on-surface/success-variant",
-              source: "color/on-surface/success",
-              collection: "Color",
-              aliases: receivedBody.repairs[0].aliases || null,
-            }],
-            skipped: [],
-            unresolved: [],
-            message: "1 created, 0 skipped, 0 unresolved.",
-          }
-        }));
-      });
-    } else { res.writeHead(404); res.end(); }
+  const hookPath = createBridgeHookFile(tmp);
+  const uninstallHook = installBridgeHook(hookPath);
+  const capturePath = path.join(tmp, "setup-repairs-accessible-capture.json");
+  setBridgeHookRoute(hookPath, "/request-setup-repairs", {
+    capturePath,
+    json: {
+      success: true,
+      result: {
+        created: [{
+          name: "color/on-surface/success-variant",
+          source: "color/on-surface/success",
+          collection: "Color",
+        }],
+        skipped: [],
+        unresolved: [],
+        message: "1 created, 0 skipped, 0 unresolved.",
+      }
+    }
   });
 
-  await new Promise(r => mockServer.listen(0, r));
-  const { port } = mockServer.address();
-
-  const prevReceiver = process.env.FIGLETS_RECEIVER_URL;
   const prevLocal = process.env.FIGLETS_LOCAL_DIR;
   const prevFigPath = process.env.FIGLETS_FIGMA_DATA_PATH;
-  process.env.FIGLETS_RECEIVER_URL = `http://127.0.0.1:${port}`;
   process.env.FIGLETS_LOCAL_DIR = tmp;          // no active-file.json → no scoped snapshot
   process.env.FIGLETS_FIGMA_DATA_PATH = snapshotPath;
 
@@ -131,6 +125,7 @@ module.exports = (async () => {
     assert.ok(!result.error, "handler reported error: " + result.error);
     assert.strictEqual(result.created.length, 1);
 
+    const receivedBody = readBridgeHookCapture(capturePath);
     assert.ok(receivedBody, "bridge did not receive a request");
     const wire = receivedBody.repairs[0];
     assert.strictEqual(wire.bg, "color/surface/success-variant");
@@ -154,13 +149,11 @@ module.exports = (async () => {
     assert.strictEqual(wire.aliases.Dark, "color/green/200",
       "Dark alias should retain the passing source step, got " + wire.aliases.Dark);
   } finally {
-    if (prevReceiver !== undefined) process.env.FIGLETS_RECEIVER_URL = prevReceiver;
-    else delete process.env.FIGLETS_RECEIVER_URL;
+    uninstallHook();
     if (prevLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevLocal;
     else delete process.env.FIGLETS_LOCAL_DIR;
     if (prevFigPath !== undefined) process.env.FIGLETS_FIGMA_DATA_PATH = prevFigPath;
     else delete process.env.FIGLETS_FIGMA_DATA_PATH;
-    await new Promise(r => mockServer.close(r));
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 })();

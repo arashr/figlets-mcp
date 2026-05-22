@@ -1,8 +1,13 @@
 const assert = require("assert");
 const fs = require("fs");
-const http = require("http");
 const os = require("os");
 const path = require("path");
+const {
+  createBridgeHookFile,
+  installBridgeHook,
+  readBridgeHookCapture,
+  setBridgeHookRoute,
+} = require("../helpers/bridge-hook.js");
 
 const {
   applyDsSetupRepairsTool,
@@ -26,9 +31,6 @@ module.exports = (async () => {
     [{ bg: "color/surface/info-variant", name: "color/on-surface/info-variant", source: "color/on-surface/info" }]
   );
 
-  // Regression — a repair missing `bg` must be dropped by the normalizer.
-  // Otherwise an agent could approve `{ name, source }` and Figma would still
-  // create an orphan semantic with no paired background.
   assert.deepStrictEqual(
     _normalizeRepairs([
       { recommended: "color/on-surface/danger-variant", source: "color/on-surface/danger" },
@@ -37,8 +39,6 @@ module.exports = (async () => {
     []
   );
 
-  // Designer-approved aliases must round-trip through the normalizer so the
-  // bridge sees exactly what was previewed.
   assert.deepStrictEqual(
     _normalizeRepairs([
       {
@@ -57,6 +57,8 @@ module.exports = (async () => {
   );
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-setup-repairs-"));
+  const hookPath = createBridgeHookFile(tmp);
+  const uninstallHook = installBridgeHook(hookPath);
   const configPath = path.join(tmp, "design-system.config.js");
   fs.writeFileSync(configPath, `const DS = {
     color: { semantics: { pairs: [
@@ -64,63 +66,50 @@ module.exports = (async () => {
     ] } }
   };\n`, "utf8");
 
-  const configResult = _updateConfigPairs(configPath, [
-    { bg: "color/surface/info-variant", name: "color/on-surface/info-variant" },
-    { bg: "color/surface/info-variant", name: "color/on-surface/info-variant" },
-  ]);
-  assert.deepStrictEqual(configResult, { updated: true, added: 1, conflicts: [] });
-  const updatedConfig = fs.readFileSync(configPath, "utf8");
-  assert.ok(updatedConfig.includes("color/surface/info-variant"));
-  assert.strictEqual((updatedConfig.match(/color\/surface\/info-variant/g) || []).length, 1);
-
-  let receivedBody = null;
-  const mockServer = http.createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/request-setup-repairs") {
-      let body = "";
-      req.on("data", chunk => { body += chunk.toString(); });
-      req.on("end", () => {
-        receivedBody = JSON.parse(body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: {
-            created: [{ name: "color/on-surface/danger-variant", source: "color/on-surface/danger", collection: "Color / Semantics" }],
-            skipped: [],
-            unresolved: [],
-            message: "1 created, 0 skipped, 0 unresolved."
-          }
-        }));
-      });
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  await new Promise(resolve => mockServer.listen(0, resolve));
-  const { port } = mockServer.address();
-  process.env.FIGLETS_RECEIVER_URL = `http://localhost:${port}`;
-  // Isolate from the developer's `.local/` snapshot so the bridge payload is
-  // deterministic. With no snapshot reachable, the handler can't compute
-  // accessible aliases and emits the legacy `{bg,name,source}` payload.
-  const prevLocalDir = process.env.FIGLETS_LOCAL_DIR;
-  process.env.FIGLETS_LOCAL_DIR = tmp;
   try {
-    const result = await handleApplyDsSetupRepairs({
-      config_path: configPath,
-      repairs: [{ bg: "color/surface/danger-variant", recommended: "color/on-surface/danger-variant", source: "color/on-surface/danger" }]
-    });
-    assert.ok(!result.error);
-    assert.strictEqual(result.created.length, 1);
-    assert.deepStrictEqual(receivedBody.repairs, [
-      { bg: "color/surface/danger-variant", name: "color/on-surface/danger-variant", source: "color/on-surface/danger" }
+    const configResult = _updateConfigPairs(configPath, [
+      { bg: "color/surface/info-variant", name: "color/on-surface/info-variant" },
+      { bg: "color/surface/info-variant", name: "color/on-surface/info-variant" },
     ]);
-    assert.deepStrictEqual(result.configUpdate, { updated: true, added: 1, conflicts: [] });
+    assert.deepStrictEqual(configResult, { updated: true, added: 1, conflicts: [] });
+    const updatedConfig = fs.readFileSync(configPath, "utf8");
+    assert.ok(updatedConfig.includes("color/surface/info-variant"));
+    assert.strictEqual((updatedConfig.match(/color\/surface\/info-variant/g) || []).length, 1);
+
+    const capturePath = path.join(tmp, "setup-repairs-capture.json");
+    setBridgeHookRoute(hookPath, "/request-setup-repairs", {
+      capturePath,
+      json: {
+        success: true,
+        result: {
+          created: [{ name: "color/on-surface/danger-variant", source: "color/on-surface/danger", collection: "Color / Semantics" }],
+          skipped: [],
+          unresolved: [],
+          message: "1 created, 0 skipped, 0 unresolved."
+        }
+      }
+    });
+
+    const prevLocalDir = process.env.FIGLETS_LOCAL_DIR;
+    process.env.FIGLETS_LOCAL_DIR = tmp;
+    try {
+      const result = await handleApplyDsSetupRepairs({
+        config_path: configPath,
+        repairs: [{ bg: "color/surface/danger-variant", recommended: "color/on-surface/danger-variant", source: "color/on-surface/danger" }]
+      });
+      assert.ok(!result.error);
+      assert.strictEqual(result.created.length, 1);
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.deepStrictEqual(receivedBody.repairs, [
+        { bg: "color/surface/danger-variant", name: "color/on-surface/danger-variant", source: "color/on-surface/danger" }
+      ]);
+      assert.deepStrictEqual(result.configUpdate, { updated: true, added: 1, conflicts: [] });
+    } finally {
+      if (prevLocalDir !== undefined) process.env.FIGLETS_LOCAL_DIR = prevLocalDir;
+      else delete process.env.FIGLETS_LOCAL_DIR;
+    }
   } finally {
-    delete process.env.FIGLETS_RECEIVER_URL;
-    if (prevLocalDir !== undefined) process.env.FIGLETS_LOCAL_DIR = prevLocalDir;
-    else delete process.env.FIGLETS_LOCAL_DIR;
-    await new Promise(resolve => mockServer.close(resolve));
+    uninstallHook();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
@@ -144,7 +133,6 @@ module.exports = (async () => {
   });
   fs.rmSync(path.dirname(conflictConfigPath), { recursive: true, force: true });
 
-  // ── aliasUpdates: normalization drops bad rows, keeps clean ones ─────────
   assert.deepStrictEqual(
     _normalizeAliasUpdates([
       { token: "color/on-surface/variant", mode: "Dark", newAliasTarget: "color/neutral/200" },
@@ -192,36 +180,22 @@ module.exports = (async () => {
   assert.ok(roleConfigText.includes("color/icon/success"));
   fs.rmSync(roleConfigDir, { recursive: true, force: true });
 
-  // ── aliasUpdates wire-format + handler round-trip ────────────────────────
-  // Mock receiver inspects the body, returns an updated/result payload, and
-  // the handler should surface `updated` back to the caller.
-  let aliasBody = null;
-  const aliasServer = http.createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/request-setup-repairs") {
-      let body = "";
-      req.on("data", chunk => { body += chunk.toString(); });
-      req.on("end", () => {
-        aliasBody = JSON.parse(body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: {
-            created: [], skipped: [], unresolved: [],
-            updated: [{ token: "color/on-surface/variant", mode: "Dark", to: "color/neutral/200" }],
-            updateSkipped: [], updateUnresolved: [],
-            message: "0 created, 0 skipped, 0 unresolved, 1 re-aliased."
-          }
-        }));
-      });
-    } else {
-      res.writeHead(404);
-      res.end();
+  const aliasTmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-alias-update-"));
+  const aliasHookPath = createBridgeHookFile(aliasTmp);
+  const uninstallAliasHook = installBridgeHook(aliasHookPath);
+  const aliasCapturePath = path.join(aliasTmp, "setup-repairs-alias-capture.json");
+  setBridgeHookRoute(aliasHookPath, "/request-setup-repairs", {
+    capturePath: aliasCapturePath,
+    json: {
+      success: true,
+      result: {
+        created: [], skipped: [], unresolved: [],
+        updated: [{ token: "color/on-surface/variant", mode: "Dark", to: "color/neutral/200" }],
+        updateSkipped: [], updateUnresolved: [],
+        message: "0 created, 0 skipped, 0 unresolved, 1 re-aliased."
+      }
     }
   });
-  await new Promise(resolve => aliasServer.listen(0, resolve));
-  const aliasPort = aliasServer.address().port;
-  process.env.FIGLETS_RECEIVER_URL = `http://localhost:${aliasPort}`;
-  const aliasTmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-alias-update-"));
   const prevAliasLocal = process.env.FIGLETS_LOCAL_DIR;
   process.env.FIGLETS_LOCAL_DIR = aliasTmp;
   try {
@@ -232,6 +206,7 @@ module.exports = (async () => {
       update_config: false,
     });
     assert.ok(!aliasResult.error, "alias-only apply should succeed");
+    const aliasBody = readBridgeHookCapture(aliasCapturePath);
     assert.deepStrictEqual(aliasBody.aliasUpdates, [
       {
         token: "color/on-surface/variant",
@@ -240,47 +215,33 @@ module.exports = (async () => {
         expectedCurrentAlias: "color/neutral/900",
       },
     ]);
-    // Repairs array can still be sent (empty) — the wire-format is consistent.
     assert.deepStrictEqual(aliasBody.repairs, []);
     assert.strictEqual(aliasResult.updated.length, 1);
     assert.strictEqual(aliasResult.updated[0].token, "color/on-surface/variant");
   } finally {
-    delete process.env.FIGLETS_RECEIVER_URL;
+    uninstallAliasHook();
     if (prevAliasLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevAliasLocal;
     else delete process.env.FIGLETS_LOCAL_DIR;
-    await new Promise(resolve => aliasServer.close(resolve));
     fs.rmSync(aliasTmp, { recursive: true, force: true });
   }
 
-  // ── roleRepairs wire-format + handler round-trip ────────────────────────
-  let roleBody = null;
-  const roleServer = http.createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/request-setup-repairs") {
-      let body = "";
-      req.on("data", chunk => { body += chunk.toString(); });
-      req.on("end", () => {
-        roleBody = JSON.parse(body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          success: true,
-          result: {
-            created: [], skipped: [], unresolved: [],
-            roleCreated: [{ name: "color/border/info", role: "border", collection: "Color" }],
-            roleSkipped: [], roleUnresolved: [],
-            updated: [], updateSkipped: [], updateUnresolved: [],
-            message: "0 created, 1 role created, 0 skipped, 0 unresolved."
-          }
-        }));
-      });
-    } else {
-      res.writeHead(404);
-      res.end();
+  const roleTmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-role-apply-"));
+  const roleHookPath = createBridgeHookFile(roleTmp);
+  const uninstallRoleHook = installBridgeHook(roleHookPath);
+  const roleCapturePath = path.join(roleTmp, "setup-repairs-role-capture.json");
+  setBridgeHookRoute(roleHookPath, "/request-setup-repairs", {
+    capturePath: roleCapturePath,
+    json: {
+      success: true,
+      result: {
+        created: [], skipped: [], unresolved: [],
+        roleCreated: [{ name: "color/border/info", role: "border", collection: "Color" }],
+        roleSkipped: [], roleUnresolved: [],
+        updated: [], updateSkipped: [], updateUnresolved: [],
+        message: "0 created, 1 role created, 0 skipped, 0 unresolved."
+      }
     }
   });
-  await new Promise(resolve => roleServer.listen(0, resolve));
-  const rolePort = roleServer.address().port;
-  process.env.FIGLETS_RECEIVER_URL = `http://localhost:${rolePort}`;
-  const roleTmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-role-apply-"));
   const roleApplyConfig = path.join(roleTmp, "design-system.config.js");
   fs.writeFileSync(roleApplyConfig, `const DS = { color: { semantics: { icons: [], unpaired: [] } } };\n`, "utf8");
   const prevRoleLocal = process.env.FIGLETS_LOCAL_DIR;
@@ -293,20 +254,34 @@ module.exports = (async () => {
       ],
     });
     assert.ok(!roleResult.error, "role repair apply should succeed");
+    const roleBody = readBridgeHookCapture(roleCapturePath);
     assert.deepStrictEqual(roleBody.roleRepairs, [
       { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500" } },
     ]);
     assert.strictEqual(roleResult.roleCreated.length, 1);
     assert.deepStrictEqual(roleResult.roleConfigUpdate, { updated: true, added: 1 });
   } finally {
-    delete process.env.FIGLETS_RECEIVER_URL;
+    uninstallRoleHook();
     if (prevRoleLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevRoleLocal;
     else delete process.env.FIGLETS_LOCAL_DIR;
-    await new Promise(resolve => roleServer.close(resolve));
     fs.rmSync(roleTmp, { recursive: true, force: true });
   }
 
-  // No inputs → error
+  const missingHookTmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-setup-missing-hook-"));
+  const previousHook = process.env.FIGLETS_BRIDGE_HOOK_FILE;
+  process.env.FIGLETS_BRIDGE_HOOK_FILE = path.join(missingHookTmp, "missing-hook.json");
+  try {
+    const result = await handleApplyDsSetupRepairs({
+      update_config: false,
+      repairs: [{ bg: "color/surface/danger-variant", recommended: "color/on-surface/danger-variant", source: "color/on-surface/danger" }]
+    });
+    assert.ok(result.error && /hook file does not exist/.test(result.error), "missing hook should fail closed");
+  } finally {
+    if (previousHook !== undefined) process.env.FIGLETS_BRIDGE_HOOK_FILE = previousHook;
+    else delete process.env.FIGLETS_BRIDGE_HOOK_FILE;
+    fs.rmSync(missingHookTmp, { recursive: true, force: true });
+  }
+
   const emptyResult = await handleApplyDsSetupRepairs({});
   assert.ok(emptyResult.error && /at least one/i.test(emptyResult.error));
 })();

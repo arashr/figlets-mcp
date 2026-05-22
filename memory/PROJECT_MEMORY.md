@@ -36,11 +36,11 @@ Active context for the project so future sessions can recover quickly without re
 
 ### [2026-05-22 — bridge-request migration for primitives and QA audit]
 
-**Status:** BNN-6 migrated two named bridge-backed paths from ad hoc localhost `http.request` code to the shared `requestBridgePost` transport: `update_ds_primitives` (`/request-update-primitives`) and `qa_binding_audit` (`/request-qa-audit`). Live HTTP behavior stays on the same receiver routes, while tests can now use `FIGLETS_BRIDGE_HOOK_FILE` hook transport and fail closed when an explicit hook file is missing.
+**Status:** BNN-6 migrated three named bridge-backed paths from ad hoc localhost `http.request` code to the shared `requestBridgePost` transport: `update_ds_primitives` (`/request-update-primitives`), `qa_binding_audit` (`/request-qa-audit`), and `apply_ds_setup_repairs` (`/request-setup-repairs`). Live HTTP behavior stays on the same receiver routes, while tests can now use `FIGLETS_BRIDGE_HOOK_FILE` hook transport and fail closed when an explicit hook file is missing.
 
-**Test impact:** `tests/server/update-ds-primitives-tool.test.js` and `tests/server/qa-binding-audit-tool.test.js` no longer bind localhost ports. They use `tests/helpers/bridge-hook.js` to capture request payloads and simulate 200/503/409 or missing-hook failures. `tests/integration/qa-binding-audit-flow.test.js` still exercises the receiver path.
+**Test impact:** `tests/server/update-ds-primitives-tool.test.js`, `tests/server/qa-binding-audit-tool.test.js`, `tests/server/apply-ds-setup-repairs-tool.test.js`, and `tests/server/apply-ds-setup-repairs-accessible-aliases.test.js` no longer bind localhost ports. They use `tests/helpers/bridge-hook.js` to capture request payloads and simulate success/error or missing-hook failures. `tests/integration/qa-binding-audit-flow.test.js` and `tests/integration/setup-repair-flow.test.js` still exercise the receiver path.
 
-**Remaining BNN-6 candidates:** setup repair/setup paths and other bridge-backed tools may still use direct HTTP. Migrate only where hook transport removes meaningful test fragility and keep live receiver behavior unchanged.
+**Remaining BNN-6 candidates:** broad setup, doc/component/showcase, and sync paths still use direct HTTP. They are lower-priority for this cleanup slice because the named high-value mutation/audit candidates are now covered. Migrate only where hook transport removes meaningful test fragility and keep live receiver behavior unchanged.
 
 ### [2026-05-22 — token prune + collection modes in update_ds_tokens]
 

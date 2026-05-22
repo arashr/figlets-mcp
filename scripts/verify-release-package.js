@@ -10,6 +10,12 @@ const path = require("path");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SERVER_PKG_PATH = path.join(REPO_ROOT, "packages", "figlets-mcp-server", "package.json");
 const DIST_DIR = path.join(REPO_ROOT, "dist");
+const {
+  assertPluginReleaseAlignment,
+  smokeAgentInterfaceTools,
+} = require("./lib/agent-interface-smoke.js");
+const { withMcpStdioSession, parseToolCallPayload } = require("../tests/helpers/mcp-stdio-client.js");
+
 const REQUIRED_TOOLS = [
   "figlets_start",
   "figlets_route_intent",
@@ -82,91 +88,35 @@ function assertExtractedPackage(packageDir, expectedVersion) {
   );
 }
 
-function smokeMcpServer(packageDir) {
-  return new Promise((resolve, reject) => {
-    const child = childProcess.spawn(
-      process.execPath,
-      [path.join(packageDir, "bin", "figlets-mcp.js")],
-      {
-        cwd: packageDir,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: Object.assign({}, process.env, {
-          // The release tarball intentionally bundles private @figlets/core only.
-          // Public runtime deps are installed by npx/npm for real users; for this
-          // repo-local smoke check, resolve them from the workspace install.
-          NODE_PATH: [path.join(REPO_ROOT, "node_modules"), process.env.NODE_PATH]
-            .filter(Boolean)
-            .join(path.delimiter),
-          FIGLETS_SKIP_RECEIVER: "1",
-        }),
-      }
-    );
-
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-
-    function finish(err) {
-      if (settled) return;
-      settled = true;
-      child.kill();
-      if (err) reject(err);
-      else resolve();
-    }
-
-    child.stdout.on("data", chunk => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", chunk => {
-      stderr += String(chunk);
-    });
-    child.on("error", finish);
-    child.on("exit", code => {
-      if (!settled && code !== null && code !== 0) {
-        finish(new Error(`packed MCP server exited with ${code}: ${stderr}`));
-      }
-    });
-
-    function send(id, method, params) {
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-    }
-
-    setTimeout(() => {
-      send(1, "initialize", {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "figlets-release-verify", version: "0.0.0" },
-      });
-    }, 25);
-
-    setTimeout(() => {
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }) + "\n");
-    }, 100);
-
-    setTimeout(() => {
-      send(2, "tools/list", {});
-    }, 175);
-
-    setTimeout(() => {
-      try {
-        const lines = stdout.split("\n").filter(Boolean).map(line => JSON.parse(line));
-        const listResponse = lines.find(item => item.id === 2);
-        assert.ok(listResponse, "tools/list response should be present");
-        assert.ok(!listResponse.error, `tools/list should not error: ${JSON.stringify(listResponse.error)}`);
-        const toolNames = listResponse.result.tools.map(tool => tool.name);
-        for (const tool of REQUIRED_TOOLS) {
-          assert.ok(toolNames.includes(tool), `packed tools/list should expose ${tool}`);
-        }
-        finish();
-      } catch (err) {
-        err.message += `\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`;
-        finish(err);
-      }
-    }, 2500);
+async function smokeMcpServer(packageDir) {
+  const env = Object.assign({}, process.env, {
+    NODE_PATH: [path.join(REPO_ROOT, "node_modules"), process.env.NODE_PATH]
+      .filter(Boolean)
+      .join(path.delimiter),
+    FIGLETS_SKIP_RECEIVER: "1",
   });
+
+  await withMcpStdioSession(
+    {
+      serverEntry: path.join(packageDir, "bin", "figlets-mcp.js"),
+      cwd: packageDir,
+      env,
+    },
+    async session => {
+      session.send(2, "tools/list", {});
+      const listResponse = await session.waitForResponse(2);
+      assert.ok(!listResponse.error, `tools/list should not error: ${JSON.stringify(listResponse.error)}`);
+      const toolNames = listResponse.result.tools.map(tool => tool.name);
+      for (const tool of REQUIRED_TOOLS) {
+        assert.ok(toolNames.includes(tool), `packed tools/list should expose ${tool}`);
+      }
+      await smokeAgentInterfaceTools(session, parseToolCallPayload);
+    }
+  );
 }
 
 async function main() {
+  assertPluginReleaseAlignment();
   const serverPkg = JSON.parse(fs.readFileSync(SERVER_PKG_PATH, "utf-8"));
   const tarballName = `figlets-mcp-server-${serverPkg.version}.tgz`;
   const tarballPath = path.join(DIST_DIR, tarballName);
@@ -195,7 +145,7 @@ async function main() {
     "Release package verification: OK",
     `  Tarball: dist/${tarballName}`,
     `  Required tools: ${REQUIRED_TOOLS.join(", ")}`,
-    skipSmoke ? "  Packed MCP smoke: skipped" : "  Packed MCP smoke: OK",
+    skipSmoke ? "  Packed MCP smoke: skipped" : "  Packed MCP smoke (tools/list + Agent Interface): OK",
     "",
   ].join("\n"));
 }

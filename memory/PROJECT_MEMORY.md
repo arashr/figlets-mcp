@@ -14,6 +14,14 @@ Active context for the project so future sessions can recover quickly without re
 
 **Decision basis:** `docs/bulk-repair-api-implementation-plan.md` shows no remaining Phase 3 token-completion product gaps. `docs/future-figlets-gap-register.md` still names host smoke testing, bridge capability/version mismatch, release packaging drift, and instruction drift as risks that can break the designer experience even when unit tests pass.
 
+### [2026-05-22 — host smoke coverage for Claude Code and Codex plugins]
+
+**Status:** BNN-12 added repeatable host smoke for the Figlets Agent Interface on the plugin/release path. `npm run smoke:plugins` checks Claude/Codex plugin version + GitHub release tarball URL alignment, then smoke-calls `figlets_start`, `figlets_route_intent`, and `figlets_workflow_guide` against the packed server (or `--workspace` for a faster local server). `npm run verify:release` now includes the same Agent Interface `tools/call` checks after packed `tools/list`. Unit coverage lives in `tests/plugins/host-agent-interface-smoke.test.js` (workspace server, receiver skipped).
+
+**Manual host checks:** Restart Claude Code or Codex after plugin/setup changes; confirm `/figlets:start` or designer phrases surface Figlets MCP tools. Automated smoke does not drive host UI.
+
+**Verification:** `npm run smoke:plugins`, `npm_config_cache=/private/tmp/figlets-npm-cache npm run verify:release`, full `npm test`, `git diff --check`.
+
 ### [2026-05-22 — release/package verification for public GitHub repo]
 
 **Status:** BNN-11 added `npm run verify:release` as a CI-friendly release verification command. It rebuilds the self-contained server tarball, checks required tarball contents, extracts the packed package, validates package metadata, and runs a packed MCP `tools/list` smoke with bridge startup skipped. The smoke asserts key public tools are exposed from the packed release entrypoint.
@@ -23,6 +31,14 @@ Active context for the project so future sessions can recover quickly without re
 **Test support:** `FIGLETS_SKIP_RECEIVER=1` skips bridge receiver startup for MCP tool-list/package smoke tests that do not need live Figma or localhost. Runtime designer flows still start or reuse the receiver normally.
 
 **Verification:** `npm_config_cache=/private/tmp/figlets-npm-cache npm run verify:release` passed because the machine's default npm cache has root-owned files. Full supported-runtime `npm test` passed **78/78**, and `git diff --check` passed.
+
+### [2026-05-22 — bridge-request migration for primitives and QA audit]
+
+**Status:** BNN-6 migrated two named bridge-backed paths from ad hoc localhost `http.request` code to the shared `requestBridgePost` transport: `update_ds_primitives` (`/request-update-primitives`) and `qa_binding_audit` (`/request-qa-audit`). Live HTTP behavior stays on the same receiver routes, while tests can now use `FIGLETS_BRIDGE_HOOK_FILE` hook transport and fail closed when an explicit hook file is missing.
+
+**Test impact:** `tests/server/update-ds-primitives-tool.test.js` and `tests/server/qa-binding-audit-tool.test.js` no longer bind localhost ports. They use `tests/helpers/bridge-hook.js` to capture request payloads and simulate 200/503/409 or missing-hook failures. `tests/integration/qa-binding-audit-flow.test.js` still exercises the receiver path.
+
+**Remaining BNN-6 candidates:** setup repair/setup paths and other bridge-backed tools may still use direct HTTP. Migrate only where hook transport removes meaningful test fragility and keep live receiver behavior unchanged.
 
 ### [2026-05-22 — token prune + collection modes in update_ds_tokens]
 

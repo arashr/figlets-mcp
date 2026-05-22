@@ -22,6 +22,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Verification:** `npm run smoke:plugins`, `npm_config_cache=/private/tmp/figlets-npm-cache npm run verify:release`, full `npm test`, `git diff --check`.
 
+**Coordination note:** This work was initially left uncommitted while another agent worked on BNN-6, which made the shared `main` worktree ambiguous. For parallel agent work, use separate branches/worktrees or commit/stash before handing off. Do not leave completed work uncommitted in the shared checkout when another agent is active.
+
 ### [2026-05-22 — release/package verification for public GitHub repo]
 
 **Status:** BNN-11 added `npm run verify:release` as a CI-friendly release verification command. It rebuilds the self-contained server tarball, checks required tarball contents, extracts the packed package, validates package metadata, and runs a packed MCP `tools/list` smoke with bridge startup skipped. The smoke asserts key public tools are exposed from the packed release entrypoint.

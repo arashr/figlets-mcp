@@ -58,7 +58,7 @@ const figletsWorkflowGuideTool = {
 const figletsHealthCheckTool = {
   name: "figlets_health_check",
   description:
-    "Read-only Agent Interface health check for agent readiness and Figlets workflow safety. Returns structured, host-neutral feedback about entrypoint/routing, workflow sequencing, approval boundaries, repair payload sources, product-gap handling, stale host risk, and bridge readiness. Does not inspect or mutate Figma.",
+    "Read-only Agent Interface health check for agent readiness and Figlets workflow safety. Returns structured, host-neutral feedback about entrypoint/routing, workflow sequencing, setup intake and proposal boundaries, approval boundaries, repair payload sources, product-gap handling, stale host risk, and bridge readiness. Does not inspect or mutate Figma.",
   inputSchema: {
     type: "object",
     properties: {
@@ -157,6 +157,22 @@ function _chooseNextAction(checks, fallback) {
       type: "call_tool",
       tool: actionable.recommendedTool || "figlets_workflow_guide",
       argsSource: actionable.recommendedTool ? "workflow guide step order" : "context.workflowId",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "setup_intake_boundary") {
+    return {
+      type: "ask_user",
+      tool: null,
+      argsSource: "new-ds-setup intakeContract.requiredTopics",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "setup_proposal_boundary") {
+    return {
+      type: "ask_user",
+      tool: "figlets_workflow_guide",
+      argsSource: "new-ds-setup intakeContract.firstResponseRule",
       message: actionable.nextAction,
     };
   }
@@ -312,6 +328,89 @@ function handleFigletsHealthCheck(args) {
         nextAction: "Follow figlets_workflow_guide step order.",
       }));
     }
+
+    const setupIntakeCompleted = _truthy(workflowState.setupIntakeCompleted);
+    const setupToolRequested = requestedTool === "prepare_ds_config" ||
+      requestedTool === "apply_ds_setup" ||
+      completedTools.indexOf("prepare_ds_config") !== -1;
+    if (workflow.id === "new-ds-setup" && setupToolRequested && !setupIntakeCompleted) {
+      checks.push(_makeCheck({
+        id: "setup_intake_boundary",
+        title: "Setup intake boundary",
+        status: "fail",
+        severity: "error",
+        message: "New design-system setup must collect designer intake answers before prepare_ds_config or apply_ds_setup.",
+        evidence: [
+          "workflowId=new-ds-setup",
+          "setupIntakeCompleted is not true",
+          `requestedOrCompletedTool=${requestedTool || "prepare_ds_config"}`,
+        ],
+        nextAction: "Ask targeted setup intake questions for missing choices. Treat the designer prompt as direction, not a complete spec. Do not draft a full proposal or concrete token values before intake.",
+        recommendedTool: "figlets_workflow_guide",
+      }));
+    } else if (workflow.id === "new-ds-setup") {
+      checks.push(_makeCheck({
+        id: "setup_intake_boundary",
+        title: "Setup intake boundary",
+        status: setupIntakeCompleted || !setupToolRequested ? "pass" : "info",
+        severity: "info",
+        message: setupIntakeCompleted
+          ? "Setup intake is marked complete for this workflow."
+          : "Setup intake has not been requested yet.",
+        evidence: [`setupIntakeCompleted=${setupIntakeCompleted}`],
+        nextAction: "Collect missing setup choices before calling prepare_ds_config.",
+      }));
+    } else {
+      checks.push(_makeCheck({
+        id: "setup_intake_boundary",
+        title: "Setup intake boundary",
+        status: "info",
+        severity: "info",
+        message: "Setup intake boundary applies only to new-ds-setup.",
+        evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+        nextAction: "No setup intake check needed for this workflow.",
+      }));
+    }
+
+    const proposalDraftedBeforeIntake = _truthy(workflowState.proposalDraftedBeforeIntake);
+    if (workflow.id === "new-ds-setup" && proposalDraftedBeforeIntake && !setupIntakeCompleted) {
+      checks.push(_makeCheck({
+        id: "setup_proposal_boundary",
+        title: "Setup proposal boundary",
+        status: "fail",
+        severity: "error",
+        message: "New design-system setup must ask intake questions before drafting palettes, typography stacks, grid defaults, or token names.",
+        evidence: [
+          "workflowId=new-ds-setup",
+          "proposalDraftedBeforeIntake is true",
+          "setupIntakeCompleted is not true",
+        ],
+        nextAction: "Replace the proposal with targeted intake questions. Offer lightweight multiple-choice options only; do not draft a full setup proposal before intake unless the designer explicitly asks for suggestions.",
+        recommendedTool: "figlets_workflow_guide",
+      }));
+    } else if (workflow.id === "new-ds-setup") {
+      checks.push(_makeCheck({
+        id: "setup_proposal_boundary",
+        title: "Setup proposal boundary",
+        status: proposalDraftedBeforeIntake ? "warn" : "pass",
+        severity: proposalDraftedBeforeIntake ? "warning" : "info",
+        message: proposalDraftedBeforeIntake
+          ? "A setup proposal was drafted after intake began; confirm the designer asked for suggestions."
+          : "No pre-intake setup proposal risk detected.",
+        evidence: [`proposalDraftedBeforeIntake=${proposalDraftedBeforeIntake}`],
+        nextAction: "Lead with intake questions for broad setup prompts; avoid full proposals before answers.",
+      }));
+    } else {
+      checks.push(_makeCheck({
+        id: "setup_proposal_boundary",
+        title: "Setup proposal boundary",
+        status: "info",
+        severity: "info",
+        message: "Setup proposal boundary applies only to new-ds-setup.",
+        evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+        nextAction: "No setup proposal check needed for this workflow.",
+      }));
+    }
   } else {
     checks.push(_makeCheck({
       id: "workflow_tool_sequence",
@@ -324,6 +423,26 @@ function handleFigletsHealthCheck(args) {
       evidence: _nonEmpty(workflowId) ? [`workflowId=${workflowId}`] : [],
       nextAction: "Call figlets_route_intent and figlets_workflow_guide to establish the workflow.",
       recommendedTool: "figlets_workflow_guide",
+    }));
+
+    checks.push(_makeCheck({
+      id: "setup_intake_boundary",
+      title: "Setup intake boundary",
+      status: "info",
+      severity: "info",
+      message: "Setup intake boundary applies only to new-ds-setup.",
+      evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+      nextAction: "No setup intake check needed until new-ds-setup is selected.",
+    }));
+
+    checks.push(_makeCheck({
+      id: "setup_proposal_boundary",
+      title: "Setup proposal boundary",
+      status: "info",
+      severity: "info",
+      message: "Setup proposal boundary applies only to new-ds-setup.",
+      evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+      nextAction: "No setup proposal check needed until new-ds-setup is selected.",
     }));
   }
 
@@ -539,7 +658,7 @@ function handleFigletsRouteIntent(args) {
 function handleFigletsWorkflowGuide(args) {
   const workflowId = args && args.workflow_id;
   const workflow = getWorkflowGuide(workflowId);
-  return {
+  const response = {
     workflow,
     hardRules: DESIGNER_FLOW_HARD_RULES,
     availableWorkflows: listWorkflows().map(item => ({ id: item.id, title: item.title })),
@@ -547,6 +666,12 @@ function handleFigletsWorkflowGuide(args) {
     bulkRepairRouting: DESIGNER_FLOW_HARD_RULES.bulkRepairRouting,
     message: `Workflow guide: ${workflow.title}. Follow the steps in order, use the named Figlets tools/scripts only, follow bulkRepairRouting when choosing repair surfaces, use structured repairPlan payloads when Figlets provides them, summarize tool output in plain language, and ask for approval before any write step.`,
   };
+  if (workflow.id === "new-ds-setup" && workflow.intakeContract) {
+    response.intakeContract = workflow.intakeContract;
+    response.intakePresentationRule = workflow.intakeContract.firstResponseRule;
+    response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Ask intake questions first and do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. Run setup intake before prepare_ds_config. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
+  }
+  return response;
 }
 
 module.exports = {

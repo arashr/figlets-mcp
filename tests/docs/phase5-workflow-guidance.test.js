@@ -32,6 +32,36 @@ for (const rel of paths) {
   }
 }
 
+const adapterPaths = [
+  "packages/figlets-adapter/AGENTS.md",
+  "packages/figlets-adapter/CLAUDE.md",
+];
+for (const rel of adapterPaths) {
+  const content = fs.readFileSync(path.join(ROOT, rel), "utf8");
+  assert.ok(
+    !/Broad typography and elevation remain product-gap scope/i.test(content),
+    `${rel} should not treat broad typography/elevation apply as a product gap`
+  );
+  assert.ok(
+    content.includes("broad `typography` / `elevation` orchestration"),
+    `${rel} should document broad typography/elevation orchestration apply`
+  );
+  assert.ok(
+    content.includes("primitive-shadow"),
+    `${rel} should document primitive-shadow on update_ds_primitives`
+  );
+}
+
+const developerGuide = fs.readFileSync(path.join(ROOT, "docs/developer-guide.md"), "utf8");
+assert.ok(
+  !/planned `figlets_health_check`/i.test(developerGuide),
+  "developer-guide should not describe figlets_health_check as planned-only"
+);
+assert.ok(
+  developerGuide.includes("figlets_health_check"),
+  "developer-guide should reference shipped figlets_health_check"
+);
+
 const workflows = fs.readFileSync(
   path.join(ROOT, "packages/figlets-mcp-server/src/agent-interface/workflows.js"),
   "utf8"

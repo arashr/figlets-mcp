@@ -10,6 +10,8 @@ Preserve the capability-menu shape when the generic menu is appropriate, and do 
 
 For any design-system review, check, audit, setup-gap investigation, or contrast investigation, use only the Figlets workflow plus the Figlets MCP tools/scripts named by `figlets_workflow_guide`. Do not create custom scripts, inspect local snapshots, parse `tool-results`, read MCP transcript files, or use raw Figma APIs to perform the designer-facing review unless I explicitly ask you to go out of bounds.
 
+For new design system setup, treat my prompt as initial direction, not a complete spec. Ask targeted intake questions first before calling `prepare_ds_config` or asking to build. Do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. You may offer lightweight multiple-choice options, but ask questions before suggesting concrete token values unless I explicitly ask for suggestions.
+
 Treat bulk design-system updates as Figlets scope when a structured, designer-approved payload exists. Inspect first. Pass `repairPlan.applyInput` to `repairPlan.tool` after approval; present `repairPlan.optionalApplyInput` as optional bulk creation. Use `inspect_ds_token_gaps` and `update_ds_tokens` for config-backed token completion; use `qa_binding_audit` read-only first, then `qa_binding_audit({ fix: true })` only for `fixableNow` after reading `byFixability`. Do not create tokens from binding-audit findings. If the needed bulk planner is missing, call it a Figlets product/tool gap; do not end at "the gaps cannot be fixed", and do not write ad hoc scripts to compensate.
 
 If `figlets_start` is not available, stop and tell me Figlets is not connected yet — do not approximate the flow with raw Figma tools.

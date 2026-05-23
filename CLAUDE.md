@@ -24,6 +24,8 @@ In Designer Mode:
 9. After the designer picks a goal, call `figlets_route_intent`, then `figlets_workflow_guide`, then follow that workflow.
 10. Inspect before changing anything, summarize in plain language, and ask before any Figma write.
 
+Setup intake rule for new design systems: when the designer asks to set up a new design system, treat their prompt as initial direction, not a complete spec. Ask targeted intake questions first for missing choices (color families, brand colors, typography, spacing, grid, breakpoints, contrast standard, light/dark behavior) before calling `prepare_ds_config` or asking to build. Do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. You may offer lightweight multiple-choice options, but only ask questions before suggesting concrete token values unless the designer explicitly asks for suggestions.
+
 Hard rule for reviews/checks/audits: use the Figlets workflow and the Figlets MCP tools/scripts named by `figlets_workflow_guide`. Do not write or run custom scripts over Figma snapshots, MCP transcripts, `tool-results`, local `.local/.../figma-data.json` files, or raw Figma APIs to perform the designer-facing review. If a Figlets tool does not expose the needed information, say that this is a Figlets product/tool gap. Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds.
 
 Bulk repair/update posture: bulk design-system updates are in Figlets scope when they can be represented as structured, designer-approved tool payloads. Inspect first. If `repairPlan.applyInput` is non-empty, ask approval and pass it to `repairPlan.tool`. If `repairPlan.optionalApplyInput` is non-empty, present it as optional bulk creation requiring separate approval. Use `inspect_ds_setup_gaps.repairPlan` → `apply_ds_setup_repairs` for semantic color setup; `inspect_ds_token_gaps` → `apply_ds_foundation_repairs`, `repairPlan.primitiveRepairPlan` → `update_ds_primitives`, and `repairPlan.applyInput` → `update_ds_tokens` for config-backed token completion; `update_ds_primitives` for primitive/color-semantic and primitive typography/shadow updates; `qa_binding_audit` read-only first, then `qa_binding_audit({ fix: true })` only for `fixableNow` after reading `byFixability` and `repairPlan`. Do not create tokens from binding-audit findings. If a requested bulk repair is not yet exposed by Figlets, say the missing planner/apply surface is a Figlets product/tool gap; do not tell the designer the gaps cannot be fixed as a dead end, and do not write ad hoc scripts to compensate.
@@ -49,6 +51,32 @@ Use Developer Mode only when the user asks to edit this repository, debug code, 
 In Developer Mode, read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, and the relevant source files before editing. Human-oriented repo onboarding lives in `docs/developer-guide.md` (not linked from the root README).
 
 Architecture guardrail: before adding a new public Figlets tool, bridge mutation branch, or parallel repair path, check the existing bulk-capable surfaces in `docs/bulk-repair-api-implementation-plan.md`. Decide explicitly whether to extend an existing planner/apply surface, extract shared helpers, or create a new surface because the designer approval boundary is genuinely different. Prefer shared pure helpers for collection names, configured modes, token entry names, and style names; do not duplicate setup/update logic casually.
+
+Linear task comments: when work is tied to a Linear issue, leave additive comments on that issue as the task-level execution log. Keep issue descriptions as stable goal/acceptance criteria; do not rewrite descriptions to capture transient progress. Comment at: start of substantial work, material scope/approach changes (checkpoint), blockers or failed verification, code review verdicts, and completion/handoff. If Linear is unavailable, include paste-ready comment text in the final answer.
+
+Use this comment template:
+
+```md
+Status: started | checkpoint | review | completed | blocked
+
+Scope:
+- ...
+
+Technical notes:
+- ...
+
+Files/areas touched:
+- ...
+
+Verification:
+- `command`: pass/fail/not run + reason
+
+Risks / follow-ups:
+- ...
+
+Links:
+- PR/commit/branch if available
+```
 
 ## Default
 

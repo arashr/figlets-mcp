@@ -32,4 +32,19 @@ for (const file of files) {
   assert.ok(content.includes("repairPlan.optionalApplyInput"), `${file} should document optional bulk apply payloads`);
   assert.ok(content.includes("inspect_ds_token_gaps"), `${file} should route token completion through inspect_ds_token_gaps`);
   assert.ok(content.includes("fixableNow"), `${file} should document qa_binding_audit fixableNow apply boundary`);
+  assert.ok(content.includes("Linear task comments"), `${file} should define Linear task comment logging in Developer Mode`);
+  assert.ok(content.includes("Status: started | checkpoint | review | completed | blocked"), `${file} should include the Linear comment template`);
+  assert.ok(content.includes("paste-ready comment text"), `${file} should require paste-ready comments when Linear is unavailable`);
 }
+
+const developerGuide = fs.readFileSync(path.join(ROOT, "docs/developer-guide.md"), "utf-8");
+assert.ok(developerGuide.includes("additive task comments"), "developer-guide should reference Linear task comment convention");
+assert.ok(developerGuide.includes("AGENTS.md"), "developer-guide should point to AGENTS.md for the comment template");
+assert.ok(
+  !/planned `figlets_health_check`/i.test(developerGuide),
+  "developer-guide should not describe figlets_health_check as planned-only"
+);
+assert.ok(
+  developerGuide.includes("figlets_health_check"),
+  "developer-guide should reference shipped figlets_health_check"
+);

@@ -46,11 +46,11 @@ Include these work packets:
 3. Host smoke coverage: cover G-003 with scripted smoke prompts/checks for Claude Code and Codex plugin flows after release packaging is verifiable.
 4. Guidance hygiene: keep BNN-8 active so root docs, plugin skills, and Agent Interface guidance stay aligned with completed bulk repair surfaces.
 
-Do not include `figlets_health_check` in this slice unless the hardening items above are explicitly deferred. It is the leading next product-capability candidate, but it is a new public read-only orchestration surface and should be planned separately under the bulk-surface guardrail.
+`figlets_health_check` v1 shipped (2026-05-23, BNN-17) as a read-only agent readiness checker; keep v2 audit orchestration separate from this hardening slice.
 
 ### Product-Capability Backlog After Hardening
 
-1. `figlets_health_check` orchestrator.
+1. `figlets_health_check` v2 (optional Figma read-only audit orchestration).
 2. Exact-match typography binding fixes.
 3. Preview/test harness for showcase visual changes.
 4. Result pagination/detail tools for long findings.

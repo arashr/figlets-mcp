@@ -43,7 +43,7 @@ try {
     assert.ok(figletsRouteIntentTool.description.includes("before any design-system review scripting"));
     assert.ok(figletsWorkflowGuideTool.description.includes("named Figlets tools/scripts only"));
     assert.ok(figletsHealthCheckTool.description.includes("Read-only Agent Interface health check"));
-    assert.ok(figletsHealthCheckTool.description.includes("host-neutral feedback"));
+    assert.ok(figletsHealthCheckTool.description.includes("setup intake and proposal boundaries"));
   }
 
   {
@@ -133,6 +133,97 @@ try {
   {
     const route = routeIntent("add missing typography and spacing tokens");
     assert.strictEqual(route.workflow.id, "token-gap-completion");
+  }
+
+  {
+    const posterGalleryIntent =
+      "using figlets set up a new design system with multiple vibrant colors as backgrounds and some matching vibrant colors to pair with them as foreground. The ds is called Poster Gallery.";
+    const route = routeIntent(posterGalleryIntent);
+    assert.strictEqual(route.workflow.id, "new-ds-setup");
+    assert.ok(route.intakeContract);
+    assert.ok(route.intakeContract.firstResponseRule.includes("intake questions"));
+    assert.ok(route.intakeContract.doNotDraftBeforeIntake.some(item => /palette|proposal/i.test(item)));
+    assert.ok(route.message.includes("do not draft a full proposal"));
+    assert.ok(route.designerResponse.includes("start by asking"));
+    assert.ok(route.designerResponse.includes("won't draft"));
+    assert.ok(route.designerResponse.includes("not a proposal to approve"));
+    assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
+  }
+
+  {
+    const negativeRoutes = [
+      ["using figlets build a token showcase for vibrant colors", "build-showcase"],
+      ["using figlets export DESIGN.md for background colors", "export-design-md"],
+      ["using figlets check foreground contrast in my design system", "health-check"],
+      ["using figlets add missing background/foreground color roles", "health-check"],
+    ];
+    for (const [intent, expectedWorkflowId] of negativeRoutes) {
+      const route = routeIntent(intent);
+      assert.strictEqual(
+        route.workflow.id,
+        expectedWorkflowId,
+        `intent should route to ${expectedWorkflowId}: ${intent}`
+      );
+    }
+  }
+
+  {
+    const guide = getWorkflowGuide("new-ds-setup");
+    assert.ok(guide.intakeContract);
+    assert.ok(guide.intakeContract.requiredTopics.length >= 8);
+    assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "prepare_ds_config"));
+    assert.ok(guide.errors.some(item => item.includes("Do not invent missing brand colors")));
+    const handled = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
+    assert.ok(handled.intakeContract);
+    assert.ok(handled.intakePresentationRule.includes("intake questions"));
+    assert.ok(handled.message.includes("do not draft a full proposal"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: {
+        mode: "designer",
+        workflowId: "new-ds-setup",
+        goal: "set up Poster Gallery design system",
+      },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        setupIntakeCompleted: false,
+        proposalDraftedBeforeIntake: true,
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const proposal = health.checks.find(check => check.id === "setup_proposal_boundary");
+    assert.strictEqual(proposal.status, "fail");
+    assert.ok(proposal.nextAction.includes("targeted intake questions"));
+    assert.strictEqual(health.nextAction.type, "ask_user");
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: {
+        mode: "designer",
+        workflowId: "new-ds-setup",
+        goal: "set up Poster Gallery design system",
+      },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        setupIntakeCompleted: false,
+      },
+      requestedAction: {
+        tool: "prepare_ds_config",
+        kind: "read",
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const intake = health.checks.find(check => check.id === "setup_intake_boundary");
+    assert.strictEqual(intake.status, "fail");
+    assert.ok(intake.nextAction.includes("Ask targeted setup intake questions"));
+    assert.strictEqual(health.nextAction.type, "ask_user");
   }
 
   {

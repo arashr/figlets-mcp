@@ -4,6 +4,8 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+---
+
 ### [2026-05-23 — figlets_health_check v1 agent readiness tool]
 
 **Status:** BNN-17 implemented the first public `figlets_health_check` MCP tool as a read-only Agent Interface surface. V1 is an agent-agnostic workflow contract checker, not a full Figma audit runner: it accepts optional caller-provided context/workflow/repair-plan/requested-action state and returns structured `status`, `checks`, `nextAction`, `blockingReasons`, and read-only boundaries.
@@ -11,6 +13,18 @@ Active context for the project so future sessions can recover quickly without re
 **Checks shipped:** Designer Mode entrypoint, concrete goal routing, workflow step sequencing from `WORKFLOWS`, approval boundary, structured repair payload source, product-gap response, `qa_binding_audit` fixability boundary, stale MCP host suspicion, bridge readiness, and release/docs readiness. The implementation is pure Agent Interface logic and does not probe or mutate Figma, start bridge mutation branches, or branch on Cursor/Codex/Claude-specific behavior.
 
 **Docs/tests:** Adapter `AGENTS.md` / `CLAUDE.md` list `figlets_health_check` as an advanced read-only agent readiness check, not a designer menu item. Host Agent Interface smoke now calls it. Supported-runtime full suite passed **79/79**; `git diff --check` clean.
+
+### [2026-05-23 — BNN-13 human README rewrite]
+
+**Status:** Closed BNN-13. Root `README.md` is designer-first for GitHub onboarding: local-first About section, per-agent setup (no recommended default), Figlets Bridge get/import/use/update steps, and plain-language troubleshooting. Developer/repo content moved to `docs/developer-guide.md`, intentionally not linked from the root README. `AGENTS.md` and `CLAUDE.md` point repo contributors to that guide.
+
+**Voice:** Direct sentences, consistent `**Label:**` list pattern, no em dashes in README prose. Plugin and adapter READMEs aligned to the same style.
+
+**Files:** `README.md`, `docs/developer-guide.md`, `AGENTS.md`, `CLAUDE.md`, `plugins/claude-code/README.md`, `plugins/claude-code/figlets/README.md`, `plugins/codex/figlets/README.md`, `packages/figlets-adapter/README.md`.
+
+**Verification:** `git diff --check`; `node tests/plugins/claude-code-plugin.test.js`; `node tests/plugins/codex-plugin.test.js`. No full `npm test` (docs-only).
+
+**Release-ready:** Yes for human GitHub onboarding. Bridge plugin remains dev-import (localhost); README states that explicitly.
 
 ### [2026-05-22 — next roadmap slice after Phase 3 token completion]
 

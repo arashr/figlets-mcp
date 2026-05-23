@@ -1,156 +1,169 @@
-# figlets-mcp
+# Figlets
 
-`figlets-mcp` is the next step for figlets: an agent-agnostic, MCP-first toolkit for Figma design system workflows.
+**Figlets** helps you work on your Figma design system through an AI assistant. You can check health, set things up, fix gaps, build a showcase, document components, or export design docs.
 
-The current `figlets` repository remains the Claude-facing product. This repository becomes the shared core that we can expose to Codex, Claude, and future agents through stable MCP tools and thin adapters.
+You stay in Figma and plain language. Figlets handles the structured work behind the scenes and **asks before changing anything** in your file.
 
-## Why this repo exists
+Figlets works with MCP-capable AI assistants such as Cursor, Claude, Codex, Windsurf, and GitHub Copilot in VS Code. You do not need to read this repository to use it.
 
-The long-term goal is simple:
+## About Figlets
 
-- keep deterministic Figma logic local
-- reduce token burn
-- improve consistency across runs
-- reserve model reasoning for ambiguity, tradeoffs, and orchestration
+Figlets is built around a simple split: **your AI assistant is the interface; Figlets runs the design-system work on your computer.**
 
-## Direction
+When you sync, inspect, plan repairs, or apply approved fixes, the repeatable work happens in **local Figlets tools**. That includes token audits, gap planning, contrast checks, showcase builds, and structured Figma updates through Figlets Bridge. The agent understands what you want, runs the right workflow, explains results in plain language, and asks before anything changes.
 
-This repo is organized around three layers:
+**Local-first by design.** Figlets does not run a cloud backend that stores your design system. The Figlets MCP server and bridge receiver run on your machine. Synced snapshots and working files are saved **locally on your computer** (by default under a `.local/` folder next to where Figlets runs). Approved Figma changes go through the bridge plugin in Figma Desktop, not through a Figlets-hosted service.
 
-1. `packages/figlets-core`
-   Shared analysis, planning, validation, and transformation logic.
-2. `packages/figlets-mcp-server`
-   An MCP server that exposes stable tools over the shared core.
-3. `packages/figlets-adapter-*`
-   Thin agent-specific adapters for Codex, Claude, and future runtimes.
+That is the core idea of this project: keep deterministic Figma logic local, reserve the model for ambiguity and orchestration, and avoid shipping your file through extra cloud pipelines when Figlets can compute the answer on your machine.
 
-## Initial workflow targets
+**Why that matters**
 
-The first workflows to migrate from the existing `figlets` repo are:
+- **Safer:** inspect-first workflows and explicit approval before bulk changes, instead of open-ended edits or one-off scripts.
+- **More consistent:** the same named tools and repair plans on every run, rather than the model improvising steps each time.
+- **More cost-efficient:** heavy design-system analysis stays in Figlets tools, so your assistant spends fewer tokens re-deriving work the tools already did.
 
-- design system detection
-- token gap audit
-- component inspection
-- component documentation
+**What still uses other services.** Your file still lives in **Figma** as usual. Your **AI app** (Claude, Cursor, Codex, and so on) still processes what you type and the summaries it needs to explain results to you. That is normal for any AI assistant. Figlets reduces how much raw file reasoning the model has to do, but it does not replace your AI provider. Installing Figlets may download the MCP server from GitHub. That is setup software, not uploading your design file to Figlets.
 
-These are the best early candidates because they are high-value, mostly deterministic, and useful across agents.
+## What you can do
 
-## Repo map
+Ask your assistant to help with any of these:
 
-- `docs/architecture.md`
-- `docs/migration-plan.md`
-- `docs/tool-contracts.md`
-- `DECISIONS.md`
-- `memory/PROJECT_MEMORY.md`
-- `examples/`
-- `packages/figlets-core/`
-- `packages/figlets-mcp-server/`
+- **Check my design system:** review tokens, setup, and bindings; summarize what needs attention
+- **Set up a new design system:** bootstrap variables and foundations from your config
+- **Build a token showcase:** generate a visual reference in Figma
+- **Document a component:** create a spec sheet for handoff
+- **Export DESIGN.md:** export design documentation from your file
 
-## Near-term roadmap
+## Get started
 
-1. Define the MCP tool contracts.
-2. Port design system detection into `figlets-core`.
-3. Expose the first MCP tools from the server.
-4. Build thin Claude and Codex adapters on top.
+### 1. Connect Figlets to your AI tool
 
-## Current Bridge Strategy
+Pick the section for the assistant you use. Each path is a one-time setup, then **restart that app**.
 
-The first bridge is intentionally simple:
+You need the `figlets-mcp` command available first. If you do not have it yet, see **[docs/mcp-config-examples.md](./docs/mcp-config-examples.md)** for how to get it.
 
-- the server can accept inline `figmaData`
-- or load a Figma-like JSON payload from `figmaDataPath`
-- or run a command that prints that payload with `figmaDataCommand`
-- or read that path from `FIGLETS_FIGMA_DATA_PATH`
-- or read that command from `FIGLETS_FIGMA_DATA_COMMAND`
-
-That gives us a full fetch-then-analyze seam today, while keeping room for a real Figma runtime bridge next.
-
-## Try It
-
-From the repo root:
+To preview what setup would change before anything is written:
 
 ```bash
-node packages/figlets-mcp-server/src/index.js
+figlets-mcp setup
 ```
 
-To run the first tool directly against the bundled example:
+#### Claude Code
+
+Uses a Figlets plugin (MCP server plus designer routing). After setup you can type **`/figlets:start`** or describe what you need in plain language.
 
 ```bash
-node packages/figlets-mcp-server/src/cli/detect-design-system.js
+figlets-mcp setup --hosts=claude-code-plugin --yes
 ```
 
-To run it against your own JSON payload:
+Restart Claude Code, then ask something like: *“Help me with my Figma design system.”*
+
+#### OpenAI Codex
+
+Uses a Figlets plugin (MCP server plus designer routing):
 
 ```bash
-node packages/figlets-mcp-server/src/cli/detect-design-system.js /absolute/path/to/figma-data.json
+figlets-mcp setup --hosts=codex-plugin --yes
 ```
 
-To run it through an external exporter command:
+Restart Codex, then ask something like: *“Help me with my Figma design system using Figlets.”*
+
+#### Cursor, Claude Desktop, Windsurf, VS Code (GitHub Copilot), Gemini CLI
+
+These assistants share the same Figlets MCP connection. One setup command updates the config for each app it finds on your machine:
 
 ```bash
-node packages/figlets-mcp-server/src/cli/detect-design-system.js --command "cat /absolute/path/to/figma-data.json"
+figlets-mcp setup --yes
 ```
 
-To run the unit tests (from the repo root):
+Restart whichever app you use, then start a Figlets conversation in plain language.
 
-```bash
-npm test
-```
+If you use only one of these and prefer setup to touch just that app, add `--hosts=` with its name. Examples: `--hosts=cursor` or `--hosts=claude-desktop`. More detail: **[docs/mcp-config-examples.md](./docs/mcp-config-examples.md)**.
 
-The test setup is intentionally lightweight and dependency-free right now so contributors do not need to learn extra tooling just to verify changes.
+### 2. Open the Figlets Bridge in Figma Desktop
 
-## Export From Figma REST
+Figlets talks to Figma through a small companion plugin called **Figlets Bridge**. Your AI assistant cannot read or change your file until this plugin is open in **Figma Desktop** (the desktop app).
 
-If you already have a Figma personal access token, you can export a real file into the JSON contract used by `detect_design_system`.
+#### Get the plugin files (one time per computer)
 
-For private local testing on your machine:
+You need the Figlets Bridge folder once. It is **not** installed by step 1 alone.
 
-1. Copy `.env.example` to `.env`
-2. Put your Figma token in `.env`
-3. Optionally write exports into `.local/`
+1. Download the Figlets project from GitHub: [github.com/arashr/figlets-mcp](https://github.com/arashr/figlets-mcp) → **Code** → **Download ZIP**, then unzip it.
+2. Inside the unzipped folder, open **`packages/figma-bridge-plugin/`**.
 
-Set one of these environment variables, or put it in `.env`:
+That folder contains **`manifest.json`**. Figma will ask for this file during setup.
 
-```bash
-export FIGMA_ACCESS_TOKEN=your_token_here
-```
+If someone on your team already set up Figlets, you can ask them for that folder instead of downloading again.
 
-Then run (from the repo root):
+#### Add the plugin to Figma (one time)
 
-```bash
-node packages/figlets-mcp-server/src/cli/export-figma-file.js --file "https://www.figma.com/design/FILE_KEY/File-Name" --output /absolute/path/to/figma-data.json
-```
+1. Open **Figma Desktop** and open the design file you want to work on.
+2. In the menu bar: **Plugins** → **Development** → **Import plugin from manifest…**
+3. Choose **`manifest.json`** inside `packages/figma-bridge-plugin`.
 
-A local-only example writing into the gitignored `.local/` directory:
+You only need to import once per computer. After that, **Figlets Bridge** appears under **Plugins** → **Development**.
 
-```bash
-node packages/figlets-mcp-server/src/cli/export-figma-file.js --file "https://www.figma.com/design/FILE_KEY/File-Name" --output .local/figma-data.json
-```
+> **Why a development plugin?** Figlets Bridge talks to your assistant through **localhost** on your computer. Figma does not allow that for plugins published in the **Community catalog**, so Figlets Bridge is installed through Figma’s **Development** import flow instead. That is expected and will stay this way unless Figlets moves to a different connection architecture.
 
-Then analyze that export:
+#### When Figlets is updated
 
-```bash
-node packages/figlets-mcp-server/src/cli/detect-design-system.js /absolute/path/to/figma-data.json
-```
+The Figma plugin and your AI setup can get out of sync after a Figlets update. If your assistant reports missing bridge features, sync failures, or “reload the plugin” messages, refresh the plugin files and Figma’s copy:
 
-Notes:
-- The exporter uses Figma REST `GET /v1/files/:key` and attempts `GET /v1/files/:file_key/variables/local`.
-- Per Figma’s official docs, the local Variables endpoint requires the `file_variables:read` scope and is available only to full members of Enterprise orgs.
-- If the Variables API is unavailable, the exporter still returns file metadata plus any text and effect styles visible from the file response, along with a warning.
-- `.env` and `.local/` are ignored by Git so your private tokens and scratch exports stay on your machine.
+1. **Get the latest plugin folder.** Download a fresh copy of [figlets-mcp](https://github.com/arashr/figlets-mcp) (or pull the latest from your team’s checkout) and use the updated **`packages/figma-bridge-plugin/`** folder.
+2. **Close Figlets Bridge** in Figma if it is open.
+3. **Reload in Figma Desktop.** Either remove and re-import the plugin, or run Figlets Bridge again after replacing the folder on disk:
+   - **Plugins** → **Development** → **Remove unused development plugins…** → remove the old **Figlets Bridge** → **Import plugin from manifest…** again and choose the new **`manifest.json`**, or
+   - Run **Figlets Bridge** again from **Plugins** → **Development** after replacing the folder on disk. If Figma still shows stale behavior, remove and re-import as above.
+4. **Restart your AI app** so it picks up any MCP server update from step 1.
 
-## Relationship to the existing figlets repo
+After both sides are updated, open Figlets Bridge again and confirm it still shows **Listening for Agent**.
 
-This repository does not replace `figlets` immediately. Instead:
+#### Each time you use Figlets
 
-- `figlets` stays usable as the current product
-- `figlets-mcp` becomes the shared architecture
-- logic migrates here gradually
-- adapters stay lightweight and agent-specific
+1. Open your design file in **Figma Desktop**.
+2. Run **Plugins** → **Development** → **Figlets Bridge**.
+3. **Leave the plugin window open** while your assistant works.
 
-## Project Memory
+When it is ready, the plugin shows **Listening for Agent**. It may say **Waiting…** until your assistant sends the first request. That means Figlets can see your file.
 
-This repo keeps its reasoning close to the codebase:
+**Tips**
 
-- [DECISIONS.md](./DECISIONS.md) for durable architectural choices and rationale
-- [memory/PROJECT_MEMORY.md](./memory/PROJECT_MEMORY.md) for active context, session notes, and next steps
+- Use the **same file** in Figma that you are discussing with your assistant.
+- If sync or bridge errors appear, close and reopen Figlets Bridge in that file.
+- If problems started right after a Figlets update, follow **[When Figlets is updated](#when-figlets-is-updated)** above.
+
+Your file stays in Figma. The bridge only runs locally on your machine to connect Figma and your assistant.
+
+### 3. Start a conversation
+
+Tell your assistant what you want. For example:
+
+- “Check my design system”
+- “Set up tokens for this file”
+- “Document the component I have selected”
+
+Figlets will **look first**, explain findings in everyday language, and **only apply fixes you approve**.
+
+## How Figlets keeps changes safe
+
+- **Inspect before change:** Figlets reviews your file and explains gaps before suggesting fixes.
+- **You approve writes:** nothing bulk-updates in Figma without your explicit yes.
+- **Structured fixes:** approved repairs come from Figlets planning, not ad hoc scripts or manual API tinkering.
+- **Optional vs required:** some suggestions are recommended fixes; others are optional conventions. Figlets separates those so you can choose.
+
+If your assistant says Figlets is not connected, run setup again and **restart your AI app** so it picks up the Figlets connection.
+
+## If something goes wrong
+
+| What you see | What to try |
+| --- | --- |
+| Assistant says Figlets is unavailable | Run `figlets-mcp setup --yes`, restart your AI app, try again |
+| Sync or bridge errors | Open the design file in Figma Desktop, run **Plugins** → **Development** → **Figlets Bridge**, and leave it open |
+| Assistant behaves oddly after an update | Update the Figma plugin (**When Figlets is updated** above) and restart your AI app |
+| Setup or connection still unclear | Run `figlets-mcp doctor` and follow what it reports |
+
+More host-specific notes: **[docs/mcp-config-examples.md](./docs/mcp-config-examples.md)**.
+
+## License
+
+MIT

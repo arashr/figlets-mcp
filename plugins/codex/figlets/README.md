@@ -1,4 +1,4 @@
-# Figlets — Codex plugin
+# Figlets Codex plugin
 
 Designer-friendly entrypoint for the Figlets design-system toolkit in Codex. Installing this plugin:
 

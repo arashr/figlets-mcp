@@ -1,4 +1,4 @@
-# Figlets — Claude Code plugin
+# Figlets Claude Code plugin
 
 Designer-friendly entrypoint for the Figlets design-system toolkit. Installing this plugin:
 
@@ -10,7 +10,7 @@ Designer-friendly entrypoint for the Figlets design-system toolkit. Installing t
 
 This plugin is **agent-agnostic-friendly**: the Figlets toolkit itself lives in the main repo and is shared by every agent. Only this thin Claude integration lives under `plugins/claude-code/`.
 
-- The marketplace manifest is at the **repo root** (`<repo>/.claude-plugin/marketplace.json`) because Claude Code only reads it from there. It just redirects to `./plugins/claude-code/figlets`.
+- The marketplace manifest is at the **repo root** (`<repo>/.claude-plugin/marketplace.json`) because Claude Code only reads it from there. It redirects to `./plugins/claude-code/figlets`.
 - The MCP server is **not** published to npm. Instead the manifest runs `npx -y <GitHub release tarball URL>`. `npx` downloads that tarball and resolves dependencies from the public npm registry (registry reads are free and need no login).
 
 > [!IMPORTANT]
@@ -22,10 +22,10 @@ This plugin is **agent-agnostic-friendly**: the Figlets toolkit itself lives in 
 figlets-mcp setup --hosts=claude-code-plugin --yes
 ```
 
-That runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` + `claude plugin install figlets@figlets-claude-code`, is idempotent, and — only after a smoke check confirms the plugin's MCP server is actually reachable — removes any legacy `figlets` MCP entries the plugin supersedes. If the server is not reachable (e.g. the release is not published yet), setup leaves your existing config untouched and tells you why. Restart Claude Code afterwards.
+That runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code` and `claude plugin install figlets@figlets-claude-code`. Setup is idempotent. Only after a smoke check confirms the plugin's MCP server is reachable does it remove legacy `figlets` MCP entries the plugin supersedes. If the server is not reachable (for example the release is not published yet), setup leaves your existing config untouched and tells you why. Restart Claude Code afterwards.
 
 > [!WARNING]
-> `FIGLETS_MARKETPLACE_SOURCE=/path/to/figlets-mcp` only changes where Claude Code fetches the plugin *files*. The plugin still launches its MCP server from the GitHub release tarball URL pinned in `plugin.json`. So a local-source install does **not** give you a working MCP server before the release exists — you would still need the *Local development override* below. For everyday local development before the release, the simplest working path is **not** the plugin: run `figlets-mcp setup --hosts=claude-code --yes`, which registers the local server directly and works immediately.
+> `FIGLETS_MARKETPLACE_SOURCE=/path/to/figlets-mcp` only changes where Claude Code fetches the plugin *files*. The plugin still launches its MCP server from the GitHub release tarball URL pinned in `plugin.json`. A local-source install does **not** give you a working MCP server before the release exists. You would still need the *Local development override* below. For everyday local development before the release, the simplest working path is **not** the plugin: run `figlets-mcp setup --hosts=claude-code --yes`, which registers the local server directly and works immediately.
 
 ## Manual install
 
@@ -34,7 +34,7 @@ That runs `claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plu
 /plugin install figlets@figlets-claude-code
 ```
 
-Restart the Claude Code session, then either type `/figlets:start` or just describe what you want — *"help me with my Figma design system"* — and the `figlets-designer` skill will route you in.
+Restart the Claude Code session, then either type `/figlets:start` or describe what you want (for example *"help me with my Figma design system"*). The `figlets-designer` skill will route you in.
 
 ## Local development override
 
@@ -49,7 +49,7 @@ Until the `v0.1.0` GitHub release exists, the `npx -y <tarball-url>` command in 
 }
 ```
 
-Do not commit that override — it is machine-specific. The committed manifest tracks the GitHub release target.
+Do not commit that override. It is machine-specific. The committed manifest tracks the GitHub release target.
 
 ## What gets installed
 

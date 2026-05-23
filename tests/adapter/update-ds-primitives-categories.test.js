@@ -14,6 +14,10 @@ for (const file of files) {
     `${file} update_ds_primitives row must mention color-semantics category`
   );
   assert.ok(
+    toolRow[0].includes("primitive-typography") && toolRow[0].includes("primitive-shadow"),
+    `${file} update_ds_primitives row must list primitive-typography and primitive-shadow categories`
+  );
+  assert.ok(
     /Today:\s*`color`,\s*`spacing`,\s*`color-semantics`/.test(content),
     `${file} primitive update workflow should list color, spacing, and color-semantics`
   );

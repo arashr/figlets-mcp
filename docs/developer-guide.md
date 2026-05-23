@@ -93,10 +93,10 @@ Optional offline analysis: export or sync Figma JSON, then use CLIs under `packa
 
 ## Roadmap and decisions
 
-- **Linear** (team Minions, project Figlets MCP): operational source of truth for active work.
+- **Linear** (team Minions, project Figlets MCP): operational source of truth for active work. Developer agents should leave additive task comments on active issues (start, checkpoint, blocker, review, completion) using the template in **[AGENTS.md](../AGENTS.md)** / **[CLAUDE.md](../CLAUDE.md)** Developer Mode; issue descriptions stay stable scope, comments are execution history.
 - **[DECISIONS.md](../DECISIONS.md):** durable architectural choices.
 - **[memory/PROJECT_MEMORY.md](../memory/PROJECT_MEMORY.md):** active implementation context.
-- **[future-figlets-gap-register.md](./future-figlets-gap-register.md):** future gaps and risks (e.g. planned `figlets_health_check` orchestrator, G-001).
+- **[future-figlets-gap-register.md](./future-figlets-gap-register.md):** future gaps and risks (e.g. G-001 workflow readiness — v1 `figlets_health_check` shipped; v2 audit orchestration remains open).
 
 Phase 3 token completion and core post-Phase-3 reliability hardening are done on `main`. Remaining polish includes guidance hygiene across entrypoints.
 

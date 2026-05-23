@@ -50,6 +50,32 @@ In Developer Mode, read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, and the rele
 
 Architecture guardrail: before adding a new public Figlets tool, bridge mutation branch, or parallel repair path, check the existing bulk-capable surfaces in `docs/bulk-repair-api-implementation-plan.md`. Decide explicitly whether to extend an existing planner/apply surface, extract shared helpers, or create a new surface because the designer approval boundary is genuinely different. Prefer shared pure helpers for collection names, configured modes, token entry names, and style names; do not duplicate setup/update logic casually.
 
+Linear task comments: when work is tied to a Linear issue, leave additive comments on that issue as the task-level execution log. Keep issue descriptions as stable goal/acceptance criteria; do not rewrite descriptions to capture transient progress. Comment at: start of substantial work, material scope/approach changes (checkpoint), blockers or failed verification, code review verdicts, and completion/handoff. If Linear is unavailable, include paste-ready comment text in the final answer.
+
+Use this comment template:
+
+```md
+Status: started | checkpoint | review | completed | blocked
+
+Scope:
+- ...
+
+Technical notes:
+- ...
+
+Files/areas touched:
+- ...
+
+Verification:
+- `command`: pass/fail/not run + reason
+
+Risks / follow-ups:
+- ...
+
+Links:
+- PR/commit/branch if available
+```
+
 ## Default
 
 If the request is ambiguous but mentions Figlets as a product or a Figma design system, default to Designer Mode.

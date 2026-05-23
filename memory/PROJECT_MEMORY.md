@@ -46,7 +46,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Scope:** Focus on bridge transport cleanup, release/package verification, host smoke coverage, and keeping designer/agent guidance synchronized with the completed bulk repair surfaces. Existing Linear issues BNN-6 (bridge reliability cleanup) and BNN-8 (guidance hygiene) remain part of the slice. Additional Linear work packets should cover release packaging verification and host smoke prompts/checks.
 
-**Deferred next product capability:** `figlets_health_check` remains the leading product-capability candidate after this hardening slice. It should be treated as a new public read-only orchestration surface and must go through the bulk-surface guardrail before implementation.
+**Follow-up product capability:** `figlets_health_check` v1 shipped 2026-05-23 (BNN-17) as agent readiness feedback; v2 audit orchestration remains backlog after hardening.
 
 **Decision basis:** `docs/bulk-repair-api-implementation-plan.md` shows no remaining Phase 3 token-completion product gaps. `docs/future-figlets-gap-register.md` still names host smoke testing, bridge capability/version mismatch, release packaging drift, and instruction drift as risks that can break the designer experience even when unit tests pass.
 

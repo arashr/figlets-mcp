@@ -350,6 +350,21 @@ try {
     assert.strictEqual(intake.status, "fail");
     assert.ok(intake.nextAction.includes("Do not invent brand colors"));
     assert.strictEqual(skippedIntake.nextAction.type, "ask_user");
+
+    const negativeRoutes = [
+      ["using figlets build a token showcase for vibrant colors", "build-showcase"],
+      ["using figlets export DESIGN.md for background colors", "export-design-md"],
+      ["using figlets check foreground contrast in my design system", "health-check"],
+      ["using figlets add missing background/foreground color roles", "health-check"],
+    ];
+    for (const [intent, expectedWorkflowId] of negativeRoutes) {
+      const route = handleFigletsRouteIntent({ intent });
+      assert.strictEqual(
+        route.workflow.id,
+        expectedWorkflowId,
+        `intent should route to ${expectedWorkflowId}: ${intent}`
+      );
+    }
   }
 
   // --- figlets_health_check first check set (host/model-neutral corrective guidance) ---

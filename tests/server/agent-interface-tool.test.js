@@ -136,11 +136,6 @@ try {
   }
 
   {
-    const route = routeIntent("add missing typography and spacing tokens");
-    assert.strictEqual(route.workflow.id, "token-gap-completion");
-  }
-
-  {
     const posterGalleryIntent =
       "using figlets set up a new design system with multiple vibrant colors as backgrounds and some matching vibrant colors to pair with them as foreground. The ds is called Poster Gallery.";
     const route = routeIntent(posterGalleryIntent);
@@ -149,6 +144,23 @@ try {
     assert.ok(route.designerResponse.includes("direction, not a complete design-system spec"));
     assert.ok(route.designerResponse.includes("targeted setup questions"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
+  }
+
+  {
+    const negativeRoutes = [
+      ["using figlets build a token showcase for vibrant colors", "build-showcase"],
+      ["using figlets export DESIGN.md for background colors", "export-design-md"],
+      ["using figlets check foreground contrast in my design system", "health-check"],
+      ["using figlets add missing background/foreground color roles", "health-check"],
+    ];
+    for (const [intent, expectedWorkflowId] of negativeRoutes) {
+      const route = routeIntent(intent);
+      assert.strictEqual(
+        route.workflow.id,
+        expectedWorkflowId,
+        `intent should route to ${expectedWorkflowId}: ${intent}`
+      );
+    }
   }
 
   {

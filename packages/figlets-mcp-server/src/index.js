@@ -25,14 +25,18 @@ const {
   figletsStartTool,
   figletsRouteIntentTool,
   figletsWorkflowGuideTool,
+  figletsHealthCheckTool,
   handleFigletsStart,
   handleFigletsRouteIntent,
   handleFigletsWorkflowGuide,
+  handleFigletsHealthCheck,
 } = require("./tools/agent-interface.js");
+
+const { version: serverVersion } = require("../package.json");
 
 const server = new McpServer({
   name: "figlets-mcp",
-  version: "0.1.0"
+  version: serverVersion
 });
 
 // --- figlets_start ---
@@ -81,6 +85,66 @@ server.tool(
   async (args) => {
     try {
       return { content: [{ type: "text", text: JSON.stringify(handleFigletsWorkflowGuide(args), null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- figlets_health_check ---
+server.tool(
+  figletsHealthCheckTool.name,
+  figletsHealthCheckTool.description,
+  {
+    context: z.object({
+      mode: z.enum(["designer", "developer", "unknown"]).optional(),
+      goal: z.string().optional(),
+      intent: z.string().optional(),
+      workflowId: z.string().optional(),
+      host: z.object({
+        name: z.string().optional(),
+        mcpSessionFreshness: z.enum(["fresh", "stale_suspected", "unknown"]).optional(),
+        bridgeState: z.enum(["connected", "disconnected", "unknown"]).optional(),
+      }).optional(),
+    }).optional(),
+    workflowState: z.object({
+      figletsStartCalled: z.boolean().optional(),
+      routeIntentCalled: z.boolean().optional(),
+      workflowGuideCalled: z.boolean().optional(),
+      completedTools: z.array(z.string()).optional(),
+      lastTool: z.string().optional(),
+      lastToolStatus: z.enum(["success", "error", "unknown"]).optional(),
+      pendingWriteTool: z.string().optional(),
+      approvalStatus: z.enum(["not_needed", "needed", "granted", "denied", "unknown"]).optional(),
+    }).optional(),
+    repairPlanState: z.object({
+      sourceTool: z.string().optional(),
+      hasApplyInput: z.boolean().optional(),
+      hasOptionalApplyInput: z.boolean().optional(),
+      hasFoundationRepairPlan: z.boolean().optional(),
+      hasPrimitiveRepairPlan: z.boolean().optional(),
+      hasMissingCapabilityNotes: z.boolean().optional(),
+      fixableNowCount: z.number().optional(),
+    }).optional(),
+    requestedAction: z.object({
+      tool: z.string().optional(),
+      kind: z.enum(["read", "write", "unknown"]).optional(),
+      payloadSource: z.enum([
+        "repairPlan.applyInput",
+        "repairPlan.optionalApplyInput",
+        "repairPlan.foundationRepairPlan.applyInput",
+        "repairPlan.primitiveRepairPlan",
+        "hand_authored",
+        "unknown",
+      ]).optional(),
+    }).optional(),
+  },
+  async (args) => {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify(handleFigletsHealthCheck(args), null, 2) }] };
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],

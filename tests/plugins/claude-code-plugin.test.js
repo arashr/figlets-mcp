@@ -19,8 +19,9 @@ assert.ok(!fs.existsSync(path.join(ROOT, "plugins", "claude-code", ".claude-plug
 
 // Plugin manifest.
 const plugin = JSON.parse(fs.readFileSync(path.join(PLUGIN_DIR, ".claude-plugin", "plugin.json"), "utf-8"));
+const { readProductVersion } = require("../../scripts/lib/product-version.js");
 assert.strictEqual(plugin.name, "figlets", "plugin name must be 'figlets' so the command surfaces as /figlets:start");
-assert.ok(typeof plugin.version === "string" && plugin.version.length > 0, "plugin must declare a version");
+assert.strictEqual(plugin.version, readProductVersion(), "plugin version must track the server package version");
 assert.ok(typeof plugin.description === "string" && plugin.description.length > 0, "plugin must declare a description");
 
 // MCP server contract — distributed as a GitHub release tarball, not an npm package (no npm account).

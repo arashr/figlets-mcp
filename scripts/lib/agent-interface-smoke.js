@@ -1,53 +1,17 @@
 "use strict";
 
 const assert = require("assert");
-const fs = require("fs");
-const path = require("path");
 
-const REPO_ROOT = path.resolve(__dirname, "../..");
-const SERVER_PKG_PATH = path.join(REPO_ROOT, "packages", "figlets-mcp-server", "package.json");
-const CLAUDE_PLUGIN_JSON = path.join(REPO_ROOT, "plugins", "claude-code", "figlets", ".claude-plugin", "plugin.json");
-const CODEX_PLUGIN_JSON = path.join(REPO_ROOT, "plugins", "codex", "figlets", ".codex-plugin", "plugin.json");
-const CODEX_MCP_JSON = path.join(REPO_ROOT, "plugins", "codex", "figlets", ".mcp.json");
-
-const TARBALL_URL_RE =
-  /^https:\/\/github\.com\/arashr\/figlets-mcp\/releases\/download\/v(\d+\.\d+\.\d+)\/figlets-mcp-server-(\d+\.\d+\.\d+)\.tgz$/;
-
-function expectedTarballUrl(version) {
-  return `https://github.com/arashr/figlets-mcp/releases/download/v${version}/figlets-mcp-server-${version}.tgz`;
-}
-
-function readServerVersion() {
-  const pkg = JSON.parse(fs.readFileSync(SERVER_PKG_PATH, "utf-8"));
-  assert.ok(pkg.version, "server package must declare a version");
-  return pkg.version;
-}
-
-function assertTarballUrl(url, contextLabel) {
-  const match = TARBALL_URL_RE.exec(url);
-  assert.ok(match, `${contextLabel} must use a versioned GitHub release tarball URL`);
-  assert.strictEqual(match[1], match[2], `${contextLabel} tarball tag and filename version must match`);
-  return match[1];
-}
+const {
+  REPO_ROOT,
+  assertProductVersionAlignment,
+  expectedTarballUrl,
+  readProductVersion,
+  readServerVersion,
+} = require("./product-version.js");
 
 function assertPluginReleaseAlignment() {
-  const version = readServerVersion();
-  const expectedUrl = expectedTarballUrl(version);
-
-  const claudePlugin = JSON.parse(fs.readFileSync(CLAUDE_PLUGIN_JSON, "utf-8"));
-  assert.strictEqual(claudePlugin.version, version, "Claude plugin version must track the server package");
-  const claudeUrl = claudePlugin.mcpServers.figlets.args[1];
-  assert.strictEqual(assertTarballUrl(claudeUrl, "Claude plugin MCP"), version);
-  assert.strictEqual(claudeUrl, expectedUrl, "Claude plugin MCP URL must match the current server version");
-
-  const codexPlugin = JSON.parse(fs.readFileSync(CODEX_PLUGIN_JSON, "utf-8"));
-  assert.strictEqual(codexPlugin.version, version, "Codex plugin version must track the server package");
-  const codexMcp = JSON.parse(fs.readFileSync(CODEX_MCP_JSON, "utf-8"));
-  const codexUrl = codexMcp.mcpServers.figlets.args[1];
-  assert.strictEqual(assertTarballUrl(codexUrl, "Codex plugin MCP"), version);
-  assert.strictEqual(codexUrl, expectedUrl, "Codex plugin MCP URL must match the current server version");
-
-  return { version, expectedUrl };
+  return assertProductVersionAlignment();
 }
 
 function assertStartPayload(start) {
@@ -79,6 +43,16 @@ function assertWorkflowGuidePayload(guide) {
   assert.ok(guide.message.includes("named Figlets tools/scripts only"), "workflow guide must forbid ad hoc scripting");
 }
 
+function assertHealthCheckPayload(health) {
+  assert.strictEqual(health.boundaries.readOnly, true, "health check must be read-only");
+  assert.strictEqual(health.boundaries.figmaMutationAllowed, false, "health check must not allow Figma mutation");
+  assert.strictEqual(health.boundaries.hostSpecificBehavior, false, "health check must stay host-neutral");
+  assert.ok(Array.isArray(health.checks) && health.checks.length > 0, "health check must return checks");
+  assert.ok(health.checks.some(check => check.id === "designer_mode_entrypoint"), "health check must cover Designer Mode entrypoint");
+  assert.ok(health.checks.some(check => check.id === "approval_boundary"), "health check must cover approval boundaries");
+  assert.ok(health.nextAction && health.nextAction.message, "health check must return a next action");
+}
+
 async function smokeAgentInterfaceTools(session, parseToolCallPayload) {
   callTool(session, 10, "figlets_start", {});
   const start = parseToolCallPayload(await session.waitForResponse(10));
@@ -91,6 +65,18 @@ async function smokeAgentInterfaceTools(session, parseToolCallPayload) {
   callTool(session, 12, "figlets_workflow_guide", { workflow_id: route.workflow.id });
   const guide = parseToolCallPayload(await session.waitForResponse(12));
   assertWorkflowGuidePayload(guide);
+
+  callTool(session, 13, "figlets_health_check", {
+    context: { mode: "designer", goal: "review my design system", workflowId: route.workflow.id },
+    workflowState: {
+      figletsStartCalled: true,
+      routeIntentCalled: true,
+      workflowGuideCalled: true,
+      completedTools: [],
+    },
+  });
+  const health = parseToolCallPayload(await session.waitForResponse(13));
+  assertHealthCheckPayload(health);
 }
 
 function callTool(session, id, name, argumentsPayload) {
@@ -100,10 +86,13 @@ function callTool(session, id, name, argumentsPayload) {
 module.exports = {
   REPO_ROOT,
   expectedTarballUrl,
+  readProductVersion,
   readServerVersion,
   assertPluginReleaseAlignment,
+  assertProductVersionAlignment,
   assertStartPayload,
   assertRoutePayload,
   assertWorkflowGuidePayload,
+  assertHealthCheckPayload,
   smokeAgentInterfaceTools,
 };

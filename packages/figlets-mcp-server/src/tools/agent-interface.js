@@ -2,6 +2,8 @@
 
 const {
   DESIGNER_FLOW_HARD_RULES,
+  MUTATING_TOOLS,
+  WORKFLOWS,
   getStartGuide,
   getWorkflowGuide,
   listWorkflows,
@@ -53,8 +55,477 @@ const figletsWorkflowGuideTool = {
   },
 };
 
+const figletsHealthCheckTool = {
+  name: "figlets_health_check",
+  description:
+    "Read-only Agent Interface health check for agent readiness and Figlets workflow safety. Returns structured, host-neutral feedback about entrypoint/routing, workflow sequencing, approval boundaries, repair payload sources, product-gap handling, stale host risk, and bridge readiness. Does not inspect or mutate Figma.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      context: { type: "object" },
+      workflowState: { type: "object" },
+      repairPlanState: { type: "object" },
+      requestedAction: { type: "object" },
+    },
+    additionalProperties: false,
+  },
+};
+
 function asTextResult(result) {
   return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+}
+
+function _truthy(value) {
+  return value === true;
+}
+
+function _nonEmpty(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function _array(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function _knownWorkflow(workflowId) {
+  if (!_nonEmpty(workflowId)) return null;
+  return WORKFLOWS.find(workflow => workflow.id === workflowId) || null;
+}
+
+function _isWriteTool(toolName) {
+  if (!_nonEmpty(toolName)) return false;
+  return MUTATING_TOOLS.has(toolName) || toolName === "qa_binding_audit:fix";
+}
+
+function _statusRank(status) {
+  if (status === "fail") return 4;
+  if (status === "warn") return 3;
+  if (status === "info") return 2;
+  if (status === "pass") return 1;
+  return 0;
+}
+
+function _makeCheck({
+  id,
+  title,
+  status,
+  severity,
+  message,
+  evidence,
+  nextAction,
+  recommendedTool,
+  recommendedPayloadSource,
+}) {
+  const check = {
+    id,
+    title,
+    status,
+    severity,
+    message,
+    evidence: _array(evidence),
+    nextAction,
+  };
+  if (recommendedTool) check.recommendedTool = recommendedTool;
+  if (recommendedPayloadSource) check.recommendedPayloadSource = recommendedPayloadSource;
+  return check;
+}
+
+function _chooseNextAction(checks, fallback) {
+  const actionable = checks
+    .filter(check => check.status === "fail" || check.status === "warn")
+    .sort((a, b) => _statusRank(b.status) - _statusRank(a.status))[0];
+  if (!actionable) return fallback;
+
+  if (actionable.id === "designer_mode_entrypoint") {
+    return {
+      type: "call_tool",
+      tool: "figlets_start",
+      argsSource: "{}",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "concrete_goal_routing") {
+    return {
+      type: "route_intent",
+      tool: "figlets_route_intent",
+      argsSource: "context.intent or context.goal",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "workflow_tool_sequence") {
+    return {
+      type: "call_tool",
+      tool: actionable.recommendedTool || "figlets_workflow_guide",
+      argsSource: actionable.recommendedTool ? "workflow guide step order" : "context.workflowId",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "approval_boundary") {
+    return {
+      type: "ask_user",
+      tool: actionable.recommendedTool || null,
+      argsSource: actionable.recommendedPayloadSource || "exact Figlets payload",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "repair_payload_source") {
+    return {
+      type: "call_tool",
+      tool: actionable.recommendedTool || null,
+      argsSource: actionable.recommendedPayloadSource || "repairPlan payload",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "product_gap_response") {
+    return {
+      type: "report_product_gap",
+      tool: null,
+      argsSource: "repairPlan.missingCapabilityNotes",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "stale_host_suspicion") {
+    return {
+      type: "restart_or_refresh_host",
+      tool: null,
+      argsSource: "fresh stdio MCP server validation",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "bridge_readiness") {
+    return {
+      type: "ask_user",
+      tool: null,
+      argsSource: "Figma Desktop and Figlets Bridge plugin",
+      message: actionable.nextAction,
+    };
+  }
+  return {
+    type: actionable.status === "fail" ? "stop" : "continue",
+    tool: actionable.recommendedTool || null,
+    argsSource: actionable.recommendedPayloadSource || null,
+    message: actionable.nextAction,
+  };
+}
+
+function handleFigletsHealthCheck(args) {
+  const input = args || {};
+  const context = input.context || {};
+  const host = context.host || {};
+  const workflowState = input.workflowState || {};
+  const repairPlanState = input.repairPlanState || {};
+  const requestedAction = input.requestedAction || {};
+  const checks = [];
+
+  const mode = context.mode || "unknown";
+  const goal = context.goal || context.intent || "";
+  const workflowId = context.workflowId || "";
+  const workflow = _knownWorkflow(workflowId);
+  const completedTools = _array(workflowState.completedTools);
+  const requestedTool = requestedAction.tool || workflowState.pendingWriteTool || "";
+  const requestedKind = requestedAction.kind || (_isWriteTool(requestedTool) ? "write" : "unknown");
+  const pendingWriteTool = workflowState.pendingWriteTool || (requestedKind === "write" ? requestedTool : "");
+  const approvalStatus = workflowState.approvalStatus || "unknown";
+
+  if (mode === "designer" && !_truthy(workflowState.figletsStartCalled)) {
+    checks.push(_makeCheck({
+      id: "designer_mode_entrypoint",
+      title: "Designer Mode entrypoint",
+      status: "fail",
+      severity: "error",
+      message: "Designer-facing Figlets work must start with figlets_start.",
+      evidence: ["context.mode=designer", "workflowState.figletsStartCalled is not true"],
+      nextAction: "Call figlets_start before repo inspection, raw Figma actions, or designer-facing workflow guidance.",
+      recommendedTool: "figlets_start",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "designer_mode_entrypoint",
+      title: "Designer Mode entrypoint",
+      status: mode === "designer" ? "pass" : "info",
+      severity: "info",
+      message: mode === "designer"
+        ? "Designer Mode entrypoint has been acknowledged."
+        : "Mode was not provided as designer; if this is designer-facing work, start with figlets_start.",
+      evidence: [`context.mode=${mode}`],
+      nextAction: mode === "designer"
+        ? "Continue with intent routing and workflow guidance."
+        : "Provide context.mode or call figlets_start for designer-facing work.",
+      recommendedTool: mode === "designer" ? null : "figlets_start",
+    }));
+  }
+
+  if (_nonEmpty(goal) && mode === "designer" && (!_truthy(workflowState.routeIntentCalled) || !_truthy(workflowState.workflowGuideCalled))) {
+    checks.push(_makeCheck({
+      id: "concrete_goal_routing",
+      title: "Concrete goal routing",
+      status: "fail",
+      severity: "error",
+      message: "A concrete designer goal should route through figlets_route_intent and figlets_workflow_guide before the agent answers with workflow steps.",
+      evidence: [
+        `goal=${goal}`,
+        `routeIntentCalled=${Boolean(workflowState.routeIntentCalled)}`,
+        `workflowGuideCalled=${Boolean(workflowState.workflowGuideCalled)}`,
+      ],
+      nextAction: "Call figlets_route_intent with the designer goal, then call figlets_workflow_guide for the selected workflow.",
+      recommendedTool: "figlets_route_intent",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "concrete_goal_routing",
+      title: "Concrete goal routing",
+      status: _nonEmpty(goal) ? "pass" : "info",
+      severity: "info",
+      message: _nonEmpty(goal)
+        ? "Concrete goal routing state is acceptable."
+        : "No concrete goal was provided; route intent when the designer states one.",
+      evidence: _nonEmpty(goal) ? [`goal=${goal}`] : [],
+      nextAction: _nonEmpty(goal)
+        ? "Continue with the selected workflow."
+        : "Collect or pass the designer goal, then route it.",
+    }));
+  }
+
+  if (workflow) {
+    const firstMissingReadStep = (workflow.steps || [])
+      .filter(step => step.kind === "read" && step.tool)
+      .find(step => completedTools.indexOf(step.tool) === -1);
+    if (pendingWriteTool && firstMissingReadStep) {
+      checks.push(_makeCheck({
+        id: "workflow_tool_sequence",
+        title: "Workflow tool sequence",
+        status: "warn",
+        severity: "warning",
+        message: `The ${workflow.id} workflow appears to be moving toward a write before completing the read step ${firstMissingReadStep.tool}.`,
+        evidence: [`pendingWriteTool=${pendingWriteTool}`, `missingReadTool=${firstMissingReadStep.tool}`],
+        nextAction: `Run ${firstMissingReadStep.tool} before requesting or applying writes for this workflow.`,
+        recommendedTool: firstMissingReadStep.tool,
+      }));
+    } else {
+      checks.push(_makeCheck({
+        id: "workflow_tool_sequence",
+        title: "Workflow tool sequence",
+        status: "pass",
+        severity: "info",
+        message: `Workflow metadata found for ${workflow.id}.`,
+        evidence: [`completedTools=${completedTools.join(",")}`],
+        nextAction: "Follow figlets_workflow_guide step order.",
+      }));
+    }
+  } else {
+    checks.push(_makeCheck({
+      id: "workflow_tool_sequence",
+      title: "Workflow tool sequence",
+      status: _nonEmpty(workflowId) ? "warn" : "info",
+      severity: _nonEmpty(workflowId) ? "warning" : "info",
+      message: _nonEmpty(workflowId)
+        ? `Unknown workflow id: ${workflowId}.`
+        : "No workflow id was provided.",
+      evidence: _nonEmpty(workflowId) ? [`workflowId=${workflowId}`] : [],
+      nextAction: "Call figlets_route_intent and figlets_workflow_guide to establish the workflow.",
+      recommendedTool: "figlets_workflow_guide",
+    }));
+  }
+
+  if ((requestedKind === "write" || pendingWriteTool) && approvalStatus !== "granted") {
+    checks.push(_makeCheck({
+      id: "approval_boundary",
+      title: "Approval boundary",
+      status: "fail",
+      severity: "error",
+      message: "A Figlets write is pending without explicit designer approval.",
+      evidence: [`tool=${requestedTool || pendingWriteTool}`, `approvalStatus=${approvalStatus}`],
+      nextAction: "Ask the designer to approve the exact Figlets payload before calling the write tool.",
+      recommendedTool: requestedTool || pendingWriteTool,
+      recommendedPayloadSource: requestedAction.payloadSource || "exact Figlets payload",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "approval_boundary",
+      title: "Approval boundary",
+      status: "pass",
+      severity: "info",
+      message: requestedKind === "write" || pendingWriteTool
+        ? "A write is pending and approval is marked granted."
+        : "No write is pending.",
+      evidence: [`approvalStatus=${approvalStatus}`],
+      nextAction: "Continue to use explicit approval for any Figma write.",
+    }));
+  }
+
+  if ((requestedKind === "write" || pendingWriteTool) && requestedAction.payloadSource === "hand_authored") {
+    checks.push(_makeCheck({
+      id: "repair_payload_source",
+      title: "Repair payload source",
+      status: "fail",
+      severity: "error",
+      message: "Designer-facing Figlets repairs should use structured Figlets repairPlan payloads, not hand-authored mutation payloads.",
+      evidence: [`payloadSource=${requestedAction.payloadSource}`],
+      nextAction: "Use the applicable repairPlan payload from Figlets output, or report a Figlets product/tool gap if no planner/apply surface exists.",
+      recommendedTool: requestedTool || pendingWriteTool,
+      recommendedPayloadSource: "repairPlan.applyInput",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "repair_payload_source",
+      title: "Repair payload source",
+      status: "pass",
+      severity: "info",
+      message: "No hand-authored repair payload risk detected.",
+      evidence: requestedAction.payloadSource ? [`payloadSource=${requestedAction.payloadSource}`] : [],
+      nextAction: "Keep using structured Figlets repairPlan payloads for approved repairs.",
+    }));
+  }
+
+  const hasAnyApplyPath = _truthy(repairPlanState.hasApplyInput) ||
+    _truthy(repairPlanState.hasOptionalApplyInput) ||
+    _truthy(repairPlanState.hasFoundationRepairPlan) ||
+    _truthy(repairPlanState.hasPrimitiveRepairPlan) ||
+    Number(repairPlanState.fixableNowCount || 0) > 0;
+  if (_truthy(repairPlanState.hasMissingCapabilityNotes) && !hasAnyApplyPath) {
+    checks.push(_makeCheck({
+      id: "product_gap_response",
+      title: "Product gap response",
+      status: "warn",
+      severity: "warning",
+      message: "Figlets reported missing capability notes without an apply-ready path.",
+      evidence: ["repairPlanState.hasMissingCapabilityNotes=true"],
+      nextAction: "Report this as a Figlets product/tool gap. Do not invent raw Figma scripts or present it as impossible.",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "product_gap_response",
+      title: "Product gap response",
+      status: "pass",
+      severity: "info",
+      message: "No unsupported product-gap dead-end risk detected.",
+      evidence: [],
+      nextAction: "Use existing repairPlan channels when present.",
+    }));
+  }
+
+  const isQaFix = requestedTool === "qa_binding_audit:fix" ||
+    (requestedTool === "qa_binding_audit" && requestedKind === "write");
+  if (isQaFix && (Number(repairPlanState.fixableNowCount || 0) <= 0 || approvalStatus !== "granted")) {
+    checks.push(_makeCheck({
+      id: "binding_fixability_boundary",
+      title: "Binding fixability boundary",
+      status: "fail",
+      severity: "error",
+      message: "qa_binding_audit fixes are only allowed for fixableNow findings after approval.",
+      evidence: [`fixableNowCount=${Number(repairPlanState.fixableNowCount || 0)}`, `approvalStatus=${approvalStatus}`],
+      nextAction: "Run/read qa_binding_audit first, summarize byFixability, and apply fix:true only for fixableNow after approval.",
+      recommendedTool: "qa_binding_audit",
+      recommendedPayloadSource: "repairPlan.applyInput",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "binding_fixability_boundary",
+      title: "Binding fixability boundary",
+      status: "pass",
+      severity: "info",
+      message: "No unsafe binding fix request detected.",
+      evidence: [],
+      nextAction: "Use qa_binding_audit({ fix: true }) only for fixableNow after approval.",
+    }));
+  }
+
+  if (host.mcpSessionFreshness === "stale_suspected") {
+    checks.push(_makeCheck({
+      id: "stale_host_suspicion",
+      title: "Stale host suspicion",
+      status: "warn",
+      severity: "warning",
+      message: "The MCP host/session may be stale.",
+      evidence: ["context.host.mcpSessionFreshness=stale_suspected"],
+      nextAction: "Validate with a fresh stdio Figlets MCP server or restart/reconnect the host before calling this a repo regression.",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "stale_host_suspicion",
+      title: "Stale host suspicion",
+      status: "pass",
+      severity: "info",
+      message: "No stale-host signal was provided.",
+      evidence: host.mcpSessionFreshness ? [`mcpSessionFreshness=${host.mcpSessionFreshness}`] : [],
+      nextAction: "If host output contradicts current repo behavior, validate with a fresh stdio server.",
+    }));
+  }
+
+  if (host.bridgeState === "disconnected") {
+    checks.push(_makeCheck({
+      id: "bridge_readiness",
+      title: "Bridge readiness",
+      status: "warn",
+      severity: "warning",
+      message: "Live designer workflows need Figma Desktop and the Figlets Bridge plugin open.",
+      evidence: ["context.host.bridgeState=disconnected"],
+      nextAction: "Ask the designer to open Figma Desktop and the Figlets Bridge plugin before live read/write workflow steps.",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "bridge_readiness",
+      title: "Bridge readiness",
+      status: "info",
+      severity: "info",
+      message: "Bridge state was not reported as disconnected.",
+      evidence: host.bridgeState ? [`bridgeState=${host.bridgeState}`] : [],
+      nextAction: "For live workflows, make sure Figma Desktop and Figlets Bridge are open.",
+    }));
+  }
+
+  checks.push(_makeCheck({
+    id: "release_docs_readiness",
+    title: "Release/docs readiness",
+    status: "info",
+    severity: "info",
+    message: "Public onboarding and release claims should stay aligned with README and release verification.",
+    evidence: [],
+    nextAction: "Use README/release tasks for public install claims; do not imply future features are shipped.",
+  }));
+
+  const blockingReasons = checks
+    .filter(check => check.status === "fail")
+    .map(check => check.message);
+  const hasWarn = checks.some(check => check.status === "warn");
+  let status = "ready";
+  if (blockingReasons.length) status = "blocked";
+  else if (hasWarn) status = "warning";
+  else if (!workflow || (mode === "unknown" && !_nonEmpty(goal))) status = "needs_input";
+
+  const fallbackNextAction = status === "ready"
+    ? {
+      type: "continue",
+      tool: null,
+      argsSource: null,
+      message: "Continue with the Figlets workflow guide and keep writes approval-gated.",
+    }
+    : {
+      type: "call_tool",
+      tool: "figlets_start",
+      argsSource: "{}",
+      message: "Call figlets_start or provide context.goal/context.workflowId so Figlets can give precise workflow guidance.",
+    };
+  const nextAction = _chooseNextAction(checks, fallbackNextAction);
+
+  return {
+    status,
+    summary: status === "blocked"
+      ? "Figlets workflow is blocked until the failed checks are resolved."
+      : status === "warning"
+        ? "Figlets workflow can continue with caution after reviewing warnings."
+        : status === "needs_input"
+          ? "Figlets needs a workflow goal or starting context to give precise guidance."
+          : "Figlets workflow readiness checks passed for the supplied context.",
+    nextAction,
+    blockingReasons,
+    checks,
+    boundaries: {
+      readOnly: true,
+      figmaMutationAllowed: false,
+      hostSpecificBehavior: false,
+    },
+  };
 }
 
 function handleFigletsStart() {
@@ -82,8 +553,10 @@ module.exports = {
   figletsStartTool,
   figletsRouteIntentTool,
   figletsWorkflowGuideTool,
+  figletsHealthCheckTool,
   handleFigletsStart,
   handleFigletsRouteIntent,
   handleFigletsWorkflowGuide,
+  handleFigletsHealthCheck,
   asTextResult,
 };

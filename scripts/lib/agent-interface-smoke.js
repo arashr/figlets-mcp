@@ -79,6 +79,16 @@ function assertWorkflowGuidePayload(guide) {
   assert.ok(guide.message.includes("named Figlets tools/scripts only"), "workflow guide must forbid ad hoc scripting");
 }
 
+function assertHealthCheckPayload(health) {
+  assert.strictEqual(health.boundaries.readOnly, true, "health check must be read-only");
+  assert.strictEqual(health.boundaries.figmaMutationAllowed, false, "health check must not allow Figma mutation");
+  assert.strictEqual(health.boundaries.hostSpecificBehavior, false, "health check must stay host-neutral");
+  assert.ok(Array.isArray(health.checks) && health.checks.length > 0, "health check must return checks");
+  assert.ok(health.checks.some(check => check.id === "designer_mode_entrypoint"), "health check must cover Designer Mode entrypoint");
+  assert.ok(health.checks.some(check => check.id === "approval_boundary"), "health check must cover approval boundaries");
+  assert.ok(health.nextAction && health.nextAction.message, "health check must return a next action");
+}
+
 async function smokeAgentInterfaceTools(session, parseToolCallPayload) {
   callTool(session, 10, "figlets_start", {});
   const start = parseToolCallPayload(await session.waitForResponse(10));
@@ -91,6 +101,18 @@ async function smokeAgentInterfaceTools(session, parseToolCallPayload) {
   callTool(session, 12, "figlets_workflow_guide", { workflow_id: route.workflow.id });
   const guide = parseToolCallPayload(await session.waitForResponse(12));
   assertWorkflowGuidePayload(guide);
+
+  callTool(session, 13, "figlets_health_check", {
+    context: { mode: "designer", goal: "review my design system", workflowId: route.workflow.id },
+    workflowState: {
+      figletsStartCalled: true,
+      routeIntentCalled: true,
+      workflowGuideCalled: true,
+      completedTools: [],
+    },
+  });
+  const health = parseToolCallPayload(await session.waitForResponse(13));
+  assertHealthCheckPayload(health);
 }
 
 function callTool(session, id, name, argumentsPayload) {
@@ -105,5 +127,6 @@ module.exports = {
   assertStartPayload,
   assertRoutePayload,
   assertWorkflowGuidePayload,
+  assertHealthCheckPayload,
   smokeAgentInterfaceTools,
 };

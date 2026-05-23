@@ -7,7 +7,11 @@ module.exports = new Promise((resolve, reject) => {
   const child = childProcess.spawn(
     process.execPath,
     [path.join(root, "packages", "figlets-mcp-server", "bin", "figlets-mcp.js")],
-    { cwd: root, stdio: ["pipe", "pipe", "pipe"] }
+    {
+      cwd: root,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: Object.assign({}, process.env, { FIGLETS_SKIP_RECEIVER: "1" }),
+    }
   );
 
   let stdout = "";
@@ -65,6 +69,7 @@ module.exports = new Promise((resolve, reject) => {
       assert.ok(toolNames.indexOf("figlets_start") >= 0, "tools/list should expose figlets_start");
       assert.ok(toolNames.indexOf("figlets_route_intent") >= 0, "tools/list should expose figlets_route_intent");
       assert.ok(toolNames.indexOf("figlets_workflow_guide") >= 0, "tools/list should expose figlets_workflow_guide");
+      assert.ok(toolNames.indexOf("figlets_health_check") >= 0, "tools/list should expose figlets_health_check");
       assert.ok(toolNames.indexOf("inspect_ds_token_gaps") >= 0, "tools/list should expose inspect_ds_token_gaps");
       assert.ok(toolNames.indexOf("update_ds_tokens") >= 0, "tools/list should expose update_ds_tokens");
       assert.ok(toolNames.indexOf("apply_ds_foundation_repairs") >= 0, "tools/list should expose apply_ds_foundation_repairs");

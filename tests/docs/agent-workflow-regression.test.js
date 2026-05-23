@@ -33,6 +33,7 @@ const {
   figletsStartTool,
   figletsWorkflowGuideTool,
   handleFigletsHealthCheck,
+  handleFigletsRouteIntent,
   handleFigletsStart,
   handleFigletsWorkflowGuide,
 } = require("../../packages/figlets-mcp-server/src/tools/agent-interface.js");
@@ -299,12 +300,65 @@ try {
     assert.strictEqual(productGap.nextAction.type, "report_product_gap");
   }
 
+  // --- Unsafe pattern 6: skipping new-DS setup intake and inventing config values ---
+  {
+    const posterGalleryIntent =
+      "using figlets set up a new design system with multiple vibrant colors as backgrounds and some matching vibrant colors to pair with them as foreground. The ds is called Poster Gallery.";
+    const route = handleFigletsRouteIntent({ intent: posterGalleryIntent });
+    assert.strictEqual(route.workflow.id, "new-ds-setup");
+    assert.ok(route.message.includes("setup intake before prepare_ds_config"));
+    assert.ok(route.designerResponse.includes("direction, not a complete design-system spec"));
+    assert.ok(route.designerResponse.includes("targeted setup questions"));
+    assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
+
+    const guide = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
+    assert.ok(guide.intakeContract);
+    assert.ok(guide.intakeContract.requiredTopics.some(topic => topic.includes("brand colors")));
+    assert.ok(guide.message.includes("Do not invent brand colors"));
+    assert.ok(guide.workflow.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "prepare_ds_config"));
+
+    assertDocsIncludeAny(
+      DESIGNER_DOC_PATHS,
+      [
+        "do not invent final token/config values",
+        "do not invent missing setup choices",
+        "Treat the prompt as direction, not a complete spec",
+        "treat their prompt as initial direction, not a complete spec",
+      ],
+      "setup intake docs"
+    );
+
+    const skippedIntake = handleFigletsHealthCheck({
+      context: {
+        mode: "designer",
+        goal: posterGalleryIntent,
+        workflowId: "new-ds-setup",
+      },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        setupIntakeCompleted: false,
+      },
+      requestedAction: {
+        tool: "prepare_ds_config",
+        kind: "read",
+      },
+    });
+    assert.strictEqual(skippedIntake.status, "blocked");
+    const intake = findCheck(skippedIntake, "setup_intake_boundary");
+    assert.strictEqual(intake.status, "fail");
+    assert.ok(intake.nextAction.includes("Do not invent brand colors"));
+    assert.strictEqual(skippedIntake.nextAction.type, "ask_user");
+  }
+
   // --- figlets_health_check first check set (host/model-neutral corrective guidance) ---
   {
     const expectedCheckIds = [
       "designer_mode_entrypoint",
       "concrete_goal_routing",
       "workflow_tool_sequence",
+      "setup_intake_boundary",
       "approval_boundary",
       "repair_payload_source",
       "product_gap_response",

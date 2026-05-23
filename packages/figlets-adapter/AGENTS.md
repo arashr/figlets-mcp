@@ -51,7 +51,7 @@ Designers should be able to ask in natural language. Route their intent to MCP t
 | "Check my design system" | Run the full QA workflow: sync if needed, detect the system, audit tokens, inspect semantic setup gaps, summarize the highest-confidence issues first, then ask whether to apply the exact suggested repairs. |
 | "QA this frame/component" | Ask them to select the target in Figma, run `qa_binding_audit` without fixes, then summarize raw/unbound values. |
 | "Fix the binding gaps" | Confirm they want automatic safe fixes, then run `qa_binding_audit` with `fix: true`. |
-| "Set up a design system" | Walk through setup intake in plain language, show previews, then use `prepare_ds_config` and `apply_ds_setup`. |
+| "Set up a design system" | Walk through setup intake in plain language. Treat the prompt as direction, not a complete spec. Ask missing choices before `prepare_ds_config`, show previews, then use `apply_ds_setup` only after approval. |
 | "Document this component" | Ask them to select the component, inspect it, craft human usage copy, then call `generate_component_doc`. |
 
 Keep the designer-facing language non-technical. Say "I'll check what's available in the file" rather than "I'll call `sync_figma_data` and `detect_design_system`." Tool names are for internal clarity and debugging, not the default user experience.
@@ -111,6 +111,8 @@ Bulk design-system updates are part of Figlets when the change can be expressed 
 6. Tell the user to look at the "00 · Tokens" page in their Figma file
 
 ### Set up a new design system (bootstrap collections)
+Treat evocative setup prompts (for example, "multiple vibrant background colors with matching foregrounds") as **direction**, not a complete design-system spec. Ask targeted intake questions before writing config values or calling `prepare_ds_config`. You may suggest options, but the designer must confirm or replace them before those values become final.
+
 1. Ask whether the designer already has a Google `DESIGN.md`. If yes, call `create_ds_config_from_design_md` to create the starter config, then only ask for missing or intentionally overridden answers. Treat DESIGN.md as imported intake answers, not as the final source of truth.
 2. Run any remaining intake: project name, platform, grid base (4px/8px), breakpoints (3-tier/4-tier), naming convention (role-based/surface-based), **contrast standard (APCA default / WCAG 2.2)**, color scale, brand colors (name + hex), typeface, typography preset.
    When asking about contrast standard, give the short pros/cons:
@@ -216,4 +218,5 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 - Never add agent reasoning steps to `build_ds_showcase` unless the user explicitly opts into a supported parameter such as `numericFallback`. Showcase descriptions are deterministic by default; agent-enriched description polish is post-MVP and should only run when the user asks for it.
 - Never call `apply_ds_setup` until `prepare_ds_config` returns `readyToBuild === true` — building with failing pairs will produce inaccessible tokens
 - Never hardcode token values in intake — all values come from the user and are written to the config file
+- Never invent missing setup choices for a new design system — ask intake questions before `prepare_ds_config`
 - Never skip showing the semantic pairs table before building — the user must confirm contrast ratios before any collections are created

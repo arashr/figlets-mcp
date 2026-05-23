@@ -63,6 +63,34 @@ const DESIGNER_FLOW_HARD_RULES = {
   missingCapabilityResponse: "If the Figlets workflow output does not expose the needed planner or apply payload, say this is a Figlets product/tool gap or proposed Figlets bulk-update scope instead of inventing a script or saying the gaps cannot be fixed.",
 };
 
+const NEW_DS_SETUP_INTAKE_CONTRACT = {
+  treatPromptAs: "initial direction, not a complete design-system spec",
+  requireQuestionsBefore: ["prepare_ds_config", "apply_ds_setup"],
+  doNotInvent: [
+    "brand color hex values",
+    "color family names or counts",
+    "background/foreground pairing choices",
+    "typography scale or preset",
+    "spacing, grid, radius, or breakpoint defaults",
+    "contrast standard choice",
+    "light/dark mode behavior",
+  ],
+  requiredTopics: [
+    "project name",
+    "platform",
+    "grid base (4px/8px)",
+    "breakpoints (3-tier/4-tier)",
+    "naming convention (role-based/surface-based)",
+    "contrast standard (APCA default / WCAG 2.2)",
+    "color scale and brand colors (name + hex)",
+    "color families and background/foreground pairing intent",
+    "typeface and typography preset",
+    "light/dark behavior",
+  ],
+  proposalRule:
+    "The agent may suggest options, but must ask the designer to confirm or replace them before writing design-system.config.js or calling prepare_ds_config.",
+};
+
 const WORKFLOWS = [
   {
     id: "start",
@@ -277,8 +305,19 @@ const WORKFLOWS = [
     id: "new-ds-setup",
     title: "New Design System Setup",
     summary: "Collect designer choices, prepare a config, preview generated tokens, then build collections only after approval.",
-    intents: ["set up a design system", "create variables", "bootstrap tokens", "build variables", "new design system"],
-    prerequisites: ["Designer has brand/type choices ready", "Figma Desktop is open before the build step", "Figlets Bridge plugin is open before the build step"],
+    intents: [
+      "set up a design system",
+      "create variables",
+      "bootstrap tokens",
+      "build variables",
+      "new design system",
+      "setup a new design system",
+      "vibrant colors",
+      "background colors",
+      "foreground colors",
+    ],
+    prerequisites: ["Designer intake answers are collected before config preparation", "Figma Desktop is open before the build step", "Figlets Bridge plugin is open before the build step"],
+    intakeContract: NEW_DS_SETUP_INTAKE_CONTRACT,
     steps: [
       {
         id: "optional-design-md-intake",
@@ -290,12 +329,15 @@ const WORKFLOWS = [
       {
         id: "collect-answers",
         kind: "confirmation",
-        designerMessage: "I'll ask for the missing setup choices in plain language.",
+        requiredBeforeTool: "prepare_ds_config",
+        designerMessage: "I'll ask for the missing setup choices in plain language before preparing any token values.",
+        intakeTopics: NEW_DS_SETUP_INTAKE_CONTRACT.requiredTopics,
       },
       {
         id: "prepare",
         kind: "read",
         tool: "prepare_ds_config",
+        requiresIntake: true,
         designerMessage: "I'll compute and preview the token plan before touching Figma.",
       },
       {
@@ -312,7 +354,11 @@ const WORKFLOWS = [
       },
     ],
     next: ["build-showcase", "health-check", "export-design-md"],
-    errors: ["If prepare_ds_config reports contrast failures, fix or confirm the config before running apply_ds_setup."],
+    errors: [
+      "If the designer prompt is evocative but incomplete, treat it as direction and run intake before prepare_ds_config.",
+      "Do not invent missing brand colors, typography, spacing, contrast, or light/dark choices and ask for build confirmation.",
+      "If prepare_ds_config reports contrast failures, fix or confirm the config before running apply_ds_setup.",
+    ],
   },
   {
     id: "build-showcase",
@@ -462,6 +508,25 @@ const ROUTE_STOPWORDS = new Set(["what", "this", "that", "with", "using", "help"
 
 function _workflowStartResponse(workflow) {
   if (!workflow || workflow.id === "start") return null;
+  if (workflow.id === "new-ds-setup") {
+    return [
+      "# Figlets",
+      "",
+      "I'll use the Figlets new design system setup workflow.",
+      "",
+      "Your prompt gives me direction, not a complete design-system spec yet.",
+      "",
+      "First I'll ask targeted setup questions for any missing choices, such as:",
+      "- color families and brand colors (name + hex)",
+      "- how many background/foreground pairings you want",
+      "- light/dark behavior",
+      "- typography, spacing, grid, breakpoints, and contrast standard",
+      "",
+      "I can suggest options, but I won't treat them as final until you confirm.",
+      "",
+      "After intake I'll preview tokens with prepare_ds_config, show the preview, and only then ask before building in Figma.",
+    ].join("\n");
+  }
   if (workflow.id === "health-check") {
     return [
       "# Figlets",
@@ -599,7 +664,9 @@ function routeIntent(intent) {
     hardRules: clone(DESIGNER_FLOW_HARD_RULES),
     message: best.workflowId === "start"
       ? "I am not sure which Figlets workflow fits yet. Use selectionPrompt if the host supports choices; otherwise ask with its message."
-      : `Recommended workflow: ${best.title}. Use Figlets workflow tools/scripts only, start read-only, summarize plainly, and ask before any Figma write.`,
+      : best.workflowId === "new-ds-setup"
+        ? `Recommended workflow: ${best.title}. Treat the designer prompt as initial direction, run setup intake before prepare_ds_config, do not invent missing choices, summarize plainly, and ask before any Figma write.`
+        : `Recommended workflow: ${best.title}. Use Figlets workflow tools/scripts only, start read-only, summarize plainly, and ask before any Figma write.`,
   };
 }
 
@@ -729,6 +796,7 @@ function listWorkflows() {
 module.exports = {
   DESIGNER_FLOW_HARD_RULES,
   MUTATING_TOOLS,
+  NEW_DS_SETUP_INTAKE_CONTRACT,
   WORKFLOWS,
   getStartGuide,
   getWorkflowGuide,

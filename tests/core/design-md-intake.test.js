@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { computeDsConfig, designMdIntake } = require('../../packages/figlets-core/src/ds-config/index.js');
 const { designMdToDsConfig: convertDesignMd, readDesignMdAsDsConfig, dsConfigToDesignMd: exportDesignMd } = designMdIntake;
 
@@ -61,11 +63,11 @@ assert.ok(exported.includes('colors:'), 'export should include colors');
 assert.ok(exported.includes('typography:'), 'export should include typography');
 assert.ok(exported.includes('## Overview'), 'export should include markdown rationale section');
 
-const fs = require('fs');
-const path = require('path');
 const fixtureDir = path.join(__dirname, '../fixtures/md-gallery');
-const markdownOnly = fs.readFileSync(path.join(fixtureDir, 'DESIGN.md'), 'utf8');
-const markdownResult = convertDesignMd(markdownOnly, { sourcePath: path.join(fixtureDir, 'DESIGN.md') });
+const designPath = path.join(fixtureDir, 'docs/DESIGN.md');
+const linkedConfigPath = path.join(fixtureDir, 'config/gallery.config.json');
+const markdownOnly = fs.readFileSync(designPath, 'utf8');
+const markdownResult = convertDesignMd(markdownOnly, { sourcePath: designPath });
 
 assert.strictEqual(markdownResult.parsedFromFrontMatter, false);
 assert.strictEqual(markdownResult.parsedFromMarkdown.projectName, 'MD Gallery');
@@ -74,25 +76,32 @@ assert.strictEqual(markdownResult.parsedFromMarkdown.rules.gridBase, 8);
 assert.strictEqual(markdownResult.parsedFromMarkdown.rules.colorAlgorithm, 'oklch');
 assert.strictEqual(markdownResult.parsedFromMarkdown.rules.backgroundFirstForegroundPairing, true);
 assert.strictEqual(markdownResult.parsedFromMarkdown.rules.lightDarkBehavior, 'dark-chrome-only');
+
+const jsonCandidate = markdownResult.linkedConfigCandidates.find(entry => entry.path === 'config/gallery.config.json');
+assert.ok(jsonCandidate, 'should detect linked JSON config candidate');
+assert.strictEqual(jsonCandidate.exists, true);
+assert.strictEqual(jsonCandidate.resolvedPath, linkedConfigPath);
 assert.ok(
-  markdownResult.linkedConfigCandidates.some(entry => entry.path === 'config/gallery.config.json'),
-  'should detect linked JSON config candidate'
+  jsonCandidate.resolvedPaths.some(entry => entry.path.endsWith('/docs/config/gallery.config.json') && entry.exists === false),
+  'should record the docs-relative miss'
 );
 assert.ok(markdownResult.needsDesignerInput.includes('platform'));
 assert.ok(!markdownResult.needsDesignerInput.includes('grid base (4px/8px)'));
 assert.ok(!markdownResult.needsDesignerInput.includes('contrast standard (APCA default / WCAG 2.2)'));
 
 const linkedResult = convertDesignMd(markdownOnly, {
-  sourcePath: path.join(fixtureDir, 'DESIGN.md'),
-  linkedConfigPath: path.join(fixtureDir, 'config/gallery.config.json')
+  sourcePath: designPath,
+  linkedConfigPath: linkedConfigPath
 });
 assert.strictEqual(linkedResult.mapped.linkedConfigUsed, true);
 assert.ok(linkedResult.mapped.brandColors >= 2);
 assert.strictEqual(linkedResult.ds.typography.families.sans, 'Inconsolata');
-assert.ok(linkedResult.ds.typography.scale['body/md']);
+assert.strictEqual(linkedResult.ds.typography.scale['body/md'].sizes[0], 17);
+assert.strictEqual(linkedResult.ds.typography.scale['body/md'].lineHeights[0], 27);
 assert.ok(!linkedResult.needsDesignerInput.includes('color scale and brand colors (name + hex)'));
 assert.ok(!linkedResult.needsDesignerInput.includes('light/dark behavior'));
 
-const autoLinked = readDesignMdAsDsConfig(path.join(fixtureDir, 'DESIGN.md'));
+const autoLinked = readDesignMdAsDsConfig(designPath);
 assert.strictEqual(autoLinked.mapped.linkedConfigUsed, true);
 assert.ok(autoLinked.mapped.brandColors >= 2);
+assert.strictEqual(autoLinked.ds.typography.scale['body/md'].lineHeights[0], 27);

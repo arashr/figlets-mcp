@@ -53,11 +53,12 @@ assert.ok(written.includes('"source"'), 'config should record DESIGN.md source m
 assert.ok(written.includes('"primary"'), 'config should include imported primary color');
 
 const markdownOnlyDir = path.join(scopedDir, 'markdown-only');
+fs.mkdirSync(path.join(markdownOnlyDir, 'docs'), { recursive: true });
 fs.mkdirSync(path.join(markdownOnlyDir, 'config'), { recursive: true });
-const markdownOnlyPath = path.join(markdownOnlyDir, 'DESIGN.md');
+const markdownOnlyPath = path.join(markdownOnlyDir, 'docs/DESIGN.md');
 const markdownOnlyConfigPath = path.join(markdownOnlyDir, 'design-system.config.js');
 fs.copyFileSync(
-  path.join(__dirname, '../fixtures/md-gallery/DESIGN.md'),
+  path.join(__dirname, '../fixtures/md-gallery/docs/DESIGN.md'),
   markdownOnlyPath
 );
 fs.copyFileSync(
@@ -67,15 +68,14 @@ fs.copyFileSync(
 
 const markdownOnlyResult = handleCreateDsConfigFromDesignMd({
   design_md_path: markdownOnlyPath,
-  config_path: markdownOnlyConfigPath,
-  linked_config_path: path.join(markdownOnlyDir, 'config/gallery.config.json')
+  config_path: markdownOnlyConfigPath
 });
 
 assert.ok(!markdownOnlyResult.error, 'Markdown-only DESIGN.md intake should succeed');
 assert.strictEqual(markdownOnlyResult.intakeMode, 'markdown+linked-config');
 assert.strictEqual(markdownOnlyResult.parsedFromFrontMatter, false);
 assert.strictEqual(markdownOnlyResult.parsedFromMarkdown.projectName, 'MD Gallery');
-assert.ok(markdownOnlyResult.linkedConfigCandidates.some(entry => entry.path === 'config/gallery.config.json'));
+assert.ok(markdownOnlyResult.linkedConfigCandidates.some(entry => entry.path === 'config/gallery.config.json' && entry.exists));
 assert.ok(markdownOnlyResult.mapped.brandColors >= 2);
 assert.ok(Array.isArray(markdownOnlyResult.needsDesignerInput));
 assert.ok(markdownOnlyResult.needsDesignerInput.includes('platform'));

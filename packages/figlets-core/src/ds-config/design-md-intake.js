@@ -109,16 +109,10 @@ function _extractLinkedConfigCandidates(markdown, baseDir) {
   const seen = new Set();
 
   function addCandidate(rawPath) {
-    const normalized = String(rawPath || '').trim().replace(/^[./\\]+/, '');
-    if (!normalized || seen.has(normalized)) return;
-    if (!/\.(?:json|js|md|yaml|yml)$/i.test(normalized)) return;
-    seen.add(normalized);
-    const resolvedPath = baseDir ? path.resolve(baseDir, normalized) : normalized;
-    candidates.push({
-      path: normalized,
-      resolvedPath: resolvedPath,
-      kind: /\.json$/i.test(normalized) ? 'json' : /\.md$/i.test(normalized) ? 'markdown' : 'config'
-    });
+    const candidate = _resolveLinkedConfigCandidate(rawPath, baseDir);
+    if (!candidate || seen.has(candidate.path)) return;
+    seen.add(candidate.path);
+    candidates.push(candidate);
   }
 
   for (const match of text.matchAll(/`([^`\n]+\.(?:json|md|yaml|yml|config\.js))`/gi)) {
@@ -186,11 +180,11 @@ function mapLinkedJsonConfig(rawConfig, options) {
   let sans = null;
   if (typography.bodySize) {
     const fontSize = _toPx(typography.bodySize);
-    const lineHeight = _toPx(typography.bodyLineHeight) || (fontSize ? Math.round(fontSize * 1.6) : null);
+    const lineHeight = _toLineHeightPx(typography.bodyLineHeight, fontSize);
     if (fontSize) {
       scale['body/md'] = {
         sizes: [fontSize, fontSize, fontSize],
-        lineHeights: [lineHeight || Math.round(fontSize * 1.6), lineHeight || Math.round(fontSize * 1.6), lineHeight || Math.round(fontSize * 1.6)],
+        lineHeights: [lineHeight, lineHeight, lineHeight],
         weight: Number(typography.bodyWeight || 400),
         tracking: _trackingPx(typography.bodyLetterSpacing, fontSize)
       };
@@ -198,10 +192,11 @@ function mapLinkedJsonConfig(rawConfig, options) {
   }
   if (typography.proseSize) {
     const fontSize = _toPx(typography.proseSize);
+    const lineHeight = _toLineHeightPx(typography.proseLineHeight, fontSize);
     if (fontSize) {
       scale['body/lg'] = {
         sizes: [fontSize, fontSize, fontSize],
-        lineHeights: [Math.round(fontSize * 1.6), Math.round(fontSize * 1.6), Math.round(fontSize * 1.6)],
+        lineHeights: [lineHeight, lineHeight, lineHeight],
         weight: Number(typography.proseWeight || 400),
         tracking: 0
       };
@@ -209,10 +204,11 @@ function mapLinkedJsonConfig(rawConfig, options) {
   }
   if (typography.labelSize) {
     const fontSize = _toPx(typography.labelSize);
+    const lineHeight = _toLineHeightPx(typography.labelLineHeight, fontSize);
     if (fontSize) {
       scale['label/sm'] = {
         sizes: [fontSize, fontSize, fontSize],
-        lineHeights: [Math.round(fontSize * 1.4), Math.round(fontSize * 1.4), Math.round(fontSize * 1.4)],
+        lineHeights: [lineHeight, lineHeight, lineHeight],
         weight: Number(typography.labelWeight || 500),
         tracking: _trackingPx(typography.labelLetterSpacing, fontSize)
       };
@@ -279,6 +275,67 @@ function _toPx(value) {
   const unit = (m[2] || 'px').toLowerCase();
   if (unit === 'rem' || unit === 'em') return n * 16;
   return n;
+}
+
+function _toLineHeightPx(value, fontSize) {
+  if (value == null) return fontSize ? Math.round(fontSize * 1.6) : null;
+  const s = String(value).trim();
+  const m = s.match(/^(-?\d+(?:\.\d+)?)(px|rem|em)?$/i);
+  if (!m) return fontSize ? Math.round(fontSize * 1.6) : null;
+  const n = Number(m[1]);
+  const unit = (m[2] || '').toLowerCase();
+  if (unit === 'rem' || unit === 'em') return Math.round(n * (fontSize || 16));
+  if (unit === 'px') return n;
+  if (!unit && fontSize && n > 0 && n <= 4) return Math.round(fontSize * n);
+  return n;
+}
+
+function _linkedConfigSearchRoots(baseDir) {
+  const roots = [];
+  let current = path.resolve(baseDir || '.');
+  for (let depth = 0; depth < 6; depth++) {
+    roots.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return roots;
+}
+
+function _resolveLinkedConfigCandidate(rawPath, baseDir) {
+  const trimmed = String(rawPath || '').trim();
+  if (!trimmed) return null;
+
+  const resolvedPaths = [];
+  if (trimmed.startsWith('..') || path.isAbsolute(trimmed)) {
+    const resolved = path.resolve(baseDir || '.', trimmed);
+    resolvedPaths.push({
+      base: baseDir || '.',
+      path: resolved,
+      exists: fs.existsSync(resolved)
+    });
+  } else {
+    const normalized = trimmed.replace(/^[./\\]+/, '');
+    for (const root of _linkedConfigSearchRoots(baseDir)) {
+      const resolved = path.resolve(root, normalized);
+      if (resolvedPaths.some(entry => entry.path === resolved)) continue;
+      resolvedPaths.push({
+        base: root,
+        path: resolved,
+        exists: fs.existsSync(resolved)
+      });
+    }
+  }
+
+  const existing = resolvedPaths.find(entry => entry.exists);
+  const displayPath = trimmed.replace(/^[./\\]+/, '') || trimmed;
+  return {
+    path: displayPath,
+    resolvedPaths: resolvedPaths,
+    resolvedPath: existing ? existing.path : resolvedPaths[0].path,
+    exists: Boolean(existing),
+    kind: /\.json$/i.test(trimmed) ? 'json' : /\.md$/i.test(trimmed) ? 'markdown' : 'config'
+  };
 }
 
 function _hex(value) {
@@ -646,8 +703,8 @@ function readDesignMdAsDsConfig(designMdPath, options) {
   const opts = Object.assign({}, options || {}, { sourcePath: resolved });
   if (!opts.linkedConfigPath && opts.autoLinkedConfig !== false) {
     const intake = parseMarkdownIntake(markdown, { baseDir: path.dirname(resolved) });
-    const jsonCandidate = (intake.linkedConfigCandidates || []).find(entry => entry.kind === 'json');
-    if (jsonCandidate && fs.existsSync(jsonCandidate.resolvedPath)) {
+    const jsonCandidate = (intake.linkedConfigCandidates || []).find(entry => entry.kind === 'json' && entry.exists);
+    if (jsonCandidate) {
       opts.linkedConfigPath = jsonCandidate.resolvedPath;
     }
   }

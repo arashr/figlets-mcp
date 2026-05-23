@@ -6,13 +6,27 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+---
+
+### [2026-05-23 — BNN-25 single-source product version automation]
+
+**Status:** Closed BNN-25 on `main` via [PR #1](https://github.com/arashr/figlets-mcp/pull/1) merge `cd2ec07`. Figlets now has one product version sourced from `packages/figlets-mcp-server/package.json`.
+
+**Shipped:** `npm run release:prepare` (`scripts/sync-product-version.js` + `scripts/lib/product-version.js`) syncs workspace package versions, Claude/Codex plugin manifests, GitHub release tarball URLs, and `package-lock.json`. Supports exact version (`1.0.0`), `--patch` / `--minor` / `--major`, and `--check` drift detection. Exact-version sync repairs drift even when the server package already matches the requested version. `--check` validates lockfile root + workspace entries. Runtime MCP `version`, REST `User-Agent`, and `@figlets/core` `CORE_VERSION` read from package metadata.
+
+**Docs/tests:** `docs/developer-guide.md` documents the release sequence. Plugin READMEs no longer hardcode `v0.1.0`. Tests in `tests/scripts/product-version.test.js`; plugin tests compare against `readProductVersion()`.
+
+**Verification:** `npm test` **80/80**; `npm run release:prepare -- --check`; `npm run verify:release`; `npm run smoke:plugins`; `git diff --check`.
+
+**Release-ready:** Maintainer automation is in place. v1.0 still requires an explicit `npm run release:prepare -- 1.0.0`, tarball build, verify/smoke, then GitHub tag + release asset.
+
 ### [2026-05-23 — figlets_health_check v1 agent readiness tool]
 
 **Status:** BNN-17 implemented the first public `figlets_health_check` MCP tool as a read-only Agent Interface surface. V1 is an agent-agnostic workflow contract checker, not a full Figma audit runner: it accepts optional caller-provided context/workflow/repair-plan/requested-action state and returns structured `status`, `checks`, `nextAction`, `blockingReasons`, and read-only boundaries.
 
 **Checks shipped:** Designer Mode entrypoint, concrete goal routing, workflow step sequencing from `WORKFLOWS`, approval boundary, structured repair payload source, product-gap response, `qa_binding_audit` fixability boundary, stale MCP host suspicion, bridge readiness, and release/docs readiness. The implementation is pure Agent Interface logic and does not probe or mutate Figma, start bridge mutation branches, or branch on Cursor/Codex/Claude-specific behavior.
 
-**Docs/tests:** Adapter `AGENTS.md` / `CLAUDE.md` list `figlets_health_check` as an advanced read-only agent readiness check, not a designer menu item. Host Agent Interface smoke now calls it. Supported-runtime full suite passed **79/79**; `git diff --check` clean.
+**Docs/tests:** Adapter `AGENTS.md` / `CLAUDE.md` list `figlets_health_check` as an advanced read-only agent readiness check, not a designer menu item. Host Agent Interface smoke now calls it. Supported-runtime full suite passed **80/80**; `git diff --check` clean.
 
 ### [2026-05-23 — BNN-13 human README rewrite]
 
@@ -530,8 +544,8 @@ Setup registers the repo checkout as local marketplace `figlets-codex` in `~/.co
 **Architecture (current — supersedes earlier npm-publish design):**
 
 - **Marketplace at repo root.** `/.claude-plugin/marketplace.json` (NOT nested under `plugins/`). Verified: `claude plugin marketplace add owner/repo` reads the manifest strictly from `<repo-root>/.claude-plugin/marketplace.json`; no subdirectory form exists. Its plugin `source` is `./plugins/claude-code/figlets` (relative paths resolve from the marketplace root = repo root). All real Claude content stays nested under `plugins/claude-code/figlets/`; the root file is a thin redirect. User chose this (Option A) over a separate dedicated plugin repo (Option B), accepting one Claude folder at the monorepo root.
-- **No npm.** The plugin's `mcpServers.figlets` runs `npx -y https://github.com/arashr/figlets-mcp/releases/download/v0.1.0/figlets-mcp-server-0.1.0.tgz`. `npx` runs the remote tarball and resolves deps from the public npm registry (reads are free/unauthenticated). No `@figlets/mcp-server` npm package. The server package's `package.json` was reverted to a plain agent-agnostic package (no `files: plugins/`, no `prepack`, `scripts/sync-plugins.js` deleted, no `publishConfig`).
-- **Release tooling.** `npm run build:server-tarball` → `scripts/build-server-tarball.js` runs `npm pack` into `dist/` (gitignored) and prints the `gh release create v0.1.0 dist/figlets-mcp-server-0.1.0.tgz` step + a manifest-URL match check.
+- **No npm.** The plugin's `mcpServers.figlets` runs `npx -y https://github.com/arashr/figlets-mcp/releases/download/v<version>/figlets-mcp-server-<version>.tgz`. `npx` runs the remote tarball and resolves deps from the public npm registry (reads are free/unauthenticated). No `@figlets/mcp-server` npm package. The server package's `package.json` was reverted to a plain agent-agnostic package (no `files: plugins/`, no `prepack`, `scripts/sync-plugins.js` deleted, no `publishConfig`).
+- **Release tooling.** `npm run release:prepare` syncs the single product version across workspace packages, plugin manifests, tarball URLs, and `package-lock.json` from `packages/figlets-mcp-server/package.json`. Then `npm run build:server-tarball` → `scripts/build-server-tarball.js` runs `npm pack` into `dist/` (gitignored) and prints the `gh release create v<version> dist/figlets-mcp-server-<version>.tgz` step + a manifest-URL match check. `npm run release:prepare -- --check` and `npm run verify:release` fail on drift.
 - `plugins/claude-code/figlets/commands/start.md` — `/figlets:start`. `skills/figlets-designer/SKILL.md` — auto-trigger skill for designer phrases, routes to `figlets_start`, forbids developer-mode.
 
 **`figlets-mcp setup` `claude-code-plugin` target (current):**
@@ -541,7 +555,7 @@ Setup registers the repo checkout as local marketplace `figlets-codex` in `~/.co
 - Apply: `claude plugin marketplace list`/`add`, `claude plugin list`/`install`, idempotent, then `claude mcp remove --scope user|project|local figlets` to drop legacy duplicates the plugin supersedes.
 - Viability-gated supersession of the legacy `claude-code` target (dropped from defaults only when the plugin path plans `would-run`/`unchanged`; reachable via explicit `--hosts=claude-code`).
 
-**Designer install path (once the GitHub repo + v0.1.0 release exist):**
+**Designer install path (once the GitHub repo + tagged release with the server tarball exist):**
 
 ```
 figlets-mcp setup --hosts=claude-code-plugin --yes   # or just figlets-mcp setup --yes
@@ -552,8 +566,8 @@ figlets-mcp setup --hosts=claude-code-plugin --yes   # or just figlets-mcp setup
 **Open follow-ups (owned by the user, not code):**
 
 1. Push `arashr/figlets-mcp` public (default branch must have `/.claude-plugin/marketplace.json` + `plugins/claude-code/`).
-2. `npm run build:server-tarball`, then `gh release create v0.1.0 dist/figlets-mcp-server-0.1.0.tgz` (or upload via the web UI). Until then the manifest URL 404s and the plugin README's local-dev `node`+bin override applies.
-3. Bump flow: a new server version means rebuilding the tarball, cutting a new release tag, and updating the URL in `plugins/claude-code/figlets/.claude-plugin/plugin.json` (the build script prints a match check).
+2. `npm run release:prepare -- <version>`, then `npm run build:server-tarball`, then `gh release create v<version> dist/figlets-mcp-server-<version>.tgz` (or upload via the web UI). Until then the manifest URL 404s and the plugin README's local-dev `node`+bin override applies.
+3. Bump flow: run `npm run release:prepare -- --patch|--minor|--major` or pass an exact version; rebuild tarball; cut release tag; verify with `npm run verify:release` and `npm run smoke:plugins`.
 
 **Earlier (now-abandoned) iterations on this branch, for context:** first used a nested `plugins/claude-code/.claude-plugin/marketplace.json` + `npx -y @figlets/mcp-server` (npm publish) + `prepack` sync of plugins into the server tarball. Abandoned because the user did not want an npm account and wanted the main repo to stay agent-agnostic (no plugin bundling in the server package).
 

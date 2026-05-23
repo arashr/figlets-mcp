@@ -4,6 +4,22 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-23] One product version with `release:prepare` automation
+
+**Decision:** Figlets has a single product version. The source of truth is `packages/figlets-mcp-server/package.json`. Do not maintain separate human-managed server/plugin/bridge/Codex/Claude version numbers.
+
+**Automation:** `npm run release:prepare` syncs every workspace `package.json`, Claude/Codex plugin manifest version, GitHub release tarball URL, and `package-lock.json` workspace entries from that server package version. It supports exact versions (`1.0.0`), default patch bumps (`--patch`), explicit minor/major bumps, and read-only drift checks (`--check`). Exact-version sync must repair drift even when the server package already equals the requested version.
+
+**Runtime metadata:** MCP server `version`, REST export `User-Agent`, and `@figlets/core` `CORE_VERSION` read from package metadata at runtime so they cannot drift from the synced package version.
+
+**Verification:** `assertProductVersionAlignment()` (via `assertPluginReleaseAlignment()`) checks workspace packages, plugin manifests, tarball URLs, and lockfile drift. `npm run verify:release` and `npm run smoke:plugins` inherit this.
+
+**Release sequence:** `npm run release:prepare -- <version>` → `npm run build:server-tarball` → `npm run verify:release` → `npm run smoke:plugins` → tag `v<version>` and attach tarball to GitHub release.
+
+**Consequence:** v1.0 should ship as `1.0.0` everywhere via one maintainer command, not a mix of `0.1.0` and `1.0.0`. Plugin READMEs stay version-agnostic; manifests remain the release-pinned surfaces.
+
+---
+
 ## [2026-05-18] Repair plans have required, optional, and missing-capability channels
 
 **Decision:** Read-only planner outputs should expose a stable repair-plan contract instead of forcing agents to parse long diagnostic arrays. For `inspect_ds_setup_gaps`, the stable shape is:
@@ -207,7 +223,7 @@ Known cosmetic debt: the dual `try/catch` blocks around the old figlets-core req
 
 **Why:** Manual `claude mcp add` and project `.mcp.json` editing was unreliable for designer testing — user-scope registration did not consistently expose `figlets_start`. A plugin install collapses MCP registration and the curated entrypoint into one command-palette action and removes the need for designers to edit JSON. Keeping the folder under `plugins/<agent>/` leaves room for future Cursor/Windsurf plugins without renaming.
 
-**Command resolution (revised — npm-free, GitHub release tarball):** The plugin's MCP server entry uses `npx -y https://github.com/arashr/figlets-mcp/releases/download/v0.1.0/figlets-mcp-server-0.1.0.tgz`. The user did not want to depend on npm publishing or an npm account. `npx` runs a remote tarball directly and resolves its dependencies from the public npm registry (registry **reads** are free and unauthenticated; only publishing needs auth). The tarball is produced by `npm run build:server-tarball` (wraps `npm pack`) and attached to a GitHub release — no `@figlets/mcp-server` npm package exists. An earlier iteration used `npx -y @figlets/mcp-server` (npm publish); that was abandoned to avoid the npm account. Until the `v0.1.0` GitHub release exists the manifest URL 404s, so the plugin README documents a machine-local `node`+bin override (never commit it).
+**Command resolution (revised — npm-free, GitHub release tarball):** The plugin's MCP server entry uses `npx -y https://github.com/arashr/figlets-mcp/releases/download/v<version>/figlets-mcp-server-<version>.tgz`. The user did not want to depend on npm publishing or an npm account. `npx` runs a remote tarball directly and resolves its dependencies from the public npm registry (registry **reads** are free and unauthenticated; only publishing needs auth). The tarball is produced by `npm run build:server-tarball` (wraps `npm pack`) and attached to a GitHub release — no `@figlets/mcp-server` npm package exists. An earlier iteration used `npx -y @figlets/mcp-server` (npm publish); that was abandoned to avoid the npm account. Until the GitHub release exists the manifest URL 404s, so the plugin README documents a machine-local `node`+bin override (never commit it).
 
 **Contract reuse:** The plugin does not invent a new workflow contract. The `/figlets:start` command body intentionally mirrors the Designer Mode rules from root `CLAUDE.md`/`AGENTS.md` and defers everything else to `figlets_start.designerResponse` and the Agent Interface registry.
 
@@ -221,7 +237,7 @@ Known cosmetic debt: the dual `try/catch` blocks around the old figlets-core req
 
 **Auto-cleanup of pre-plugin installs:** After a successful (or already-applied) plugin install, the target runs `claude mcp remove --scope <user|project|local> figlets` to drop any pre-existing `figlets` MCP registrations that the plugin now supersedes. "No server found" responses are treated as `absent` (silent skip). This was added after live testing showed a fresh install left both `plugin:figlets:figlets` (new) and `figlets` (legacy `claude mcp add`) connected, exposing duplicate tools.
 
-**Distribution (revised):** No npm publish. `npm run build:server-tarball` (`scripts/build-server-tarball.js`) stages a self-contained server (bundling `@figlets/core`), runs `npm pack` into `dist/` (gitignored), and runs a release pre-flight that **exits non-zero** unless BOTH `plugin.json` `version` equals the server `package.json` version AND the `mcpServers` tarball URL equals `https://github.com/arashr/figlets-mcp/releases/download/v<version>/figlets-mcp-server-<version>.tgz`. Release step (owned by the user): bump the server version → `npm run build:server-tarball` (fix `plugin.json` `version` + URL if it complains) → push `arashr/figlets-mcp` public → `gh release create v<version> dist/figlets-mcp-server-<version>.tgz`. Until the release exists the local-dev override applies.
+**Distribution (revised):** No npm publish. `npm run release:prepare` keeps workspace packages, plugin manifests, tarball URLs, and lockfile entries aligned to the server package version. `npm run build:server-tarball` (`scripts/build-server-tarball.js`) stages a self-contained server (bundling `@figlets/core`), runs `npm pack` into `dist/` (gitignored), and runs a release pre-flight that **exits non-zero** unless BOTH `plugin.json` `version` equals the server `package.json` version AND the `mcpServers` tarball URL equals `https://github.com/arashr/figlets-mcp/releases/download/v<version>/figlets-mcp-server-<version>.tgz`. Release step (owned by the user): `npm run release:prepare -- <version>` → `npm run build:server-tarball` → push `arashr/figlets-mcp` public → `gh release create v<version> dist/figlets-mcp-server-<version>.tgz`. Until the release exists the local-dev override applies.
 
 ---
 

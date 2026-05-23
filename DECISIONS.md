@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-23] GitHub PRs are review truth; Linear comments are task logs
+
+**Decision:** For multi-agent Figlets development, GitHub PR comments carry code-review truth: review scope, findings, verification, manual checks, and merge readiness. Linear issue comments carry the task log: start, checkpoints, blockers, review verdict summaries, completion, and handoff. Chat remains temporary coordination, not durable project state.
+
+**Protocol:** New PRs should use `.github/pull_request_template.md`. Review agents should follow `docs/agent-pr-review-protocol.md`, post the detailed verdict on the PR, and mirror a shorter status comment to Linear. Merge captains should not give merge green light while must-fix findings remain open.
+
+**Why:** Linear alone was not enough for code-review handoff across multiple agents because merge-specific findings were easy to lose in task history. GitHub alone was not enough because task execution logs, blocked context, and handoffs need to stay attached to the Linear issue. Splitting responsibility keeps each tool honest and recoverable.
+
+**Regression:** `npm run check:pr-protocol` and `tests/docs/pr-review-protocol.test.js` pin the PR template, protocol doc, and agent/developer-guide cross-links.
+
+---
+
 ## [2026-05-23] One product version with `release:prepare` automation
 
 **Decision:** Figlets has a single product version. The source of truth is `packages/figlets-mcp-server/package.json`. Do not maintain separate human-managed server/plugin/bridge/Codex/Claude version numbers.

@@ -78,6 +78,8 @@ Links:
 - PR/commit/branch if available
 ```
 
+PR review protocol: when opening, reviewing, or giving merge guidance for a GitHub PR, follow `docs/agent-pr-review-protocol.md`. GitHub PR is the code review truth for scope, findings, verification, and merge readiness. Linear remains the task log and should receive a shorter comment with the same verdict plus links. Use `.github/pull_request_template.md` for PR descriptions. Do not give merge green light while must-fix findings remain open.
+
 ## Default
 
 If the request is ambiguous but mentions Figlets as a product or a Figma design system, default to Designer Mode.

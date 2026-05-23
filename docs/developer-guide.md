@@ -83,6 +83,18 @@ Claude/Codex plugins pin the GitHub release tarball via `npx -y <tarball>`. Run 
 
 Optional offline analysis: export or sync Figma JSON, then use CLIs under `packages/figlets-mcp-server/src/cli/`. See `.env.example` for REST export tokens. Designer-facing reviews should still go through Figlets MCP workflows.
 
+## Agent PR review protocol
+
+Use **[agent-pr-review-protocol.md](./agent-pr-review-protocol.md)** when agents open, review, or merge Figlets PRs. New PRs should use **[.github/pull_request_template.md](../.github/pull_request_template.md)** so Linear, scope, tests, manual verification, agent review, and merge notes stay visible.
+
+GitHub PRs are the code review truth: detailed findings, verification, unresolved must-fix items, and merge readiness belong there. Linear issue comments are the task log: start, checkpoints, blockers, review verdicts, completion, and handoff belong there. Keep the two linked so another agent can recover state without rereading the chat thread.
+
+Protocol drift is checked by:
+
+```bash
+npm run check:pr-protocol
+```
+
 ## Troubleshooting (maintainers)
 
 | Symptom | Likely cause | What to do |

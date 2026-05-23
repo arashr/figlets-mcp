@@ -1,0 +1,39 @@
+{
+  "theme": {
+    "colors": {
+      "paper": "#eff1f3",
+      "ink": "#0c0e10",
+      "inkSoft": "#1b1f24",
+      "red": "#c8102e",
+      "redBright": "#e8334e"
+    },
+    "typography": {
+      "bodySize": "17px",
+      "bodyLineHeight": "1.6",
+      "labelSize": "0.75rem",
+      "labelWeight": "500",
+      "proseSize": "18px"
+    }
+  },
+  "darkTheme": {
+    "paper": "#12151a",
+    "colors": {
+      "ink": "#eef0f4",
+      "red": "#ffa0ab"
+    }
+  },
+  "grounds": {
+    "pink": {
+      "surface": "#f8c0d4",
+      "foreground": {
+        "display": "#710617",
+        "body": "ink"
+      }
+    }
+  },
+  "fonts": {
+    "uiSans": {
+      "family": "Inconsolata"
+    }
+  }
+}

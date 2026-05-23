@@ -172,6 +172,7 @@ try {
     assert.ok(guide.intakeContract);
     assert.ok(guide.intakeContract.requiredTopics.length >= 8);
     assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "prepare_ds_config"));
+    assert.ok(guide.steps.some(step => step.id === "optional-design-md-intake" && step.optional === true && step.designerMessage.includes("just drop it in")));
     assert.ok(guide.errors.some(item => item.includes("Do not invent missing brand colors")));
     const handled = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
     assert.ok(handled.intakeContract);

@@ -8,6 +8,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-23 — BNN-30 agent PR review protocol]
+
+**Status:** Implemented on `codex/bnn-30-agent-pr-review-protocol`. Figlets now has a lightweight PR coordination contract for multi-agent work: GitHub PR comments are the code-review/merge-readiness truth, while Linear comments are the task execution log.
+
+**Shipped:** `.github/pull_request_template.md` captures Linear link/status, scope, not-in-scope, test plan, manual verification, agent review, and merge notes. `docs/agent-pr-review-protocol.md` defines reviewer comment shape, merge-captain checklist, and subagent handoff prompt. Root `AGENTS.md` / `CLAUDE.md` and `docs/developer-guide.md` link the protocol and state that merge green light must wait for must-fix findings to clear.
+
+**Regression:** `scripts/check-pr-protocol.js`, `npm run check:pr-protocol`, and `tests/docs/pr-review-protocol.test.js` guard the protocol/template/guidance from drifting.
+
+**Verification:** `npm run check:pr-protocol`; `node tests/docs/pr-review-protocol.test.js`; full `npm test` **82/82** after allowing localhost bind for bridge tests; `git diff --check`.
+
+---
+
 ### [2026-05-23 — BNN-25 single-source product version automation]
 
 **Status:** Closed BNN-25 on `main` via [PR #1](https://github.com/arashr/figlets-mcp/pull/1) merge `cd2ec07`. Figlets now has one product version sourced from `packages/figlets-mcp-server/package.json`.

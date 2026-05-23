@@ -52,12 +52,222 @@ function parseDesignMd(markdown) {
   const text = String(markdown || '');
   const match = text.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)([\s\S]*)$/);
   if (!match) {
-    throw new Error('DESIGN.md must start with YAML front matter delimited by --- fences.');
+    return {
+      hasFrontMatter: false,
+      tokens: {},
+      markdown: text
+    };
   }
   return {
+    hasFrontMatter: true,
     tokens: _parseSimpleYaml(match[1]),
     markdown: match[2] || ''
   };
+}
+
+function _extractProjectNameFromMarkdown(markdown) {
+  const lines = String(markdown || '').split(/\r?\n/);
+  for (const line of lines) {
+    const titled = line.match(/^#\s+(?:Design\s+system\s+[—–-]\s+)?(.+?)\s*$/i);
+    if (titled) return titled[1].trim();
+    const generic = line.match(/^#\s+(.+?)\s*$/);
+    if (generic && !/^design\s+system$/i.test(generic[1])) return generic[1].trim();
+  }
+  return null;
+}
+
+function _detectMarkdownRules(markdown) {
+  const text = String(markdown || '');
+  const lower = text.toLowerCase();
+  const rules = {};
+
+  if (/\bapca\b/.test(lower)) rules.contrastStandard = 'apca';
+  else if (/\bwcag\s*2(?:\.2)?\b/.test(lower)) rules.contrastStandard = 'wcag-2.2';
+
+  const gridMatch = text.match(/\b(?:grid(?:\s+system)?\s*:\s*)?(\d)\s*px\b/i);
+  if (gridMatch) rules.gridBase = Number(gridMatch[1]);
+
+  if (/\boklch\b/.test(lower)) rules.colorAlgorithm = 'oklch';
+  if (/semantic\s+color/.test(lower) || /semantic\s+colors/.test(lower)) {
+    rules.colorConvention = 'role-based';
+  }
+  if (/background(?:\s+colors?)?\s+(?:is\s+the\s+anchor|first)|foreground\s+adapt/.test(lower)) {
+    rules.backgroundFirstForegroundPairing = true;
+  }
+  if (/dark\s+(?:mode\s+is\s+)?chrome[-\s]only|chrome[-\s]only/.test(lower)) {
+    rules.lightDarkBehavior = 'dark-chrome-only';
+  } else if (/\blight\s+and\s+dark\b|\bdark\s+mode\b/.test(lower)) {
+    rules.lightDarkBehavior = 'light-and-dark';
+  }
+
+  return rules;
+}
+
+function _extractLinkedConfigCandidates(markdown, baseDir) {
+  const text = String(markdown || '');
+  const candidates = [];
+  const seen = new Set();
+
+  function addCandidate(rawPath) {
+    const normalized = String(rawPath || '').trim().replace(/^[./\\]+/, '');
+    if (!normalized || seen.has(normalized)) return;
+    if (!/\.(?:json|js|md|yaml|yml)$/i.test(normalized)) return;
+    seen.add(normalized);
+    const resolvedPath = baseDir ? path.resolve(baseDir, normalized) : normalized;
+    candidates.push({
+      path: normalized,
+      resolvedPath: resolvedPath,
+      kind: /\.json$/i.test(normalized) ? 'json' : /\.md$/i.test(normalized) ? 'markdown' : 'config'
+    });
+  }
+
+  for (const match of text.matchAll(/`([^`\n]+\.(?:json|md|yaml|yml|config\.js))`/gi)) {
+    addCandidate(match[1]);
+  }
+  for (const match of text.matchAll(/\[[^\]]+\]\(([^)\s]+\.(?:json|md|yaml|yml))\)/gi)) {
+    addCandidate(match[1]);
+  }
+
+  return candidates;
+}
+
+function parseMarkdownIntake(markdown, options) {
+  options = options || {};
+  const body = String(markdown || '');
+  const rules = _detectMarkdownRules(body);
+  const projectName = _extractProjectNameFromMarkdown(body);
+  const linkedConfigCandidates = _extractLinkedConfigCandidates(body, options.baseDir || null);
+  const sections = [];
+  for (const match of body.matchAll(/^##\s+(.+?)\s*$/gm)) {
+    sections.push(match[1].trim());
+  }
+
+  return {
+    projectName: projectName,
+    rules: rules,
+    sections: sections,
+    linkedConfigCandidates: linkedConfigCandidates
+  };
+}
+
+function _resolveColorToken(value, palette) {
+  if (value == null) return null;
+  const direct = _hex(value);
+  if (direct) return direct;
+  const token = String(value).trim();
+  if (palette && palette[token]) return _resolveColorToken(palette[token], palette);
+  return null;
+}
+
+function mapLinkedJsonConfig(rawConfig, options) {
+  options = options || {};
+  const config = typeof rawConfig === 'string' ? JSON.parse(rawConfig) : rawConfig;
+  const theme = config && config.theme ? config.theme : {};
+  const colors = theme.colors && typeof theme.colors === 'object' ? theme.colors : {};
+  const typography = theme.typography && typeof theme.typography === 'object' ? theme.typography : {};
+  const brand = [];
+  const brandOrder = ['red', 'redBright', 'primary', 'secondary', 'accent', 'tertiary', 'brand'];
+
+  for (const name of brandOrder) {
+    if (!Object.prototype.hasOwnProperty.call(colors, name)) continue;
+    const hex = _resolveColorToken(colors[name], colors);
+    if (!hex) continue;
+    brand.push({ name: _slug(name), hex: hex, role: _roleForColor(name, brand.length) });
+  }
+  for (const [name, value] of Object.entries(colors)) {
+    if (brand.some(entry => entry.name === _slug(name))) continue;
+    const hex = _resolveColorToken(value, colors);
+    if (!hex) continue;
+    if (_isNeutralColorName(name) && !/primary|brand|secondary|tertiary|accent|red/i.test(name)) continue;
+    brand.push({ name: _slug(name), hex: hex, role: _roleForColor(name, brand.length) });
+  }
+
+  const scale = {};
+  let sans = null;
+  if (typography.bodySize) {
+    const fontSize = _toPx(typography.bodySize);
+    const lineHeight = _toPx(typography.bodyLineHeight) || (fontSize ? Math.round(fontSize * 1.6) : null);
+    if (fontSize) {
+      scale['body/md'] = {
+        sizes: [fontSize, fontSize, fontSize],
+        lineHeights: [lineHeight || Math.round(fontSize * 1.6), lineHeight || Math.round(fontSize * 1.6), lineHeight || Math.round(fontSize * 1.6)],
+        weight: Number(typography.bodyWeight || 400),
+        tracking: _trackingPx(typography.bodyLetterSpacing, fontSize)
+      };
+    }
+  }
+  if (typography.proseSize) {
+    const fontSize = _toPx(typography.proseSize);
+    if (fontSize) {
+      scale['body/lg'] = {
+        sizes: [fontSize, fontSize, fontSize],
+        lineHeights: [Math.round(fontSize * 1.6), Math.round(fontSize * 1.6), Math.round(fontSize * 1.6)],
+        weight: Number(typography.proseWeight || 400),
+        tracking: 0
+      };
+    }
+  }
+  if (typography.labelSize) {
+    const fontSize = _toPx(typography.labelSize);
+    if (fontSize) {
+      scale['label/sm'] = {
+        sizes: [fontSize, fontSize, fontSize],
+        lineHeights: [Math.round(fontSize * 1.4), Math.round(fontSize * 1.4), Math.round(fontSize * 1.4)],
+        weight: Number(typography.labelWeight || 500),
+        tracking: _trackingPx(typography.labelLetterSpacing, fontSize)
+      };
+    }
+  }
+
+  const grounds = config && config.grounds && typeof config.grounds === 'object' ? config.grounds : null;
+  const fonts = config && config.fonts && typeof config.fonts === 'object' ? config.fonts : {};
+  if (fonts.uiSans && fonts.uiSans.family) sans = fonts.uiSans.family;
+  else if (fonts.uiSerif && fonts.uiSerif.family) sans = fonts.uiSerif.family;
+
+  const mapped = {
+    brand: brand,
+    typographyScale: scale,
+    sans: sans,
+    gridBase: options.gridBase || null,
+    lightDarkBehavior: config.darkTheme ? 'dark-chrome-only' : null,
+    groundsCount: grounds ? Object.keys(grounds).length : 0,
+    sourcePath: options.sourcePath || null
+  };
+
+  return mapped;
+}
+
+function _deriveIntakeNeeds(ds, context) {
+  context = context || {};
+  const needs = [];
+  const rules = context.parsedFromMarkdown && context.parsedFromMarkdown.rules
+    ? context.parsedFromMarkdown.rules
+    : {};
+
+  if (!ds.project || !ds.project.name) needs.push('project name');
+  needs.push('platform');
+  if (!ds.grid || !ds.grid.base) needs.push('grid base (4px/8px)');
+  needs.push('breakpoints (3-tier/4-tier)');
+  if (!ds.color || !ds.color.convention) needs.push('naming convention (role-based/surface-based)');
+  if (!ds.color || !ds.color.contrastAlgorithm) needs.push('contrast standard (APCA default / WCAG 2.2)');
+  if (!ds.color || !Array.isArray(ds.color.brand) || !ds.color.brand.length) {
+    needs.push('color scale and brand colors (name + hex)');
+  }
+  needs.push('color families and background/foreground pairing intent');
+  if (
+    !ds.typography
+    || (
+      ds.typography.scalePreset === 'custom'
+      && (!ds.typography.scale || !Object.keys(ds.typography.scale).length)
+    )
+  ) {
+    needs.push('typeface and typography preset');
+  }
+  if (!rules.lightDarkBehavior && !(ds.color && ds.color.modes)) {
+    needs.push('light/dark behavior');
+  }
+
+  return needs;
 }
 
 function _toPx(value) {
@@ -185,77 +395,178 @@ function designMdToDsConfig(markdown, options) {
   options = options || {};
   const parsed = parseDesignMd(markdown);
   const tokens = parsed.tokens || {};
+  const parsedFromFrontMatter = parsed.hasFrontMatter;
+  let parsedFromMarkdown = null;
+  let linkedConfigCandidates = [];
+  let linkedMapped = null;
+  const warnings = [];
 
-  // If the body carries a `figlets-extended` block written by our own exporter,
-  // use it as the canonical DS. Front matter parsing is the fallback for
-  // external DESIGN.md files that have no extended block.
-  const extended = _readExtendedBlock(parsed.markdown);
-  if (extended && extended.ds && typeof extended.ds === 'object') {
-    const ds = extended.ds;
-    if (!ds.source) {
-      ds.source = {
-        type: 'design.md',
-        path: options.sourcePath || null,
-        version: tokens.version || null
+  if (parsedFromFrontMatter) {
+    // If the body carries a `figlets-extended` block written by our own exporter,
+    // use it as the canonical DS. Front matter parsing is the fallback for
+    // external DESIGN.md files that have no extended block.
+    const extended = _readExtendedBlock(parsed.markdown);
+    if (extended && extended.ds && typeof extended.ds === 'object') {
+      const ds = extended.ds;
+      if (!ds.source) {
+        ds.source = {
+          type: 'design.md',
+          path: options.sourcePath || null,
+          version: tokens.version || null
+        };
+      }
+      return {
+        ds: ds,
+        parsed: {
+          name: tokens.name || (ds.project && ds.project.name) || null,
+          colors: Object.keys(tokens.colors || {}).length,
+          typography: Object.keys(tokens.typography || {}).length,
+          spacing: Object.keys(tokens.spacing || {}).length,
+          rounded: Object.keys(tokens.rounded || {}).length,
+          components: Object.keys(tokens.components || {}).length,
+          extended: true
+        },
+        parsedFromFrontMatter: true,
+        parsedFromMarkdown: null,
+        linkedConfigCandidates: [],
+        mapped: {
+          brandColors: ds.color && Array.isArray(ds.color.brand) ? ds.color.brand.length : 0,
+          typographyRoles: ds.typography && ds.typography.scale ? Object.keys(ds.typography.scale).length : 0,
+          gridBase: ds.grid && ds.grid.base ? ds.grid.base : 8
+        },
+        needsDesignerInput: [],
+        warnings: []
       };
     }
-    return {
-      ds: ds,
-      parsed: {
-        name: tokens.name || (ds.project && ds.project.name) || null,
-        colors: Object.keys(tokens.colors || {}).length,
-        typography: Object.keys(tokens.typography || {}).length,
-        spacing: Object.keys(tokens.spacing || {}).length,
-        rounded: Object.keys(tokens.rounded || {}).length,
-        components: Object.keys(tokens.components || {}).length,
-        extended: true
-      },
-      mapped: {
-        brandColors: ds.color && Array.isArray(ds.color.brand) ? ds.color.brand.length : 0,
-        typographyRoles: ds.typography && ds.typography.scale ? Object.keys(ds.typography.scale).length : 0,
-        gridBase: ds.grid && ds.grid.base ? ds.grid.base : 8
-      },
-      warnings: []
-    };
-  }
 
-  const colors = tokens.colors && typeof tokens.colors === 'object' ? tokens.colors : {};
-  const brand = [];
+    const colors = tokens.colors && typeof tokens.colors === 'object' ? tokens.colors : {};
+    const brand = [];
 
-  for (const [name, value] of Object.entries(colors)) {
-    const hex = _hex(value);
-    if (!hex) continue;
-    if (_isNeutralColorName(name) && !/primary|brand|secondary|tertiary|accent/.test(String(name).toLowerCase())) continue;
-    const role = _roleForColor(name, brand.length);
-    brand.push({ name: _slug(name), hex: hex, role: role });
-  }
-
-  if (!brand.length) {
     for (const [name, value] of Object.entries(colors)) {
       const hex = _hex(value);
       if (!hex) continue;
-      brand.push({ name: _slug(name), hex: hex, role: _roleForColor(name, brand.length) });
-      if (brand.length) break;
+      if (_isNeutralColorName(name) && !/primary|brand|secondary|tertiary|accent/.test(String(name).toLowerCase())) continue;
+      const role = _roleForColor(name, brand.length);
+      brand.push({ name: _slug(name), hex: hex, role: role });
+    }
+
+    if (!brand.length) {
+      for (const [name, value] of Object.entries(colors)) {
+        const hex = _hex(value);
+        if (!hex) continue;
+        brand.push({ name: _slug(name), hex: hex, role: _roleForColor(name, brand.length) });
+        if (brand.length) break;
+      }
+    }
+
+    const type = _makeTypographyScale(tokens.typography || {});
+    const DS = {
+      project: { name: tokens.name || options.projectName || 'Imported DESIGN.md' },
+      grid: { base: _gridBase(tokens.spacing) },
+      breakpoints: { tier: 3, modes: ['Mobile', 'Tablet', 'Desktop'] },
+      typography: {
+        scalePreset: Object.keys(type.scale).length ? 'custom' : 'material3',
+        families: {
+          sans: type.sans || 'Inter',
+          mono: 'JetBrains Mono'
+        }
+      },
+      color: {
+        scale: '50-950',
+        algorithm: 'oklch',
+        convention: 'role-based',
+        contrastAlgorithm: 'apca',
+        brand: brand
+      },
+      collections: {
+        primitives: '1. Primitives',
+        color: '2. Color',
+        typography: '3. Typography',
+        spacing: '4. Spacing',
+        elevation: '5. Elevation'
+      },
+      naming: {
+        color: 'color/{role}/{step}',
+        textStyle: 'type/{role}/{size}',
+        fontFamily: 'font/{variant}'
+      },
+      source: {
+        type: 'design.md',
+        path: options.sourcePath || null,
+        version: tokens.version || null
+      }
+    };
+
+    if (tokens.description) DS.project.description = tokens.description;
+    if (Object.keys(type.scale).length) DS.typography.scale = type.scale;
+
+    const frontMatterWarnings = brand.length
+      ? []
+      : ['No usable color hex tokens found in DESIGN.md; add at least one brand color before prepare_ds_config.'];
+
+    return {
+      ds: DS,
+      parsed: {
+        name: tokens.name || null,
+        colors: Object.keys(colors).length,
+        typography: Object.keys(tokens.typography || {}).length,
+        spacing: Object.keys(tokens.spacing || {}).length,
+        rounded: Object.keys(tokens.rounded || {}).length
+      },
+      parsedFromFrontMatter: true,
+      parsedFromMarkdown: null,
+      linkedConfigCandidates: [],
+      mapped: {
+        brandColors: brand.length,
+        typographyRoles: Object.keys(type.scale).length,
+        gridBase: DS.grid.base
+      },
+      needsDesignerInput: _deriveIntakeNeeds(DS, {}),
+      warnings: frontMatterWarnings
+    };
+  }
+
+  const baseDir = options.sourcePath ? path.dirname(path.resolve(options.sourcePath)) : null;
+  parsedFromMarkdown = parseMarkdownIntake(parsed.markdown, { baseDir: baseDir });
+  linkedConfigCandidates = parsedFromMarkdown.linkedConfigCandidates || [];
+
+  if (options.linkedConfigPath) {
+    const linkedPath = path.resolve(options.linkedConfigPath);
+    if (fs.existsSync(linkedPath)) {
+      try {
+        linkedMapped = mapLinkedJsonConfig(fs.readFileSync(linkedPath, 'utf8'), {
+          sourcePath: linkedPath,
+          gridBase: parsedFromMarkdown.rules.gridBase || null
+        });
+      } catch (err) {
+        warnings.push('Linked config could not be parsed: ' + err.message);
+      }
+    } else {
+      warnings.push('Linked config not found: ' + linkedPath);
     }
   }
 
-  const type = _makeTypographyScale(tokens.typography || {});
+  const rules = parsedFromMarkdown.rules || {};
+  const brand = linkedMapped && Array.isArray(linkedMapped.brand) ? linkedMapped.brand.slice() : [];
+  const typographyScale = linkedMapped && linkedMapped.typographyScale ? linkedMapped.typographyScale : {};
   const DS = {
-    project: { name: tokens.name || options.projectName || 'Imported DESIGN.md' },
-    grid: { base: _gridBase(tokens.spacing) },
+    project: {
+      name: parsedFromMarkdown.projectName || options.projectName || 'Imported DESIGN.md'
+    },
+    grid: { base: rules.gridBase || (linkedMapped && linkedMapped.gridBase) || 8 },
     breakpoints: { tier: 3, modes: ['Mobile', 'Tablet', 'Desktop'] },
     typography: {
-      scalePreset: Object.keys(type.scale).length ? 'custom' : 'material3',
+      scalePreset: Object.keys(typographyScale).length ? 'custom' : 'material3',
       families: {
-        sans: type.sans || 'Inter',
+        sans: (linkedMapped && linkedMapped.sans) || 'Inter',
         mono: 'JetBrains Mono'
       }
     },
     color: {
       scale: '50-950',
-      algorithm: 'oklch',
-      convention: 'role-based',
-      contrastAlgorithm: 'apca',
+      algorithm: rules.colorAlgorithm || 'oklch',
+      convention: rules.colorConvention || 'role-based',
+      contrastAlgorithm: rules.contrastStandard || 'apca',
       brand: brand
     },
     collections: {
@@ -273,37 +584,74 @@ function designMdToDsConfig(markdown, options) {
     source: {
       type: 'design.md',
       path: options.sourcePath || null,
-      version: tokens.version || null
+      intakeMode: linkedMapped ? 'markdown+linked-config' : 'markdown-only'
     }
   };
 
-  if (tokens.description) DS.project.description = tokens.description;
-  if (Object.keys(type.scale).length) DS.typography.scale = type.scale;
+  if (Object.keys(typographyScale).length) DS.typography.scale = typographyScale;
+  if (linkedMapped && linkedMapped.sans) DS.typography.families.sans = linkedMapped.sans;
+  if (rules.lightDarkBehavior === 'dark-chrome-only' || (linkedMapped && linkedMapped.lightDarkBehavior === 'dark-chrome-only')) {
+    DS.color.modes = ['Light'];
+    DS.project.notes = (DS.project.notes || '') + ' Dark mode limited to chrome/shell per DESIGN.md.';
+  }
+
+  if (!parsedFromMarkdown.projectName) {
+    warnings.push('Could not infer project name from DESIGN.md heading.');
+  }
+  if (!brand.length) {
+    warnings.push('No brand colors mapped yet. Provide linked JSON config or answer brand color intake questions.');
+  }
+  if (linkedConfigCandidates.length && !linkedMapped) {
+    warnings.push('DESIGN.md references linked config files. Pass linked_config_path to import concrete theme values.');
+  }
+  warnings.push('Markdown-only DESIGN.md parsed as partial intake. Remaining setup questions still apply.');
+
+  const needsDesignerInput = _deriveIntakeNeeds(DS, {
+    parsedFromMarkdown: parsedFromMarkdown,
+    linkedMapped: linkedMapped
+  });
 
   return {
     ds: DS,
     parsed: {
-      name: tokens.name || null,
-      colors: Object.keys(colors).length,
-      typography: Object.keys(tokens.typography || {}).length,
-      spacing: Object.keys(tokens.spacing || {}).length,
-      rounded: Object.keys(tokens.rounded || {}).length
+      name: parsedFromMarkdown.projectName || null,
+      colors: brand.length,
+      typography: Object.keys(typographyScale).length,
+      spacing: 0,
+      rounded: 0,
+      sections: parsedFromMarkdown.sections.length
     },
+    parsedFromFrontMatter: false,
+    parsedFromMarkdown: {
+      projectName: parsedFromMarkdown.projectName,
+      rules: parsedFromMarkdown.rules,
+      sections: parsedFromMarkdown.sections
+    },
+    linkedConfigCandidates: linkedConfigCandidates,
     mapped: {
       brandColors: brand.length,
-      typographyRoles: Object.keys(type.scale).length,
-      gridBase: DS.grid.base
+      typographyRoles: Object.keys(typographyScale).length,
+      gridBase: DS.grid.base,
+      linkedConfigUsed: Boolean(linkedMapped),
+      groundsCount: linkedMapped ? linkedMapped.groundsCount : 0
     },
-    warnings: brand.length
-      ? []
-      : ['No usable color hex tokens found in DESIGN.md; add at least one brand color before prepare_ds_config.']
+    needsDesignerInput: needsDesignerInput,
+    warnings: warnings
   };
 }
 
 function readDesignMdAsDsConfig(designMdPath, options) {
   const resolved = path.resolve(designMdPath);
   const markdown = fs.readFileSync(resolved, 'utf8');
-  return designMdToDsConfig(markdown, Object.assign({}, options || {}, { sourcePath: resolved }));
+  const opts = Object.assign({}, options || {}, { sourcePath: resolved });
+  if (!opts.linkedConfigPath && opts.autoLinkedConfig !== false) {
+    const intake = parseMarkdownIntake(markdown, { baseDir: path.dirname(resolved) });
+    const jsonCandidate = (intake.linkedConfigCandidates || []).find(entry => entry.kind === 'json');
+    if (jsonCandidate && fs.existsSync(jsonCandidate.resolvedPath)) {
+      opts.linkedConfigPath = jsonCandidate.resolvedPath;
+    }
+  }
+  return designMdToDsConfig(markdown, opts);
 }
 
 function _formatDimension(value) {
@@ -743,6 +1091,8 @@ function writeDesignMdFromDsConfig(configPath, outputPath) {
 
 module.exports = {
   parseDesignMd,
+  parseMarkdownIntake,
+  mapLinkedJsonConfig,
   designMdToDsConfig,
   readDesignMdAsDsConfig,
   dsConfigToDesignMd,

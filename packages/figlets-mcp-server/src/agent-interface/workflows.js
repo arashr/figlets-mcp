@@ -334,7 +334,7 @@ const WORKFLOWS = [
         kind: "read",
         tool: "create_ds_config_from_design_md",
         optional: true,
-        designerMessage: "If you already have DESIGN.md, I can use it as starter intake.",
+        designerMessage: "If you have a DESIGN.md file, just drop it in and I will ask the remaining questions. If you don't, no worries.",
       },
       {
         id: "collect-answers",

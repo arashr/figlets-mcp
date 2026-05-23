@@ -32,9 +32,11 @@ const {
   handleFigletsHealthCheck,
 } = require("./tools/agent-interface.js");
 
+const { version: serverVersion } = require("../package.json");
+
 const server = new McpServer({
   name: "figlets-mcp",
-  version: "0.1.0"
+  version: serverVersion
 });
 
 // --- figlets_start ---

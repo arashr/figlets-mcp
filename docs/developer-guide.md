@@ -70,12 +70,16 @@ git diff --check
 Before a release tag:
 
 ```bash
-npm run build:server-tarball   # build self-contained server tarball
-npm run verify:release         # tarball contents, packed tools/list, Agent Interface smoke
-npm run smoke:plugins          # plugin version/tarball alignment + host smoke
+npm run release:prepare -- 1.0.0   # or --patch / --minor / --major
+npm run release:prepare -- --check # fail if any product version surface drifts
+npm run build:server-tarball       # build self-contained server tarball
+npm run verify:release             # tarball contents, packed tools/list, Agent Interface smoke
+npm run smoke:plugins              # plugin version/tarball alignment + host smoke
 ```
 
-Claude/Codex plugins pin the GitHub release tarball via `npx -y <tarball>`. Run `verify:release` before tagging so designer installs do not drift.
+Figlets has one product version. The source of truth is `packages/figlets-mcp-server/package.json`; `npm run release:prepare` syncs every workspace package, host plugin manifest, and GitHub release tarball URL to that version. Runtime server metadata reads from package metadata, so MCP `version` and REST `User-Agent` stay aligned without separate edits.
+
+Claude/Codex plugins pin the GitHub release tarball via `npx -y <tarball>`. Run `release:prepare -- --check` and `verify:release` before tagging so designer installs do not drift.
 
 Optional offline analysis: export or sync Figma JSON, then use CLIs under `packages/figlets-mcp-server/src/cli/`. See `.env.example` for REST export tokens. Designer-facing reviews should still go through Figlets MCP workflows.
 

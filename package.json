@@ -13,6 +13,7 @@
     "pretest": "node scripts/check-node-version.js 22",
     "test": "node tests/run-tests.js",
     "build:server-tarball": "node scripts/build-server-tarball.js",
+    "release:prepare": "node scripts/sync-product-version.js",
     "verify:release": "node scripts/verify-release-package.js",
     "smoke:plugins": "node scripts/smoke-plugin-hosts.js",
     "figlets:export-design-md": "node packages/figlets-mcp-server/src/cli/export-design-md.js",

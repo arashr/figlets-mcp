@@ -17,8 +17,9 @@ assert.strictEqual(figletsEntry.policy.authentication, "ON_INSTALL", "marketplac
 assert.strictEqual(figletsEntry.category, "Design", "marketplace entry must include a category");
 
 const plugin = JSON.parse(fs.readFileSync(path.join(PLUGIN_DIR, ".codex-plugin", "plugin.json"), "utf-8"));
+const { readProductVersion } = require("../../scripts/lib/product-version.js");
 assert.strictEqual(plugin.name, "figlets", "plugin name must be 'figlets'");
-assert.strictEqual(plugin.version, "0.1.0", "plugin version should track the server package version");
+assert.strictEqual(plugin.version, readProductVersion(), "plugin version should track the server package version");
 assert.strictEqual(plugin.skills, "./skills/", "plugin must expose the designer skill folder");
 assert.strictEqual(plugin.mcpServers, "./.mcp.json", "plugin must expose MCP server config");
 assert.ok(plugin.interface && plugin.interface.displayName === "Figlets", "plugin must include Codex interface metadata");

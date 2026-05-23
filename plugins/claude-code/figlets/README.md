@@ -14,7 +14,7 @@ This plugin is **agent-agnostic-friendly**: the Figlets toolkit itself lives in 
 - The MCP server is **not** published to npm. Instead the manifest runs `npx -y <GitHub release tarball URL>`. `npx` downloads that tarball and resolves dependencies from the public npm registry (registry reads are free and need no login).
 
 > [!IMPORTANT]
-> The server tarball must be attached to a GitHub release before this works for anyone. Build it with `npm run build:server-tarball` (from the repo root) and follow the printed steps to create the `v0.1.0` release on `github.com/arashr/figlets-mcp`. Until that release exists, use the *Local development override* below.
+> The server tarball must be attached to a GitHub release before this works for anyone. Build it with `npm run build:server-tarball` (from the repo root) and follow the printed `gh release create` steps on `github.com/arashr/figlets-mcp`. Until that release exists, use the *Local development override* below.
 
 ## One-command install
 
@@ -38,7 +38,7 @@ Restart the Claude Code session, then either type `/figlets:start` or describe w
 
 ## Local development override
 
-Until the `v0.1.0` GitHub release exists, the `npx -y <tarball-url>` command in `.claude-plugin/plugin.json` cannot resolve. For local testing, replace `mcpServers.figlets` with an absolute path to your checkout:
+Until the GitHub release tarball exists, the `npx -y <tarball-url>` command in `.claude-plugin/plugin.json` cannot resolve. For local testing, replace `mcpServers.figlets` with an absolute path to your checkout:
 
 ```json
 "mcpServers": {

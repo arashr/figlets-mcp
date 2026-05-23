@@ -4,7 +4,7 @@ const { auditTokens } = require("./audit-tokens.js");
 const dsConfig = require("./ds-config/index.js");
 const variableBinding = require("./variable-binding.js");
 
-const CORE_VERSION = "0.1.0";
+const { version: coreVersion } = require("../package.json");
 
 function summarizeDesignSystem(input = {}) {
   const collectionList = Array.isArray(input.collections) ? input.collections : [];
@@ -70,7 +70,7 @@ function detectDesignSystemFromFigmaData(input = {}) {
 }
 
 module.exports = {
-  CORE_VERSION,
+  CORE_VERSION: coreVersion,
   auditTokens,
   detectDesignSystem,
   detectDesignSystemFromFigmaData,

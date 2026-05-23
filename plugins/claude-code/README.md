@@ -6,7 +6,7 @@ The Claude Code integration for the Figlets toolkit. This folder is intentionall
 
 The Claude Code **marketplace manifest is not here**. It lives at the repo root (`<repo>/.claude-plugin/marketplace.json`) because `claude plugin marketplace add owner/repo` only reads it from the repository root. That manifest's plugin `source` redirects here (`./plugins/claude-code/figlets`), so all real Claude content stays in this folder.
 
-Install (once the GitHub repo + `v0.1.0` release exist):
+Install (once the GitHub repo and a tagged release with the server tarball exist):
 
 ```
 claude plugin marketplace add arashr/figlets-mcp --sparse .claude-plugin plugins/claude-code

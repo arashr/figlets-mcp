@@ -28,11 +28,13 @@ function readToken() {
   return process.env.FIGMA_ACCESS_TOKEN || process.env.FIGMA_TOKEN || "";
 }
 
+const { version: serverVersion } = require("../../package.json");
+
 function createHeaders(token) {
   return {
     "X-Figma-Token": token,
     "Content-Type": "application/json",
-    "User-Agent": "figlets-mcp/0.1.0"
+    "User-Agent": `figlets-mcp/${serverVersion}`
   };
 }
 

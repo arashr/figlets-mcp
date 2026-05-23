@@ -111,7 +111,7 @@ Bulk design-system updates are part of Figlets when the change can be expressed 
 6. Tell the user to look at the "00 · Tokens" page in their Figma file
 
 ### Set up a new design system (bootstrap collections)
-Treat evocative setup prompts (for example, "multiple vibrant background colors with matching foregrounds") as **direction**, not a complete design-system spec. Ask targeted intake questions before writing config values or calling `prepare_ds_config`. You may suggest options, but the designer must confirm or replace them before those values become final.
+Treat evocative setup prompts (for example, "multiple vibrant background colors with matching foregrounds") as **direction**, not a complete design-system spec. Ask targeted intake questions first before writing config values or calling `prepare_ds_config`. Do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. You may offer lightweight multiple-choice options, but ask questions before suggesting concrete token values unless the designer explicitly asks for suggestions.
 
 1. Ask whether the designer already has a Google `DESIGN.md`. If yes, call `create_ds_config_from_design_md` to create the starter config, then only ask for missing or intentionally overridden answers. Treat DESIGN.md as imported intake answers, not as the final source of truth.
 2. Run any remaining intake: project name, platform, grid base (4px/8px), breakpoints (3-tier/4-tier), naming convention (role-based/surface-based), **contrast standard (APCA default / WCAG 2.2)**, color scale, brand colors (name + hex), typeface, typography preset.
@@ -219,4 +219,5 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 - Never call `apply_ds_setup` until `prepare_ds_config` returns `readyToBuild === true` — building with failing pairs will produce inaccessible tokens
 - Never hardcode token values in intake — all values come from the user and are written to the config file
 - Never invent missing setup choices for a new design system — ask intake questions before `prepare_ds_config`
+- Never draft a full setup proposal, palette, or token plan before intake — ask questions first
 - Never skip showing the semantic pairs table before building — the user must confirm contrast ratios before any collections are created

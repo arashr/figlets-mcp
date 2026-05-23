@@ -306,26 +306,36 @@ try {
       "using figlets set up a new design system with multiple vibrant colors as backgrounds and some matching vibrant colors to pair with them as foreground. The ds is called Poster Gallery.";
     const route = handleFigletsRouteIntent({ intent: posterGalleryIntent });
     assert.strictEqual(route.workflow.id, "new-ds-setup");
-    assert.ok(route.message.includes("setup intake before prepare_ds_config"));
-    assert.ok(route.designerResponse.includes("direction, not a complete design-system spec"));
-    assert.ok(route.designerResponse.includes("targeted setup questions"));
+    assert.ok(route.intakeContract);
+    assert.ok(route.intakeContract.proposalRule.includes("Do not draft a full proposal before intake"));
+    assert.ok(route.message.includes("do not draft a full proposal"));
+    assert.ok(route.designerResponse.includes("start by asking"));
+    assert.ok(route.designerResponse.includes("won't draft"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
 
     const guide = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
     assert.ok(guide.intakeContract);
     assert.ok(guide.intakeContract.requiredTopics.some(topic => topic.includes("brand colors")));
-    assert.ok(guide.message.includes("Do not invent brand colors"));
+    assert.ok(guide.intakePresentationRule.includes("intake questions"));
+    assert.ok(guide.message.includes("do not draft a full proposal"));
     assert.ok(guide.workflow.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "prepare_ds_config"));
 
     assertDocsIncludeAny(
       DESIGNER_DOC_PATHS,
       [
-        "do not invent final token/config values",
-        "do not invent missing setup choices",
-        "Treat the prompt as direction, not a complete spec",
-        "treat their prompt as initial direction, not a complete spec",
+        "do not draft a full proposal",
+        "Do not draft a full proposal",
+        "Never draft a full setup proposal",
       ],
-      "setup intake docs"
+      "setup proposal docs"
+    );
+    assertDocsIncludeAny(
+      DESIGNER_DOC_PATHS,
+      [
+        "ask questions before suggesting concrete token values",
+        "Ask targeted intake questions first",
+      ],
+      "setup intake question-first docs"
     );
 
     const skippedIntake = handleFigletsHealthCheck({
@@ -348,8 +358,28 @@ try {
     assert.strictEqual(skippedIntake.status, "blocked");
     const intake = findCheck(skippedIntake, "setup_intake_boundary");
     assert.strictEqual(intake.status, "fail");
-    assert.ok(intake.nextAction.includes("Do not invent brand colors"));
+    assert.ok(intake.nextAction.includes("Do not draft a full proposal"));
     assert.strictEqual(skippedIntake.nextAction.type, "ask_user");
+
+    const draftedProposal = handleFigletsHealthCheck({
+      context: {
+        mode: "designer",
+        goal: posterGalleryIntent,
+        workflowId: "new-ds-setup",
+      },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        setupIntakeCompleted: false,
+        proposalDraftedBeforeIntake: true,
+      },
+    });
+    assert.strictEqual(draftedProposal.status, "blocked");
+    const proposal = findCheck(draftedProposal, "setup_proposal_boundary");
+    assert.strictEqual(proposal.status, "fail");
+    assert.ok(proposal.nextAction.includes("targeted intake questions"));
+    assert.strictEqual(draftedProposal.nextAction.type, "ask_user");
 
     const negativeRoutes = [
       ["using figlets build a token showcase for vibrant colors", "build-showcase"],
@@ -374,6 +404,7 @@ try {
       "concrete_goal_routing",
       "workflow_tool_sequence",
       "setup_intake_boundary",
+      "setup_proposal_boundary",
       "approval_boundary",
       "repair_payload_source",
       "product_gap_response",

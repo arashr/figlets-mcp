@@ -66,6 +66,8 @@ const DESIGNER_FLOW_HARD_RULES = {
 const NEW_DS_SETUP_INTAKE_CONTRACT = {
   treatPromptAs: "initial direction, not a complete design-system spec",
   requireQuestionsBefore: ["prepare_ds_config", "apply_ds_setup"],
+  firstResponseRule:
+    "For broad setup prompts, lead with targeted intake questions. Do not open with a synthesized design-system proposal, palette, or token plan.",
   doNotInvent: [
     "brand color hex values",
     "color family names or counts",
@@ -74,6 +76,14 @@ const NEW_DS_SETUP_INTAKE_CONTRACT = {
     "spacing, grid, radius, or breakpoint defaults",
     "contrast standard choice",
     "light/dark mode behavior",
+  ],
+  doNotDraftBeforeIntake: [
+    "concrete color pairs or palettes",
+    "hex-like values or swatch lists",
+    "typography stacks or type scale choices",
+    "grid, breakpoint, spacing, or radius defaults",
+    "final-looking token or variable names",
+    "a full setup proposal presented for approval",
   ],
   requiredTopics: [
     "project name",
@@ -87,8 +97,10 @@ const NEW_DS_SETUP_INTAKE_CONTRACT = {
     "typeface and typography preset",
     "light/dark behavior",
   ],
+  suggestionRule:
+    "You may ask multiple-choice questions or offer lightweight answer options, but label them as choices to pick from. Do not draft a full proposal before intake unless the designer explicitly asks for suggestions or has already answered the relevant intake topics.",
   proposalRule:
-    "The agent may suggest options, but must ask the designer to confirm or replace them before writing design-system.config.js or calling prepare_ds_config.",
+    "Do not draft a full proposal before intake. Ask questions before suggesting concrete token values unless the designer explicitly asks for suggestions.",
 };
 
 const WORKFLOWS = [
@@ -328,7 +340,7 @@ const WORKFLOWS = [
         id: "collect-answers",
         kind: "confirmation",
         requiredBeforeTool: "prepare_ds_config",
-        designerMessage: "I'll ask for the missing setup choices in plain language before preparing any token values.",
+        designerMessage: "I'll ask targeted setup questions first. I won't draft color palettes, typography stacks, grid defaults, or token names before you answer.",
         intakeTopics: NEW_DS_SETUP_INTAKE_CONTRACT.requiredTopics,
       },
       {
@@ -355,6 +367,7 @@ const WORKFLOWS = [
     errors: [
       "If the designer prompt is evocative but incomplete, treat it as direction and run intake before prepare_ds_config.",
       "Do not invent missing brand colors, typography, spacing, contrast, or light/dark choices and ask for build confirmation.",
+      "Do not draft a full setup proposal, palette, or token plan before intake. Ask questions first; only offer lightweight multiple-choice options unless the designer asks for suggestions.",
       "If prepare_ds_config reports contrast failures, fix or confirm the config before running apply_ds_setup.",
     ],
   },
@@ -514,13 +527,14 @@ function _workflowStartResponse(workflow) {
       "",
       "Your prompt gives me direction, not a complete design-system spec yet.",
       "",
-      "First I'll ask targeted setup questions for any missing choices, such as:",
-      "- color families and brand colors (name + hex)",
-      "- how many background/foreground pairings you want",
+      "I'll start by asking targeted setup questions for missing choices, such as:",
+      "- how many color families and background/foreground pairings you want",
+      "- brand colors (name + hex) once you're ready to provide them",
       "- light/dark behavior",
       "- typography, spacing, grid, breakpoints, and contrast standard",
       "",
-      "I can suggest options, but I won't treat them as final until you confirm.",
+      "I won't draft a full palette, typography stack, grid defaults, or token names before you answer.",
+      "I may offer lightweight multiple-choice options, but not a proposal to approve.",
       "",
       "After intake I'll preview tokens with prepare_ds_config, show the preview, and only then ask before building in Figma.",
     ].join("\n");
@@ -653,7 +667,11 @@ function routeIntent(intent) {
       }), fallbackChoices)
       : null;
 
-  return {
+  return _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, intent);
+}
+
+function _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, intent) {
+  const result = {
     intent: String(intent == null ? "" : intent),
     workflow: bestWorkflow,
     candidates,
@@ -663,9 +681,13 @@ function routeIntent(intent) {
     message: best.workflowId === "start"
       ? "I am not sure which Figlets workflow fits yet. Use selectionPrompt if the host supports choices; otherwise ask with its message."
       : best.workflowId === "new-ds-setup"
-        ? `Recommended workflow: ${best.title}. Treat the designer prompt as initial direction, run setup intake before prepare_ds_config, do not invent missing choices, summarize plainly, and ask before any Figma write.`
+        ? `Recommended workflow: ${best.title}. Treat the designer prompt as initial direction, ask intake questions first, do not draft a full proposal or concrete token values before intake, run setup intake before prepare_ds_config, and ask before any Figma write.`
         : `Recommended workflow: ${best.title}. Use Figlets workflow tools/scripts only, start read-only, summarize plainly, and ask before any Figma write.`,
   };
+  if (best.workflowId === "new-ds-setup") {
+    result.intakeContract = clone(NEW_DS_SETUP_INTAKE_CONTRACT);
+  }
+  return result;
 }
 
 function getWorkflowGuide(workflowId) {

@@ -58,7 +58,7 @@ const figletsWorkflowGuideTool = {
 const figletsHealthCheckTool = {
   name: "figlets_health_check",
   description:
-    "Read-only Agent Interface health check for agent readiness and Figlets workflow safety. Returns structured, host-neutral feedback about entrypoint/routing, workflow sequencing, setup intake boundaries, approval boundaries, repair payload sources, product-gap handling, stale host risk, and bridge readiness. Does not inspect or mutate Figma.",
+    "Read-only Agent Interface health check for agent readiness and Figlets workflow safety. Returns structured, host-neutral feedback about entrypoint/routing, workflow sequencing, setup intake and proposal boundaries, approval boundaries, repair payload sources, product-gap handling, stale host risk, and bridge readiness. Does not inspect or mutate Figma.",
   inputSchema: {
     type: "object",
     properties: {
@@ -165,6 +165,14 @@ function _chooseNextAction(checks, fallback) {
       type: "ask_user",
       tool: null,
       argsSource: "new-ds-setup intakeContract.requiredTopics",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "setup_proposal_boundary") {
+    return {
+      type: "ask_user",
+      tool: "figlets_workflow_guide",
+      argsSource: "new-ds-setup intakeContract.firstResponseRule",
       message: actionable.nextAction,
     };
   }
@@ -337,7 +345,7 @@ function handleFigletsHealthCheck(args) {
           "setupIntakeCompleted is not true",
           `requestedOrCompletedTool=${requestedTool || "prepare_ds_config"}`,
         ],
-        nextAction: "Ask targeted setup intake questions for missing choices. Treat the designer prompt as direction, not a complete spec. Do not invent brand colors, typography, spacing, contrast, or light/dark values.",
+        nextAction: "Ask targeted setup intake questions for missing choices. Treat the designer prompt as direction, not a complete spec. Do not draft a full proposal or concrete token values before intake.",
         recommendedTool: "figlets_workflow_guide",
       }));
     } else if (workflow.id === "new-ds-setup") {
@@ -363,6 +371,46 @@ function handleFigletsHealthCheck(args) {
         nextAction: "No setup intake check needed for this workflow.",
       }));
     }
+
+    const proposalDraftedBeforeIntake = _truthy(workflowState.proposalDraftedBeforeIntake);
+    if (workflow.id === "new-ds-setup" && proposalDraftedBeforeIntake && !setupIntakeCompleted) {
+      checks.push(_makeCheck({
+        id: "setup_proposal_boundary",
+        title: "Setup proposal boundary",
+        status: "fail",
+        severity: "error",
+        message: "New design-system setup must ask intake questions before drafting palettes, typography stacks, grid defaults, or token names.",
+        evidence: [
+          "workflowId=new-ds-setup",
+          "proposalDraftedBeforeIntake is true",
+          "setupIntakeCompleted is not true",
+        ],
+        nextAction: "Replace the proposal with targeted intake questions. Offer lightweight multiple-choice options only; do not draft a full setup proposal before intake unless the designer explicitly asks for suggestions.",
+        recommendedTool: "figlets_workflow_guide",
+      }));
+    } else if (workflow.id === "new-ds-setup") {
+      checks.push(_makeCheck({
+        id: "setup_proposal_boundary",
+        title: "Setup proposal boundary",
+        status: proposalDraftedBeforeIntake ? "warn" : "pass",
+        severity: proposalDraftedBeforeIntake ? "warning" : "info",
+        message: proposalDraftedBeforeIntake
+          ? "A setup proposal was drafted after intake began; confirm the designer asked for suggestions."
+          : "No pre-intake setup proposal risk detected.",
+        evidence: [`proposalDraftedBeforeIntake=${proposalDraftedBeforeIntake}`],
+        nextAction: "Lead with intake questions for broad setup prompts; avoid full proposals before answers.",
+      }));
+    } else {
+      checks.push(_makeCheck({
+        id: "setup_proposal_boundary",
+        title: "Setup proposal boundary",
+        status: "info",
+        severity: "info",
+        message: "Setup proposal boundary applies only to new-ds-setup.",
+        evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+        nextAction: "No setup proposal check needed for this workflow.",
+      }));
+    }
   } else {
     checks.push(_makeCheck({
       id: "workflow_tool_sequence",
@@ -385,6 +433,16 @@ function handleFigletsHealthCheck(args) {
       message: "Setup intake boundary applies only to new-ds-setup.",
       evidence: workflowId ? [`workflowId=${workflowId}`] : [],
       nextAction: "No setup intake check needed until new-ds-setup is selected.",
+    }));
+
+    checks.push(_makeCheck({
+      id: "setup_proposal_boundary",
+      title: "Setup proposal boundary",
+      status: "info",
+      severity: "info",
+      message: "Setup proposal boundary applies only to new-ds-setup.",
+      evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+      nextAction: "No setup proposal check needed until new-ds-setup is selected.",
     }));
   }
 
@@ -610,7 +668,8 @@ function handleFigletsWorkflowGuide(args) {
   };
   if (workflow.id === "new-ds-setup" && workflow.intakeContract) {
     response.intakeContract = workflow.intakeContract;
-    response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Run setup intake and collect missing choices before prepare_ds_config. Do not invent brand colors, typography, spacing, contrast, or light/dark values. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
+    response.intakePresentationRule = workflow.intakeContract.firstResponseRule;
+    response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Ask intake questions first and do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. Run setup intake before prepare_ds_config. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
   }
   return response;
 }

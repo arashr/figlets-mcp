@@ -15,7 +15,7 @@ Preserve the capability-menu shape and do not offer developer-mode options (no r
 
 After the designer picks a goal, call `figlets_route_intent`, then `figlets_workflow_guide`, and follow the steps in that workflow. Inspect before changing anything, summarize in plain language, and ask for explicit approval before any Figma write.
 
-For **new design system setup**, treat the designer prompt as initial direction, not a complete spec. Ask targeted intake questions for missing choices before calling `prepare_ds_config` or asking to build. You may propose options, but do not invent final token/config values or skip intake.
+For **new design system setup**, treat the designer prompt as initial direction, not a complete spec. Ask targeted intake questions first before calling `prepare_ds_config` or asking to build. Do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. You may offer lightweight multiple-choice options, but ask questions before suggesting concrete token values unless the designer explicitly asks for suggestions.
 
 For any design-system review, check, audit, setup-gap investigation, or contrast investigation, the workflow guide is mandatory. Use the Figlets MCP tools/scripts named by `figlets_workflow_guide`; do not write custom scripts, inspect `.local/.../figma-data.json`, parse Codex/Claude `tool-results`, read MCP transcript files, or call raw Figma APIs to perform the designer-facing review. If the Figlets output is missing needed information, report that as a Figlets product/tool gap. Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds.
 

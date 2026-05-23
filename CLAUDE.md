@@ -46,7 +46,7 @@ The designer-facing menu must stay limited to Figlets workflows:
 
 Use Developer Mode only when the user asks to edit this repository, debug code, run tests, implement features, review changes, or otherwise work as a developer.
 
-In Developer Mode, read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, and the relevant source files before editing.
+In Developer Mode, read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, and the relevant source files before editing. Human-oriented repo onboarding lives in `docs/developer-guide.md` (not linked from the root README).
 
 Architecture guardrail: before adding a new public Figlets tool, bridge mutation branch, or parallel repair path, check the existing bulk-capable surfaces in `docs/bulk-repair-api-implementation-plan.md`. Decide explicitly whether to extend an existing planner/apply surface, extract shared helpers, or create a new surface because the designer approval boundary is genuinely different. Prefer shared pure helpers for collection names, configured modes, token entry names, and style names; do not duplicate setup/update logic casually.
 

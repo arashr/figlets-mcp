@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-23 — BNN-13 human README rewrite]
+
+**Status:** Closed BNN-13. Root `README.md` is designer-first for GitHub onboarding: local-first About section, per-agent setup (no recommended default), Figlets Bridge get/import/use/update steps, and plain-language troubleshooting. Developer/repo content moved to `docs/developer-guide.md`, intentionally not linked from the root README. `AGENTS.md` and `CLAUDE.md` point repo contributors to that guide.
+
+**Voice:** Direct sentences, consistent `**Label:**` list pattern, no em dashes in README prose. Plugin and adapter READMEs aligned to the same style.
+
+**Files:** `README.md`, `docs/developer-guide.md`, `AGENTS.md`, `CLAUDE.md`, `plugins/claude-code/README.md`, `plugins/claude-code/figlets/README.md`, `plugins/codex/figlets/README.md`, `packages/figlets-adapter/README.md`.
+
+**Verification:** `git diff --check`; `node tests/plugins/claude-code-plugin.test.js`; `node tests/plugins/codex-plugin.test.js`. No full `npm test` (docs-only).
+
+**Release-ready:** Yes for human GitHub onboarding. Bridge plugin remains dev-import (localhost); README states that explicitly.
+
 ### [2026-05-22 — next roadmap slice after Phase 3 token completion]
 
 **Status:** BNN-10 defined the next slice as **Post-Phase-3 reliability and release hardening**. Phase 3 token completion stays closed; do not reopen token work without a concrete regression. The next slice should make the completed Figlets surfaces dependable for real designer sessions before starting another broad product-capability build.

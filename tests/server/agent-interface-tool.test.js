@@ -26,9 +26,11 @@ const {
   figletsStartTool,
   figletsRouteIntentTool,
   figletsWorkflowGuideTool,
+  figletsHealthCheckTool,
   handleFigletsStart,
   handleFigletsRouteIntent,
   handleFigletsWorkflowGuide,
+  handleFigletsHealthCheck,
 } = require("../../packages/figlets-mcp-server/src/tools/agent-interface.js");
 
 function allSteps() {
@@ -40,6 +42,8 @@ try {
     assert.ok(figletsStartTool.description.includes("not custom scripts"));
     assert.ok(figletsRouteIntentTool.description.includes("before any design-system review scripting"));
     assert.ok(figletsWorkflowGuideTool.description.includes("named Figlets tools/scripts only"));
+    assert.ok(figletsHealthCheckTool.description.includes("Read-only Agent Interface health check"));
+    assert.ok(figletsHealthCheckTool.description.includes("host-neutral feedback"));
   }
 
   {
@@ -186,6 +190,121 @@ try {
   }
 
   {
+    const health = handleFigletsHealthCheck({});
+    assert.strictEqual(health.boundaries.readOnly, true);
+    assert.strictEqual(health.boundaries.figmaMutationAllowed, false);
+    assert.strictEqual(health.boundaries.hostSpecificBehavior, false);
+    assert.strictEqual(health.status, "needs_input");
+    assert.strictEqual(health.nextAction.tool, "figlets_start");
+    assert.ok(health.checks.some(check => check.id === "designer_mode_entrypoint"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: {
+        mode: "designer",
+        goal: "review my design system",
+      },
+      workflowState: {
+        figletsStartCalled: false,
+        routeIntentCalled: false,
+        workflowGuideCalled: false,
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    assert.ok(health.blockingReasons.some(reason => reason.includes("figlets_start")));
+    const entrypoint = health.checks.find(check => check.id === "designer_mode_entrypoint");
+    assert.strictEqual(entrypoint.status, "fail");
+    assert.strictEqual(entrypoint.recommendedTool, "figlets_start");
+    const routing = health.checks.find(check => check.id === "concrete_goal_routing");
+    assert.strictEqual(routing.status, "fail");
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: {
+        mode: "designer",
+        workflowId: "health-check",
+      },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: ["sync_figma_data"],
+        pendingWriteTool: "apply_ds_setup_repairs",
+        approvalStatus: "needed",
+      },
+      requestedAction: {
+        tool: "apply_ds_setup_repairs",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const sequence = health.checks.find(check => check.id === "workflow_tool_sequence");
+    assert.strictEqual(sequence.status, "warn");
+    assert.strictEqual(sequence.recommendedTool, "detect_design_system");
+    const approval = health.checks.find(check => check.id === "approval_boundary");
+    assert.strictEqual(approval.status, "fail");
+    assert.ok(approval.nextAction.includes("approve"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: {
+        mode: "designer",
+        workflowId: "token-gap-completion",
+      },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "hand_authored",
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const payload = health.checks.find(check => check.id === "repair_payload_source");
+    assert.strictEqual(payload.status, "fail");
+    assert.ok(payload.message.includes("structured Figlets repairPlan payloads"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: { mode: "designer" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+      },
+      repairPlanState: {
+        hasMissingCapabilityNotes: true,
+      },
+    });
+    assert.strictEqual(health.status, "warning");
+    const productGap = health.checks.find(check => check.id === "product_gap_response");
+    assert.strictEqual(productGap.status, "warn");
+    assert.ok(productGap.nextAction.includes("product/tool gap"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: {
+        mode: "developer",
+        host: { mcpSessionFreshness: "stale_suspected" },
+      },
+    });
+    assert.strictEqual(health.status, "warning");
+    const stale = health.checks.find(check => check.id === "stale_host_suspicion");
+    assert.strictEqual(stale.status, "warn");
+    assert.ok(stale.nextAction.includes("fresh stdio"));
+  }
+
+  {
     const guide = getWorkflowGuide("build-showcase");
     assert.strictEqual(guide.id, "build-showcase");
     assert.ok(guide.steps.some(step => step.tool === "build_ds_showcase" && step.requiresApproval === true));
@@ -221,6 +340,7 @@ try {
       start: handleFigletsStart(),
       route: handleFigletsRouteIntent({ intent: "export design.md" }),
       guide: handleFigletsWorkflowGuide({ workflow_id: "export-design-md" }),
+      health: handleFigletsHealthCheck({ context: { mode: "designer" } }),
     });
     assert.ok(!/\/(Users|home)\/[^"\\/]+/.test(publicPayload), "Agent Interface should not hardcode developer-local home paths");
   }

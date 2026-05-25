@@ -17,6 +17,16 @@ const RECEIVER_PATH = RECEIVER_PATHS.find((candidate) => {
   }
 }) || RECEIVER_PATHS[0];
 
+function _isFigletsReceiverCommand(command) {
+  const normalized = String(command || "").replace(/\\/g, "/");
+  return normalized.includes("figma-bridge-plugin/src/receiver.js")
+    || normalized.includes("figma-bridge-plugin/receiver.js");
+}
+
+function _isFigletsReceiverHealth(health) {
+  return Boolean(health && health.ok === true && health.receiver === "running");
+}
+
 function isDevBridgeRequested() {
   const raw = String(process.env.FIGLETS_DEV_BRIDGE || "").trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes";
@@ -85,16 +95,38 @@ function fetchReceiverHealth() {
 }
 
 async function stopReceiverOnPort(port) {
+  let pids = [];
   try {
     const out = execSync(`lsof -tiTCP:${port} -sTCP:LISTEN`, { encoding: "utf8" }).trim();
-    if (!out) return;
-    for (const pid of out.split("\n").filter(Boolean)) {
-      process.kill(Number(pid), "SIGTERM");
-    }
-    await waitForPortDown(port, 5000);
+    pids = out.split("\n").filter(Boolean);
   } catch (err) {
-    if (err && err.status !== 1) throw err;
+    if (err && err.status === 1) return { stoppedPids: [], skippedPids: [] };
+    throw err;
   }
+
+  const stoppedPids = [];
+  const skippedPids = [];
+
+  for (const pid of pids) {
+    let command = "";
+    try {
+      command = execSync(`ps -p ${pid} -o command=`, { encoding: "utf8" }).trim();
+    } catch (err) {}
+
+    if (!_isFigletsReceiverCommand(command)) {
+      skippedPids.push({ pid, command });
+      continue;
+    }
+
+    process.kill(Number(pid), "SIGTERM");
+    stoppedPids.push(pid);
+  }
+
+  if (stoppedPids.length) {
+    await waitForPortDown(port, 5000);
+  }
+
+  return { stoppedPids, skippedPids };
 }
 
 function spawnReceiver() {
@@ -127,9 +159,9 @@ async function ensureReceiverRunning() {
   const already = await checkPort(RECEIVER_PORT);
 
   if (already) {
-    if (needsDevBridge) {
-      const health = await fetchReceiverHealth();
-      if (!health || health.devBridgeEnabled !== true) {
+    const health = await fetchReceiverHealth();
+    if (_isFigletsReceiverHealth(health)) {
+      if (needsDevBridge && health.devBridgeEnabled !== true) {
         process.stderr.write(
           `[figlets] Bridge receiver on :${RECEIVER_PORT} is running without developer commands; restarting with FIGLETS_DEV_BRIDGE=1...\n`
         );
@@ -139,8 +171,21 @@ async function ensureReceiverRunning() {
         return;
       }
     } else {
-      process.stderr.write(`[figlets] Bridge receiver already running on :${RECEIVER_PORT}\n`);
-      return;
+      process.stderr.write(
+        `[figlets] Port :${RECEIVER_PORT} is in use but did not return Figlets receiver health; checking for a stale Figlets receiver...\n`
+      );
+      const stopped = await stopReceiverOnPort(RECEIVER_PORT);
+      if (!stopped || stopped.stoppedPids.length === 0) {
+        const skipped = stopped && stopped.skippedPids && stopped.skippedPids.length
+          ? ` Listener command: ${stopped.skippedPids.map(item => item.command || `pid ${item.pid}`).join("; ")}`
+          : "";
+        throw new Error(
+          `Port ${RECEIVER_PORT} is in use, but it is not a healthy Figlets receiver and Figlets could not identify it as safe to restart.${skipped}`
+        );
+      }
+      process.stderr.write(
+        `[figlets] Stopped stale Figlets receiver on :${RECEIVER_PORT}; starting a fresh receiver...\n`
+      );
     }
   }
 
@@ -174,6 +219,8 @@ module.exports = {
   waitForPluginConnection,
   isDevBridgeRequested,
   isReceiverStartupSkipped,
+  _isFigletsReceiverCommand,
+  _isFigletsReceiverHealth,
   RECEIVER_PORT,
   RECEIVER_PATH,
 };

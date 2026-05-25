@@ -7453,18 +7453,37 @@ async function _applyDsSetupRepairs(payload) {
       continue;
     }
     var source = byName[sourceName];
+    var coll = null;
+    var isNonVariableSource = false;
     if (!source) {
-      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source variable not found.' });
-      continue;
-    }
-    if (source.resolvedType !== 'COLOR') {
-      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source variable is not COLOR.' });
-      continue;
-    }
-    var coll = collByVarId[source.id];
-    if (!coll) {
-      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source collection not found.' });
-      continue;
+      // When source is a non-variable marker (e.g. "background-ramp"), use the
+      // BG variable's collection and require aliases to be present. This path
+      // supports foreground companions derived from accessible contrast search.
+      if (sourceName === 'background-ramp' || sourceName === 'derived') {
+        coll = collByVarId[bgVarLookup.id];
+        isNonVariableSource = true;
+        if (!coll) {
+          unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'BG collection not found.' });
+          continue;
+        }
+        if (!repair.aliases || typeof repair.aliases !== 'object' || !Object.keys(repair.aliases).length) {
+          unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Non-variable source requires aliases.' });
+          continue;
+        }
+      } else {
+        unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source variable not found.' });
+        continue;
+      }
+    } else {
+      if (source.resolvedType !== 'COLOR') {
+        unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source variable is not COLOR.' });
+        continue;
+      }
+      coll = collByVarId[source.id];
+      if (!coll) {
+        unresolved.push({ name: name, bg: bgName, source: sourceName, reason: 'Source collection not found.' });
+        continue;
+      }
     }
 
     try {
@@ -7496,6 +7515,9 @@ async function _applyDsSetupRepairs(payload) {
       }
 
       if (!anyAliasSet) {
+        if (isNonVariableSource) {
+          throw new Error('Non-variable source requires all aliases to be resolvable.');
+        }
         var modeIds = Object.keys(source.valuesByMode || {});
         for (var mi = 0; mi < modeIds.length; mi++) {
           createdVar.setValueForMode(modeIds[mi], source.valuesByMode[modeIds[mi]]);

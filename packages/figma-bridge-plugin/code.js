@@ -7486,32 +7486,63 @@ async function _applyDsSetupRepairs(payload) {
       }
     }
 
+    // Validate all aliases upfront before creating the variable. For non-variable
+    // sources (background-ramp, derived), require ALL requested aliases to be
+    // valid. This prevents partial/empty variable creation when aliases fail.
+    var hasAliases = repair.aliases && typeof repair.aliases === 'object';
+    var validatedAliases = [];
+    var aliasValidationFailed = false;
+    var aliasFailureReason = null;
+    if (hasAliases) {
+      var aliasModeNames = Object.keys(repair.aliases);
+      for (var ami = 0; ami < aliasModeNames.length; ami++) {
+        var modeName = aliasModeNames[ami];
+        var primitiveName = repair.aliases[modeName];
+        if (!primitiveName) continue;
+        var modeMatch = (coll.modes || []).find(function (m) {
+          return String(m.name || '').toLowerCase() === String(modeName).toLowerCase();
+        });
+        if (!modeMatch) {
+          if (isNonVariableSource) {
+            aliasValidationFailed = true;
+            aliasFailureReason = 'Alias mode "' + modeName + '" not found in collection.';
+            break;
+          }
+          continue;
+        }
+        var primVar = byName[primitiveName];
+        if (!primVar) {
+          if (isNonVariableSource) {
+            aliasValidationFailed = true;
+            aliasFailureReason = 'Alias target "' + primitiveName + '" not found.';
+            break;
+          }
+          continue;
+        }
+        validatedAliases.push({ modeName: modeName, modeId: modeMatch.modeId, primVar: primVar, primitiveName: primitiveName });
+      }
+    }
+    if (isNonVariableSource && !aliasValidationFailed && !validatedAliases.length) {
+      aliasValidationFailed = true;
+      aliasFailureReason = 'Non-variable source requires at least one resolvable alias.';
+    }
+    if (aliasValidationFailed) {
+      unresolved.push({ name: name, bg: bgName, source: sourceName, reason: aliasFailureReason || 'Alias validation failed.' });
+      continue;
+    }
+
     try {
       var createdVar = figma.variables.createVariable(name, coll, 'COLOR');
       _setVariableScopesForName(createdVar, name, 'COLOR');
 
-      // Prefer precomputed accessible aliases from the MCP server when present.
-      // The server has already run validateSemanticPairs against the BG variant
-      // and picked the nearest ramp step that passes the contrast threshold.
-      var hasAliases = repair.aliases && typeof repair.aliases === 'object';
+      // Apply validated aliases. All aliases were pre-validated, so no need to
+      // check again here. The server ran validateSemanticPairs and picked
+      // accessible ramp steps.
       var anyAliasSet = false;
-      var aliasNote = null;
-      if (hasAliases) {
-        var aliasModeNames = Object.keys(repair.aliases);
-        for (var ami = 0; ami < aliasModeNames.length; ami++) {
-          var modeName = aliasModeNames[ami];
-          var primitiveName = repair.aliases[modeName];
-          if (!primitiveName) continue;
-          var modeMatch = (coll.modes || []).find(function (m) {
-            return String(m.name || '').toLowerCase() === String(modeName).toLowerCase();
-          });
-          if (!modeMatch) continue;
-          var primVar = byName[primitiveName];
-          if (!primVar) continue;
-          createdVar.setValueForMode(modeMatch.modeId, { type: 'VARIABLE_ALIAS', id: primVar.id });
-          anyAliasSet = true;
-        }
-        if (!anyAliasSet) aliasNote = 'precomputed aliases could not be applied; copied source values';
+      for (var vai = 0; vai < validatedAliases.length; vai++) {
+        var va = validatedAliases[vai];
+        createdVar.setValueForMode(va.modeId, { type: 'VARIABLE_ALIAS', id: va.primVar.id });
+        anyAliasSet = true;
       }
 
       if (!anyAliasSet) {
@@ -7525,8 +7556,12 @@ async function _applyDsSetupRepairs(payload) {
       }
       byName[name] = createdVar;
       var createdRow = { name: name, source: sourceName, collection: coll.name };
-      if (anyAliasSet) createdRow.aliases = repair.aliases;
-      if (aliasNote) createdRow.note = aliasNote;
+      if (anyAliasSet) {
+        createdRow.aliases = {};
+        for (var cai = 0; cai < validatedAliases.length; cai++) {
+          createdRow.aliases[validatedAliases[cai].modeName] = validatedAliases[cai].primitiveName;
+        }
+      }
       created.push(createdRow);
     } catch (err) {
       unresolved.push({ name: name, source: sourceName, reason: err.message || 'Create failed.' });

@@ -4,6 +4,7 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { getReceiverUrl } = require("../utils/receiver-url.js");
+const { ensureReceiverRunning } = require("../utils/ensure-receiver.js");
 
 function _hookRouteKey(method, routePath) {
   return `${String(method || "POST").toUpperCase()} ${routePath}`;
@@ -66,12 +67,31 @@ function requestBridgeViaHttp(receiverUrl, method, routePath, body, options) {
 
     req.on("error", (err) => {
       if (err.code === "ECONNREFUSED") {
-        resolve({
-          statusCode: 0,
-          data: {},
-          raw: "",
-          connectionError: "Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP host.",
-        });
+        const customReceiverUrl = process.env.FIGLETS_RECEIVER_URL || (options && options.receiverUrl);
+        if (!customReceiverUrl && !(options && options.receiverRetryAttempted)) {
+          ensureReceiverRunning()
+            .then(() => requestBridgeViaHttp(receiverUrl, method, routePath, body, Object.assign({}, options || {}, {
+              receiverRetryAttempted: true,
+            })))
+            .then(resolve)
+            .catch((retryErr) => {
+              resolve({
+                statusCode: 0,
+                data: {},
+                raw: "",
+                connectionError: `Bridge receiver was not reachable and Figlets could not restart it automatically: ${retryErr.message}`,
+              });
+            });
+        } else {
+          resolve({
+            statusCode: 0,
+            data: {},
+            raw: "",
+            connectionError: customReceiverUrl
+              ? "Bridge receiver is not running at the configured receiver URL."
+              : "Bridge receiver is not running. Figlets already tried to restart it automatically.",
+          });
+        }
       } else {
         resolve({
           statusCode: 0,

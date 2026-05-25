@@ -749,6 +749,104 @@ function _focusContrastForAliases(focusName, aliases, bgVar, byName, colorVars, 
   return contrast;
 }
 
+function _planMissingForegroundFromBackground(bgVar, fgName, colorVars, varsById, collections, algorithm) {
+  if (!bgVar || !fgName) return null;
+  const coll = _collectionFor(bgVar, collections);
+  if (!coll || !Array.isArray(coll.modes) || !coll.modes.length) return null;
+
+  const aliases = {};
+  const contrast = {};
+  const threshold = algorithm === "apca" ? _APCA_THRESHOLD : _WCAG_THRESHOLD;
+
+  for (const mode of coll.modes) {
+    const bgTerm = _resolveTerminalByModeName(bgVar, mode.name, varsById, collections);
+    const bgInfo = _primitiveInfo(bgTerm && bgTerm.name);
+    if (!bgInfo || !bgTerm || !bgTerm.rgb) return null;
+
+    const targetStep = _luminance(bgTerm.rgb) >= 0.5 ? 900 : 50;
+    let candidate = null;
+    if (algorithm === "apca") {
+      const candidates = [];
+      for (const variable of colorVars) {
+        const info = _primitiveInfo(variable && variable.name);
+        if (!info || info.ramp !== bgInfo.ramp) continue;
+        const terminal = _resolveTerminalByModeName(variable, mode.name, varsById, collections);
+        if (!terminal || !terminal.rgb) continue;
+        const lc = Math.abs(_apcaLc(terminal.rgb, bgTerm.rgb));
+        if (lc < _APCA_THRESHOLD) continue;
+        candidates.push({
+          name: info.name,
+          rgb: terminal.rgb,
+          score: lc,
+          step: info.step,
+          distance: Math.abs(info.step - targetStep),
+        });
+      }
+      candidates.sort((a, b) =>
+        (a.distance - b.distance)
+        || (b.score - a.score)
+        || (a.step - b.step)
+        || a.name.localeCompare(b.name)
+      );
+      candidate = candidates[0] || null;
+      if (candidate) {
+        const modeName = mode.name || mode.modeId;
+        aliases[modeName] = candidate.name;
+        contrast[modeName] = {
+          background: bgVar.name,
+          backgroundAlias: bgTerm.name,
+          backgroundHex: _hex(bgTerm.rgb),
+          foreground: fgName,
+          alias: candidate.name,
+          aliasHex: _hex(candidate.rgb),
+          apcaLc: Math.round(candidate.score * 10) / 10,
+          threshold: _APCA_THRESHOLD,
+          algorithm: "apca",
+          pass: true,
+        };
+      }
+    } else {
+      candidate = _nearestAccessiblePrimitiveOnRamp(
+        colorVars,
+        bgInfo.ramp,
+        targetStep,
+        bgTerm.rgb,
+        varsById,
+        collections,
+        mode.name,
+        _WCAG_THRESHOLD
+      );
+      if (candidate) {
+        const modeName = mode.name || mode.modeId;
+        aliases[modeName] = candidate.name;
+        contrast[modeName] = {
+          background: bgVar.name,
+          backgroundAlias: bgTerm.name,
+          backgroundHex: _hex(bgTerm.rgb),
+          foreground: fgName,
+          alias: candidate.name,
+          aliasHex: _hex(candidate.rgb),
+          wcagRatio: Math.round(candidate.ratio * 10) / 10,
+          threshold: _WCAG_THRESHOLD,
+          algorithm: "wcag",
+          pass: true,
+        };
+      }
+    }
+    if (!candidate) return null;
+  }
+
+  if (!Object.keys(aliases).length) return null;
+  return {
+    name: fgName,
+    source: "background-ramp",
+    aliases,
+    contrast,
+    basis: "background-ramp-contrast-search",
+    reason: "Foreground aliases were derived from the background's ramp and checked for text contrast accessibility.",
+  };
+}
+
 function _planFoundationRoleRepair(finding, byName, colorVars, varsById, collections, semanticContext, preferredFamilies) {
   if (!finding || finding.role !== "focus-border") return null;
   const name = _foundationNameForRole(finding, preferredFamilies);
@@ -874,7 +972,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const source = sourceCandidates.find(candidate => byName.has(candidate)) || null;
     const sourceVariable = source ? byName.get(source) : null;
 
-    semanticGaps.push({
+    const gap = {
       kind: "missing-foreground-companion",
       bg: variable.name,
       recommended,
@@ -882,7 +980,29 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       sourceAliases: sourceVariable ? _aliasTargetNames(sourceVariable, varsById, collections) : {},
       reason: "Background semantic token has no matching foreground companion.",
       status: source ? "proposed" : "unresolved",
-    });
+    };
+
+    if (!source) {
+      const derivedPlan = _planMissingForegroundFromBackground(
+        variable,
+        recommended,
+        colorVars,
+        varsById,
+        collections,
+        algorithm
+      );
+      if (derivedPlan && derivedPlan.aliases) {
+        gap.source = "background-ramp";
+        gap.sourceAliases = derivedPlan.aliases;
+        gap.plannedAliases = derivedPlan.aliases;
+        gap.plannedContrast = derivedPlan.contrast;
+        gap.plannedBasis = derivedPlan.basis;
+        gap.plannedReason = derivedPlan.reason;
+        gap.status = "proposed";
+      }
+    }
+
+    semanticGaps.push(gap);
   }
   semanticGaps.sort((left, right) => left.bg.localeCompare(right.bg));
 
@@ -1411,9 +1531,11 @@ function handleInspectDsSetupGaps(input = {}) {
   // approved a missing-fg repair. Forwarded verbatim by apply_ds_setup_repairs
   // when present, so what the designer sees here matches what gets written.
   // Falls back silently when the snapshot or config don't support the picker.
+  // Skips gaps that already have plannedAliases from background-ramp derivation.
   const algoOpt = { algorithm };
   for (const gap of result.semanticGaps) {
     if (gap.status !== "proposed" || !gap.source) continue;
+    if (gap.plannedAliases) continue;
     const repair = { bg: gap.bg, name: gap.recommended, source: gap.source };
     const planned = computePlannedAliases(repair, dataSource.figmaData, existingDs, algoOpt);
     if (!planned) continue;

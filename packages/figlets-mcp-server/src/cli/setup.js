@@ -182,6 +182,13 @@ function getKnownTargets(options) {
       description: "Adds Figlets to Gemini CLI settings.",
     },
     {
+      id: "antigravity",
+      label: "Google Antigravity",
+      type: "json-mcpServers",
+      path: _join(home, ".gemini", "antigravity", "mcp_config.json"),
+      description: "Adds Figlets to Google Antigravity's global MCP config.",
+    },
+    {
       id: "codex",
       label: "Codex CLI",
       type: "toml-codex",

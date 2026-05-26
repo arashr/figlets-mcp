@@ -32,7 +32,7 @@ Bulk repair/update posture: bulk design-system updates are in Figlets scope when
 
 If `figlets_start` is not available, stop the designer workflow and say:
 
-> "Figlets is not connected in this agent session yet. To use the Figlets designer flow, connect the Figlets MCP server, restart the agent, then ask me again. I should not approximate this flow with raw Figma tools."
+> "Figlets is not connected in this agent session yet, so I can't run the Figlets designer flow here. I can set it up for this host if you approve, or you can run the setup command yourself. For Google Antigravity, the command is `figlets-mcp setup --hosts=antigravity --yes`; for Gemini CLI, use `figlets-mcp setup --hosts=gemini --yes`. This updates the host's MCP/server config, so restart the agent session afterwards and check that `figlets_start` is available. If your host is not listed, add a server named `figlets` with command `figlets-mcp`. I should not approximate this flow with raw Figma tools."
 
 Do not offer to proceed with raw Figma MCP tools, repo inspection, or project-memory summaries as a substitute for Figlets.
 

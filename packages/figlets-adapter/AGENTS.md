@@ -7,7 +7,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 
 ## Prerequisites
 
-1. figlets-mcp server running and configured in your MCP config (see `docs/mcp-config-examples.md`)
+1. figlets-mcp server running and configured in your MCP config (see `docs/mcp-config-examples.md`). Prefer a setup command when available, such as `figlets-mcp setup --hosts=antigravity --yes` for Google Antigravity or `figlets-mcp setup --hosts=gemini --yes` for Gemini CLI. If the agent can run shell commands, offer to run setup after user approval; otherwise show the command so the user can run it. If the host is not listed, add a server named `figlets` with command `figlets-mcp`, then restart the agent session and verify `figlets_start` is available.
 2. For live Figma data: figma-bridge-plugin open in Figma Desktop (default port 17337)
 
 ---

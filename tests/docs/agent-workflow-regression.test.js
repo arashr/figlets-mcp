@@ -230,6 +230,39 @@ try {
     assert.ok(payloadSource.message.includes("structured Figlets repairPlan payloads"));
   }
 
+  // --- Unsafe pattern 3b: reconstructing setup repair aliases after approval ---
+  {
+    assertDocsInclude(
+      DESIGNER_DOC_PATHS,
+      [
+        "Never replace `aliases` with counts",
+        "schema validation rejects",
+        "fresh structured `repairPlan.applyInput`",
+      ],
+      "setup repair alias handoff docs"
+    );
+
+    const start = getStartGuide();
+    assert.ok(
+      start.hardRules.bulkRepairRouting.some(item => item.includes("pass that exact object")),
+      "Agent Interface should tell agents to pass the exact setup repair payload"
+    );
+    assert.ok(
+      start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")),
+      "Agent Interface should forbid alias counts/summaries"
+    );
+    assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.preserveAliases, true);
+
+    const guide = getWorkflowGuide("health-check");
+    const applyStep = guide.steps.find(step => step.tool === "apply_ds_setup_repairs");
+    assert.ok(applyStep.designerMessage.includes("exact approved repairPlan.applyInput"));
+    assert.ok(applyStep.designerMessage.includes("preserving each aliases object unchanged"));
+
+    const handled = handleFigletsWorkflowGuide({ workflow_id: "health-check" });
+    assert.ok(handled.bulkRepairRouting.some(item => item.includes("retrying invented arguments")));
+    assert.strictEqual(handled.hardRules.setupRepairPayloadHandoff.target, "repairPlan.tool / apply_ds_setup_repairs");
+  }
+
   // --- Unsafe pattern 4: treating stale MCP host output as repo regression ---
   {
     assert.ok(

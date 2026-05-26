@@ -41,8 +41,8 @@ const DESIGNER_FLOW_HARD_RULES = {
     "raw Figma APIs or generic Figma tools for Figlets review",
   ],
   supportedBulkUpdateSurfaces: [
-    "inspect_ds_setup_gaps.repairPlan.applyInput → apply_ds_setup_repairs for approved setup repairs, alias updates, and missing role creations",
-    "inspect_ds_setup_gaps.repairPlan.optionalApplyInput → apply_ds_setup_repairs for separately approved optional convention-level role creation",
+    "inspect_ds_setup_gaps.repairPlan.applyInput → apply_ds_setup_repairs for approved setup repairs, alias updates, and missing role creations; preserve each aliases object exactly",
+    "inspect_ds_setup_gaps.repairPlan.optionalApplyInput → apply_ds_setup_repairs for separately approved optional convention-level role creation; preserve each aliases object exactly",
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
     "inspect_ds_token_gaps.repairPlan.previewInput / repairPlan.applyInput → update_ds_tokens for config-backed non-color token dry-run preview and narrow approved apply",
@@ -51,13 +51,24 @@ const DESIGNER_FLOW_HARD_RULES = {
     "qa_binding_audit repairPlan with applyInput { fix: true } for fixableNow binding fixes only after reading byFixability",
   ],
   bulkRepairRouting: [
-    "Inspect first. If repairPlan.applyInput is non-empty, ask approval and pass that object to repairPlan.tool without inventing payloads.",
+    "Inspect first. If inspect_ds_setup_gaps.repairPlan.applyInput is non-empty, ask approval and pass that exact object to repairPlan.tool / apply_ds_setup_repairs without inventing payloads.",
+    "Never replace setup repair aliases with counts, summaries, booleans, or prose-derived values. aliases must remain the per-mode object from repairPlan.applyInput.",
+    "If only a subset of setup repairs is approved, filter entries from repairPlan.applyInput while preserving each approved entry's aliases object unchanged.",
+    "If schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh structured repairPlan.applyInput instead of retrying invented arguments.",
     "If repairPlan.optionalApplyInput is non-empty, present it as optional bulk creation that needs separate approval.",
     "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps, then approved update_ds_primitives when primitiveRepairPlan applies, update_ds_tokens when repairPlan.applyInput applies, and apply_ds_foundation_repairs when foundationRepairPlan applies.",
     "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability; call qa_binding_audit({ fix: true }) only for fixableNow after approval.",
     "Do not create tokens from qa_binding_audit findings unless a Figlets token-completion planner provides the payload.",
     "If no Figlets repair payload exists, report a Figlets product/tool gap instead of saying the gaps cannot be fixed.",
   ],
+  setupRepairPayloadHandoff: {
+    source: "inspect_ds_setup_gaps.repairPlan.applyInput",
+    target: "repairPlan.tool / apply_ds_setup_repairs",
+    preserveAliases: true,
+    subsetRule: "Filter approved entries only; do not rewrite aliases.",
+    invalidPayloadRecovery: "Stop, rerun inspect_ds_setup_gaps, then copy or filter the fresh repairPlan.applyInput.",
+    forbiddenAliasSubstitutes: ["counts", "summaries", "booleans", "prose-derived values"],
+  },
   designerPresentationRule:
     "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
   missingCapabilityResponse: "If the Figlets workflow output does not expose the needed planner or apply payload, say this is a Figlets product/tool gap or proposed Figlets bulk-update scope instead of inventing a script or saying the gaps cannot be fixed.",
@@ -179,14 +190,14 @@ const WORKFLOWS = [
       {
         id: "approve-repairs",
         kind: "confirmation",
-        designerMessage: "If the QA found setup gaps, I'll summarize them in designer-friendly language, separate required fixes from optional convention choices, and ask which exact repair payload you want applied.",
+        designerMessage: "If the QA found setup gaps, I'll summarize them in designer-friendly language, separate required fixes from optional convention choices, and ask which exact repairPlan.applyInput entries you want applied.",
       },
       {
         id: "apply-approved-repairs",
         kind: "write",
         tool: "apply_ds_setup_repairs",
         requiresApproval: true,
-        designerMessage: "I'll apply only the exact approved repairs from the QA output, including bulk-safe repair payloads when Figlets provides them.",
+        designerMessage: "I'll pass the exact approved repairPlan.applyInput object to apply_ds_setup_repairs, filtering entries only if you approved a subset and preserving each aliases object unchanged.",
       },
       {
         id: "verify-repairs",
@@ -294,14 +305,14 @@ const WORKFLOWS = [
       {
         id: "approve-repairs",
         kind: "confirmation",
-        designerMessage: "Which of these fixes do you want me to apply?",
+        designerMessage: "Which repairPlan.applyInput entries do you want me to apply?",
       },
       {
         id: "apply-repairs",
         kind: "write",
         tool: "apply_ds_setup_repairs",
         requiresApproval: true,
-        designerMessage: "I'll apply only the repairs you approved.",
+        designerMessage: "I'll apply only the approved structured repairPlan.applyInput entries and preserve aliases unchanged.",
       },
       {
         id: "verify",
@@ -311,7 +322,10 @@ const WORKFLOWS = [
       },
     ],
     next: ["health-check", "build-showcase", "export-design-md"],
-    errors: ["If a suggested repair is ambiguous, ask the designer instead of applying it from confidence alone."],
+    errors: [
+      "If a suggested repair is ambiguous, ask the designer instead of applying it from confidence alone.",
+      "If apply_ds_setup_repairs schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh repairPlan.applyInput instead of retrying invented arguments.",
+    ],
   },
   {
     id: "new-ds-setup",

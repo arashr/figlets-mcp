@@ -50,6 +50,9 @@ assert.ok(/Use `figlets_start\.designerResponse` only for generic help\/start re
 assert.ok(/design-system review[\s\S]*Figlets MCP tools\/scripts/i.test(body), "start.md must require Figlets tools/scripts for designer review");
 assert.ok(/Do not create custom scripts/i.test(body), "start.md must forbid ad hoc scripts for designer review");
 assert.ok(/bulk design-system updates as Figlets scope/i.test(body), "start.md must keep bulk DS updates in Figlets scope");
+assert.ok(/exact `inspect_ds_setup_gaps\.repairPlan\.applyInput` object/i.test(body), "start.md must require exact setup repair applyInput handoff");
+assert.ok(/Never replace `aliases` with counts/i.test(body), "start.md must forbid replacing aliases with summaries");
+assert.ok(/schema validation rejects[\s\S]*rerun `inspect_ds_setup_gaps`/i.test(body), "start.md must recover from malformed setup repair payloads by reinspecting");
 assert.ok(/do not end at "the gaps cannot be fixed"/i.test(body), "start.md must avoid dead-end bulk repair wording");
 assert.ok(/explicitly ask.*go out of bounds/i.test(body), "start.md must allow out-of-bounds work only when explicitly requested");
 assert.ok(/not approximate.*raw Figma/i.test(body), "start.md must forbid raw-Figma-tool fallback when Figlets is unavailable");
@@ -77,6 +80,9 @@ assert.ok(/workflow guide is mandatory/i.test(skillBody), "skill body must make 
 assert.ok(/do not write custom scripts/i.test(skillBody), "skill body must forbid ad hoc scripts for designer review");
 assert.ok(/product\/tool gap/i.test(skillBody), "skill body must report missing Figlets data as a product/tool gap");
 assert.ok(/bulk design-system updates as Figlets scope/i.test(skillBody), "skill body must keep bulk DS updates in Figlets scope");
+assert.ok(/exact `repairPlan\.applyInput` object/i.test(skillBody), "skill body must require exact setup repair applyInput handoff");
+assert.ok(/Never replace `aliases` with counts/i.test(skillBody), "skill body must forbid replacing aliases with summaries");
+assert.ok(/schema validation rejects[\s\S]*rerun `inspect_ds_setup_gaps`/i.test(skillBody), "skill body must recover from malformed setup repair payloads by reinspecting");
 assert.ok(skillBody.includes("repairPlan.optionalApplyInput"), "skill body must document optional bulk apply payloads");
 assert.ok(skillBody.includes("inspect_ds_token_gaps"), "skill body must mention token-gap planner");
 assert.ok(skillBody.includes("fixableNow"), "skill body must document binding-audit fixableNow boundary");

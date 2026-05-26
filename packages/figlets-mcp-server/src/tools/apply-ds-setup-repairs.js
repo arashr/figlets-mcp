@@ -11,7 +11,7 @@ const {
 const applyDsSetupRepairsTool = {
   name: "apply_ds_setup_repairs",
   description:
-    "Apply designer-approved setup changes to Figma. Repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode; `roleRepairs` creates approved missing border/icon/focus-border semantic role variables. Updates the file-scoped config only after Figma succeeds.",
+    "Apply designer-approved setup changes to Figma. Repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode; `roleRepairs` creates approved missing border/icon/focus-border semantic role variables. After inspect_ds_setup_gaps approval, pass repairPlan.applyInput exactly; do not replace aliases with counts or summaries. Updates the file-scoped config only after Figma succeeds.",
   inputSchema: {
     type: "object",
     properties: {
@@ -26,7 +26,7 @@ const applyDsSetupRepairsTool = {
             source: { type: "string" },
             aliases: {
               type: "object",
-              description: "Per-mode primitive variable names approved by the designer (from inspect_ds_setup_gaps.plannedAliases). Keys are mode names (e.g. \"Light\", \"Dark\"); values are primitive ref names like \"color/green/700\". When provided, the bridge uses these as-is. When omitted, the server falls back to recomputing them.",
+              description: "Per-mode primitive variable names approved by the designer (from inspect_ds_setup_gaps.repairPlan.applyInput). Keys are mode names (e.g. \"Light\", \"Dark\"); values are primitive ref names like \"color/green/700\". Preserve this object exactly; never replace it with a count, summary, boolean, or prose-derived value. When provided, the bridge uses these as-is. When omitted, the server falls back to recomputing them.",
               properties: {
                 Light: { type: "string" },
                 Dark: { type: "string" }
@@ -63,7 +63,7 @@ const applyDsSetupRepairsTool = {
             role: { type: "string", description: "Role type, usually border, icon, or focus-border." },
             aliases: {
               type: "object",
-              description: "Per-mode primitive variable names approved by the designer.",
+              description: "Per-mode primitive variable names approved by the designer from inspect_ds_setup_gaps.repairPlan.applyInput. Preserve this object exactly; never replace it with a count, summary, boolean, or prose-derived value.",
               properties: {
                 Light: { type: "string" },
                 Dark: { type: "string" }
@@ -96,6 +96,56 @@ function _cleanAliases(aliases) {
     if (typeof v === "string" && v) out[keys[i]] = v;
   }
   return out;
+}
+
+function _isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function _validateAliasMap(aliases, pathLabel, { required = false } = {}) {
+  if (aliases === undefined || aliases === null) {
+    if (!required) return null;
+    return `${pathLabel} must be the per-mode aliases object from inspect_ds_setup_gaps.repairPlan.applyInput.`;
+  }
+  if (!_isPlainObject(aliases)) {
+    return `${pathLabel} must be the per-mode aliases object from inspect_ds_setup_gaps.repairPlan.applyInput, not ${typeof aliases}.`;
+  }
+  const keys = Object.keys(aliases);
+  if (!keys.length) {
+    return `${pathLabel} must include at least one mode alias copied from inspect_ds_setup_gaps.repairPlan.applyInput.`;
+  }
+  for (const key of keys) {
+    if (typeof aliases[key] !== "string" || !aliases[key]) {
+      return `${pathLabel}.${key} must be a primitive variable name string copied from inspect_ds_setup_gaps.repairPlan.applyInput.`;
+    }
+  }
+  return null;
+}
+
+function _validateApprovedAliases(args = {}) {
+  const repairs = Array.isArray(args.repairs) ? args.repairs : [];
+  for (let i = 0; i < repairs.length; i++) {
+    const repair = repairs[i] || {};
+    if (Object.prototype.hasOwnProperty.call(repair, "aliases")) {
+      const error = _validateAliasMap(repair.aliases, `repairs[${i}].aliases`);
+      if (error) return error;
+    }
+  }
+  const roleRepairs = Array.isArray(args.roleRepairs) ? args.roleRepairs : [];
+  for (let i = 0; i < roleRepairs.length; i++) {
+    const error = _validateAliasMap((roleRepairs[i] || {}).aliases, `roleRepairs[${i}].aliases`, { required: true });
+    if (error) return error;
+  }
+  return null;
+}
+
+function _invalidAliasRecoveryMessage(error) {
+  return [
+    `Invalid setup repair aliases: ${error}`,
+    "Stop and rerun inspect_ds_setup_gaps, then pass the exact repairPlan.applyInput object to apply_ds_setup_repairs.",
+    "If the designer approved only a subset, filter entries from repairPlan.applyInput while preserving each aliases object unchanged.",
+    "Do not replace aliases with counts, summaries, booleans, or prose-derived values.",
+  ].join(" ");
 }
 
 function _normalizeRepairs(repairs) {
@@ -224,6 +274,13 @@ function _updateConfigRoles(configPath, roleRepairs) {
 }
 
 function handleApplyDsSetupRepairs(args = {}) {
+  const aliasValidationError = _validateApprovedAliases(args);
+  if (aliasValidationError) {
+    return Promise.resolve({
+      error: _invalidAliasRecoveryMessage(aliasValidationError),
+    });
+  }
+
   const repairs = _normalizeRepairs(args.repairs);
   const aliasUpdates = _normalizeAliasUpdates(args.aliasUpdates);
   const roleRepairs = _normalizeRoleRepairs(args.roleRepairs);

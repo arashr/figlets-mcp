@@ -75,6 +75,12 @@ try {
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("qa_binding_audit")));
     assert.ok(Array.isArray(start.hardRules.bulkRepairRouting) && start.hardRules.bulkRepairRouting.length >= 4);
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("repairPlan.applyInput")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("pass that exact object")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("schema validation rejects")));
+    assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.source, "inspect_ds_setup_gaps.repairPlan.applyInput");
+    assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.preserveAliases, true);
+    assert.ok(start.hardRules.setupRepairPayloadHandoff.invalidPayloadRecovery.includes("rerun inspect_ds_setup_gaps"));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("fixableNow")));
     assert.ok(start.responseContract.bulkUpdateRule.includes("inspect_ds_token_gaps"));
     assert.ok(start.hardRules.appliesTo.includes("design-system review"));
@@ -257,7 +263,8 @@ try {
     assert.ok(guide.summary.includes("semantic setup"));
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("designer-friendly language")));
-    assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("bulk-safe")));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("repairPlan.applyInput")));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.designerMessage.includes("preserving each aliases object unchanged")));
     assert.ok(!guide.next.includes("setup-gap-qa"));
   }
 

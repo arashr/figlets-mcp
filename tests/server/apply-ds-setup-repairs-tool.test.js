@@ -282,6 +282,32 @@ module.exports = (async () => {
     fs.rmSync(missingHookTmp, { recursive: true, force: true });
   }
 
+  const malformedRepairAliases = await handleApplyDsSetupRepairs({
+    update_config: false,
+    repairs: [{
+      bg: "color/surface/default",
+      recommended: "color/on-surface/default",
+      source: "background-ramp",
+      aliases: 2,
+    }],
+  });
+  assert.ok(malformedRepairAliases.error, "malformed repair aliases should fail closed before bridge mutation");
+  assert.ok(malformedRepairAliases.error.includes("repairPlan.applyInput"));
+  assert.ok(malformedRepairAliases.error.includes("rerun inspect_ds_setup_gaps"));
+  assert.ok(malformedRepairAliases.error.includes("Do not replace aliases with counts"));
+
+  const malformedRoleAliases = await handleApplyDsSetupRepairs({
+    update_config: false,
+    roleRepairs: [{
+      name: "color/icon/success",
+      role: "icon",
+      aliases: 2,
+    }],
+  });
+  assert.ok(malformedRoleAliases.error, "malformed role aliases should fail closed before bridge mutation");
+  assert.ok(malformedRoleAliases.error.includes("roleRepairs[0].aliases"));
+  assert.ok(malformedRoleAliases.error.includes("preserving each aliases object unchanged"));
+
   const emptyResult = await handleApplyDsSetupRepairs({});
   assert.ok(emptyResult.error && /at least one/i.test(emptyResult.error));
 })();

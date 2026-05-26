@@ -180,14 +180,31 @@ try {
 
     for (const workflow of WORKFLOWS) {
       for (const step of workflow.steps || []) {
-        if (step.kind === "write" || MUTATING_TOOLS.has(step.tool)) {
+        if (step.kind === "write") {
           assert.strictEqual(
             step.requiresApproval,
             true,
             `${workflow.id}.${step.id} write step must require designer approval`
           );
         }
+        if (step.kind === "read" && step.tool && MUTATING_TOOLS.has(step.tool)) {
+          assert.strictEqual(
+            step.options && step.options.dry_run,
+            true,
+            `${workflow.id}.${step.id} should dry-run ${step.tool} before approval`
+          );
+        }
       }
+    }
+
+    {
+      const route = handleFigletsRouteIntent({ intent: "complete missing config-backed tokens" });
+      assert.strictEqual(route.workflow.id, "token-gap-completion");
+      assert.ok(route.designerResponse.includes("explicitly approve"));
+      assert.ok(route.designerResponse.includes("not approval to write"));
+      const tokenGuide = handleFigletsWorkflowGuide({ workflow_id: "token-gap-completion" });
+      assert.ok(tokenGuide.approvalContract);
+      assert.ok(tokenGuide.message.includes("Routing goal phrases are not approval"));
     }
 
     const unapprovedWrite = handleFigletsHealthCheck({

@@ -703,8 +703,10 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     plannedCategoryCount: categoriesWithGaps.length,
   };
 
+  const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount;
   return {
     message: _composeMessage(summary),
+    approvalBoundary: gapTotal ? TOKEN_GAP_APPROVAL_BOUNDARY : null,
     summary,
     repairPlan,
     topFindings: {
@@ -844,7 +846,7 @@ function _buildRepairPlan(context) {
     missingCapabilityNotes: context.missingCapabilityNotes || [],
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
-      ? "Show repairPlan.designerPresentation in plain language. If repairPlan.foundationRepairPlan.applyInput.collections is non-empty, ask for approval and run apply_ds_foundation_repairs before token/primitive apply. If repairPlan.primitiveRepairPlan is present, run update_ds_primitives with its previewInput, show the dry-run report, ask for approval, then run primitiveRepairPlan.applyInput before or alongside update_ds_tokens apply when both are ready. Run update_ds_tokens with repairPlan.previewInput for semantic token slices. repairPlan.applyInput may include broad typography or elevation when both variable and style work exist; update_ds_tokens runs typography-variables then typography-styles (and elevation analog) in one approved call. Narrow apply categories and orchestration categories still require explicit designer approval after preview. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
+      ? "STOP before any Figma write. This inspect pass is read-only. Run dry-run previews (repairPlan.previewInput and primitiveRepairPlan.previewInput when present), summarize repairPlan.designerPresentation in plain language, and wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Only after approval: apply_ds_foundation_repairs with foundationRepairPlan.applyInput when collections are missing, then update_ds_primitives with primitiveRepairPlan.applyInput when present, then update_ds_tokens with repairPlan.applyInput. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
       : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
 }
@@ -858,6 +860,13 @@ function _buildDesignerPresentation(context, total) {
   const sections = [];
 
   if (total) {
+    sections.unshift({
+      title: "Approval required before writes",
+      message: "Dry-run previews only until you explicitly approve. Figlets will not apply foundation, primitive, or semantic token changes until you say yes, proceed, or apply.",
+    });
+    lines.unshift(
+      "Read-only plan only. I will dry-run the updates first and wait for your explicit approval before changing Figma."
+    );
     lines.push(`I found ${total} config-backed non-color token gap${total === 1 ? "" : "s"} Figlets can plan for a future approved update.`);
     if (missingVariables.length) {
       sections.push({
@@ -912,6 +921,17 @@ function _buildDesignerPresentation(context, total) {
   };
 }
 
+const TOKEN_GAP_APPROVAL_BOUNDARY = {
+  readOnlyUntilApproval: true,
+  requiredBeforeWrite: "Explicit designer approval after dry-run previews (for example: yes, proceed, or apply).",
+  goalPhraseIsNotApproval: true,
+  stopBeforeTools: [
+    "apply_ds_foundation_repairs",
+    "update_ds_primitives",
+    "update_ds_tokens",
+  ],
+};
+
 function _composeMessage(summary) {
   const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount;
   if (!total && !summary.unsupportedCategoryCount) {
@@ -922,7 +942,15 @@ function _composeMessage(summary) {
   if (summary.missingStyleCount) parts.push(`${summary.missingStyleCount} missing style${summary.missingStyleCount === 1 ? "" : "s"}`);
   if (summary.typeMismatchCount) parts.push(`${summary.typeMismatchCount} type mismatch${summary.typeMismatchCount === 1 ? "" : "es"}`);
   if (summary.unsupportedCategoryCount) parts.push(`${summary.unsupportedCategoryCount} unsupported categor${summary.unsupportedCategoryCount === 1 ? "y" : "ies"}`);
-  return `Figlets found ${parts.join(", ")} in the config-backed token planner. Read-only inspection only.`;
+  const gapSummary = `Figlets found ${parts.join(", ")} in the config-backed token planner.`;
+  if (!total) {
+    return `${gapSummary} Read-only inspection only.`;
+  }
+  return [
+    "Read-only inspection. Do not call apply_ds_foundation_repairs, update_ds_primitives, or update_ds_tokens with dry_run:false until the designer explicitly approves after dry-run previews.",
+    "A routing goal phrase (for example: complete missing tokens) is not approval to write.",
+    gapSummary,
+  ].join(" ");
 }
 
 function handleInspectDsTokenGaps(input = {}) {

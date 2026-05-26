@@ -671,6 +671,10 @@ function handleFigletsWorkflowGuide(args) {
     response.intakePresentationRule = workflow.intakeContract.firstResponseRule;
     response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Ask intake questions first and do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. Run setup intake before prepare_ds_config. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
   }
+  if (workflow.id === "token-gap-completion" && workflow.approvalContract) {
+    response.approvalContract = workflow.approvalContract;
+    response.message = `Workflow guide: ${workflow.title}. Follow the steps in order through dry-run previews first. Do not call apply_ds_foundation_repairs, update_ds_primitives, or update_ds_tokens with dry_run:false until the designer explicitly approves after seeing the plan. Routing goal phrases are not approval to write. Use repairPlan.foundationRepairPlan.applyInput, repairPlan.primitiveRepairPlan.applyInput, and repairPlan.applyInput exactly after approval. Summarize plainly and ask for approval before any write step.`;
+  }
   return response;
 }
 

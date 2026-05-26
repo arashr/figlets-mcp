@@ -236,8 +236,24 @@ try {
   {
     const guide = getWorkflowGuide("token-gap-completion");
     assert.ok(guide.steps.some(step => step.tool === "inspect_ds_token_gaps"));
+    assert.ok(guide.steps.some(step => step.tool === "update_ds_tokens" && step.options && step.options.dry_run === true));
+    assert.ok(guide.steps.some(step => step.tool === "update_ds_primitives" && step.options && step.options.dry_run === true));
     assert.ok(guide.steps.some(step => step.tool === "update_ds_tokens" && step.requiresApproval === true));
-    assert.ok(guide.steps.some(step => step.tool === "apply_ds_foundation_repairs"));
+    assert.ok(guide.steps.some(step => step.tool === "update_ds_primitives" && step.requiresApproval === true));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_foundation_repairs" && step.requiresApproval === true));
+    const approveStep = guide.steps.find(step => step.id === "approve-token-plan");
+    assert.ok(approveStep.designerMessage.includes("not permission to write"));
+    assert.ok(guide.approvalContract && guide.approvalContract.goalPhraseIsNotApproval === true);
+
+    const route = routeIntent("complete missing config-backed tokens");
+    assert.strictEqual(route.workflow.id, "token-gap-completion");
+    assert.ok(route.designerResponse.includes("will not change Figma until you explicitly approve"));
+    assert.ok(route.designerResponse.includes("not approval to write"));
+
+    const handled = handleFigletsWorkflowGuide({ workflow_id: "token-gap-completion" });
+    assert.ok(handled.approvalContract);
+    assert.ok(handled.message.includes("dry_run:false"));
+    assert.ok(handled.message.includes("Routing goal phrases are not approval"));
   }
 
   {
@@ -374,6 +390,29 @@ try {
 
   {
     const health = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "token-gap-completion" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: ["sync_figma_data", "inspect_ds_token_gaps", "update_ds_tokens"],
+        pendingWriteTool: "update_ds_tokens",
+        approvalStatus: "needed",
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const approval = health.checks.find(check => check.id === "approval_boundary");
+    assert.strictEqual(approval.status, "fail");
+    assert.ok(approval.nextAction.includes("approve"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
       context: { mode: "designer" },
       workflowState: {
         figletsStartCalled: true,
@@ -412,11 +451,18 @@ try {
 
   {
     for (const { workflow, step } of allSteps()) {
-      if (step.kind === "write" || MUTATING_TOOLS.has(step.tool)) {
+      if (step.kind === "write") {
         assert.strictEqual(
           step.requiresApproval,
           true,
           `${workflow.id}.${step.id} mutates Figma and must require approval`
+        );
+      }
+      if (step.kind === "read" && step.tool && MUTATING_TOOLS.has(step.tool)) {
+        assert.strictEqual(
+          step.options && step.options.dry_run,
+          true,
+          `${workflow.id}.${step.id} should dry-run ${step.tool} during read-only workflow steps`
         );
       }
     }

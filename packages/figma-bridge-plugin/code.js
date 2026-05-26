@@ -382,6 +382,23 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  if (msg.type === 'prepare-broken-ds-fixture') {
+    try {
+      _appendSessionLog('Executing prepare_broken_ds_fixture.');
+      const result = await _prepareBrokenDsFixtureForDevPrep(msg.data || {});
+      figma.ui.postMessage({ type: 'figlets-prepare-broken-ds-fixture-done', fileKey: _getFigletsFileKey(), data: result });
+      if (result && result.error) {
+        _appendSessionLog('prepare_broken_ds_fixture failed: ' + result.error);
+      } else {
+        _appendSessionLog('Completed prepare_broken_ds_fixture.');
+        figma.notify('Broken DS fixture prepared. Developer test prep only.');
+      }
+    } catch (err) {
+      _appendSessionLog('prepare_broken_ds_fixture failed: ' + err.message);
+      figma.ui.postMessage({ type: 'figlets-prepare-broken-ds-fixture-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
   if (msg.type === 'update-primitives') {
     try {
       _appendSessionLog('Executing update_ds_primitives.');
@@ -1029,6 +1046,117 @@ async function _removeLocalTextStylesByName(names) {
     } catch (e) {}
   }
   result.missingStyleNames = Object.keys(nameSet);
+  return result;
+}
+
+async function _removeLocalVariablesByName(names) {
+  var requested = Array.isArray(names) ? names.filter(Boolean) : [];
+  var nameSet = {};
+  for (var ni = 0; ni < requested.length; ni++) nameSet[requested[ni]] = true;
+  var result = { removedVariables: 0, removedVariableNames: [], missingVariableNames: [] };
+  if (!requested.length) return result;
+
+  var vars = await figma.variables.getLocalVariablesAsync();
+  for (var vi = 0; vi < vars.length; vi++) {
+    var variable = vars[vi];
+    if (!variable || !variable.name || !nameSet[variable.name]) continue;
+    var variableName = variable.name;
+    try {
+      variable.remove();
+      result.removedVariables++;
+      result.removedVariableNames.push(variableName);
+      delete nameSet[variableName];
+    } catch (e) {}
+  }
+  result.missingVariableNames = Object.keys(nameSet);
+  return result;
+}
+
+async function _createBrokenFixtureBindingTargets() {
+  var page = figma.createPage();
+  page.name = 'BNN-37 Binding Audit Targets';
+  if (figma.setCurrentPageAsync) await figma.setCurrentPageAsync(page);
+  else figma.currentPage = page;
+
+  var frame = figma.createFrame();
+  frame.name = 'Raw card target - BNN-37';
+  frame.x = 80;
+  frame.y = 80;
+  frame.resize(360, 220);
+  frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+  frame.strokes = [{ type: 'SOLID', color: { r: 0.82, g: 0.84, b: 0.88 } }];
+  frame.strokeWeight = 1;
+  frame.cornerRadius = 12;
+  frame.paddingLeft = 24;
+  frame.paddingRight = 24;
+  frame.paddingTop = 20;
+  frame.paddingBottom = 20;
+  frame.layoutMode = 'VERTICAL';
+  frame.itemSpacing = 12;
+
+  var title = figma.createText();
+  title.name = 'Raw text target - BNN-37';
+  try { await figma.loadFontAsync({ family: 'Inter', style: 'Regular' }); title.fontName = { family: 'Inter', style: 'Regular' }; } catch (_) {}
+  title.characters = 'Unbound manual smoke target';
+  title.fontSize = 16;
+  title.lineHeight = { value: 24, unit: 'PIXELS' };
+  title.fills = [{ type: 'SOLID', color: { r: 0.11, g: 0.12, b: 0.14 } }];
+  frame.appendChild(title);
+
+  page.appendChild(frame);
+  page.selection = [frame, title];
+  return {
+    pageName: page.name,
+    selectedNodeNames: [frame.name, title.name],
+  };
+}
+
+async function _prepareBrokenDsFixtureForDevPrep(payload) {
+  payload = payload || {};
+  if (payload.confirmation !== 'RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE') {
+    return { error: 'Explicit confirmation is required before preparing a broken fixture.' };
+  }
+  if (!payload.ds) return { error: 'Prepared DS payload is required.' };
+
+  var result = {
+    fileKey: _getFigletsFileKey(),
+    seed: payload.seed || null,
+    reset: false,
+    setup: null,
+    removedVariables: [],
+    missingVariables: [],
+    removedTextStyles: [],
+    missingTextStyles: [],
+    trimmedModes: [],
+    bindingAuditTargets: null
+  };
+
+  if (payload.reset !== false) {
+    result.reset = await _resetFigletsFile({});
+  }
+
+  result.setup = await _applyDsSetup(payload.ds);
+
+  var gaps = payload.gaps || {};
+  var variableResult = await _removeLocalVariablesByName(gaps.removeVariables || []);
+  result.removedVariables = variableResult.removedVariableNames || [];
+  result.missingVariables = variableResult.missingVariableNames || [];
+
+  var textResult = await _removeLocalTextStylesByName(gaps.removeTextStyles || []);
+  result.removedTextStyles = textResult.removedStyleNames || [];
+  result.missingTextStyles = textResult.missingStyleNames || [];
+
+  var trims = Array.isArray(gaps.trimCollectionModes) ? gaps.trimCollectionModes : [];
+  for (var ti = 0; ti < trims.length; ti++) {
+    var trimResult = await _trimCollectionModesForDevPrep(trims[ti] || {});
+    result.trimmedModes.push(trimResult);
+  }
+
+  if (gaps.createBindingAuditTargets) {
+    result.bindingAuditTargets = await _createBrokenFixtureBindingTargets();
+  }
+
+  result.message = 'Broken DS fixture prepared for developer manual smoke.';
   return result;
 }
 

@@ -26,6 +26,7 @@ let pendingFoundationRepairsRequest = null;
 let pendingResetRequest = null;
 let pendingRemoveTextStylesRequest = null;
 let pendingTrimCollectionModesRequest = null;
+let pendingBrokenDsFixtureRequest = null;
 let pendingSyncPreviousFileKey = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
@@ -777,6 +778,76 @@ const server = http.createServer((req, res) => {
         pendingTrimCollectionModesRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingTrimCollectionModesRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingTrimCollectionModesRequest = null;
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/request-prepare-broken-ds-fixture') {
+    if (!_devBridgeCommandsEnabled()) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'prepare-broken-ds-fixture is a developer-only bridge command and is disabled for designer flows.',
+        hint: 'Set FIGLETS_DEV_BRIDGE=1 on the bridge receiver process for local validation scripts only.',
+      }));
+      return;
+    }
+    if (pendingPollResponse) {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+        if (payload.confirmation !== 'RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'Explicit confirmation is required before preparing a broken fixture.',
+            requiredConfirmation: 'RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE',
+          }));
+          return;
+        }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'prepare-broken-ds-fixture', data: payload }));
+        _clearPendingPoll();
+
+        pendingBrokenDsFixtureRequest = res;
+
+        const fixtureTimer = setTimeout(() => {
+          if (pendingBrokenDsFixtureRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Broken fixture prep timed out.' }));
+            pendingBrokenDsFixtureRequest = null;
+          }
+        }, 185000);
+        if (fixtureTimer.unref) fixtureTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-prepare-broken-ds-fixture') {
+    if (!_devBridgeCommandsEnabled()) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'prepare-broken-ds-fixture sync is disabled outside developer bridge mode.' }));
+      return;
+    }
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingBrokenDsFixtureRequest) {
+        let parsed;
+        try { parsed = JSON.parse(body); } catch { parsed = {}; }
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingBrokenDsFixtureRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingBrokenDsFixtureRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingBrokenDsFixtureRequest = null;
       }
     });
     return;

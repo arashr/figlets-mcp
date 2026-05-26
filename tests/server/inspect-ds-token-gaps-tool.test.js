@@ -93,9 +93,17 @@ module.exports = (() => {
   });
 
   assert.deepStrictEqual(
-    Object.keys(result).slice(0, 4),
-    ["message", "summary", "repairPlan", "topFindings"],
+    Object.keys(result).slice(0, 5),
+    ["message", "approvalBoundary", "summary", "repairPlan", "topFindings"],
     "agent-actionable output should be first"
+  );
+  assert.ok(result.approvalBoundary && result.approvalBoundary.readOnlyUntilApproval === true);
+  assert.ok(result.message.includes("Do not call apply_ds_foundation_repairs"));
+  assert.ok(result.message.includes("not approval to write"));
+  assert.ok(result.repairPlan.agentInstruction.includes("STOP before any Figma write"));
+  assert.ok(
+    result.repairPlan.designerPresentation.sections.some(section => section.title === "Approval required before writes"),
+    "designerPresentation should lead with approval boundary"
   );
   assert.strictEqual(result.summary.unsupportedCategoryCount, 1);
   assert.ok(
@@ -494,7 +502,10 @@ module.exports = (() => {
       categories: ["spacing-semantics"],
     });
     assert.ok(!handled.error, handled.error);
-    assert.deepStrictEqual(Object.keys(handled).slice(0, 4), ["message", "summary", "repairPlan", "topFindings"]);
+    assert.deepStrictEqual(
+      Object.keys(handled).slice(0, 5),
+      ["message", "approvalBoundary", "summary", "repairPlan", "topFindings"]
+    );
     assert.strictEqual(handled.config.path, configPath);
     assert.strictEqual(handled.snapshot.path, figmaDataPath);
     assert.deepStrictEqual(handled.repairPlan.previewInput.categories, ["spacing-semantics"]);

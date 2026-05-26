@@ -15,7 +15,25 @@ const MUTATING_TOOLS = new Set([
   "generate_component_doc",
   "qa_binding_audit:fix",
   "update_ds_primitives",
+  "update_ds_tokens",
 ]);
+
+const TOKEN_GAP_APPROVAL_CONTRACT = {
+  goalPhraseIsNotApproval: true,
+  requiredBeforeWrite:
+    "Explicit designer approval after dry-run previews (for example: yes, proceed, or apply).",
+  routingExamplesThatAreNotApproval: [
+    "complete missing config-backed tokens",
+    "complete tokens",
+    "missing tokens",
+    "finish the token system",
+  ],
+  stopBeforeTools: [
+    "apply_ds_foundation_repairs",
+    "update_ds_primitives",
+    "update_ds_tokens",
+  ],
+};
 
 const DESIGNER_FLOW_HARD_RULES = {
   reviewMustUseFigletsWorkflow: true,
@@ -56,7 +74,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "If only a subset of setup repairs is approved, filter entries from repairPlan.applyInput while preserving each approved entry's aliases object unchanged.",
     "If schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh structured repairPlan.applyInput instead of retrying invented arguments.",
     "If repairPlan.optionalApplyInput is non-empty, present it as optional bulk creation that needs separate approval.",
-    "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps, then approved update_ds_primitives when primitiveRepairPlan applies, update_ds_tokens when repairPlan.applyInput applies, and apply_ds_foundation_repairs when foundationRepairPlan applies.",
+    "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps, dry-run preview with repairPlan.previewInput and primitiveRepairPlan.previewInput, ask for explicit designer approval, then apply_ds_foundation_repairs when foundationRepairPlan applies, update_ds_primitives when primitiveRepairPlan applies, and update_ds_tokens when repairPlan.applyInput applies. A routing goal phrase is not approval to write.",
     "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability; call qa_binding_audit({ fix: true }) only for fixableNow after approval.",
     "Do not create tokens from qa_binding_audit findings unless a Figlets token-completion planner provides the payload.",
     "If no Figlets repair payload exists, report a Figlets product/tool gap instead of saying the gaps cannot be fixed.",
@@ -226,6 +244,7 @@ const WORKFLOWS = [
       "finish the token system",
     ],
     prerequisites: ["design-system.config.js exists for the active Figma file", "Figlets Bridge plugin is open"],
+    approvalContract: TOKEN_GAP_APPROVAL_CONTRACT,
     steps: [
       {
         id: "sync",
@@ -244,26 +263,40 @@ const WORKFLOWS = [
         kind: "read",
         tool: "update_ds_tokens",
         options: { dry_run: true },
-        designerMessage: "I'll dry-run the planned token updates so you can review what would change.",
+        designerMessage: "I'll dry-run the planned semantic token updates so you can review what would change.",
+      },
+      {
+        id: "preview-primitives",
+        kind: "read",
+        tool: "update_ds_primitives",
+        options: { dry_run: true },
+        designerMessage: "If primitiveRepairPlan is present, I'll dry-run primitive typography/shadow updates before asking for approval.",
       },
       {
         id: "approve-token-plan",
         kind: "confirmation",
-        designerMessage: "I'll summarize missing-capability notes, any foundation collection repairs, and the exact categories you want applied.",
+        designerMessage: "I'll summarize the dry-run plan (foundation modes, primitives, semantic tokens) and wait for your explicit approval. A goal phrase like 'complete missing tokens' is not permission to write.",
       },
       {
         id: "apply-foundation",
         kind: "write",
         tool: "apply_ds_foundation_repairs",
         requiresApproval: true,
-        designerMessage: "If foundation collections are missing, I'll apply only repairPlan.foundationRepairPlan.applyInput after you approve it.",
+        designerMessage: "After you approve, I'll apply only repairPlan.foundationRepairPlan.applyInput.",
+      },
+      {
+        id: "apply-primitives",
+        kind: "write",
+        tool: "update_ds_primitives",
+        requiresApproval: true,
+        designerMessage: "After you approve, I'll apply only repairPlan.primitiveRepairPlan.applyInput through update_ds_primitives.",
       },
       {
         id: "apply-tokens",
         kind: "write",
         tool: "update_ds_tokens",
         requiresApproval: true,
-        designerMessage: "I'll apply only the approved repairPlan.applyInput categories through update_ds_tokens.",
+        designerMessage: "After you approve, I'll apply only the approved repairPlan.applyInput categories through update_ds_tokens.",
       },
       {
         id: "verify",
@@ -566,6 +599,24 @@ function _workflowStartResponse(workflow) {
       "4. Check semantic setup gaps, icon contrast, and missing roles",
       "",
       "I'll summarize the findings in plain language before suggesting any repairs. If a write is needed, I'll ask before changing Figma.",
+      "",
+      "Please make sure the Figlets Bridge plugin is open in Figma, then I'll begin.",
+    ].join("\n");
+  }
+  if (workflow.id === "token-gap-completion") {
+    return [
+      "# Figlets",
+      "",
+      "I'll complete missing config-backed tokens using the Figlets token-gap workflow.",
+      "",
+      "I'll start read-only:",
+      "1. Sync the current Figma file",
+      "2. Inspect config-backed token gaps",
+      "3. Dry-run semantic token updates",
+      "4. Dry-run primitive updates when needed",
+      "",
+      "I will not change Figma until you explicitly approve after the dry-run plan (for example: yes, proceed, or apply).",
+      "Phrases like 'complete missing tokens' route to this workflow; they are not approval to write.",
       "",
       "Please make sure the Figlets Bridge plugin is open in Figma, then I'll begin.",
     ].join("\n");

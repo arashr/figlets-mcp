@@ -20,6 +20,10 @@ for (const file of files) {
   assert.ok(content.includes("Only go outside the Figlets workflow when the designer explicitly asks you to go out of bounds"), `${file} should preserve an explicit out-of-bounds escape hatch`);
   assert.ok(content.includes("If `figlets_start` is not available"), `${file} should define missing-MCP behavior`);
   assert.ok(content.includes("I should not approximate this flow with raw Figma tools"), `${file} should reject raw-tool fallback`);
+  assert.ok(
+    content.includes("restart") && content.includes("figlets_start"),
+    `${file} should tell designers to restart and verify figlets_start after setup`
+  );
   assert.ok(content.includes("Do not read `memory/PROJECT_MEMORY.md`"), `${file} should block project memory before designer intro`);
   assert.ok(content.includes("Do not offer developer work"), `${file} should block developer options in designer mode`);
   assert.ok(content.includes("Architecture guardrail"), `${file} should require architecture awareness in Developer Mode`);
@@ -36,6 +40,30 @@ for (const file of files) {
   assert.ok(content.includes("Status: started | checkpoint | review | completed | blocked"), `${file} should include the Linear comment template`);
   assert.ok(content.includes("paste-ready comment text"), `${file} should require paste-ready comments when Linear is unavailable`);
 }
+
+const genericEntrypoint = fs.readFileSync(path.join(ROOT, "AGENTS.md"), "utf-8");
+assert.ok(
+  genericEntrypoint.includes("figlets-mcp setup --hosts=antigravity --yes") &&
+    genericEntrypoint.includes("figlets-mcp setup --hosts=gemini --yes"),
+  "AGENTS.md should give concrete setup commands for Gemini-family hosts when Figlets MCP is missing"
+);
+assert.ok(
+  genericEntrypoint.includes("I can set it up for this host if you approve") &&
+    genericEntrypoint.includes("you can run the setup command yourself"),
+  "AGENTS.md should offer approved agent-run setup and self-service setup"
+);
+assert.ok(
+  genericEntrypoint.includes("server named `figlets`") &&
+    genericEntrypoint.includes("command `figlets-mcp`"),
+  "AGENTS.md should include a generic fallback MCP server shape for non-packaged hosts"
+);
+
+const claudeEntrypoint = fs.readFileSync(path.join(ROOT, "CLAUDE.md"), "utf-8");
+assert.ok(
+  claudeEntrypoint.includes("figlets-mcp setup --yes") ||
+    claudeEntrypoint.includes("figlets-mcp setup --hosts=claude-code-plugin --yes"),
+  "CLAUDE.md should give a concrete Claude setup command when Figlets MCP is missing"
+);
 
 const developerGuide = fs.readFileSync(path.join(ROOT, "docs/developer-guide.md"), "utf-8");
 assert.ok(developerGuide.includes("additive task comments"), "developer-guide should reference Linear task comment convention");

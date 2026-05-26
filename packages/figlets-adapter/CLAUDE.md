@@ -7,7 +7,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 
 ## Prerequisites
 
-1. figlets-mcp server running and configured in your MCP config (see `docs/mcp-config-examples.md`)
+1. figlets-mcp server running and configured in your MCP config (see `docs/mcp-config-examples.md`). If the Claude plugin is unavailable, offer to install it with `figlets-mcp setup --hosts=claude-code-plugin --yes` after user approval, or show that command so the user can run it. Restart Claude Code and verify `figlets_start` is available.
 2. For live Figma data: figma-bridge-plugin open in Figma Desktop (default port 17337)
 
 ---

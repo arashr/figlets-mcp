@@ -100,6 +100,21 @@ try {
   }
 
   {
+    const plan = getSetupPlan({ homeDir: home, cwd, platform: "darwin", hosts: ["antigravity"] });
+    assert.strictEqual(plan.targets.length, 1);
+    assert.strictEqual(plan.targets[0].id, "antigravity");
+    assert.strictEqual(plan.targets[0].path, path.join(home, ".gemini", "antigravity", "mcp_config.json"));
+    assert.strictEqual(plan.targets[0].status, "would-update");
+    const applied = applySetupPlan(plan);
+    assert.strictEqual(applied.targets[0].status, "updated");
+    const config = JSON.parse(fs.readFileSync(path.join(home, ".gemini", "antigravity", "mcp_config.json"), "utf-8"));
+    assert.strictEqual(config.mcpServers.figlets.command, "figlets-mcp");
+
+    const idempotent = getSetupPlan({ homeDir: home, cwd, platform: "darwin", hosts: ["antigravity"] });
+    assert.strictEqual(idempotent.targets[0].status, "unchanged");
+  }
+
+  {
     const claudePath = path.join(bin, "claude");
     fs.writeFileSync(claudePath, "#!/bin/sh\nexit 0\n");
     fs.chmodSync(claudePath, 0o755);

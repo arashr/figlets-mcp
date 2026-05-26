@@ -196,6 +196,36 @@ File: `~/.gemini/settings.json`
 }
 ```
 
+You can also let Figlets write this for you:
+
+```bash
+figlets-mcp setup --hosts=gemini --yes
+```
+
+---
+
+## Google Antigravity
+
+Antigravity stores custom MCP servers in `~/.gemini/antigravity/mcp_config.json`.
+
+The easiest setup is:
+
+```bash
+figlets-mcp setup --hosts=antigravity --yes
+```
+
+Restart Antigravity after setup. If you want to inspect or edit the file manually, open the Agent panel menu, choose **Manage MCP Servers**, then **View raw config**. The config should contain:
+
+```json
+{
+  "mcpServers": {
+    "figlets": {
+      "command": "figlets-mcp"
+    }
+  }
+}
+```
+
 ---
 
 ## Available Tools

@@ -83,6 +83,27 @@ Claude/Codex plugins pin the GitHub release tarball via `npx -y <tarball>`. Run 
 
 Optional offline analysis: export or sync Figma JSON, then use CLIs under `packages/figlets-mcp-server/src/cli/`. See `.env.example` for REST export tokens. Designer-facing reviews should still go through Figlets MCP workflows.
 
+## Developer-only broken fixture prep
+
+BNN-37 manual smoke prep is intentionally developer-only. It is not an MCP designer tool and must not appear in designer menus, plugin skills, or commands. Use it only in a fresh/disposable Figma file.
+
+The script resets local variables, local styles, and canvas content in the open file, builds a realistic Figlets-style design system, then intentionally removes a seeded set of semantic foreground companions, token variables, a text style, and extra spacing modes. It can also create raw binding-audit target nodes. After the bridge reports the file key, the script copies the prepared config to `.local/<fileKey>/design-system.config.js` so config-backed smoke checks still know which tokens were intentionally removed.
+
+```bash
+FIGLETS_DEV_BRIDGE=1 node scripts/prepare-broken-ds-fixture.js \
+  --yes-i-understand-this-mutates-figma \
+  --seed bnn-37-smoke
+```
+
+Reset/re-run steps:
+
+1. Open a fresh or disposable Figma file.
+2. Open the local Figlets Bridge plugin from this checkout.
+3. Run the command above with a seed. Reuse the same seed for repeatable gaps; change the seed for a different gap mix.
+4. Run `sync_figma_data`, then manual smoke the designer workflows against the prepared broken file.
+
+The receiver endpoint is gated by `FIGLETS_DEV_BRIDGE=1` and returns 404 outside developer bridge mode. The CLI also refuses to run without `--yes-i-understand-this-mutates-figma`, and the bridge request includes the explicit confirmation phrase `RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE`.
+
 ## Agent PR review protocol
 
 Use **[agent-pr-review-protocol.md](./agent-pr-review-protocol.md)** when agents open, review, or merge Figlets PRs. New PRs should use **[.github/pull_request_template.md](../.github/pull_request_template.md)** so Linear, scope, tests, manual verification, agent review, and merge notes stay visible.

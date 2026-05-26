@@ -733,6 +733,13 @@
           document.getElementById('substatus').innerText = 'Developer test prep only.';
           _appendLog('Received command: trim_collection_modes (dev bridge).');
           parent.postMessage({ pluginMessage: { type: 'trim-collection-modes', data: data.data || {} } }, '*');
+        } else if (data.command === 'prepare-broken-ds-fixture') {
+          isExtracting = true;
+          _armWatchdog('Broken DS fixture prep', 185000);
+          document.getElementById('status').innerText = 'Preparing broken fixture...';
+          document.getElementById('substatus').innerText = 'Developer test prep only. This resets and mutates the open file.';
+          _appendLog('Received command: prepare_broken_ds_fixture (dev bridge).');
+          parent.postMessage({ pluginMessage: { type: 'prepare-broken-ds-fixture', data: data.data || {} } }, '*');
         }
       }
     } catch (err) {
@@ -990,6 +997,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send collection mode trim result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'figlets-prepare-broken-ds-fixture-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch(RECEIVER_URL + '/sync-prepare-broken-ds-fixture?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Broken fixture prep failed.' : 'Broken fixture ready.';
+        _appendLog(msg.data.error ? 'Broken fixture prep failed in plugin.' : 'Broken fixture prep result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
+        _appendLog('Failed to send broken fixture prep result to receiver.');
       }
       isExtracting = false;
       poll();

@@ -5,10 +5,12 @@ const path = require("path");
 const repoRoot = path.resolve(__dirname, "../..");
 const codePath = path.join(repoRoot, "packages/figma-bridge-plugin/code.js");
 const uiPath = path.join(repoRoot, "packages/figma-bridge-plugin/ui.html");
+const manifestPath = path.join(repoRoot, "packages/figma-bridge-plugin/manifest.json");
 const toolPath = path.join(repoRoot, "packages/figlets-mcp-server/src/tools/qa-binding-audit.js");
 
 const code = fs.readFileSync(codePath, "utf8");
 const ui = fs.readFileSync(uiPath, "utf8");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const tool = fs.readFileSync(toolPath, "utf8");
 
 assert.ok(
@@ -45,6 +47,47 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("function isIconColorName(name)") &&
+    code.includes("'icon': { ICON: 3 }") &&
+    code.includes("'on-danger': { FG: 2, DANGER: 2 }") &&
+    code.includes("ICON: -8") &&
+    code.includes("function adjustedSegScore(name, role, score)") &&
+    code.includes("role === 'dangerText' && /(?:^|\\/)on[-_]danger") &&
+    code.includes("lum: c ? lum(c) : 0") &&
+    code.includes("if (isTextRole(role) && isIconColorName(s.name)) continue;") &&
+    code.includes("if (isTextRole(role) && isIconColorName(scored[i].name)) continue;") &&
+    code.includes("if (node.type !== 'TEXT' && /icon|glyph/.test(name))") &&
+    code.includes("return 'iconDefault';"),
+  "Shared color-role picker must consider unresolved semantic color variables by name, avoid color/icon/* for text roles, and preserve icon roles for icon nodes"
+);
+
+assert.ok(
+  code.includes("const _vDoText  = _ds.colorRoles.successText") &&
+    code.includes("const _vDontText = _ds.colorRoles.dangerText") &&
+    code.includes("label === 'Do' ? _vDoText : _vDontText") &&
+    !code.includes("_applyTextRole(lbl, 'bodyStrong', 13, _fSemi, borderColor"),
+  "Component-doc usage labels must bind text fills to semantic text roles from the shared resolver, not border variables"
+);
+
+assert.ok(
+  code.includes("const _vBadgeText = _ds.colorRoles.dangerText") &&
+    code.includes("const _cBadgeText = _ds.resolvedOrFallback(_vBadgeText") &&
+    code.includes("_applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, _cBadgeText, _vBadgeText)") &&
+    code.includes("badgeTextVariable: _vBadgeText ? _vBadgeText.name : null") &&
+    code.includes("firstBadgeTextFillVariable = _boundPaintColorVarName(_fill)") &&
+    code.includes("bindingDiagnostics: _docBindingDiagnostics") &&
+    !code.includes("_applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, { r: 1, g: 1, b: 1 }, null)"),
+  "Component-doc anatomy badge numbers must bind to the shared danger text role instead of raw white and report smoke diagnostics"
+);
+
+assert.ok(
+  code.includes("title: ['type/headline/lg'") &&
+    code.includes("'type/title/md'") &&
+    !code.includes("title: ['type/display/lg'"),
+  "Component-doc title typography must prefer headline/title styles and avoid display/lg by default"
+);
+
+assert.ok(
   code.includes("if (msg.data && msg.data.local) result.local = true;"),
   "Local plugin QA buttons must mark results so the UI can render them without receiver round-trip"
 );
@@ -58,6 +101,7 @@ assert.ok(
 
 assert.ok(
   code.includes("figma.showUI(__html__, { width: 296, height: 348, themeColors: true });") &&
+    code.includes("var _bridgeBuild = '0.1.0-dev+bnn40.") &&
     code.includes("if (msg.type === 'ui-resize')") &&
     code.includes("figma.ui.resize(msg.expanded ? 576 : 296, 348);") &&
     ui.includes("id=\"log-toggle\"") &&
@@ -69,14 +113,23 @@ assert.ok(
 );
 
 assert.ok(
+  manifest.name === "Figlets Bridge Dev" &&
+    !Object.prototype.hasOwnProperty.call(manifest, "id"),
+  "Development bridge manifest must be visibly distinct and avoid a hardcoded plugin id so stale Figma dev imports are easier to spot"
+);
+
+assert.ok(
   ui.includes("id=\"session-meta\" class=\"log-session\"") &&
+    ui.includes("Bridge: pending") &&
+    ui.includes("Bridge: ' + bridgeBuild") &&
+    ui.includes("metaEl.title = msg.data && msg.data.sessionId ? 'Session: ' + msg.data.sessionId : '';") &&
     ui.includes("title=\"") &&
     ui.includes(">Documentable</span>") &&
     ui.includes(">Undocumentable</span>") &&
     ui.includes("id=\"qa-check\"") &&
     ui.includes("id=\"qa-fix\"") &&
     !ui.includes("id=\"ui-tooltip\""),
-  "Plugin UI must keep session ID in the log panel and use native title tooltips on documentability spans and QA buttons (no custom floating tooltip)"
+  "Plugin UI must show the bridge build in the log panel while retaining the session ID as a tooltip for diagnostics"
 );
 
 assert.ok(

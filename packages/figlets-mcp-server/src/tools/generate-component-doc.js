@@ -159,6 +159,7 @@ function handleGenerateComponentDoc(args) {
                   componentMeta: result.componentMeta || {},
                   bindingsCount: result.bindingsCount || 0,
                   bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
+                  bindingDiagnostics: result.bindingDiagnostics || {},
                   anatomyCount: result.anatomyCount || 0,
                   selectionContext: result.selectionContext || selectionContext,
                   specSheet: result.specSheet || {},

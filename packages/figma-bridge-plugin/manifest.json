@@ -1,6 +1,5 @@
 {
-  "name": "Figlets Bridge",
-  "id": "1234567890", 
+  "name": "Figlets Bridge Dev",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",

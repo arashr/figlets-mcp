@@ -397,7 +397,7 @@
   <div class="log-column">
     <div id="log-box" class="log-box">
       <div id="session-log" class="empty">No actions yet.</div>
-      <div id="session-meta" class="log-session">Session: pending</div>
+      <div id="session-meta" class="log-session">Bridge: pending</div>
     </div>
     <div id="qa-report" class="qa-empty">No QA run yet.</div>
   </div>
@@ -767,7 +767,10 @@
 
     if (msg.type === 'session-meta') {
       _sessionId = (msg.data && msg.data.sessionId) ? msg.data.sessionId : '';
-      document.getElementById('session-meta').innerText = 'Session: ' + (msg.data && msg.data.sessionId ? msg.data.sessionId : 'unknown');
+      const bridgeBuild = msg.data && msg.data.bridgeBuild ? msg.data.bridgeBuild : 'unknown';
+      const metaEl = document.getElementById('session-meta');
+      metaEl.innerText = 'Bridge: ' + bridgeBuild;
+      metaEl.title = msg.data && msg.data.sessionId ? 'Session: ' + msg.data.sessionId : '';
       return;
     }
 

@@ -1,5 +1,8 @@
 const assert = require("assert");
 const http = require("http");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 const {
   generateComponentDocTool,
@@ -11,6 +14,16 @@ function startMockReceiver(handler) {
     const server = http.createServer(handler);
     server.listen(0, () => resolve(server));
   });
+}
+
+function writeSelectionFile(componentName = "Button") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-doc-selection-"));
+  const filePath = path.join(dir, "figma-selection.json");
+  fs.writeFileSync(filePath, JSON.stringify({
+    selection: [{ id: "1:2", name: componentName, type: "COMPONENT" }],
+    meta: { fileName: "Figlets Test", pageName: "Components" }
+  }));
+  return { dir, filePath };
 }
 
 module.exports = (async () => {
@@ -37,10 +50,11 @@ module.exports = (async () => {
   // --- Successful response: receiver returns markdown payload ---
   {
     let capturedBody = "";
+    const selection = writeSelectionFile("Button");
     const server = await startMockReceiver((req, res) => {
       if (req.url === "/request-selection") {
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "not connected" }));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, path: selection.filePath }));
         return;
       }
       assert.strictEqual(req.url, "/request-doc-build");
@@ -87,16 +101,18 @@ module.exports = (async () => {
       assert.ok(parsed.message.includes("component-specs/Button.md"));
     } finally {
       server.close();
+      fs.rmSync(selection.dir, { recursive: true, force: true });
       delete process.env.FIGLETS_RECEIVER_URL;
     }
   }
 
   // --- Plugin error path: result.error → isError true with message ---
   {
+    const selection = writeSelectionFile("Foo");
     const server = await startMockReceiver((req, res) => {
       if (req.url === "/request-selection") {
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "not connected" }));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, path: selection.filePath }));
         return;
       }
       req.on("data", () => {}); req.on("end", () => {
@@ -116,16 +132,52 @@ module.exports = (async () => {
       assert.ok(result.content[0].text.includes("Component not found"));
     } finally {
       server.close();
+      fs.rmSync(selection.dir, { recursive: true, force: true });
+      delete process.env.FIGLETS_RECEIVER_URL;
+    }
+  }
+
+  // --- Selection 503: preserve bridge connection details instead of asking for selection ---
+  {
+    let selectionAttempts = 0;
+    const server = await startMockReceiver((req, res) => {
+      assert.strictEqual(req.url, "/request-selection");
+      selectionAttempts += 1;
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        error: "Figma plugin was connected recently but is not listening for a new command yet.",
+        activeSessionId: "figlets-selection-session",
+        pluginRecentlySeen: true,
+        pluginCapabilities: ["component-docs"]
+      }));
+    });
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${server.address().port}`;
+    try {
+      const result = await handleGenerateComponentDoc({
+        component_name: "Button",
+        description: "A primary call-to-action button used to trigger the most important action on a screen.",
+        usage_do: ["Use for primary CTA", "Keep the label action-oriented"],
+        usage_dont: ["Don't truncate the label", "Don't use for secondary actions"]
+      });
+      assert.strictEqual(result.isError, true);
+      assert.strictEqual(selectionAttempts, 3);
+      assert.ok(result.content[0].text.includes("plugin is not connected"));
+      assert.ok(result.content[0].text.includes("figlets-selection-session"));
+      assert.ok(result.content[0].text.includes("seen recently"));
+      assert.ok(!result.content[0].text.includes("Select a COMPONENT"));
+    } finally {
+      server.close();
       delete process.env.FIGLETS_RECEIVER_URL;
     }
   }
 
   // --- 503: plugin not connected ---
   {
+    const selection = writeSelectionFile("Button");
     const server = await startMockReceiver((req, res) => {
       if (req.url === "/request-selection") {
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "not connected" }));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, path: selection.filePath }));
         return;
       }
       req.on("data", () => {}); req.on("end", () => {
@@ -146,6 +198,7 @@ module.exports = (async () => {
       assert.ok(result.content[0].text.includes("figlets-test-session"));
     } finally {
       server.close();
+      fs.rmSync(selection.dir, { recursive: true, force: true });
       delete process.env.FIGLETS_RECEIVER_URL;
     }
   }

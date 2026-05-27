@@ -5,6 +5,7 @@ const path = require('path');
 const DEFAULT_PORT = 17337;
 const PORT = Number(process.env.FIGLETS_RECEIVER_PORT || DEFAULT_PORT);
 const DEST_DIR = process.env.FIGLETS_LOCAL_DIR || path.resolve(__dirname, '../../../.local');
+const POLL_WAIT_TIMEOUT_MS = Number(process.env.FIGLETS_RECEIVER_POLL_WAIT_MS || 5000);
 
 function _devBridgeCommandsEnabled() {
   const raw = String(process.env.FIGLETS_DEV_BRIDGE || '').trim().toLowerCase();
@@ -27,6 +28,7 @@ let pendingResetRequest = null;
 let pendingRemoveTextStylesRequest = null;
 let pendingTrimCollectionModesRequest = null;
 let pendingBrokenDsFixtureRequest = null;
+let pendingPollWait = null;
 let pendingSyncPreviousFileKey = null;
 let activePluginCapabilities = [];
 let lastPluginSessionId = null;
@@ -62,7 +64,7 @@ function _getSessionId(req) {
 }
 
 function _notConnectedPayload() {
-  const recentlySeen = lastPluginSeenAt && (Date.now() - lastPluginSeenAt < 60000);
+  const recentlySeen = _pluginRecentlySeen();
   return {
     error: recentlySeen
       ? 'Figma plugin was connected recently but is not listening for a new command yet.'
@@ -72,6 +74,10 @@ function _notConnectedPayload() {
     pluginRecentlySeen: Boolean(recentlySeen),
     pluginCapabilities: recentlySeen ? activePluginCapabilities : []
   };
+}
+
+function _pluginRecentlySeen() {
+  return Boolean(lastPluginSeenAt && (Date.now() - lastPluginSeenAt < 60000));
 }
 
 function _parseCapabilities(raw) {
@@ -86,6 +92,54 @@ function _pluginHasCapability(name) {
 function _clearPendingPoll() {
   pendingPollResponse = null;
   pendingPollSessionId = null;
+}
+
+function _sendNotConnected(res) {
+  res.writeHead(503, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(_notConnectedPayload()));
+}
+
+function _dispatchOrWaitForPoll(res, dispatch) {
+  if (pendingPollResponse) {
+    dispatch();
+    return true;
+  }
+
+  if (!_pluginRecentlySeen()) {
+    return false;
+  }
+
+  if (pendingPollWait) {
+    res.writeHead(409, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'Figma plugin was connected recently, and another command is already waiting for the plugin to listen again.',
+      activeSessionId: pendingPollSessionId || lastPluginSessionId || null,
+      lastPluginSeenAt: lastPluginSeenAt || null,
+      pluginRecentlySeen: true,
+      pluginCapabilities: activePluginCapabilities
+    }));
+    return true;
+  }
+
+  const timer = setTimeout(() => {
+    if (pendingPollWait && pendingPollWait.res === res) {
+      pendingPollWait = null;
+      _sendNotConnected(res);
+    }
+  }, POLL_WAIT_TIMEOUT_MS);
+  if (timer.unref) timer.unref();
+
+  pendingPollWait = { res: res, dispatch: dispatch, timer: timer };
+  return true;
+}
+
+function _flushPendingPollWait() {
+  if (!pendingPollWait || !pendingPollResponse) return false;
+  const wait = pendingPollWait;
+  pendingPollWait = null;
+  clearTimeout(wait.timer);
+  wait.dispatch();
+  return true;
 }
 
 const server = http.createServer((req, res) => {
@@ -103,7 +157,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && pathname === '/health') {
-    const pluginRecentlySeen = Boolean(lastPluginSeenAt && (Date.now() - lastPluginSeenAt < 60000));
+    const pluginRecentlySeen = _pluginRecentlySeen();
     const pluginCapabilities = (pendingPollResponse || pluginRecentlySeen) ? activePluginCapabilities : [];
     const healthPaths = _filePaths(lastFileKey);
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -136,6 +190,10 @@ const server = http.createServer((req, res) => {
     lastPluginSessionId = pendingPollSessionId;
     lastPluginSeenAt = Date.now();
     console.log('[poll] Plugin connected' + (pendingPollSessionId ? ' (' + pendingPollSessionId + ')' : '') + (pollFileKey ? ' file=' + pollFileKey : ''));
+
+    if (_flushPendingPollWait()) {
+      return;
+    }
     
     // Keep connection alive: if no sync requested within 30 seconds, send ping
     const pollKeepaliveTimer = setTimeout(() => {
@@ -179,7 +237,7 @@ const server = http.createServer((req, res) => {
 
   // 3. MCP Agent calls this to trigger a selection sync
   if (req.method === 'POST' && pathname === '/request-selection') {
-    if (pendingPollResponse) {
+    if (_dispatchOrWaitForPoll(res, () => {
       pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
       pendingPollResponse.end(JSON.stringify({ command: 'extract-selection' }));
       _clearPendingPoll();
@@ -194,10 +252,8 @@ const server = http.createServer((req, res) => {
         }
       }, 15000); // Selection is usually very fast
       if (selectionTimer.unref) selectionTimer.unref();
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
+    })) return;
+    _sendNotConnected(res);
     return;
   }
 
@@ -254,13 +310,13 @@ const server = http.createServer((req, res) => {
 
   // 5b. MCP Agent calls this to trigger a component doc build
   if (req.method === 'POST' && pathname === '/request-doc-build') {
-    if (pendingPollResponse) {
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let docPayload;
-        try { docPayload = JSON.parse(body); } catch { docPayload = {}; }
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      let docPayload;
+      try { docPayload = JSON.parse(body); } catch { docPayload = {}; }
 
+      if (_dispatchOrWaitForPoll(res, () => {
         pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
         pendingPollResponse.end(JSON.stringify({ command: 'build-doc', data: docPayload }));
         _clearPendingPoll();
@@ -275,11 +331,9 @@ const server = http.createServer((req, res) => {
           }
         }, 120000);
         if (docTimer.unref) docTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
+      })) return;
+      _sendNotConnected(res);
+    });
     return;
   }
 

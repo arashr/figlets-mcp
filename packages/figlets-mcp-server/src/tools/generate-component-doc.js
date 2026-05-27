@@ -56,6 +56,13 @@ function handleGenerateComponentDoc(args) {
   const fallbackComponentName = args && args.component_name ? String(args.component_name) : '';
 
   return _resolveSelectedComponent(receiverUrl).then((selectionInfo) => {
+    if (selectionInfo && selectionInfo.bridgeError) {
+      return {
+        content: [{ type: 'text', text: _formatPluginConnectionError(selectionInfo.bridgeError) }],
+        isError: true
+      };
+    }
+
     const selected = selectionInfo && selectionInfo.component ? selectionInfo.component : null;
     const selectionContext = selectionInfo && selectionInfo.context ? selectionInfo.context : {};
     const componentId = selected && selected.id ? selected.id : '';
@@ -166,11 +173,8 @@ function handleGenerateComponentDoc(args) {
               setTimeout(sendDocBuildRequest, retryDelayMs);
               return;
             }
-            const activeSessionText = parsed && parsed.activeSessionId
-              ? ` Active plugin session: ${parsed.activeSessionId}.`
-              : '';
             resolve({
-              content: [{ type: 'text', text: `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${activeSessionText}` }],
+              content: [{ type: 'text', text: _formatPluginConnectionError(parsed) }],
               isError: true
             });
           } else if (res.statusCode === 504) {
@@ -219,6 +223,28 @@ function handleGenerateComponentDoc(args) {
 }
 
 function _resolveSelectedComponent(receiverUrl) {
+  const maxAttempts = 3;
+  const retryDelayMs = 750;
+
+  function attempt(attemptNumber) {
+    return _requestSelectedComponent(receiverUrl).then((result) => {
+      if (
+        result &&
+        result.bridgeError &&
+        (result.bridgeError.statusCode === 503 || result.bridgeError.statusCode === 504) &&
+        attemptNumber < maxAttempts
+      ) {
+        return new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+          .then(() => attempt(attemptNumber + 1));
+      }
+      return result;
+    });
+  }
+
+  return attempt(1);
+}
+
+function _requestSelectedComponent(receiverUrl) {
   return new Promise((resolve) => {
     const req = http.request(`${receiverUrl}/request-selection`, {
       method: 'POST',
@@ -228,7 +254,10 @@ function _resolveSelectedComponent(receiverUrl) {
       res.on('data', (chunk) => { data += chunk.toString(); });
       res.on('end', () => {
         if (res.statusCode !== 200) {
-          resolve(null);
+          let parsed;
+          try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
+          parsed.statusCode = res.statusCode;
+          resolve({ bridgeError: parsed });
           return;
         }
 
@@ -271,12 +300,33 @@ function _resolveSelectedComponent(receiverUrl) {
 
     req.setTimeout(16000, () => {
       req.destroy();
-      resolve(null);
+      resolve({
+        bridgeError: {
+          statusCode: 504,
+          error: 'Selection sync timed out before the component doc could be generated.'
+        }
+      });
     });
 
     req.on('error', () => resolve(null));
     req.end();
   });
+}
+
+function _formatPluginConnectionError(parsed) {
+  const activeSessionText = parsed && parsed.activeSessionId
+    ? ` Active plugin session: ${parsed.activeSessionId}.`
+    : '';
+  const recentlySeenText = parsed && parsed.pluginRecentlySeen
+    ? ' The plugin was seen recently but did not return to listening before the retry window ended.'
+    : '';
+  const capabilitiesText = parsed && Array.isArray(parsed.pluginCapabilities) && parsed.pluginCapabilities.length
+    ? ` Advertised capabilities: ${parsed.pluginCapabilities.join(', ')}.`
+    : '';
+  const receiverErrorText = parsed && parsed.error
+    ? ` Receiver said: ${parsed.error}`
+    : '';
+  return `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${activeSessionText}${recentlySeenText}${capabilitiesText}${receiverErrorText}`;
 }
 
 module.exports = { generateComponentDocTool, handleGenerateComponentDoc };

@@ -85,6 +85,58 @@ module.exports = (async () => {
     const syncResult = await syncPromise;
     assert.strictEqual(syncResult.statusCode, 200);
     assert.strictEqual(JSON.parse(syncResult.body).success, true);
+
+    const selectionPromise = request(port, "POST", "/request-selection", "{}");
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const selectionPollPromise = request(
+      port,
+      "GET",
+      "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives,update-tokens"
+    );
+    const selectionPoll = await selectionPollPromise;
+    assert.deepStrictEqual(JSON.parse(selectionPoll.body), { command: "extract-selection" });
+
+    const selectionAck = await request(port, "POST", "/sync-selection", JSON.stringify({
+      selection: [{ id: "34:2", name: "Raw card target - BNN-37", type: "COMPONENT" }],
+      meta: { fileName: "Figlets Test", pageName: "BNN-37 Binding Audit Targets" }
+    }));
+    assert.strictEqual(selectionAck.statusCode, 200);
+
+    const selectionResult = await selectionPromise;
+    assert.strictEqual(selectionResult.statusCode, 200);
+    assert.strictEqual(JSON.parse(selectionResult.body).success, true);
+
+    const docPromise = request(port, "POST", "/request-doc-build", JSON.stringify({
+      componentId: "34:2",
+      componentName: "Raw card target - BNN-37"
+    }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const docPollPromise = request(
+      port,
+      "GET",
+      "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives,update-tokens"
+    );
+    const docPoll = await docPollPromise;
+    assert.deepStrictEqual(JSON.parse(docPoll.body), {
+      command: "build-doc",
+      data: {
+        componentId: "34:2",
+        componentName: "Raw card target - BNN-37"
+      }
+    });
+
+    const docAck = await request(port, "POST", "/sync-doc-build", JSON.stringify({
+      componentName: "Raw card target - BNN-37",
+      path: "component-specs/Raw card target - BNN-37.md",
+      markdown: "# Raw card target - BNN-37"
+    }));
+    assert.strictEqual(docAck.statusCode, 200);
+
+    const docResult = await docPromise;
+    assert.strictEqual(docResult.statusCode, 200);
+    assert.strictEqual(JSON.parse(docResult.body).success, true);
   } finally {
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(TEMP_DIR, { recursive: true, force: true });

@@ -476,6 +476,66 @@ module.exports = (() => {
     "repair plan should name missing semantic-family backgrounds as designer/product decisions"
   );
 
+  const roleBasedForegroundOnlyVars = [
+    sem("text-on-danger", "color/text/on-danger", alias("n50"), alias("n950")),
+    sem("icon-on-danger", "color/icon/on-danger", alias("n50"), alias("n950")),
+    sem("border-danger", "color/border/danger", alias("r700"), alias("r700")),
+  ];
+  const roleBasedForegroundOnlySnap = {
+    variables: primitives.concat(roleBasedForegroundOnlyVars),
+    collections: [
+      { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+      { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: roleBasedForegroundOnlyVars.map(v => v.id) },
+    ],
+  };
+  const roleBasedForegroundOnlyResult = inspectDsSetupGapsFromFigmaData(roleBasedForegroundOnlySnap);
+  const missingDangerBg = roleBasedForegroundOnlyResult.missingSemanticRoles.find(
+    gap => gap.family === "danger" && gap.missingRole === "background"
+  );
+  assert.ok(missingDangerBg, "role-based on-* foreground family should still report missing background");
+  assert.strictEqual(
+    missingDangerBg.suggestedName,
+    "color/fill/danger",
+    "role-based on-* foreground families should resolve to fill/* backgrounds, not bg/on-*"
+  );
+  const roleBasedForegroundOnlyPlan = _buildRepairPlan(roleBasedForegroundOnlyResult);
+  assert.ok(
+    roleBasedForegroundOnlyPlan.missingCapabilityNotes.some(note =>
+      note.kind === "missing-background" &&
+      note.family === "danger" &&
+      note.suggestedName === "color/fill/danger"
+    ),
+    "missing-background notes should preserve role-based fill/* naming for on-* foreground families"
+  );
+  assert.strictEqual(
+    roleBasedForegroundOnlyPlan.missingCapabilityNotes.some(note => /color\/bg\/on-/.test(String(note.suggestedName || ""))),
+    false,
+    "repair notes should never synthesize color/bg/on-* from role-based on-* foreground leaves"
+  );
+
+  const mixedNamingVars = [
+    sem("text-on-info", "color/text/on-info", alias("n50"), alias("n950")),
+    sem("icon-on-info", "color/icon/on-info", alias("n50"), alias("n950")),
+    sem("on-surface-brand", "color/on-surface/brand", alias("n950"), alias("n50")),
+    sem("icon-brand", "color/icon/brand", alias("n950"), alias("n50")),
+  ];
+  const mixedNamingSnap = {
+    variables: primitives.concat(mixedNamingVars),
+    collections: [
+      { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+      { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: mixedNamingVars.map(v => v.id) },
+    ],
+  };
+  const mixedNamingResult = inspectDsSetupGapsFromFigmaData(mixedNamingSnap);
+  assert.ok(
+    mixedNamingResult.missingSemanticRoles.some(gap => gap.family === "info" && gap.suggestedName === "color/fill/info"),
+    "mixed naming should keep role-based on-* family mapped to fill/* background expectations"
+  );
+  assert.ok(
+    mixedNamingResult.missingSemanticRoles.some(gap => gap.family === "brand" && gap.suggestedName === "color/surface/brand"),
+    "mixed naming should preserve valid surface-based on-surface/* background expectations"
+  );
+
   // ── Config context is a suppressive hint, not the source of truth. When a
   // bg is explicitly paired to a shared foreground, the naming fallback should
   // stop asking for a same-leaf foreground.

@@ -101,7 +101,14 @@ function _roleForParts(parts) {
 }
 
 function _familyKeyForParts(parts, roleIndex) {
+  const roleSegment = _norm(parts[roleIndex]);
   const afterRole = parts.slice(roleIndex + 1);
+  if (afterRole.length && /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment)) {
+    const leaf = _norm(afterRole[0]);
+    if (/^on-[^/]+$/.test(leaf)) {
+      return [leaf.replace(/^on-/, "")].concat(afterRole.slice(1)).join("/");
+    }
+  }
   if (afterRole.length) return afterRole.join("/");
   const beforeRole = parts.slice(1, roleIndex);
   return beforeRole.length ? beforeRole.join("/") : parts.slice(1).join("/");
@@ -111,18 +118,28 @@ function _candidateNameForRole(exampleName, role, preferredFamilies) {
   const parts = String(exampleName || "").split("/");
   const info = _roleForParts(parts);
   if (!info) return null;
+  const roleSegment = _norm(parts[info.roleIndex]);
+  const roleLeaf = parts[info.roleIndex + 1];
+  const hasOnLeaf = /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment)
+    && /^on-[^/]+$/i.test(_norm(roleLeaf));
   const preferred = preferredFamilies && preferredFamilies[role];
   const replacements = {
     foreground: info.role === "background" && _norm(parts[info.roleIndex]) === "surface" ? "on-surface" : "text",
-    background: info.role === "foreground" && /^on-/.test(_norm(parts[info.roleIndex]))
-      ? _norm(parts[info.roleIndex]).replace(/^on-/, "")
+    background: hasOnLeaf
+      ? "fill"
+      : info.role === "foreground" && /^on-/.test(_norm(parts[info.roleIndex]))
+        ? _norm(parts[info.roleIndex]).replace(/^on-/, "")
       : "bg",
     icon: "icon",
     border: preferred || "border",
   };
   const replacement = replacements[role];
   if (!replacement) return null;
-  return _swapSegment(parts, info.roleIndex, replacement).join("/");
+  const next = _swapSegment(parts, info.roleIndex, replacement);
+  if (role === "background" && hasOnLeaf) {
+    next[info.roleIndex + 1] = _sameCaseSegment(roleLeaf, _norm(roleLeaf).replace(/^on-/, ""));
+  }
+  return next.join("/");
 }
 
 function _clusterSemanticFamilies(semanticVars) {

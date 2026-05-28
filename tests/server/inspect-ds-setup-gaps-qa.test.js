@@ -554,6 +554,12 @@ module.exports = (() => {
       false,
       "role-based families with existing color/fill/* backgrounds should not report missing background"
     );
+    const dangerFamily = roleBasedWithFillResult.semanticFamilies.find(family => family.family === "danger");
+    assert.ok(dangerFamily, "role-based fill/text-on family should be clustered");
+    assert.ok(
+      dangerFamily.roles.background.includes("color/fill/danger"),
+      "role-based fill token should participate as the background role for setup-gap family checks"
+    );
   }
 
   // ── Config context is a suppressive hint, not the source of truth. When a

@@ -21,7 +21,7 @@ const inspectDsSetupGapsTool = {
   }
 };
 
-const _BG_FAMILIES = ["surface", "bg", "background"];
+const _BG_FAMILIES = ["surface", "bg", "background", "fill"];
 const _ON_FAMILIES = ["on-surface", "on-bg", "on-background"];
 const _ON_TO_BG = { "on-surface": "surface", "on-bg": "bg", "on-background": "background" };
 const _BORDER_FAMILIES = ["border", "outline", "stroke"];
@@ -288,6 +288,8 @@ function _targetFamiliesFor(bgSegment, allNames) {
   const segment = _norm(bgSegment);
   const preferred = segment === "surface"
     ? ["on-surface", "text", "fg", "foreground"]
+    : segment === "fill"
+      ? ["text", "on-fill", "fg", "foreground"]
     : segment === "background"
       ? ["on-background", "text", "fg", "foreground"]
       : ["text", "fg", "foreground", "on-bg"];
@@ -298,6 +300,18 @@ function _targetFamiliesFor(bgSegment, allNames) {
     if (leftSeen === rightSeen) return 0;
     return leftSeen ? -1 : 1;
   });
+}
+
+function _foregroundCandidatesForBackgroundParts(parts, bgIndex, allNames) {
+  const targetFamilies = _targetFamiliesFor(parts[bgIndex], allNames);
+  const candidates = targetFamilies.map(family => _swapSegment(parts, bgIndex, family).join("/"));
+  if (_norm(parts[bgIndex]) === "fill") {
+    const roleBased = _swapSegment(parts, bgIndex, "text");
+    const leafIndex = roleBased.length - 1;
+    roleBased[leafIndex] = _sameCaseSegment(roleBased[leafIndex], `on-${_norm(roleBased[leafIndex])}`);
+    candidates.unshift(roleBased.join("/"));
+  }
+  return Array.from(new Set(candidates));
 }
 
 function _companionRoleCandidate(bgName, targetFamilies, allNames) {
@@ -981,12 +995,13 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_norm(parts[bgIndex]) === "fill") continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     if (configuredText && byName.has(configuredText)) continue;
     if (semanticContext.unpairedTokens.has(variable.name)) continue;
 
     const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
-    const companionCandidates = families.map(family => _swapSegment(parts, bgIndex, family).join("/"));
+    const companionCandidates = _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames);
     if (companionCandidates.some(candidate => byName.has(candidate))) continue;
 
     const recommended = companionCandidates[0];
@@ -1105,9 +1120,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     const candidate = (configuredText && byName.has(configuredText))
       ? configuredText
-      : families
-        .map(family => _swapSegment(parts, bgIndex, family).join("/"))
-        .find(name => byName.has(name));
+      : _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
     if (!candidate) continue;
     const fgVar = byName.get(candidate);
     const coll = _collectionFor(variable, collections);
@@ -1251,10 +1264,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
-    const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
-    const fgName = families
-      .map(family => _swapSegment(parts, bgIndex, family).join("/"))
-      .find(name => byName.has(name));
+    const fgName = _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
     if (!fgName) continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     if (configuredText && configuredText !== fgName) continue;

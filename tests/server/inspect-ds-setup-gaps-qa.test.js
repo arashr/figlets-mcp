@@ -535,6 +535,26 @@ module.exports = (() => {
     mixedNamingResult.missingSemanticRoles.some(gap => gap.family === "brand" && gap.suggestedName === "color/surface/brand"),
     "mixed naming should preserve valid surface-based on-surface/* background expectations"
   );
+  {
+    const roleBasedWithFillVars = [
+      sem("fill-danger", "color/fill/danger", alias("r700"), alias("r200")),
+      sem("text-on-danger", "color/text/on-danger", alias("n50"), alias("n950")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("n50"), alias("n950")),
+    ];
+    const roleBasedWithFillSnap = {
+      variables: primitives.concat(roleBasedWithFillVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: roleBasedWithFillVars.map(v => v.id) },
+      ],
+    };
+    const roleBasedWithFillResult = inspectDsSetupGapsFromFigmaData(roleBasedWithFillSnap);
+    assert.strictEqual(
+      roleBasedWithFillResult.missingSemanticRoles.some(gap => gap.family === "danger" && gap.missingRole === "background"),
+      false,
+      "role-based families with existing color/fill/* backgrounds should not report missing background"
+    );
+  }
 
   // ── Config context is a suppressive hint, not the source of truth. When a
   // bg is explicitly paired to a shared foreground, the naming fallback should

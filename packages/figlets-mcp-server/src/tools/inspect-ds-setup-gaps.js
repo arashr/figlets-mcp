@@ -142,6 +142,22 @@ function _candidateNameForRole(exampleName, role, preferredFamilies) {
   return next.join("/");
 }
 
+function _hasRoleBasedFillBackground(cluster, byName) {
+  if (!cluster || !byName) return false;
+  const family = String(cluster.family || "");
+  if (!family.length) return false;
+  if (!cluster.roles || !Array.isArray(cluster.roles.foreground)) return false;
+  const hasRoleBasedOnForeground = cluster.roles.foreground.some(name => {
+    const parts = String(name || "").split("/");
+    if (parts.length < 3) return false;
+    const roleIndex = _findFamilyIndex(parts, ["text", "fg", "foreground"]);
+    if (roleIndex < 0 || roleIndex + 1 >= parts.length) return false;
+    return /^on-[^/]+$/i.test(_norm(parts[roleIndex + 1]));
+  });
+  if (!hasRoleBasedOnForeground) return false;
+  return byName.has(`color/fill/${family}`);
+}
+
 function _clusterSemanticFamilies(semanticVars) {
   const clusters = new Map();
   for (const variable of semanticVars) {
@@ -1321,6 +1337,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   }
   for (const cluster of semanticFamilies) {
     const hasBg = cluster.roles.background.length > 0;
+    const hasRoleBasedFillBg = !hasBg && _hasRoleBasedFillBackground(cluster, byName);
     const hasFg = cluster.roles.foreground.length > 0;
     const hasIcon = cluster.roles.icon.length > 0;
     const hasBorder = cluster.roles.border.length > 0;
@@ -1348,7 +1365,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       ));
     }
 
-    if (!hasBg && hasFg && (hasIcon || hasBorder)) {
+    if (!hasBg && !hasRoleBasedFillBg && hasFg && (hasIcon || hasBorder)) {
       missingSemanticRoles.push(_missingRoleFinding(
         cluster,
         "background",

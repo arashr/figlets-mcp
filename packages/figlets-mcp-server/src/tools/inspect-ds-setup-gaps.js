@@ -21,7 +21,7 @@ const inspectDsSetupGapsTool = {
   }
 };
 
-const _BG_FAMILIES = ["surface", "bg", "background"];
+const _BG_FAMILIES = ["surface", "bg", "background", "fill"];
 const _ON_FAMILIES = ["on-surface", "on-bg", "on-background"];
 const _ON_TO_BG = { "on-surface": "surface", "on-bg": "bg", "on-background": "background" };
 const _BORDER_FAMILIES = ["border", "outline", "stroke"];
@@ -101,7 +101,14 @@ function _roleForParts(parts) {
 }
 
 function _familyKeyForParts(parts, roleIndex) {
+  const roleSegment = _norm(parts[roleIndex]);
   const afterRole = parts.slice(roleIndex + 1);
+  if (afterRole.length && /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment)) {
+    const leaf = _norm(afterRole[0]);
+    if (/^on-[^/]+$/.test(leaf)) {
+      return [leaf.replace(/^on-/, "")].concat(afterRole.slice(1)).join("/");
+    }
+  }
   if (afterRole.length) return afterRole.join("/");
   const beforeRole = parts.slice(1, roleIndex);
   return beforeRole.length ? beforeRole.join("/") : parts.slice(1).join("/");
@@ -111,18 +118,44 @@ function _candidateNameForRole(exampleName, role, preferredFamilies) {
   const parts = String(exampleName || "").split("/");
   const info = _roleForParts(parts);
   if (!info) return null;
+  const roleSegment = _norm(parts[info.roleIndex]);
+  const roleLeaf = parts[info.roleIndex + 1];
+  const hasOnLeaf = /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment)
+    && /^on-[^/]+$/i.test(_norm(roleLeaf));
   const preferred = preferredFamilies && preferredFamilies[role];
   const replacements = {
     foreground: info.role === "background" && _norm(parts[info.roleIndex]) === "surface" ? "on-surface" : "text",
-    background: info.role === "foreground" && /^on-/.test(_norm(parts[info.roleIndex]))
-      ? _norm(parts[info.roleIndex]).replace(/^on-/, "")
+    background: hasOnLeaf
+      ? "fill"
+      : info.role === "foreground" && /^on-/.test(_norm(parts[info.roleIndex]))
+        ? _norm(parts[info.roleIndex]).replace(/^on-/, "")
       : "bg",
     icon: "icon",
     border: preferred || "border",
   };
   const replacement = replacements[role];
   if (!replacement) return null;
-  return _swapSegment(parts, info.roleIndex, replacement).join("/");
+  const next = _swapSegment(parts, info.roleIndex, replacement);
+  if (role === "background" && hasOnLeaf) {
+    next[info.roleIndex + 1] = _sameCaseSegment(roleLeaf, _norm(roleLeaf).replace(/^on-/, ""));
+  }
+  return next.join("/");
+}
+
+function _hasRoleBasedFillBackground(cluster, byName) {
+  if (!cluster || !byName) return false;
+  const family = String(cluster.family || "");
+  if (!family.length) return false;
+  if (!cluster.roles || !Array.isArray(cluster.roles.foreground)) return false;
+  const hasRoleBasedOnForeground = cluster.roles.foreground.some(name => {
+    const parts = String(name || "").split("/");
+    if (parts.length < 3) return false;
+    const roleIndex = _findFamilyIndex(parts, ["text", "fg", "foreground"]);
+    if (roleIndex < 0 || roleIndex + 1 >= parts.length) return false;
+    return /^on-[^/]+$/i.test(_norm(parts[roleIndex + 1]));
+  });
+  if (!hasRoleBasedOnForeground) return false;
+  return byName.has(`color/fill/${family}`);
 }
 
 function _clusterSemanticFamilies(semanticVars) {
@@ -255,6 +288,8 @@ function _targetFamiliesFor(bgSegment, allNames) {
   const segment = _norm(bgSegment);
   const preferred = segment === "surface"
     ? ["on-surface", "text", "fg", "foreground"]
+    : segment === "fill"
+      ? ["text", "on-fill", "fg", "foreground"]
     : segment === "background"
       ? ["on-background", "text", "fg", "foreground"]
       : ["text", "fg", "foreground", "on-bg"];
@@ -265,6 +300,31 @@ function _targetFamiliesFor(bgSegment, allNames) {
     if (leftSeen === rightSeen) return 0;
     return leftSeen ? -1 : 1;
   });
+}
+
+function _foregroundCandidatesForBackgroundParts(parts, bgIndex, allNames) {
+  const targetFamilies = _targetFamiliesFor(parts[bgIndex], allNames);
+  const candidates = targetFamilies.map(family => _swapSegment(parts, bgIndex, family).join("/"));
+  if (_norm(parts[bgIndex]) === "fill") {
+    const roleBased = _swapSegment(parts, bgIndex, "text");
+    const leafIndex = roleBased.length - 1;
+    roleBased[leafIndex] = _sameCaseSegment(roleBased[leafIndex], `on-${_norm(roleBased[leafIndex])}`);
+    candidates.unshift(roleBased.join("/"));
+  }
+  return Array.from(new Set(candidates));
+}
+
+function _iconCandidatesForBackgroundParts(parts, bgIndex) {
+  const candidates = [];
+  const base = _swapSegment(parts, bgIndex, "icon");
+  candidates.push(base.join("/"));
+  if (_norm(parts[bgIndex]) === "fill") {
+    const withOnLeaf = base.slice();
+    const leafIndex = withOnLeaf.length - 1;
+    withOnLeaf[leafIndex] = _sameCaseSegment(withOnLeaf[leafIndex], `on-${_norm(withOnLeaf[leafIndex])}`);
+    candidates.unshift(withOnLeaf.join("/"));
+  }
+  return Array.from(new Set(candidates));
 }
 
 function _companionRoleCandidate(bgName, targetFamilies, allNames) {
@@ -948,12 +1008,13 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_norm(parts[bgIndex]) === "fill") continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     if (configuredText && byName.has(configuredText)) continue;
     if (semanticContext.unpairedTokens.has(variable.name)) continue;
 
     const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
-    const companionCandidates = families.map(family => _swapSegment(parts, bgIndex, family).join("/"));
+    const companionCandidates = _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames);
     if (companionCandidates.some(candidate => byName.has(candidate))) continue;
 
     const recommended = companionCandidates[0];
@@ -1072,9 +1133,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     const candidate = (configuredText && byName.has(configuredText))
       ? configuredText
-      : families
-        .map(family => _swapSegment(parts, bgIndex, family).join("/"))
-        .find(name => byName.has(name));
+      : _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
     if (!candidate) continue;
     const fgVar = byName.get(candidate);
     const coll = _collectionFor(variable, collections);
@@ -1129,9 +1188,17 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
     const configuredIcon = semanticContext.pairIconByBg.get(variable.name);
-    const iconName = (configuredIcon && byName.has(configuredIcon))
-      ? configuredIcon
-      : _companionRoleCandidate(variable.name, _ICON_FAMILIES, allColorNames);
+    let iconName = null;
+    if (configuredIcon && byName.has(configuredIcon)) {
+      iconName = configuredIcon;
+    } else {
+      const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+      if (bgIndex >= 0) {
+        const iconCandidates = _iconCandidatesForBackgroundParts(parts, bgIndex);
+        iconName = iconCandidates.find(name => byName.has(name)) || null;
+      }
+      if (!iconName) iconName = _companionRoleCandidate(variable.name, _ICON_FAMILIES, allColorNames);
+    }
     if (!iconName || !byName.has(iconName)) continue;
     const iconVar = byName.get(iconName);
     const coll = _collectionFor(variable, collections);
@@ -1218,10 +1285,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
-    const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
-    const fgName = families
-      .map(family => _swapSegment(parts, bgIndex, family).join("/"))
-      .find(name => byName.has(name));
+    const fgName = _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
     if (!fgName) continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     if (configuredText && configuredText !== fgName) continue;
@@ -1229,12 +1293,16 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
 
     const missing = [];
     for (const role of _RAW_ROLES) {
-      const candidates = [];
-      for (const family of role.families) {
-        candidates.push(_swapSegment(parts, bgIndex, family).join("/"));
-        const stripped = _swapSegment(parts, bgIndex, family);
-        stripped[stripped.length - 1] = _stripVariantSuffix(stripped[stripped.length - 1]);
-        candidates.push(stripped.join("/"));
+      let candidates = [];
+      if (role.name === "icon") {
+        candidates = _iconCandidatesForBackgroundParts(parts, bgIndex);
+      } else {
+        for (const family of role.families) {
+          candidates.push(_swapSegment(parts, bgIndex, family).join("/"));
+          const stripped = _swapSegment(parts, bgIndex, family);
+          stripped[stripped.length - 1] = _stripVariantSuffix(stripped[stripped.length - 1]);
+          candidates.push(stripped.join("/"));
+        }
       }
       if (!candidates.some(c => byName.has(c))) {
         missing.push({ role: role.name, suggestedNames: Array.from(new Set(candidates)).slice(0, 3) });
@@ -1304,6 +1372,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   }
   for (const cluster of semanticFamilies) {
     const hasBg = cluster.roles.background.length > 0;
+    const hasRoleBasedFillBg = !hasBg && _hasRoleBasedFillBackground(cluster, byName);
     const hasFg = cluster.roles.foreground.length > 0;
     const hasIcon = cluster.roles.icon.length > 0;
     const hasBorder = cluster.roles.border.length > 0;
@@ -1331,7 +1400,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       ));
     }
 
-    if (!hasBg && hasFg && (hasIcon || hasBorder)) {
+    if (!hasBg && !hasRoleBasedFillBg && hasFg && (hasIcon || hasBorder)) {
       missingSemanticRoles.push(_missingRoleFinding(
         cluster,
         "background",

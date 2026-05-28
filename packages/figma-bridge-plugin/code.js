@@ -1,6 +1,6 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
-var _bridgeBuild = '0.1.0-dev+bnn40.20260528.1';
+var _bridgeBuild = '0.1.0-dev+bnn44.20260528.2';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -12,19 +12,34 @@ function _makeLocalFileKey() {
   return 'local_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 }
 
+var _memoryFileKey = '';
+
 function _getFigletsFileKey() {
   var realKey = _sanitizeFileKey(figma.fileKey || '');
-  if (realKey) return realKey;
+  if (realKey) {
+    _memoryFileKey = realKey;
+    try { figma.root.setPluginData('figletsFileKey', realKey); } catch (e1) {}
+    return realKey;
+  }
 
   try {
     var stored = _sanitizeFileKey(figma.root.getPluginData('figletsFileKey'));
-    if (stored) return stored;
+    if (stored) {
+      _memoryFileKey = stored;
+      return stored;
+    }
+  } catch (e2) {}
 
+  if (_memoryFileKey) return _memoryFileKey;
+
+  try {
     var localKey = _makeLocalFileKey();
     figma.root.setPluginData('figletsFileKey', localKey);
+    _memoryFileKey = localKey;
     return localKey;
-  } catch (e) {
-    return '';
+  } catch (e3) {
+    if (!_memoryFileKey) _memoryFileKey = _makeLocalFileKey();
+    return _memoryFileKey;
   }
 }
 

@@ -411,6 +411,10 @@
   let _isLogOpen = false;
   let _hasQaReport = false;
   var _currentFileKey = '';
+  function _setCurrentFileKey(candidate) {
+    var key = String(candidate || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    if (key) _currentFileKey = key;
+  }
   const RECEIVER_URL = 'http://localhost:17337';
   const RECEIVER_LABEL = 'localhost:17337';
   const _capabilities = [
@@ -756,9 +760,8 @@
   onmessage = async (event) => {
     const msg = event.data.pluginMessage;
 
-    if (msg.fileKey) {
-      _currentFileKey = msg.fileKey;
-    }
+    _setCurrentFileKey(msg.fileKey);
+    if (msg.data && msg.data.fileKey) _setCurrentFileKey(msg.data.fileKey);
 
     if (msg.type === 'selection-state') {
       _setSelectionState(msg.data);
@@ -767,6 +770,8 @@
 
     if (msg.type === 'session-meta') {
       _sessionId = (msg.data && msg.data.sessionId) ? msg.data.sessionId : '';
+      _setCurrentFileKey(msg.fileKey);
+      if (msg.data && msg.data.fileKey) _setCurrentFileKey(msg.data.fileKey);
       const bridgeBuild = msg.data && msg.data.bridgeBuild ? msg.data.bridgeBuild : 'unknown';
       const metaEl = document.getElementById('session-meta');
       metaEl.innerText = 'Bridge: ' + bridgeBuild;

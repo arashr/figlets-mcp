@@ -539,7 +539,7 @@ module.exports = (() => {
     const roleBasedWithFillVars = [
       sem("fill-danger", "color/fill/danger", alias("r700"), alias("r200")),
       sem("text-on-danger", "color/text/on-danger", alias("n50"), alias("n950")),
-      sem("icon-on-danger", "color/icon/on-danger", alias("n50"), alias("n950")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("r700"), alias("r200")),
     ];
     const roleBasedWithFillSnap = {
       variables: primitives.concat(roleBasedWithFillVars),
@@ -559,6 +559,17 @@ module.exports = (() => {
     assert.ok(
       dangerFamily.roles.background.includes("color/fill/danger"),
       "role-based fill token should participate as the background role for setup-gap family checks"
+    );
+    const fillDangerAdvisory = roleBasedWithFillResult.companionAdvisories.find(item => item.bg === "color/fill/danger");
+    assert.ok(
+      !fillDangerAdvisory || fillDangerAdvisory.missing.every(item => item.role !== "icon"),
+      "existing color/icon/on-* companions should prevent missing icon advisories for fill/* backgrounds"
+    );
+    assert.ok(
+      roleBasedWithFillResult.iconContrastFailures.some(item =>
+        item.bg === "color/fill/danger" && item.icon === "color/icon/on-danger"
+      ),
+      "icon contrast QA should evaluate fill/* backgrounds against existing icon/on-* companions"
     );
   }
 

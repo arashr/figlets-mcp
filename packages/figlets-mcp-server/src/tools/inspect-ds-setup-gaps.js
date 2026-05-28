@@ -314,6 +314,19 @@ function _foregroundCandidatesForBackgroundParts(parts, bgIndex, allNames) {
   return Array.from(new Set(candidates));
 }
 
+function _iconCandidatesForBackgroundParts(parts, bgIndex) {
+  const candidates = [];
+  const base = _swapSegment(parts, bgIndex, "icon");
+  candidates.push(base.join("/"));
+  if (_norm(parts[bgIndex]) === "fill") {
+    const withOnLeaf = base.slice();
+    const leafIndex = withOnLeaf.length - 1;
+    withOnLeaf[leafIndex] = _sameCaseSegment(withOnLeaf[leafIndex], `on-${_norm(withOnLeaf[leafIndex])}`);
+    candidates.unshift(withOnLeaf.join("/"));
+  }
+  return Array.from(new Set(candidates));
+}
+
 function _companionRoleCandidate(bgName, targetFamilies, allNames) {
   const names = new Set(allNames);
   const parts = String(bgName || "").split("/");
@@ -1175,9 +1188,17 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
     const configuredIcon = semanticContext.pairIconByBg.get(variable.name);
-    const iconName = (configuredIcon && byName.has(configuredIcon))
-      ? configuredIcon
-      : _companionRoleCandidate(variable.name, _ICON_FAMILIES, allColorNames);
+    let iconName = null;
+    if (configuredIcon && byName.has(configuredIcon)) {
+      iconName = configuredIcon;
+    } else {
+      const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+      if (bgIndex >= 0) {
+        const iconCandidates = _iconCandidatesForBackgroundParts(parts, bgIndex);
+        iconName = iconCandidates.find(name => byName.has(name)) || null;
+      }
+      if (!iconName) iconName = _companionRoleCandidate(variable.name, _ICON_FAMILIES, allColorNames);
+    }
     if (!iconName || !byName.has(iconName)) continue;
     const iconVar = byName.get(iconName);
     const coll = _collectionFor(variable, collections);
@@ -1272,12 +1293,16 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
 
     const missing = [];
     for (const role of _RAW_ROLES) {
-      const candidates = [];
-      for (const family of role.families) {
-        candidates.push(_swapSegment(parts, bgIndex, family).join("/"));
-        const stripped = _swapSegment(parts, bgIndex, family);
-        stripped[stripped.length - 1] = _stripVariantSuffix(stripped[stripped.length - 1]);
-        candidates.push(stripped.join("/"));
+      let candidates = [];
+      if (role.name === "icon") {
+        candidates = _iconCandidatesForBackgroundParts(parts, bgIndex);
+      } else {
+        for (const family of role.families) {
+          candidates.push(_swapSegment(parts, bgIndex, family).join("/"));
+          const stripped = _swapSegment(parts, bgIndex, family);
+          stripped[stripped.length - 1] = _stripVariantSuffix(stripped[stripped.length - 1]);
+          candidates.push(stripped.join("/"));
+        }
       }
       if (!candidates.some(c => byName.has(c))) {
         missing.push({ role: role.name, suggestedNames: Array.from(new Set(candidates)).slice(0, 3) });

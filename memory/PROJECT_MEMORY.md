@@ -4,7 +4,131 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-28 — BNN-41 and BNN-44 shipped; V1 smoke resumes]
+
+**Status:** `main` includes PR #13 / BNN-41 at merge `83d7023` and PR #14 / BNN-44 at merge `37beb33`. BNN-41 and BNN-44 are Done in Linear. The remaining V1 path is BNN-26 manual RC sign-off, then BNN-42 release execution.
+
+**BNN-41 shipped:** `inspect_ds_setup_gaps` no longer treats role-based `color/text/on-*` / `color/icon/on-*` semantics as requiring synthetic `color/bg/on-*` backgrounds. Role-based `color/fill/*` participates as the background counterpart for setup-gap QA, including text/icon contrast and companion checks, while surface-based naming behavior stays intact.
+
+**BNN-44 shipped:** same-session apply → sync → inspect now keeps active file identity and scoped snapshot paths aligned. The final fix covered plugin file-key stickiness, receiver key healing/persistence, server active-path alignment, and a regression for apply → sync → inspect with stale flat snapshot plus null active-file state. Designers must reload the Bridge once when moving to this build.
+
+**Verification:** PR #14 final Linear completion records `npm test` **91/91** and manual designer apply → sync → health-check pass on Figlets Test. Agent review approved after the `getActiveFilePaths()` alignment and `apply-sync-inspect-flow.test.js` regression landed.
+
+**Current V1 release posture:**
+
+- BNN-26 is the active release-candidate manual smoke/sign-off lane again.
+- BNN-42 is the final release-ops checklist after BNN-26 signs off.
+- BNN-43 (approval summary detail), BNN-45 (mixed semantic duplicate detection), and BNN-38 (designer-approved `needsDesignerDecision` text-style apply) remain follow-ups unless Arash explicitly pulls one into V1.
+- Product version is still `0.1.0`; the actual release still needs `npm run release:prepare -- 1.0.0`, release verification, plugin smoke, tag `v1.0.0`, and GitHub release tarball upload.
+
+**Environment note:** Plain non-interactive shells in this environment may still resolve `/usr/local/bin/node` v10.1.0 and fail. Interactive zsh loads nvm and uses Node `v24.14.0`, which satisfies the repo requirement (`.nvmrc` is `22`). When verifying release gates from Codex, prefer `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && npm test'` or explicitly put the nvm Node bin first in `PATH`.
+
 ---
+
+### [2026-05-28 — PM release-readiness checkpoint after BNN-39/BNN-40]
+
+**Status:** `main` is up to date with `origin/main` at merge `8829298` (PR #12 / BNN-40). BNN-39 and BNN-40 are complete. The normal checkout is back on `main`; only local context edits remain in `DECISIONS.md` and `memory/PROJECT_MEMORY.md`.
+
+**Done since the previous memory checkpoint:**
+
+- **BNN-39 / PR #11:** fixed component-doc bridge poll flake where the receiver returned 503 when the Figma plugin was recently seen but not actively long-polling. Merged at `5689ff9`.
+- **BNN-40 / PR #12:** fixed component-doc and shared bridge binding behavior so text layers avoid `color/icon/*`, component-doc docs share QA binding resolver logic, title typography avoids `type/display/lg` by default, usage labels use semantic text roles instead of border roles, anatomy badge text binds through status text semantics, and `generate_component_doc` forwards `bindingDiagnostics`. Merged at `8829298`.
+- Manual smoke for BNN-40 was completed by Arash before merge.
+- Full supported-runtime test suite passed with interactive zsh / nvm Node: `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && which node && node -v && which npm && npm -v && npm test'` → Node `v24.14.0`, npm `11.9.0`, **89/89** tests passed.
+
+**Current V1 release posture:**
+
+- The release is no longer blocked by BNN-39 or BNN-40.
+- **BNN-26** remains the release-candidate manual smoke/sign-off lane. Its previous "blocked by BNN-40" comment is stale; it now needs a final checkpoint pass over install/start, Designer Mode routing, component-doc recheck on merged code, stale-host/bridge recovery, approval-gate sweep, and release sign-off.
+- **BNN-41** is the next likely V1 product-risk issue: setup/gap planners may misclassify `color/text/on-*` role-based semantics as requiring invalid `color/bg/on-*` backgrounds. Treat as a V1 blocker unless triage/manual smoke proves it can be safely deferred.
+- **BNN-38** is partially superseded by BNN-40 for shared text/icon binding selection. The remaining scope is the designer-approved `needsDesignerDecision` text-style apply path; decide whether that is V1 or post-V1.
+- Product version is still `0.1.0`. The actual V1 release still requires `npm run release:prepare -- 1.0.0`, `npm run release:prepare -- --check`, `npm run verify:release`, `npm run smoke:plugins`, tag `v1.0.0`, and attach the release tarball.
+
+**Environment note:** Plain non-interactive shells in this environment may still resolve `/usr/local/bin/node` v10.1.0 and fail. Interactive zsh loads nvm and uses Node `v24.14.0`, which satisfies the repo requirement (`.nvmrc` is `22`). When verifying release gates from Codex, prefer `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && npm test'` or explicitly put the nvm Node bin first in `PATH`.
+
+**PM recommendation:** Resume BNN-26 now that BNN-39/40 are merged. Triage BNN-41 before final release-prep. Clarify or defer BNN-38. Add a final release execution/checklist issue only if BNN-26 should stay purely manual-smoke rather than release-ops.
+
+---
+
+---
+
+---
+
+### [2026-05-26 — Token-gap approval boundary (PR #10 / BNN-26)]
+
+**Status:** Merged to `main` at `79706bb` via [PR #10](https://github.com/arashr/figlets-mcp/pull/10). Guidance-layer hardening only; no server-side write gate.
+
+**Shipped:** `token-gap-completion` workflow now includes explicit `preview-primitives` and `apply-primitives` steps (both with `requiresApproval`), `approvalContract` on route/guide, routed opener stating goal phrases are not approval, `inspect_ds_token_gaps.approvalBoundary` + STOP `agentInstruction` + designerPresentation approval section when gaps exist, and `update_ds_tokens` added to `MUTATING_TOOLS` for `figlets_health_check`.
+
+**Manual smoke (Arash, `bnn-26-smoke` on `local_mpcspbgz_7gq8yy0l`):** Cursor initially applied without approval (failure). After merge, Cursor dry-ran, asked explicitly, then apply-all cleared 11 gaps (foundation modes → primitives → semantic tokens). Gemini Flash had asked before apply on the same fixture path.
+
+**Verification:** `npm test` **89/89**; targeted agent-interface, inspect-ds-token-gaps, and agent-workflow-regression tests.
+
+**Follow-up:** BNN-26 still owns full v1.0 manual smoke matrix; binding-audit handoff and optional health-check setup repairs remain on that checklist.
+
+---
+
+### [2026-05-26 — BNN-35 closed; Antigravity setup guidance (PR #9)]
+
+**Status:** Closed BNN-35 (option A). Merged [PR #9](https://github.com/arashr/figlets-mcp/pull/9) at `a3fcbe8`.
+
+**Shipped:** `figlets-mcp setup --hosts=antigravity` writes `~/.gemini/antigravity/mcp_config.json`. Missing-MCP fail-closed copy offers agent-run setup after approval or self-service commands (`figlets-mcp setup --hosts=antigravity|gemini --yes`). Root, adapter, and plugin start docs aligned.
+
+**Weaker-agent evidence (Gemini/Antigravity on Figlets Test):** Fail-closed when MCP missing; after connect, setup gap generation, required `apply_ds_setup_repairs` with exact `repairPlan.applyInput`, downstream icon repairs, reinspect clean. Optional border roles (`color/border/overlay|raised|sunken`) left as designer convention choices.
+
+**Deferred to BNN-26:** Token-gap completion and binding-audit fixability handoffs in the v1.0 manual smoke matrix (not blockers for closing BNN-35).
+
+**Verification:** setup-cli and root-agent-entrypoint tests; PR review approve with nits.
+
+---
+
+### [2026-05-26 — BNN-37 developer broken DS fixture (PR #8)]
+
+**Status:** Done. Merged [PR #8](https://github.com/arashr/figlets-mcp/pull/8) at `2f681b8` (`c37d23b`).
+
+**Shipped:** Developer-only `scripts/prepare-broken-ds-fixture.js` + `prepare-broken-ds-fixture` bridge command (`FIGLETS_DEV_BRIDGE=1`, CLI `--yes-i-understand-this-mutates-figma`, confirmation phrase `RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE`). Seeds randomized gaps (foreground companions, token variables, text styles, spacing mode trim, binding-audit target page). Not exposed in designer menus, Agent Interface, or plugin skills.
+
+**Docs:** `docs/developer-guide.md` documents disposable-file prep for BNN-26/BNN-35 manual smoke.
+
+**Verification:** `npm test` **89/89**; `tests/dev/broken-ds-fixture*.test.js`, `tests/bridge/broken-ds-fixture-dev-bridge.test.js`.
+
+**Ops note:** On some files, `reset: true` inside the script can hit `duplicate variable name` if the file is partially built; maintainer workaround: bridge `request-reset-figlets-file` then fixture prep with `reset: false`.
+
+---
+
+### [2026-05-26 — BNN-26 manual smoke checkpoint (partial)]
+
+**Status:** In progress (Arash-owned). Not blocked on code merges as of `79706bb`.
+
+**Recorded passes on `local_mpcspbgz_7gq8yy0l` with `bnn-26-smoke` fixture:** Health-check setup path (Gemini: gaps + approval ask); token-gap completion (dry-run → approve → apply → reinspect clean). Cursor auto-apply without approval was a process failure addressed by PR #10.
+
+**Still open on BNN-26 checklist:** Full host matrix (Claude/Codex/Cursor/Gemini), binding-audit (`qa_binding_audit`), optional border convention choices, release-candidate install path.
+
+**Related:** BNN-29 (setup intake) and BNN-32 (bridge self-heal) were blockers earlier on `main`; BNN-34 foreground companion fix merged at `55e5426` ([PR #7](https://github.com/arashr/figlets-mcp/pull/7)).
+
+---
+
+### [2026-05-25 — BNN-34 foreground companion repair handoff (PR #7)]
+
+**Status:** Done. Merged [PR #7](https://github.com/arashr/figlets-mcp/pull/7) at `55e5426`.
+
+**Shipped:** Background-ramp foreground companion planning in `inspect_ds_setup_gaps`, apply boundary for non-variable sources, Agent Interface/plugin guidance to pass exact `repairPlan.applyInput` (preserve `aliases` objects), and clearer `apply_ds_setup_repairs` validation errors on malformed alias maps.
+
+**Why:** Manual v1.0 smoke had agents dead-ending on “product gap” instead of applying deterministic foreground companion repairs. Follow-on weaker-agent issue: `aliases: 2` instead of structured alias objects — addressed in same PR via guidance + validation messaging.
+
+**Verification:** Full test suite at merge **85/85**; manual Figlets Test apply/reinspect passed per Linear.
+
+---
+
+### [2026-05-25 — BNN-32 stale/offline receiver self-heal (PR #6)]
+
+**Status:** Done. Merged [PR #6](https://github.com/arashr/figlets-mcp/pull/6) at `89991a0`.
+
+**Shipped:** Shared `ensure-receiver` + bridge request path retries on `ECONNREFUSED`; `sync_figma_data` routes through `/request-sync` so Designer Mode’s first bridge step self-heals stale/offline receivers instead of failing with a generic contact error.
+
+**Follow-up:** BNN-33 tracks non-blocking cleanup to move remaining direct receiver callers (`apply_ds_setup`, `build_ds_showcase`, etc.) to the shared bridge path.
+
+**Verification:** `npm test` **82/82**; ensure-receiver and sync-figma-data tests; live healthy reuse + stale-port simulation passed per Linear.
 
 ---
 

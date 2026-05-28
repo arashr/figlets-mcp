@@ -4,6 +4,46 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-28] Same-session verification depends on active file identity
+
+**Decision:** The apply → sync → inspect loop must preserve a non-empty active file identity through plugin, receiver, and server path resolution. The Bridge should not emit an empty `fileKey` for an active Figma file; the receiver should heal and persist the best available key; server active-path helpers should resolve snapshots from the same key used by `getActiveFileKey()`.
+
+**Why:** BNN-44 showed that successful setup repairs could be followed by a health-check reading stale or flat `.local/figma-data.json` state and caveating that no active Figma file key was available. That made Figlets contradict itself immediately after a designer-approved write.
+
+**Verification expectation:** Release-blocking changes to file identity, sync, or repair verification need both unit/bridge coverage and an apply → sync → inspect regression. Manual designer smoke should reload the Bridge build first and then verify that same-session health-check output reflects the applied changes without `no active file key` or stale snapshot caveats.
+
+---
+
+## [2026-05-28] Role-based fill semantics are background-backed families
+
+**Decision:** For setup-gap QA, role-based semantic families using `color/fill/<role>` with `color/text/on-<role>` and `color/icon/on-<role>` should be modeled as background-backed families. `fill/*` is the background counterpart for those role-based `on-*` foreground/icon tokens; it is not a missing `bg/on-*` convention.
+
+**Why:** BNN-41 showed that treating `text/on-*` as ordinary foreground leaves created false missing-background guidance such as `color/bg/on-danger`. The first fixes that only renamed or suppressed the missing-background finding were not enough; `fill/*` also needed to participate in background-driven text contrast, icon contrast, and companion checks.
+
+**Scope:** This decision covers deterministic setup-gap QA semantics. Broader mixed-convention cleanup, such as detecting duplicate `text/*` versus `text/on-*` intent, remains separate follow-up scope.
+
+---
+
+## [2026-05-28] Text binding resolution is shared release-critical infrastructure
+
+**Decision:** Component documentation, QA binding audit, and other bridge-generated binding flows must use shared text-safe color-role resolution instead of local exact-name workarounds. Text roles should exclude icon semantic variables by default, prefer plain status text variables such as `color/text/danger` for status text roles, and keep `on-*` variants as fallbacks when no plain status text token exists. Non-text icon/glyph content may still resolve through explicit icon roles.
+
+**Why:** BNN-40 showed that a component-doc symptom was really a shared resolver problem: text fills could bind to `color/icon/*`, titles could pick oversized display typography, and status/badge text could select `on-*` tokens that were correct for text-on-fill but wrong for plain documentation text. Fixing this only in `generate_component_doc` would have left binding-audit and future bridge flows exposed.
+
+**Verification expectation:** Release-blocking binding fixes need focused bridge policy tests plus live/manual Figma verification when designer-facing Figma output changes. `generate_component_doc` may expose narrow `bindingDiagnostics` during development to distinguish stale Figma plugin imports from resolver/runtime bugs.
+
+---
+
+## [2026-05-28] Figma Bridge dev imports need visible freshness signals
+
+**Decision:** During local smoke or PR verification, the Figma Bridge development plugin should expose an obvious build/freshness marker and, when useful, a distinct dev plugin name. Agents should verify the loaded Figma development plugin matches the checkout being tested before asking for manual smoke conclusions.
+
+**Why:** BNN-40 was delayed by Figma loading an older development plugin folder while the actual PR changes lived in a separate worktree. The stale UI looked plausible, so manual evidence initially pointed at the wrong layer. A visible build marker made the real state inspectable by the maintainer.
+
+**Consequence:** Stale bridge/plugin confusion is a release-readiness risk, not just a developer nuisance. Future bridge doctor/version work remains useful, but manual smoke can already reduce ambiguity by checking the visible bridge marker and exact manifest path.
+
+---
+
 ## [2026-05-23] GitHub PRs are review truth; Linear comments are task logs
 
 **Decision:** For multi-agent Figlets development, GitHub PR comments carry code-review truth: review scope, findings, verification, manual checks, and merge readiness. Linear issue comments carry the task log: start, checkpoints, blockers, review verdict summaries, completion, and handoff. Chat remains temporary coordination, not durable project state.
@@ -13,6 +53,58 @@ Running log of non-obvious project decisions and the reasons behind them.
 **Why:** Linear alone was not enough for code-review handoff across multiple agents because merge-specific findings were easy to lose in task history. GitHub alone was not enough because task execution logs, blocked context, and handoffs need to stay attached to the Linear issue. Splitting responsibility keeps each tool honest and recoverable.
 
 **Regression:** `npm run check:pr-protocol` and `tests/docs/pr-review-protocol.test.js` pin the PR template, protocol doc, and agent/developer-guide cross-links.
+
+---
+
+## [2026-05-26] Token-gap routing phrases are not approval to write
+
+**Decision:** For `token-gap-completion`, natural-language goals such as “complete missing config-backed tokens” or “finish the token system” route to the workflow only. They are not permission to call `apply_ds_foundation_repairs`, `update_ds_primitives`, or `update_ds_tokens` with `dry_run: false`. Agents must dry-run (`repairPlan.previewInput`, `primitiveRepairPlan.previewInput`), summarize `repairPlan.designerPresentation`, and wait for explicit designer approval (for example: yes, proceed, or apply) before any Figma write.
+
+**Product surfaces:** `token-gap-completion` exposes `approvalContract` on route and `figlets_workflow_guide`; `inspect_ds_token_gaps` emits `approvalBoundary`, a STOP-prefixed `agentInstruction`, and a designer-facing “Approval required before writes” section when gaps exist. This is guidance-layer enforcement; there is no server-side rejection of apply calls without approval.
+
+**Apply order:** After approval: `apply_ds_foundation_repairs` (foundation modes/collections) → `update_ds_primitives` (`primitiveRepairPlan.applyInput`) → `update_ds_tokens` (`repairPlan.applyInput`). Reinspect with `inspect_ds_token_gaps`.
+
+**Why:** Cursor auto applied token completion after the goal phrase alone while Gemini Flash had stopped for approval on the same fixture. Weaker hosts treat imperative routing as consent unless the contract is repeated at route, workflow guide, planner output, and workflow steps.
+
+**Evidence:** BNN-26 manual smoke on `bnn-26-smoke` / `local_mpcspbgz_7gq8yy0l`; merged [PR #10](https://github.com/arashr/figlets-mcp/pull/10) at `79706bb`.
+
+---
+
+## [2026-05-26] Health-check and token-gap-completion are separate designer workflows
+
+**Decision:** “Check my design system” (`health-check`) runs `sync_figma_data` → `detect_design_system` → `audit_tokens` → `inspect_ds_setup_gaps` (semantic color setup, icon contrast, missing roles) with optional setup repair apply after approval. It does not call `inspect_ds_token_gaps`. Config-backed typography/spacing/radius/border-width/elevation completion belongs to `token-gap-completion` (`inspect_ds_token_gaps` → dry-run previews → approved apply). Binding-audit fixability belongs to `qa-binding-audit`.
+
+**Why:** Designers asking to “check” the system should get semantic setup and token hygiene first without mixing two different repair planners in one confusing pass. BNN-35 manual evidence showed setup-repair handoffs work on weaker agents; token-gap and binding-audit remain on the BNN-26 smoke matrix.
+
+**Consequence:** Agents should not report “all clear” from health-check alone when config-backed token gaps may still exist. After health-check, offer token-gap or binding-audit workflows when relevant.
+
+---
+
+## [2026-05-26] Antigravity and Gemini CLI setup targets for missing Figlets MCP
+
+**Decision:** When Figlets MCP is unavailable, fail closed and name host-specific setup: `figlets-mcp setup --hosts=antigravity --yes` writes `~/.gemini/antigravity/mcp_config.json`; `figlets-mcp setup --hosts=gemini --yes` updates Gemini CLI config. Agents may run setup after designer approval when the host can execute shell commands; otherwise show the self-service command and require restart before `figlets_start` is available. Do not substitute raw Figma tools or repo inspection.
+
+**Why:** Generic “add Figlets in MCP settings” was too vague for Antigravity/Gemini manual verification (BNN-35). Antigravity docs specify the raw config path under `~/.gemini/antigravity/`.
+
+**Shipped:** [PR #9](https://github.com/arashr/figlets-mcp/pull/9) at `a3fcbe8`.
+
+---
+
+## [2026-05-26] BNN-35 closure defers token-gap and binding-audit to BNN-26
+
+**Decision:** Close cross-agent verification issue BNN-35 when setup-repair handoff evidence is satisfied on a weaker agent (Gemini/Antigravity): `inspect_ds_setup_gaps` → approval → exact `repairPlan.applyInput` → `apply_ds_setup_repairs` → reinspect. Token-gap completion and binding-audit fixability are tracked in Arash-owned BNN-26 manual smoke, not as blockers for BNN-35.
+
+**Why:** BNN-35 acceptance included multiple workflow types; setup-repair was the primary BNN-34-class risk. Optional border roles remain designer convention choices, not failed handoffs.
+
+---
+
+## [2026-05-26] Developer-only broken DS fixture prep
+
+**Decision:** Manual smoke prep for disposable Figma files uses `FIGLETS_DEV_BRIDGE=1`, `node scripts/prepare-broken-ds-fixture.js --yes-i-understand-this-mutates-figma`, and bridge confirmation `RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE`. The path is not exposed in designer menus, `figlets_start`, route intents, workflow guides, or plugin designer skills. Documented in `docs/developer-guide.md` only.
+
+**Why:** BNN-26/BNN-35 need repeatable intentional gaps without polluting designer-facing product surfaces.
+
+**Shipped:** [PR #8](https://github.com/arashr/figlets-mcp/pull/8) at `2f681b8`.
 
 ---
 

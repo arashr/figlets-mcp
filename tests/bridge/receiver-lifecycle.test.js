@@ -77,14 +77,73 @@ module.exports = (async () => {
     const syncAck = await request(port, "POST", "/sync", JSON.stringify({ ok: true }));
     assert.strictEqual(syncAck.statusCode, 200);
     assert.strictEqual(JSON.parse(syncAck.body).success, true);
-    assert.deepStrictEqual(
-      JSON.parse(fs.readFileSync(path.join(TEMP_DIR, "active-file.json"), "utf8")).fileKey,
-      null
-    );
+    assert.strictEqual(fs.existsSync(path.join(TEMP_DIR, "active-file.json")), false);
 
     const syncResult = await syncPromise;
     assert.strictEqual(syncResult.statusCode, 200);
     assert.strictEqual(JSON.parse(syncResult.body).success, true);
+
+    // If the sync callback omits ?fileKey, the receiver should still resolve
+    // scoped paths from payload/last-session context in this same session.
+    const scopedPollPromise = request(
+      port,
+      "GET",
+      "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives,update-tokens&fileKey=local_session_file"
+    );
+    const scopedSyncPromise = request(port, "POST", "/request-sync", "{}");
+    const scopedPoll = await scopedPollPromise;
+    assert.deepStrictEqual(JSON.parse(scopedPoll.body), { command: "extract-all" });
+    const scopedSyncAck = await request(
+      port,
+      "POST",
+      "/sync",
+      JSON.stringify({ ok: true, fileKey: "local_session_file" })
+    );
+    assert.strictEqual(scopedSyncAck.statusCode, 200);
+    const scopedSyncResult = await scopedSyncPromise;
+    assert.strictEqual(scopedSyncResult.statusCode, 200);
+    const scopedPayload = JSON.parse(scopedSyncResult.body);
+    assert.strictEqual(scopedPayload.success, true);
+    assert.strictEqual(scopedPayload.fileKey, "local_session_file");
+    assert.strictEqual(
+      JSON.parse(fs.readFileSync(path.join(TEMP_DIR, "active-file.json"), "utf8")).fileKey,
+      "local_session_file"
+    );
+    assert.strictEqual(
+      fs.existsSync(path.join(TEMP_DIR, "local_session_file", "figma-data.json")),
+      true
+    );
+
+    fs.mkdirSync(path.join(TEMP_DIR, "local_figlets_test"), { recursive: true });
+    fs.writeFileSync(
+      path.join(TEMP_DIR, "local_figlets_test", "figma-data.json"),
+      JSON.stringify({ fileName: "Figlets Test", fileKey: "local_figlets_test", variables: [] })
+    );
+    const healPollPromise = request(
+      port,
+      "GET",
+      "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives,update-tokens"
+    );
+    const healSyncPromise = request(port, "POST", "/request-sync", "{}");
+    await healPollPromise;
+    const healSyncAck = await request(
+      port,
+      "POST",
+      "/sync",
+      JSON.stringify({ fileName: "Figlets Test", fileKey: "", variables: [{ name: "space/4" }] })
+    );
+    assert.strictEqual(healSyncAck.statusCode, 200);
+    const healSyncResult = await healSyncPromise;
+    assert.strictEqual(healSyncResult.statusCode, 200);
+    assert.strictEqual(JSON.parse(healSyncResult.body).fileKey, "local_figlets_test");
+    assert.strictEqual(
+      JSON.parse(fs.readFileSync(path.join(TEMP_DIR, "active-file.json"), "utf8")).fileKey,
+      "local_figlets_test"
+    );
+    assert.strictEqual(
+      fs.existsSync(path.join(TEMP_DIR, "local_figlets_test", "figma-data.json")),
+      true
+    );
 
     const selectionPromise = request(port, "POST", "/request-selection", "{}");
     await new Promise(resolve => setTimeout(resolve, 20));

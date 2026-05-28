@@ -28,16 +28,62 @@ function readActiveFile() {
   try { return JSON.parse(fs.readFileSync(p, "utf-8")); } catch { return null; }
 }
 
+function healFileKeyFromFileName(fileName) {
+  const normalized = String(fileName || "").trim();
+  if (!normalized || !fs.existsSync(LOCAL_DIR)) return null;
+  try {
+    const matches = [];
+    for (const entry of fs.readdirSync(LOCAL_DIR, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidateKey = String(entry.name || "").trim();
+      if (!candidateKey) continue;
+      const dataPath = path.join(LOCAL_DIR, candidateKey, "figma-data.json");
+      if (!fs.existsSync(dataPath)) continue;
+      let snapshot = null;
+      try { snapshot = JSON.parse(fs.readFileSync(dataPath, "utf-8")); } catch { continue; }
+      if (snapshot && snapshot.fileName === normalized) matches.push(candidateKey);
+    }
+    return matches.length === 1 ? matches[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveFile(fileKey) {
+  const resolved = String(fileKey || "").trim();
+  if (!resolved) return false;
+  const dir = LOCAL_DIR;
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "active-file.json"),
+    JSON.stringify({ fileKey: resolved, updatedAt: new Date().toISOString() }, null, 2),
+    "utf-8"
+  );
+  return true;
+}
+
 function getActiveFilePaths() {
-  const active = readActiveFile();
-  return getFilePaths(active ? active.fileKey : null);
+  return getFilePaths(getActiveFileKey());
 }
 
 function getActiveFileKey() {
   const active = readActiveFile();
-  return active && typeof active.fileKey === "string" && active.fileKey.trim()
-    ? active.fileKey.trim()
-    : null;
+  if (active && typeof active.fileKey === "string" && active.fileKey.trim()) {
+    return active.fileKey.trim();
+  }
+
+  if (fs.existsSync(FIGMA_DATA_PATH)) {
+    try {
+      const snapshot = JSON.parse(fs.readFileSync(FIGMA_DATA_PATH, "utf-8"));
+      if (snapshot && typeof snapshot.fileKey === "string" && snapshot.fileKey.trim()) {
+        return snapshot.fileKey.trim();
+      }
+      const healed = healFileKeyFromFileName(snapshot && snapshot.fileName);
+      if (healed) return healed;
+    } catch (_) {}
+  }
+
+  return null;
 }
 
 function getActiveFileConfigPath() {
@@ -71,6 +117,8 @@ module.exports = {
   SELECTION_PATH,
   getFilePaths,
   readActiveFile,
+  healFileKeyFromFileName,
+  writeActiveFile,
   getActiveFileKey,
   getActiveFilePaths,
   getActiveFileConfigPath,

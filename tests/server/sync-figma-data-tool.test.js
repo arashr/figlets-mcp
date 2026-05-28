@@ -1,6 +1,9 @@
 const assert = require("assert");
+const fs = require("fs");
 const http = require("http");
 const net = require("net");
+const os = require("os");
+const path = require("path");
 const { execFileSync } = require("child_process");
 
 function freshSyncFigmaData() {
@@ -57,11 +60,17 @@ module.exports = (async () => {
 
   // Test 2: handler resolves with success content on 200
   {
+    const syncLocalDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-sync-tool-"));
+    const previousLocalDir = process.env.FIGLETS_LOCAL_DIR;
+    process.env.FIGLETS_LOCAL_DIR = syncLocalDir;
+    delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/utils/paths.js")];
+    freshSyncFigmaData();
+
     const server = await startMockReceiver(200, JSON.stringify({
       ok: true,
       fileKey: "local_active_file",
       previousFileKey: "local_previous_file",
-      dataPath: "/tmp/local_active_file/figma-data.json",
+      dataPath: path.join(syncLocalDir, "local_active_file", "figma-data.json"),
       sessionId: "test-session"
     }));
     const port = server.address().port;
@@ -73,11 +82,20 @@ module.exports = (async () => {
       assert.ok(result.content[0].text.includes("Sync complete"), "success message should mention sync complete");
       const payload = JSON.parse(result.content[0].text);
       assert.strictEqual(payload.activeFile.fileKey, "local_active_file");
-      assert.strictEqual(payload.activeFile.snapshotPath, "/tmp/local_active_file/figma-data.json");
+      assert.strictEqual(
+        payload.activeFile.snapshotPath,
+        path.join(syncLocalDir, "local_active_file", "figma-data.json")
+      );
       assert.strictEqual(payload.sessionId, "test-session");
+      const activeOnDisk = JSON.parse(fs.readFileSync(path.join(syncLocalDir, "active-file.json"), "utf8"));
+      assert.strictEqual(activeOnDisk.fileKey, "local_active_file");
     } finally {
       server.close();
       delete process.env.FIGLETS_RECEIVER_URL;
+      if (previousLocalDir === undefined) delete process.env.FIGLETS_LOCAL_DIR;
+      else process.env.FIGLETS_LOCAL_DIR = previousLocalDir;
+      fs.rmSync(syncLocalDir, { recursive: true, force: true });
+      freshSyncFigmaData();
     }
   }
 

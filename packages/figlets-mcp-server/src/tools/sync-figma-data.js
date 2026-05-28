@@ -1,4 +1,4 @@
-const { getActiveFileKey, getActiveFilePaths, getFilePaths } = require("../utils/paths.js");
+const { getActiveFileKey, getActiveFilePaths, getFilePaths, writeActiveFile } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 const { requestBridgePost } = require("../bridges/bridge-request.js");
 
@@ -31,6 +31,7 @@ function _syncErrorMessage(response) {
 }
 
 function _syncSuccessPayload(parsed, beforeFileKey) {
+  if (parsed.fileKey) writeActiveFile(parsed.fileKey);
   const afterFileKey = parsed.fileKey || getActiveFileKey();
   const activePaths = afterFileKey ? getFilePaths(afterFileKey) : getActiveFilePaths();
   const activeFileChanged = Boolean(beforeFileKey && afterFileKey && beforeFileKey !== afterFileKey);

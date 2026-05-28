@@ -40,6 +40,61 @@ function _getFileKey(req) {
   return (url.searchParams.get('fileKey') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
 }
 
+function _sanitizeFileKey(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+}
+
+function _readActiveFileKeyFromDisk() {
+  try {
+    const activePath = path.join(DEST_DIR, 'active-file.json');
+    if (!fs.existsSync(activePath)) return '';
+    const active = JSON.parse(fs.readFileSync(activePath, 'utf8'));
+    return _sanitizeFileKey(active && active.fileKey);
+  } catch (_) {
+    return '';
+  }
+}
+
+function _resolveFileKeyFromFileName(fileName) {
+  const normalized = String(fileName || '').trim();
+  if (!normalized) return '';
+  try {
+    const matches = [];
+    for (const entry of fs.readdirSync(DEST_DIR, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidateKey = _sanitizeFileKey(entry.name);
+      if (!candidateKey) continue;
+      const dataPath = path.join(DEST_DIR, candidateKey, 'figma-data.json');
+      if (!fs.existsSync(dataPath)) continue;
+      let snapshot = null;
+      try { snapshot = JSON.parse(fs.readFileSync(dataPath, 'utf8')); } catch (_) { continue; }
+      if (snapshot && snapshot.fileName === normalized) matches.push(candidateKey);
+    }
+    if (matches.length === 1) return matches[0];
+  } catch (_) {}
+  return '';
+}
+
+function _resolveFileKey(req, parsedBody) {
+  const fromQuery = _getFileKey(req);
+  if (fromQuery) return fromQuery;
+  const fromPayload = _sanitizeFileKey(parsedBody && parsedBody.fileKey);
+  if (fromPayload) return fromPayload;
+  const fromFileName = _resolveFileKeyFromFileName(parsedBody && parsedBody.fileName);
+  if (fromFileName) return fromFileName;
+  if (lastFileKey) return lastFileKey;
+  return _readActiveFileKeyFromDisk() || '';
+}
+
+function _persistSessionFileKey(req, parsedBody) {
+  const fileKey = _resolveFileKey(req, parsedBody);
+  if (fileKey) {
+    lastFileKey = fileKey;
+    _writeActiveFile(fileKey);
+  }
+  return fileKey;
+}
+
 function _filePaths(fileKey) {
   const dir = fileKey ? path.join(DEST_DIR, fileKey) : DEST_DIR;
   return {
@@ -50,10 +105,13 @@ function _filePaths(fileKey) {
 }
 
 function _writeActiveFile(fileKey) {
+  const resolved = _sanitizeFileKey(fileKey) || lastFileKey || _readActiveFileKeyFromDisk();
+  if (!resolved) return;
+  lastFileKey = resolved;
   try {
     fs.writeFileSync(
       path.join(DEST_DIR, 'active-file.json'),
-      JSON.stringify({ fileKey: fileKey || null, updatedAt: new Date().toISOString() })
+      JSON.stringify({ fileKey: resolved, updatedAt: new Date().toISOString() })
     );
   } catch (_) {}
 }
@@ -648,12 +706,14 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', () => {
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = {}; }
+      _persistSessionFileKey(req, parsed);
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true }));
 
       if (pendingSetupRepairsRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
         parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
         pendingSetupRepairsRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingSetupRepairsRequest.end(JSON.stringify({ success: true, result: parsed }));
@@ -954,14 +1014,16 @@ const server = http.createServer((req, res) => {
       body += chunk.toString();
     });
     req.on('end', () => {
-      const fp = _filePaths(_getFileKey(req));
-      const fileKey = _getFileKey(req);
+      let parsedBody = null;
+      try { parsedBody = body ? JSON.parse(body) : null; } catch (_) { parsedBody = null; }
+      const fileKey = _persistSessionFileKey(req, parsedBody);
+      const fp = _filePaths(fileKey);
       try {
         fs.mkdirSync(fp.dir, { recursive: true });
         fs.writeFileSync(fp.data, body);
         console.log('[success] Wrote payload to ' + fp.data);
 
-        _writeActiveFile(fileKey);
+        if (fileKey) _writeActiveFile(fileKey);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, fileKey: fileKey || null, dataPath: fp.data }));
@@ -1003,11 +1065,15 @@ const server = http.createServer((req, res) => {
       body += chunk.toString();
     });
     req.on('end', () => {
-      const fp = _filePaths(_getFileKey(req));
+      let parsedBody = null;
+      try { parsedBody = body ? JSON.parse(body) : null; } catch (_) { parsedBody = null; }
+      const fileKey = _persistSessionFileKey(req, parsedBody);
+      const fp = _filePaths(fileKey);
       try {
         fs.mkdirSync(fp.dir, { recursive: true });
         fs.writeFileSync(fp.selection, body);
         console.log('[success] Wrote selection to ' + fp.selection);
+        if (fileKey) _writeActiveFile(fileKey);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));

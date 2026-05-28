@@ -63,8 +63,7 @@ function writeActiveFile(fileKey) {
 }
 
 function getActiveFilePaths() {
-  const active = readActiveFile();
-  return getFilePaths(active ? active.fileKey : null);
+  return getFilePaths(getActiveFileKey());
 }
 
 function getActiveFileKey() {

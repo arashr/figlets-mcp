@@ -36,6 +36,16 @@ module.exports = (async () => {
     assert.strictEqual(paths.healFileKeyFromFileName("Figlets Test"), scopedKey);
     assert.strictEqual(paths.getActiveFileKey(), scopedKey);
 
+    const activePaths = paths.getActiveFilePaths();
+    assert.strictEqual(activePaths.data, path.join(scopedDir, "figma-data.json"));
+    assert.notStrictEqual(activePaths.data, path.join(TEMP_DIR, "figma-data.json"));
+
+    delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/bridges/figma-data-source.js")];
+    const { loadActiveFigmaDataSource } = require("../../packages/figlets-mcp-server/src/bridges/figma-data-source.js");
+    const dataSource = loadActiveFigmaDataSource({});
+    assert.strictEqual(dataSource.meta.fileKey, scopedKey);
+    assert.strictEqual(dataSource.meta.path, activePaths.data);
+
     paths.writeActiveFile(scopedKey);
     assert.strictEqual(paths.getActiveFileKey(), scopedKey);
   } finally {

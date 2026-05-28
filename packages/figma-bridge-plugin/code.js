@@ -1,5 +1,6 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
+var _bridgeBuild = '0.1.0-dev+bnn40.20260528.1';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -176,6 +177,7 @@ figma.ui.onmessage = async (msg) => {
       type: 'session-meta',
       fileKey: _getFigletsFileKey(),
       data: {
+        bridgeBuild: _bridgeBuild,
         sessionId: _sessionId,
         fileKey: _getFigletsFileKey()
       }
@@ -618,6 +620,12 @@ async function _createDsBindingContext() {
     ? semanticColl.vars.filter(function (v) { return v.resolvedType === 'COLOR'; })
     : Object.keys(varByName).map(function (k) { return varByName[k]; }).filter(function (v) { return v.resolvedType === 'COLOR'; });
   const semanticRoleVars = semanticVars.filter(function (v) { return !isDecorativeColorName(v.name); });
+  function isIconColorName(name) {
+    return /(?:^|\/)icon(?:\/|$|-)/i.test(String(name || ''));
+  }
+  function isTextColorName(name) {
+    return /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_\/]|$)|(?:^|\/)label(?:[-_\/]|$)|(?:^|\/)content(?:[-_\/]|$))/i.test(String(name || ''));
+  }
 
   function bestBgVar() {
     for (let i = 0; i < semanticRoleVars.length; i++) {
@@ -636,8 +644,12 @@ async function _createDsBindingContext() {
     for (let i = 0; i < semanticRoleVars.length; i++) {
       if (/(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(semanticRoleVars[i].name)) return semanticRoleVars[i];
     }
+    for (let i = 0; i < semanticRoleVars.length; i++) {
+      if (isTextColorName(semanticRoleVars[i].name) && !isIconColorName(semanticRoleVars[i].name)) return semanticRoleVars[i];
+    }
     let best = null, bestLum = 2;
     for (let i = 0; i < semanticRoleVars.length; i++) {
+      if (isIconColorName(semanticRoleVars[i].name)) continue;
       const c = rgb(semanticRoleVars[i]);
       if (c && lum(c) < bestLum) { best = semanticRoleVars[i]; bestLum = lum(c); }
     }
@@ -662,7 +674,7 @@ async function _createDsBindingContext() {
     'surface': { BG: 3 }, 'background': { BG: 3 }, 'bg': { BG: 2 }, 'canvas': { BG: 2 },
     'base': { BG: 1 }, 'page': { BG: 1 }, 'fill': { BG: 1 }, 'container': { BG: 1, BRAND: 1 },
     'on-surface': { FG: 3 }, 'on_surface': { FG: 3 }, 'foreground': { FG: 3 }, 'fg': { FG: 2 },
-    'text': { FG: 2 }, 'icon': { FG: 1 }, 'label': { FG: 1 }, 'content': { FG: 1 }, 'on': { FG: 1 },
+    'text': { FG: 2 }, 'icon': { ICON: 3 }, 'label': { FG: 1 }, 'content': { FG: 1 }, 'on': { FG: 1 },
     'on-brand': { FG: 2, BRAND: 2 }, 'on_brand': { FG: 2, BRAND: 2 },
     'on-primary': { FG: 2, BRAND: 2 }, 'on_primary': { FG: 2, BRAND: 2 },
     'brand': { BRAND: 2 }, 'primary': { BRAND: 2 }, 'accent': { ACCENT: 2 }, 'action': { BRAND: 1 }, 'interactive': { BRAND: 1 },
@@ -673,29 +685,41 @@ async function _createDsBindingContext() {
     'separator': { OUTLINE: 3 }, 'line': { OUTLINE: 1 },
     'success': { SUCCESS: 3 }, 'positive': { SUCCESS: 2 }, 'confirm': { SUCCESS: 1 },
     'warning': { WARNING: 3 }, 'caution': { WARNING: 2 }, 'alert': { WARNING: 1 },
-    'danger': { DANGER: 2 }, 'error': { DANGER: 2 }, 'destructive': { DANGER: 2 }
+    'danger': { DANGER: 2 }, 'error': { DANGER: 2 }, 'destructive': { DANGER: 2 },
+    'on-success': { FG: 2, SUCCESS: 2 }, 'on_success': { FG: 2, SUCCESS: 2 },
+    'on-warning': { FG: 2, WARNING: 2 }, 'on_warning': { FG: 2, WARNING: 2 },
+    'on-danger': { FG: 2, DANGER: 2 }, 'on_danger': { FG: 2, DANGER: 2 },
+    'on-info': { FG: 2 }, 'on_info': { FG: 2 }
   };
 
   const ROLE = {
-    onSurface: { FG: 3, BG: -4, VARIANT: -1, DEFAULT: 1, STRONG: 1 },
-    onSurfaceVar: { FG: 3, BG: -4, VARIANT: 2 },
+    onSurface: { FG: 3, ICON: -8, BG: -4, OUTLINE: -3, VARIANT: -1, DEFAULT: 1, STRONG: 1 },
+    onSurfaceVar: { FG: 3, ICON: -8, BG: -4, OUTLINE: -3, VARIANT: 2 },
     surfaceDefault: { BG: 3, FG: -4, VARIANT: -1, DEFAULT: 2, BRAND: -2 },
     surfaceVariant: { BG: 3, FG: -4, VARIANT: 2 },
     surfaceBrand: { BG: 2, FG: -4, BRAND: 3 },
     brandVariant: { BG: 2, FG: -4, BVAR: 3, BRAND: 1 },
-    onBrandVariant: { FG: 3, BG: -4, BRAND: 3, BVAR: 2 },
+    onBrandVariant: { FG: 3, ICON: -8, BG: -4, OUTLINE: -3, BRAND: 3, BVAR: 2 },
     outlineSubtle: { OUTLINE: 3, FG: -2, BG: -2 },
     outlineBrand: { OUTLINE: 3, FG: -2, BG: -2, BRAND: 3 },
+    iconDefault: { ICON: 3, BG: -4, OUTLINE: -3, DEFAULT: 1, STRONG: 1 },
+    iconBrand: { ICON: 3, BG: -4, OUTLINE: -3, BRAND: 3, BVAR: 2 },
     successBg: { SUCCESS: 3, BG: 2, FG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
     successBorder: { SUCCESS: 3, OUTLINE: 2, BG: -2, FG: -1, WARNING: -6, DANGER: -6 },
-    successText: { SUCCESS: 3, FG: 2, BG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+    successText: { SUCCESS: 3, FG: 2, ICON: -8, BG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
+    successIcon: { SUCCESS: 3, ICON: 3, BG: -3, OUTLINE: -2, WARNING: -6, DANGER: -6 },
     warningBg: { WARNING: 3, BG: 2, FG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
     warningBorder: { WARNING: 3, OUTLINE: 2, BG: -2, FG: -1, SUCCESS: -6, DANGER: -6 },
-    warningText: { WARNING: 3, FG: 2, BG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
+    warningText: { WARNING: 3, FG: 2, ICON: -8, BG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
+    warningIcon: { WARNING: 3, ICON: 3, BG: -3, OUTLINE: -2, SUCCESS: -6, DANGER: -6 },
     dangerBg: { DANGER: 3, BG: 2, FG: -3, OUTLINE: -2, SUCCESS: -6, WARNING: -6 },
     dangerBorder: { DANGER: 3, OUTLINE: 2, BG: -2, FG: -1, SUCCESS: -6, WARNING: -6 },
-    dangerText: { DANGER: 3, FG: 2, BG: -3, OUTLINE: -2, SUCCESS: -6, WARNING: -6 }
+    dangerText: { DANGER: 3, FG: 2, ICON: -8, BG: -3, OUTLINE: -2, SUCCESS: -6, WARNING: -6 },
+    dangerIcon: { DANGER: 3, ICON: 3, BG: -3, OUTLINE: -2, SUCCESS: -6, WARNING: -6 }
   };
+  function isTextRole(role) {
+    return role === 'onSurface' || role === 'onSurfaceVar' || role === 'onBrandVariant' || /Text$/.test(String(role || ''));
+  }
 
   function pathCats(name) {
     const segments = String(name).toLowerCase().split('/');
@@ -715,22 +739,29 @@ async function _createDsBindingContext() {
     for (const cat in weights) total += weights[cat] * (cats[cat] || 0);
     return total;
   }
+  function adjustedSegScore(name, role, score) {
+    const n = String(name || '');
+    if (role === 'successText' && /(?:^|\/)on[-_]success(?:\/|$)/i.test(n)) return score - 6;
+    if (role === 'warningText' && /(?:^|\/)on[-_]warning(?:\/|$)/i.test(n)) return score - 6;
+    if (role === 'dangerText' && /(?:^|\/)on[-_]danger(?:\/|$)/i.test(n)) return score - 6;
+    return score;
+  }
 
   const scored = Object.keys(varByName).map(function (k) {
     const v = varByName[k];
     if (v.resolvedType !== 'COLOR') return null;
     if (isDecorativeColorName(v.name)) return null;
     const c = rgb(v);
-    if (!c) return null;
-    return { v: v, rgb: c, lum: lum(c), sat: sat(c), contrast: contrastRatio(c, bgRGB), name: v.name.toLowerCase() };
+    return { v: v, rgb: c, lum: c ? lum(c) : 0, sat: c ? sat(c) : 0, contrast: c ? contrastRatio(c, bgRGB) : 0, name: v.name.toLowerCase() };
   }).filter(Boolean);
 
   function pickColorRole(role, scorer, nameOnly, requiredCats, compareBg) {
     let best = null, bestSeg = 0;
     for (let i = 0; i < scored.length; i++) {
       const s = scored[i];
-      const seg = segScore(s.name, role);
+      const seg = adjustedSegScore(s.name, role, segScore(s.name, role));
       if (seg <= 0) continue;
+      if (isTextRole(role) && isIconColorName(s.name)) continue;
       if (requiredCats) {
         const cats = pathCats(s.name);
         let ok = true;
@@ -747,6 +778,7 @@ async function _createDsBindingContext() {
     if (nameOnly || requiredCats) return null;
     let funcBest = null, funcScore = 0;
     for (let i = 0; i < scored.length; i++) {
+      if (isTextRole(role) && isIconColorName(scored[i].name)) continue;
       const score = scorer(scored[i]);
       if (score > funcScore) { funcScore = score; funcBest = scored[i]; }
     }
@@ -788,12 +820,17 @@ async function _createDsBindingContext() {
       return (1 - s.sat) * (1 - dist * 2);
     }, false, ['OUTLINE']),
     outlineBrand: pickColorRole('outlineBrand', function (s) { return s.sat * 0.5 + s.lum * 0.5; }, false, ['OUTLINE']),
+    iconDefault: pickColorRole('iconDefault', function (s) { return s.contrast >= 3 ? s.contrast : 0; }, false, ['ICON']),
+    iconBrand: pickColorRole('iconBrand', function (s) { return s.contrast >= 3 ? s.contrast : 0; }, false, ['ICON', 'BRAND']),
     successBg: pickColorRole('successBg', function (s) { return s.sat; }, true, ['BG', 'SUCCESS']),
     successBorder: pickColorRole('successBorder', function (s) { return s.sat; }, true, ['OUTLINE', 'SUCCESS']),
     successText: pickColorRole('successText', function (s) { return s.contrast >= 4.5 ? s.contrast : 0; }, true, ['FG', 'SUCCESS']),
+    successIcon: pickColorRole('successIcon', function (s) { return s.contrast >= 3 ? s.contrast : 0; }, true, ['ICON', 'SUCCESS']),
+    warningIcon: pickColorRole('warningIcon', function (s) { return s.contrast >= 3 ? s.contrast : 0; }, true, ['ICON', 'WARNING']),
     dangerBg: pickColorRole('dangerBg', function (s) { return s.sat; }, true, ['BG', 'DANGER']),
     dangerBorder: pickColorRole('dangerBorder', function (s) { return s.sat; }, true, ['OUTLINE', 'DANGER']),
-    dangerText: pickColorRole('dangerText', function (s) { return s.contrast >= 4.5 ? s.contrast : 0; }, true, ['FG', 'DANGER'])
+    dangerText: pickColorRole('dangerText', function (s) { return s.contrast >= 4.5 ? s.contrast : 0; }, true, ['FG', 'DANGER']),
+    dangerIcon: pickColorRole('dangerIcon', function (s) { return s.contrast >= 3 ? s.contrast : 0; }, true, ['ICON', 'DANGER'])
   };
   if (!colorRoles.brandVariant) colorRoles.brandVariant = colorRoles.surfaceBrand || colorRoles.surfaceVariant || null;
   const brandRGB = rgb(colorRoles.brandVariant) || { r: 0.957, g: 0.953, b: 0.988 };
@@ -1297,7 +1334,14 @@ async function _runQaBindingAudit(opts) {
       if (/danger|error|destructive/.test(name)) return 'dangerBorder';
       return 'outlineSubtle';
     }
-    if (node.type === 'TEXT' || /text|label|icon|glyph|content/.test(name)) {
+    if (node.type !== 'TEXT' && /icon|glyph/.test(name)) {
+      if (/success|positive|confirm/.test(name)) return 'successIcon';
+      if (/warning|caution|alert/.test(name)) return 'warningIcon';
+      if (/danger|error|destructive/.test(name)) return 'dangerIcon';
+      if (/brand|primary|accent/.test(name)) return 'iconBrand';
+      return 'iconDefault';
+    }
+    if (node.type === 'TEXT' || /text|label|content/.test(name)) {
       if (/success|positive|confirm/.test(name)) return 'successText';
       if (/danger|error|destructive/.test(name)) return 'dangerText';
       if (/brand|primary|accent/.test(name)) return 'onBrandVariant';
@@ -8110,6 +8154,9 @@ async function _buildComponentDoc(opts) {
   const _vBorder  = _ds.colorRoles.outlineSubtle;
   const _vDo      = _ds.colorRoles.successBorder || _ds.colorRoles.successBg || _ds.colorRoles.onSurface;
   const _vDont    = _ds.colorRoles.dangerBorder || _ds.colorRoles.dangerBg || _ds.colorRoles.onSurface;
+  const _vDoText  = _ds.colorRoles.successText || _ds.colorRoles.onSurface || _ds.colorRoles.text;
+  const _vDontText = _ds.colorRoles.dangerText || _ds.colorRoles.onSurface || _ds.colorRoles.text;
+  const _vBadgeText = _ds.colorRoles.dangerText || _ds.colorRoles.onSurface || _ds.colorRoles.text;
   const _cPaper   = _ds.resolvedOrFallback(_vPaper, { r: 0.961, g: 0.941, b: 0.922 });
   const _cSurface = _ds.resolvedOrFallback(_vSurface, { r: 0.937, g: 0.918, b: 0.898 });
   const _cInk     = _ds.resolvedOrFallback(_vInk, { r: 0.071, g: 0.071, b: 0.078 });
@@ -8118,6 +8165,9 @@ async function _buildComponentDoc(opts) {
   const _cBorder  = _ds.resolvedOrFallback(_vBorder, { r: 0.851, g: 0.831, b: 0.804 });
   const _cDo      = _ds.resolvedOrFallback(_vDo, { r: 0.133, g: 0.545, b: 0.133 });
   const _cDont    = _ds.resolvedOrFallback(_vDont, { r: 0.863, g: 0.133, b: 0.000 });
+  const _cDoText  = _ds.resolvedOrFallback(_vDoText, _cDo);
+  const _cDontText = _ds.resolvedOrFallback(_vDontText, _cDont);
+  const _cBadgeText = _ds.resolvedOrFallback(_vBadgeText, { r: 1, g: 1, b: 1 });
 
   const _docSpace = {
     padS: _ds.pickFloatByValue(8, 'spacing'),
@@ -8132,7 +8182,7 @@ async function _buildComponentDoc(opts) {
   };
 
   const _docTextRoles = {
-    title: ['type/display/lg', 'display/lg', 'display large', 'type/headline/lg', 'headline/lg', 'title/lg', 'title large'],
+    title: ['type/headline/lg', 'headline/lg', 'type/headline/md', 'headline/md', 'type/title/lg', 'title/lg', 'title large', 'type/title/md', 'title/md', 'title medium'],
     subtitle: ['type/body/lg', 'body/lg', 'body large', 'type/body/md', 'body/md', 'body medium', 'paragraph'],
     sectionLabel: ['type/label/sm', 'label/sm', 'label small', 'caption', 'overline'],
     bodyStrong: ['type/label/md', 'label/md', 'label medium', 'type/body/md', 'body/md', 'body medium'],
@@ -8145,11 +8195,24 @@ async function _buildComponentDoc(opts) {
   });
   const _docBindingWarnings = [];
   const _docBindingWarningSet = {};
+  const _docBindingDiagnostics = {
+    implementation: 'bnn-40-shared-color-role-bindings-v2',
+    badgeTextVariable: _vBadgeText ? _vBadgeText.name : null,
+    firstBadgeTextFillVariable: null,
+    firstBadgeTextFillColor: null
+  };
 
   function _warnBinding(message) {
     if (!message || _docBindingWarningSet[message]) return;
     _docBindingWarningSet[message] = true;
     _docBindingWarnings.push(message);
+  }
+  function _boundPaintColorVarName(paint) {
+    const bound = paint && paint.boundVariables && paint.boundVariables.color;
+    const id = bound && bound.id ? bound.id : null;
+    if (!id) return null;
+    const variable = _ds.varById[id];
+    return variable ? variable.name : id;
   }
   Object.keys(_docSpace).forEach(function (key) {
     if (!_docSpace[key]) _warnBinding('No numeric variable found for doc ' + key + '; using raw layout value.');
@@ -8493,7 +8556,12 @@ async function _buildComponentDoc(opts) {
       _b.layoutPositioning = 'ABSOLUTE'; _b.x = bx; _b.y = by;
       const _nt = figma.createText();
       _nt.characters = String(n);
-      _applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, { r: 1, g: 1, b: 1 }, null);
+      _applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, _cBadgeText, _vBadgeText);
+      if (n === 1) {
+        const _fill = Array.isArray(_nt.fills) && _nt.fills.length ? _nt.fills[0] : null;
+        _docBindingDiagnostics.firstBadgeTextFillVariable = _boundPaintColorVarName(_fill);
+        if (_fill && _fill.color) _docBindingDiagnostics.firstBadgeTextFillColor = _toHex(_fill.color.r, _fill.color.g, _fill.color.b);
+      }
       _nt.textAlignHorizontal = 'CENTER'; _nt.textAlignVertical = 'CENTER';
       _nt.resize(_BS, _BS);
       _wrapper.appendChild(_nt);
@@ -8541,7 +8609,7 @@ async function _buildComponentDoc(opts) {
     parent.appendChild(panel); panel.layoutSizingHorizontal = 'FILL';
     const lbl = figma.createText();
     lbl.characters = label;
-    _applyTextRole(lbl, 'bodyStrong', 13, _fSemi, borderColor, label === 'Do' ? _vDo : _vDont);
+    _applyTextRole(lbl, 'bodyStrong', 13, _fSemi, label === 'Do' ? _cDoText : _cDontText, label === 'Do' ? _vDoText : _vDontText);
     panel.appendChild(lbl); lbl.textAutoResize = 'WIDTH_AND_HEIGHT';
     for (let i = 0; i < rules.length; i++) {
       const rt = figma.createText();
@@ -8764,6 +8832,7 @@ async function _buildComponentDoc(opts) {
     },
     bindingsCount: resolved.length,
     bindingWarnings: _docBindingWarnings,
+    bindingDiagnostics: _docBindingDiagnostics,
     anatomyCount: _anatomyMd.length,
     selectionContext: {
       fileName: figma.root ? figma.root.name : '',

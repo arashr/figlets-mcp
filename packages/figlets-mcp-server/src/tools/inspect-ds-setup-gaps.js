@@ -1844,63 +1844,156 @@ function _buildRepairPlan(result) {
     missingCapabilityNotes,
     designerPresentation,
     agentInstruction: total
-      ? "Show these exact repairs in plain language and ask the designer which to apply. If approved, pass repairPlan.applyInput to apply_ds_setup_repairs; do not parse local tool-results files. Optional convention-level repairs in repairPlan.optionalApplyInput require separate designer approval before applying. Do not infer or create missing backgrounds unless Figlets provides an explicit background repair payload."
+      ? "Before asking for approval, show every entry in repairPlan.designerPresentation.proposedChanges.readyToApply (or the matching What will change section) with exact token, action, mode aliases, and reason — not only a count. If approved, pass repairPlan.applyInput to apply_ds_setup_repairs unchanged; do not parse local tool-results files. Optional convention-level repairs in repairPlan.designerPresentation.proposedChanges.optional require separate designer approval before applying repairPlan.optionalApplyInput. Do not infer or create missing backgrounds unless Figlets provides an explicit background repair payload."
       : optionalTotal
         ? "Do not treat optional convention-level repairs as health-check failures. Explain repairPlan.optionalApplyInput in plain language, ask whether the designer wants those roles created, and only pass that payload to apply_ds_setup_repairs after explicit approval. Do not infer or create missing backgrounds unless Figlets provides an explicit background repair payload."
         : "Do not invent repairs or parse local tool-results files. Explain which findings need a product/tooling follow-up or designer decision, especially missing backgrounds with no explicit repair payload.",
   };
 }
 
-function _plainRoleList(items) {
-  return (items || []).slice(0, 6).map(item => item.name).filter(Boolean);
+function _formatModeAliasLine(aliases) {
+  if (!aliases || typeof aliases !== "object") return "";
+  return Object.entries(aliases)
+    .map(([mode, target]) => `${mode} → ${target}`)
+    .join("; ");
+}
+
+function _aliasUpdateReason(update) {
+  const token = update && update.token ? update.token : "";
+  if (token.includes("/icon/")) return "icon contrast fix";
+  return "contrast fix";
+}
+
+function _roleReason(role) {
+  if (role === "border") return "missing passive border role";
+  if (role === "icon") return "missing icon role";
+  return `missing ${role} role`;
+}
+
+function _buildProposedSetupChanges(context) {
+  const readyToApply = [];
+  const optional = [];
+  const needsDesignerDecision = [];
+
+  for (const repair of context.repairs || []) {
+    const token = repair.recommended || repair.name;
+    const aliases = repair.aliases || {};
+    readyToApply.push({
+      tier: "ready to apply",
+      token,
+      action: "create companion",
+      modes: Object.entries(aliases).map(([mode, target]) => ({ mode, target })),
+      reason: "missing companion",
+      summaryLine: `Create companion ${token} for ${repair.bg}: ${_formatModeAliasLine(aliases)} (missing companion).`,
+    });
+  }
+
+  for (const update of context.aliasUpdates || []) {
+    const from = update.expectedCurrentAlias;
+    const to = update.newAliasTarget;
+    const modeEntry = { mode: update.mode, target: to };
+    if (from) modeEntry.from = from;
+    const reason = _aliasUpdateReason(update);
+    const modeText = from
+      ? `${update.mode}: ${from} → ${to}`
+      : `${update.mode} → ${to}`;
+    readyToApply.push({
+      tier: "ready to apply",
+      token: update.token,
+      action: "re-alias",
+      modes: [modeEntry],
+      reason,
+      summaryLine: `Re-alias ${update.token} in ${modeText} (${reason}).`,
+    });
+  }
+
+  for (const repair of context.roleRepairs || []) {
+    const aliases = repair.aliases || {};
+    const reason = _roleReason(repair.role);
+    readyToApply.push({
+      tier: "ready to apply",
+      token: repair.name,
+      action: "create role",
+      modes: Object.entries(aliases).map(([mode, target]) => ({ mode, target })),
+      reason,
+      summaryLine: `Create ${repair.role} role ${repair.name}: ${_formatModeAliasLine(aliases)} (${reason}).`,
+    });
+  }
+
+  for (const repair of context.optionalRoleRepairs || []) {
+    const aliases = repair.aliases || {};
+    const reason = _roleReason(repair.role);
+    optional.push({
+      tier: "optional",
+      token: repair.name,
+      action: "create role",
+      modes: Object.entries(aliases).map(([mode, target]) => ({ mode, target })),
+      reason,
+      summaryLine: `Optionally create ${repair.role} role ${repair.name}: ${_formatModeAliasLine(aliases)} (${reason}).`,
+    });
+  }
+
+  for (const note of context.missingCapabilityNotes || []) {
+    if (note.kind !== "missing-background") continue;
+    const token = note.token || note.suggestedName || note.family;
+    needsDesignerDecision.push({
+      tier: "needs designer decision",
+      token,
+      action: "design decision",
+      reason: "missing background",
+      summaryLine: note.token
+        ? `${token} needs a background role decision before Figlets can create anything.`
+        : `${note.family || "semantic family"} needs a background role decision.`,
+    });
+  }
+
+  return { readyToApply, optional, needsDesignerDecision };
 }
 
 function _buildDesignerPresentation(context) {
   const result = context.result || {};
   const summary = result.summary || {};
+  const proposedChanges = _buildProposedSetupChanges(context);
   const lines = [];
   const sections = [];
 
   if (context.total > 0) {
-    const roleNames = _plainRoleList(context.roleRepairs);
-    lines.push(`I found ${context.total} safe repair${context.total === 1 ? "" : "s"} Figlets can apply after you approve.`);
-    if (roleNames.length) {
-      sections.push({
-        title: "Ready to fix",
-        message: `Figlets can create or update these semantic roles: ${roleNames.join(", ")}${context.roleRepairs.length > roleNames.length ? ", and more" : ""}.`,
-      });
-    }
-    if ((context.aliasUpdates || []).length) {
-      sections.push({
-        title: "Contrast aliases",
-        message: `Figlets can update ${(context.aliasUpdates || []).length} alias${context.aliasUpdates.length === 1 ? "" : "es"} that failed contrast checks.`,
-      });
-    }
+    lines.push(
+      `I found ${context.total} safe repair${context.total === 1 ? "" : "s"} Figlets can apply after you approve. Each proposed change is listed below before you decide.`
+    );
+    sections.push({
+      title: "What will change (ready to apply)",
+      message: proposedChanges.readyToApply.map(change => change.summaryLine).join("\n"),
+      items: proposedChanges.readyToApply.map(change => change.summaryLine),
+    });
   } else {
     lines.push("I do not see any required one-click setup repairs for Figlets to apply right now.");
   }
 
   if (context.optionalTotal > 0) {
-    const optionalNames = _plainRoleList(context.optionalRoleRepairs);
-    lines.push(`There ${context.optionalTotal === 1 ? "is" : "are"} also ${context.optionalTotal} optional passive border/outline/stroke role${context.optionalTotal === 1 ? "" : "s"} Figlets can create if you want that convention.`);
+    lines.push(
+      `There ${context.optionalTotal === 1 ? "is" : "are"} also ${context.optionalTotal} optional passive border/outline/stroke role${context.optionalTotal === 1 ? "" : "s"} available separately — not required for a healthy check.`
+    );
     sections.push({
-      title: "Optional convention",
-      message: `These are not health-check failures. They are available as an optional bulk setup choice${optionalNames.length ? `: ${optionalNames.join(", ")}${context.optionalRoleRepairs.length > optionalNames.length ? ", and more" : ""}.` : "."}`,
+      title: "Optional convention (separate approval)",
+      message: proposedChanges.optional.map(change => change.summaryLine).join("\n"),
+      items: proposedChanges.optional.map(change => change.summaryLine),
     });
   }
 
-  if ((context.missingCapabilityNotes || []).length) {
-    const missingBg = context.missingCapabilityNotes.filter(note => note.kind === "missing-background");
-    if (missingBg.length) {
-      lines.push(`${missingBg.length} background role${missingBg.length === 1 ? " needs" : "s need"} your design decision before Figlets can create anything.`);
-      sections.push({
-        title: "Needs your call",
-        message: "Figlets found foreground/icon/border roles without a paired background. It will not guess those background aliases from usage.",
-      });
-    }
+  if (proposedChanges.needsDesignerDecision.length) {
+    const missingBg = proposedChanges.needsDesignerDecision;
+    lines.push(
+      `${missingBg.length} background role${missingBg.length === 1 ? " needs" : "s need"} your design decision before Figlets can create anything.`
+    );
+    sections.push({
+      title: "Needs your call (not in apply payload)",
+      message: missingBg.map(change => change.summaryLine).join("\n"),
+      items: missingBg.map(change => change.summaryLine),
+    });
   }
 
-  if (!context.total && !context.optionalTotal && !(context.missingCapabilityNotes || []).length) {
+  if (!context.total && !context.optionalTotal && !proposedChanges.needsDesignerDecision.length) {
     lines[0] = "The semantic color setup looks clean from this QA pass.";
   }
 
@@ -1909,25 +2002,29 @@ function _buildDesignerPresentation(context) {
     tone: "plain-language",
     sayToDesigner: lines,
     sections,
+    proposedChanges,
     approvalPrompt: context.total > 0
-      ? "Do you want me to apply the ready-to-fix payload now?"
+      ? "Review the ready-to-apply changes above, then tell me which entries to apply (or approve all)."
       : context.optionalTotal > 0
-        ? "Do you want Figlets to create the optional passive border/outline/stroke roles?"
+        ? "Review the optional convention changes above. Do you want Figlets to create those roles?"
         : null,
     avoid: [
+      "Do not ask for approval using only a repair count — show the exact What will change lines first.",
       "Do not present this as a verification checklist.",
       "Do not dump repairPlan JSON unless the designer asks for exact payload details.",
       "Do not describe absent optional payloads as failures.",
+      "Do not mix optional or needs-designer-decision items into the ready-to-apply apply payload.",
     ],
     sourceFields: [
       "repairPlan.applyInput",
       "repairPlan.optionalApplyInput",
       "repairPlan.missingCapabilityNotes",
+      "repairPlan.designerPresentation.proposedChanges",
     ],
     summaryCounts: {
       readyRepairs: context.total,
       optionalRepairs: context.optionalTotal,
-      missingBackgroundDecisions: (context.missingCapabilityNotes || []).filter(note => note.kind === "missing-background").length,
+      missingBackgroundDecisions: proposedChanges.needsDesignerDecision.length,
       findings: {
         missingBackgrounds: summary.missingBackgroundCount || 0,
         semanticRoleGaps: summary.missingSemanticRoleCount || 0,

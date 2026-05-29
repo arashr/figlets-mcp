@@ -88,7 +88,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     forbiddenAliasSubstitutes: ["counts", "summaries", "booleans", "prose-derived values"],
   },
   designerPresentationRule:
-    "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
+    "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Before approval, show every ready-to-apply entry from designerPresentation.proposedChanges or the What will change section (token, action, mode aliases, reason) — not only a count. Keep optional and needs-designer-decision tiers separate. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
   missingCapabilityResponse: "If the Figlets workflow output does not expose the needed planner or apply payload, say this is a Figlets product/tool gap or proposed Figlets bulk-update scope instead of inventing a script or saying the gaps cannot be fixed.",
 };
 
@@ -208,7 +208,7 @@ const WORKFLOWS = [
       {
         id: "approve-repairs",
         kind: "confirmation",
-        designerMessage: "If the QA found setup gaps, I'll summarize them in designer-friendly language, separate required fixes from optional convention choices, and ask which exact repairPlan.applyInput entries you want applied.",
+        designerMessage: "If the QA found setup gaps, I'll list each exact proposed change from repairPlan.designerPresentation (token, action, Light/Dark aliases, reason), keep optional convention repairs separate, and ask which repairPlan.applyInput entries you want applied.",
       },
       {
         id: "apply-approved-repairs",

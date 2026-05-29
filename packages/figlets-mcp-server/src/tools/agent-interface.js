@@ -662,7 +662,7 @@ function handleFigletsWorkflowGuide(args) {
     workflow,
     hardRules: DESIGNER_FLOW_HARD_RULES,
     availableWorkflows: listWorkflows().map(item => ({ id: item.id, title: item.title })),
-    presentationRule: "For inspect_ds_setup_gaps, prefer repairPlan.designerPresentation. For inspect_ds_token_gaps and qa_binding_audit, prefer repairPlan, byFixability, and plain-language counts over raw violation dumps. Avoid technical verification matrices unless the designer asks for exact details.",
+    presentationRule: "For inspect_ds_setup_gaps, prefer repairPlan.designerPresentation and show every ready-to-apply proposed change (proposedChanges or What will change) before asking approval — not only counts. For inspect_ds_token_gaps and qa_binding_audit, prefer repairPlan, byFixability, and plain-language counts over raw violation dumps. Avoid technical verification matrices unless the designer asks for exact details.",
     bulkRepairRouting: DESIGNER_FLOW_HARD_RULES.bulkRepairRouting,
     message: `Workflow guide: ${workflow.title}. Follow the steps in order, use the named Figlets tools/scripts only, follow bulkRepairRouting when choosing repair surfaces, use structured repairPlan payloads when Figlets provides them, summarize tool output in plain language, and ask for approval before any write step.`,
   };

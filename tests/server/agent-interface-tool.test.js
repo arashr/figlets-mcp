@@ -278,7 +278,7 @@ try {
     ]);
     assert.ok(guide.summary.includes("semantic setup"));
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
-    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("designer-friendly language")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("each exact proposed change")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("repairPlan.applyInput")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.designerMessage.includes("preserving each aliases object unchanged")));
     assert.ok(!guide.next.includes("setup-gap-qa"));
@@ -301,6 +301,7 @@ try {
     assert.ok(handled.message.includes("bulkRepairRouting"));
     assert.ok(handled.message.includes("structured repairPlan payloads"));
     assert.ok(handled.presentationRule.includes("designerPresentation"));
+    assert.ok(handled.presentationRule.includes("What will change"));
     assert.ok(handled.presentationRule.includes("Avoid technical verification matrices"));
   }
 

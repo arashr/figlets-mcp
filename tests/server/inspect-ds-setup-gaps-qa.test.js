@@ -274,6 +274,22 @@ module.exports = (() => {
     universalPlan.designerPresentation.sayToDesigner.some(line => line.includes("optional passive border/outline/stroke")),
     "optional convention repairs should have a plain-language designer summary"
   );
+  assert.strictEqual(
+    universalPlan.designerPresentation.proposedChanges.readyToApply.length,
+    universalPlan.counts.total,
+    "ready-to-apply proposedChanges should match repair count"
+  );
+  assert.strictEqual(
+    universalPlan.designerPresentation.proposedChanges.optional.length,
+    universalPlan.counts.optionalTotal,
+    "optional proposedChanges should match optional repair count"
+  );
+  assert.ok(
+    universalPlan.designerPresentation.proposedChanges.readyToApply.every(change =>
+      change.token && change.action && change.summaryLine
+    ),
+    "each ready repair should expose token, action, and summary line"
+  );
 
   // ── plannedReAlias: contrast failures should carry the picker's upgrade ──
   // The handler-level path is the one that attaches plannedReAlias, since the

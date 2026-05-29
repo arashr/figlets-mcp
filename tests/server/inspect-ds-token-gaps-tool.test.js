@@ -157,6 +157,100 @@ module.exports = (() => {
   assert.ok(gapNames.indexOf("type/body/md") === -1, "existing text styles should not be reported as missing");
 
   {
+    const spacingAliasPlan = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [
+        {
+          id: "primitives",
+          name: "1. Primitives",
+          variableIds: ["space-12", "space-16", "space-24", "space-32"],
+          modes: [{ modeId: "default", name: "Default" }],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          variableIds: ["layout-lg", "touch-comfortable"],
+          modes: [
+            { modeId: "mobile", name: "Mobile" },
+            { modeId: "tablet", name: "Tablet" },
+            { modeId: "desktop", name: "Desktop" },
+          ],
+        },
+      ],
+      variables: [
+        {
+          id: "space-12",
+          name: "space/12",
+          resolvedType: "FLOAT",
+          valuesByMode: { default: 12 },
+        },
+        {
+          id: "space-16",
+          name: "space/16",
+          resolvedType: "FLOAT",
+          valuesByMode: { default: 16 },
+        },
+        {
+          id: "space-24",
+          name: "space/24",
+          resolvedType: "FLOAT",
+          valuesByMode: { default: 24 },
+        },
+        {
+          id: "space-32",
+          name: "space/32",
+          resolvedType: "FLOAT",
+          valuesByMode: { default: 32 },
+        },
+        {
+          id: "component-md",
+          name: "space/component/md",
+          resolvedType: "FLOAT",
+          valuesByMode: { mobile: 12, tablet: 16, desktop: 16 },
+        },
+        {
+          id: "layout-lg",
+          name: "space/layout/lg",
+          resolvedType: "FLOAT",
+          valuesByMode: {
+            mobile: { type: "VARIABLE_ALIAS", id: "space-16" },
+            tablet: 24,
+            desktop: 32,
+          },
+        },
+      ],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["spacing-semantics"],
+    });
+
+    assert.deepStrictEqual(
+      spacingAliasPlan.repairPlan.applyInput.categories,
+      ["spacing-semantics"],
+      "raw semantic spacing values with matching primitives should produce an apply-ready spacing-semantics plan"
+    );
+    const spacingAliasRepairs = spacingAliasPlan.tokenGaps.filter(gap => gap.gapType === "spacing-alias-repair");
+    assert.ok(
+      spacingAliasRepairs.some(gap => gap.name === "space/component/md"),
+      "planner should include spacing alias repair gaps for raw semantic spacing variables"
+    );
+    const componentMd = spacingAliasRepairs.find(gap => gap.name === "space/component/md");
+    assert.ok(
+      componentMd.updates.some(update => update.modeName === "Mobile" && update.toAliasName === "space/12"),
+      "planner should expose exact mode-level alias target for approval"
+    );
+    assert.ok(
+      spacingAliasPlan.repairPlan.designerPresentation.proposedChanges.some(change =>
+        change.token === "space/component/md"
+        && change.mode === "Mobile"
+        && change.toAlias === "space/12"
+      ),
+      "designer presentation should include exact token/mode alias mapping"
+    );
+  }
+
+  {
     const elevationVariables = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
       collections: [{ name: "5. Elevation" }],
       variables: [

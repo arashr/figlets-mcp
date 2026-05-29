@@ -168,6 +168,10 @@ function _variableByName(figmaData) {
   return map;
 }
 
+function _isAliasValue(value) {
+  return Boolean(value && typeof value === "object" && value.type === "VARIABLE_ALIAS" && typeof value.id === "string");
+}
+
 function _styleNameSet(figmaData, key) {
   const styles = Array.isArray(figmaData && figmaData[key]) ? figmaData[key] : [];
   return new Set(styles.filter(s => s && typeof s.name === "string").map(s => s.name));
@@ -238,6 +242,79 @@ function _missingFoundationModes(ds, kind, collectionName, figmaData) {
   const expected = _foundationModesForKind(ds, kind);
   const actual = new Set(actualNames);
   return expected.filter(mode => !actual.has(mode));
+}
+
+function _primitiveVariableIdByName(figmaData, primitivesCollectionName) {
+  const collections = Array.isArray(figmaData && figmaData.collections) ? figmaData.collections : [];
+  const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
+  if (!primitivesCollectionName) return new Map();
+  const primitiveCollection = collections.find(collection => collection && collection.name === primitivesCollectionName);
+  if (!primitiveCollection || !Array.isArray(primitiveCollection.variableIds)) return new Map();
+  const byId = new Map();
+  for (const variable of variables) {
+    if (variable && variable.id) byId.set(variable.id, variable);
+  }
+  const map = new Map();
+  for (const variableId of primitiveCollection.variableIds) {
+    const variable = byId.get(variableId);
+    if (variable && typeof variable.name === "string") map.set(variable.name, variable.id);
+  }
+  return map;
+}
+
+function _sanitizeSpaceStep(step) {
+  return String(step).replace(".", "-");
+}
+
+function _spacingModeOrder(ds, figmaData, spacingCollectionName) {
+  const collectionRecord = _collectionRecordByName(figmaData, spacingCollectionName);
+  if (!collectionRecord || !Array.isArray(collectionRecord.modes) || !collectionRecord.modes.length) return [];
+  const expectedModes = ds && ds.breakpoints && Array.isArray(ds.breakpoints.modes) && ds.breakpoints.modes.length
+    ? ds.breakpoints.modes.map(mode => String(mode || "").trim().toLowerCase()).filter(Boolean)
+    : ["mobile", "tablet", "desktop"];
+  return collectionRecord.modes.map((mode, modeIndex) => {
+    const modeName = String(mode && mode.name || "").trim();
+    let bpIndex = modeIndex;
+    if (modeName) {
+      const exact = expectedModes.indexOf(modeName.toLowerCase());
+      if (exact >= 0) bpIndex = exact;
+    }
+    return { modeId: mode.modeId, modeName: modeName || ("Mode " + String(modeIndex + 1)), bpIndex };
+  });
+}
+
+function _semanticSpacingAliasRepairs(ds, figmaData, variableMap) {
+  const repairs = [];
+  const spacingCollectionName = ds && ds.collections && ds.collections.spacing || "4. Spacing";
+  const primitiveCollectionName = ds && ds.collections && ds.collections.primitives || "1. Primitives";
+  const modeOrder = _spacingModeOrder(ds, figmaData, spacingCollectionName);
+  if (!modeOrder.length) return repairs;
+  const semantic = ds && ds.spacing && ds.spacing.semantic ? ds.spacing.semantic : {};
+  const primitiveByName = _primitiveVariableIdByName(figmaData, primitiveCollectionName);
+  for (const key of Object.keys(semantic)) {
+    const tokenName = "space/" + key;
+    const variable = variableMap.get(tokenName);
+    if (!variable || variable.resolvedType !== "FLOAT" || !variable.valuesByMode || typeof variable.valuesByMode !== "object") continue;
+    const values = Array.isArray(semantic[key]) ? semantic[key] : [semantic[key]];
+    const updates = [];
+    for (const mode of modeOrder) {
+      const desiredRaw = values[mode.bpIndex] != null ? values[mode.bpIndex] : values[values.length - 1];
+      const aliasName = "space/" + _sanitizeSpaceStep(desiredRaw);
+      const aliasId = primitiveByName.get(aliasName);
+      if (!aliasId) continue;
+      const currentValue = variable.valuesByMode[mode.modeId];
+      if (_isAliasValue(currentValue) && currentValue.id === aliasId) continue;
+      updates.push({
+        modeId: mode.modeId,
+        modeName: mode.modeName,
+        from: currentValue,
+        toAliasName: aliasName,
+        toAliasId: aliasId,
+      });
+    }
+    if (updates.length) repairs.push({ name: tokenName, updates });
+  }
+  return repairs;
 }
 
 const PRUNE_VARIABLE_PREFIXES_BY_COLLECTION = {
@@ -527,6 +604,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const textStyleNames = _styleNameSet(figmaData, "textStyles");
   const effectStyleNames = _styleNameSet(figmaData, "effectStyles");
   const collectionNames = _collectionNameSet(figmaData);
+  const spacingAliasRepairs = _semanticSpacingAliasRepairs(ds, figmaData, variableMap);
+  const spacingAliasRepairByName = new Map(spacingAliasRepairs.map(item => [item.name, item]));
 
   const tokenGaps = [];
   const existingUpdates = [];
@@ -657,6 +736,18 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
           reason: "Phase 3A records the request but does not compare live values for stale updates yet.",
         }));
       }
+      if (category === "spacing-semantics" && existing && existing.resolvedType === item.expectedType) {
+        const plannedAliasRepair = spacingAliasRepairByName.get(item.name);
+        if (plannedAliasRepair) {
+          tokenGaps.push(Object.assign({}, item, {
+            gapType: "spacing-alias-repair",
+            kind: "variable",
+            updates: plannedAliasRepair.updates,
+            reason: "This semantic spacing variable uses raw values where matching primitive spacing aliases already exist.",
+          }));
+          supportedCategoriesWithGaps.add(category);
+        }
+      }
     }
   }
 
@@ -671,6 +762,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const missingVariables = tokenGaps.filter(gap => gap.gapType === "missing-variable");
   const missingStyles = tokenGaps.filter(gap => gap.gapType === "missing-style");
   const typeMismatches = tokenGaps.filter(gap => gap.gapType === "type-mismatch");
+  const spacingAliasRepairGaps = tokenGaps.filter(gap => gap.gapType === "spacing-alias-repair");
   const categoriesWithGaps = Array.from(supportedCategoriesWithGaps).sort();
   for (const category of categoriesWithGaps) {
     if (APPLY_CATEGORIES.has(category) || PRIMITIVE_APPLY_CATEGORIES.has(category) || ORCHESTRATION_APPLY_CATEGORIES.has(category)) continue;
@@ -691,10 +783,11 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     missingVariables,
     missingStyles,
     typeMismatches,
+    spacingAliasRepairs: spacingAliasRepairGaps,
   });
   const summary = {
     missingVariableCount: missingVariables.length,
-    staleVariableCount: 0,
+    staleVariableCount: spacingAliasRepairGaps.length,
     missingStyleCount: missingStyles.length,
     staleStyleCount: 0,
     typeMismatchCount: typeMismatches.length,
@@ -703,7 +796,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     plannedCategoryCount: categoriesWithGaps.length,
   };
 
-  const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount;
+  const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount + summary.staleVariableCount;
   return {
     message: _composeMessage(summary),
     approvalBoundary: gapTotal ? TOKEN_GAP_APPROVAL_BOUNDARY : null,
@@ -713,6 +806,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       missingVariables: missingVariables.slice(0, 10),
       missingStyles: missingStyles.slice(0, 10),
       typeMismatches: typeMismatches.slice(0, 10),
+      spacingAliasRepairs: spacingAliasRepairGaps.slice(0, 10),
       unsupportedCategories,
     },
     tokenGaps,
@@ -748,7 +842,10 @@ function _buildRepairPlan(context) {
       || (context.typeMismatches || []).some(gap => gap.category === category)
     )
     .sort();
-  const total = (context.missingVariables || []).length + (context.missingStyles || []).length + (context.typeMismatches || []).length;
+  const total = (context.missingVariables || []).length
+    + (context.missingStyles || []).length
+    + (context.typeMismatches || []).length
+    + (context.spacingAliasRepairs || []).length;
   const previewInput = {
     config_path: context.configPath,
     categories,
@@ -854,6 +951,7 @@ function _buildRepairPlan(context) {
 function _buildDesignerPresentation(context, total) {
   const missingVariables = context.missingVariables || [];
   const missingStyles = context.missingStyles || [];
+  const spacingAliasRepairs = context.spacingAliasRepairs || [];
   const notes = context.missingCapabilityNotes || [];
   const foundationRepairs = context.foundationRepairs || [];
   const lines = [];
@@ -878,6 +976,20 @@ function _buildDesignerPresentation(context, total) {
       sections.push({
         title: "Styles to create",
         message: `Figlets can preview ${missingStyles.length} missing text/effect style${missingStyles.length === 1 ? "" : "s"} from config.`,
+      });
+    }
+    if (spacingAliasRepairs.length) {
+      const changes = [];
+      for (const repair of spacingAliasRepairs) {
+        for (const update of repair.updates || []) {
+          changes.push(repair.name + " [" + update.modeName + "] -> " + update.toAliasName);
+        }
+      }
+      sections.push({
+        title: "Semantic spacing alias repairs",
+        message: "Figlets can replace raw semantic spacing values with existing primitive aliases: "
+          + changes.slice(0, 6).join(", ")
+          + (changes.length > 6 ? ", and more." : "."),
       });
     }
   } else {
@@ -918,6 +1030,12 @@ function _buildDesignerPresentation(context, total) {
       foundationRepairs: foundationRepairs.length,
       productGaps: notes.filter(note => note.productGap).length,
     },
+    proposedChanges: spacingAliasRepairs.flatMap(repair => (repair.updates || []).map(update => ({
+      token: repair.name,
+      mode: update.modeName,
+      action: "alias-to-existing-primitive",
+      toAlias: update.toAliasName,
+    }))),
   };
 }
 
@@ -933,7 +1051,7 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 };
 
 function _composeMessage(summary) {
-  const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount;
+  const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount + (summary.staleVariableCount || 0);
   if (!total && !summary.unsupportedCategoryCount) {
     return "No config-backed non-color token gaps found in the inspected categories.";
   }
@@ -941,6 +1059,7 @@ function _composeMessage(summary) {
   if (summary.missingVariableCount) parts.push(`${summary.missingVariableCount} missing variable${summary.missingVariableCount === 1 ? "" : "s"}`);
   if (summary.missingStyleCount) parts.push(`${summary.missingStyleCount} missing style${summary.missingStyleCount === 1 ? "" : "s"}`);
   if (summary.typeMismatchCount) parts.push(`${summary.typeMismatchCount} type mismatch${summary.typeMismatchCount === 1 ? "" : "es"}`);
+  if (summary.staleVariableCount) parts.push(`${summary.staleVariableCount} alias repair${summary.staleVariableCount === 1 ? "" : "s"}`);
   if (summary.unsupportedCategoryCount) parts.push(`${summary.unsupportedCategoryCount} unsupported categor${summary.unsupportedCategoryCount === 1 ? "y" : "ies"}`);
   const gapSummary = `Figlets found ${parts.join(", ")} in the config-backed token planner.`;
   if (!total) {

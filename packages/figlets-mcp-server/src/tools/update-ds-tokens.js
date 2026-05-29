@@ -142,6 +142,11 @@ function _buildDryRunReport(plannerResult, options) {
       _pushCategoryItem(report, gap.category, "typeMismatch", Object.assign(_toPreviewItem(gap), {
         actualType: gap.actualType,
       }));
+    } else if (gap.gapType === "spacing-alias-repair") {
+      _pushCategoryItem(report, gap.category, "wouldUpdateVariables", Object.assign(_toPreviewItem(gap), {
+        updates: gap.updates || [],
+        reason: gap.reason,
+      }));
     }
   }
   for (const update of plannerResult.existingUpdates || []) {
@@ -159,13 +164,15 @@ function _messageForReport(report, unknownCategories, createMissing) {
   for (const category of categories) {
     const item = report[category];
     const createCount = item.wouldCreateVariables.length + item.wouldCreateStyles.length;
+    const updateCount = item.wouldUpdateVariables.length;
     const refreshCount = item.wouldRefreshStyles.length;
     const missingCount = item.unmatched.length;
     const mismatchCount = item.typeMismatch.length;
     if (createMissing) {
       const createPart = `${createCount} would create`;
+      const updatePart = updateCount ? `, ${updateCount} would update` : "";
       const refreshPart = refreshCount ? `, ${refreshCount} would refresh` : "";
-      parts.push(`${category}: ${createPart}${refreshPart}, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
+      parts.push(`${category}: ${createPart}${updatePart}${refreshPart}, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
     } else {
       parts.push(`${category}: ${missingCount} missing, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
     }

@@ -75,6 +75,74 @@ module.exports = (() => {
   assert.deepStrictEqual(resolvePrimitiveAliasTarget(lookup, 64), { id: "p16", name: "space/16" });
   assert.deepStrictEqual(resolvePrimitiveAliasTarget(lookup, 96), { id: "p24", name: "space/24" });
 
+  const stepScaleConflictSnapshot = {
+    collections: [
+      {
+        id: "primitives",
+        name: "1. Primitives",
+        variableIds: ["p12", "p48"],
+        modes: [{ modeId: "default", name: "Default" }],
+      },
+      {
+        id: "spacing",
+        name: "4. Spacing",
+        variableIds: ["layout-lg"],
+        modes: [
+          { modeId: "mobile", name: "Mobile" },
+          { modeId: "tablet", name: "Tablet" },
+          { modeId: "desktop", name: "Desktop" },
+        ],
+      },
+    ],
+    variables: [
+      { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+      { id: "p48", name: "space/48", resolvedType: "FLOAT", valuesByMode: { default: 192 } },
+      {
+        id: "layout-lg",
+        name: "space/layout/lg",
+        resolvedType: "FLOAT",
+        valuesByMode: { mobile: 48, tablet: 48, desktop: 48 },
+      },
+    ],
+  };
+  const conflictLookup = buildPrimitiveSpacingLookup(stepScaleConflictSnapshot, "1. Primitives");
+  assert.deepStrictEqual(
+    resolvePrimitiveAliasTarget(conflictLookup, 48),
+    { id: "p12", name: "space/12" },
+    "raw 48 must alias to step-scale space/12=48, not pixel-named space/48=192"
+  );
+  const conflictPlan = planSpacingSemanticAliasRepairs(
+    { collections: { primitives: "1. Primitives", spacing: "4. Spacing" }, spacing: { semantic: { "layout/lg": [48, 48, 48] } } },
+    stepScaleConflictSnapshot,
+    new Map(stepScaleConflictSnapshot.variables.map(item => [item.name, item]))
+  );
+  const conflictRepair = conflictPlan.repairs.find(item => item.name === "space/layout/lg");
+  assert.ok(conflictRepair, "step-scale conflict should still produce alias repairs");
+  assert.ok(
+    conflictRepair.updates.every(update => update.toAliasName === "space/12"),
+    "all modes with raw 48 must plan alias to space/12, not space/48"
+  );
+
+  const legacyPixelNamedSnapshot = {
+    collections: [
+      {
+        id: "primitives",
+        name: "1. Primitives",
+        variableIds: ["p48"],
+        modes: [{ modeId: "default", name: "Default" }],
+      },
+    ],
+    variables: [
+      { id: "p48", name: "space/48", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+    ],
+  };
+  const legacyLookup = buildPrimitiveSpacingLookup(legacyPixelNamedSnapshot, "1. Primitives");
+  assert.deepStrictEqual(
+    resolvePrimitiveAliasTarget(legacyLookup, 48),
+    { id: "p48", name: "space/48" },
+    "legacy pixel-named primitive should still resolve when no value match exists"
+  );
+
   const plan = planSpacingSemanticAliasRepairs(DS, snapshot, variableMap);
   assert.strictEqual(plan.repairs.length, 2);
   const layout = plan.repairs.find(item => item.name === "space/layout/lg");

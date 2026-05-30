@@ -7079,12 +7079,12 @@ async function _updateDsTokens(payload) {
   for (var avid = 0; avid < allVars.length; avid++) allVariablesById[allVars[avid].id] = allVars[avid];
 
   function _resolveSpaceValue(rawVal) {
-    var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
-    if (primByName[aliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[aliasName] };
     var num = Number(rawVal);
     if (isFinite(num) && primByFloat[num]) {
       return { type: 'VARIABLE_ALIAS', id: primByFloat[num].id };
     }
+    var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
+    if (primByName[aliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[aliasName] };
     return isFinite(num) ? num : rawVal;
   }
 

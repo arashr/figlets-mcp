@@ -119,16 +119,16 @@ function buildPrimitiveSpacingLookup(figmaData, primitivesCollectionName) {
 }
 
 function resolvePrimitiveAliasTarget(lookup, expectedFloat) {
-  const pixelName = "space/" + sanitizeSpaceStep(expectedFloat);
-  const byPixelId = lookup.byName.get(pixelName);
-  if (byPixelId) return { id: byPixelId, name: pixelName };
-
   const byFloat = lookup.byFloat.get(expectedFloat);
   if (byFloat) return byFloat;
 
   for (const [floatValue, target] of lookup.byFloat.entries()) {
     if (floatsEqual(floatValue, expectedFloat)) return target;
   }
+
+  const pixelName = "space/" + sanitizeSpaceStep(expectedFloat);
+  const byPixelId = lookup.byName.get(pixelName);
+  if (byPixelId) return { id: byPixelId, name: pixelName };
 
   return null;
 }

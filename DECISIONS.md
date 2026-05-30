@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-05-30] Semantic spacing alias hygiene is repairable token-gap scope
+
+**Decision:** Raw values in semantic spacing variables are repairable Figlets token-gap hygiene when the intended value can be matched to an existing primitive spacing variable. `audit_tokens` may flag or route the hygiene issue, but the structured repair path is `inspect_ds_token_gaps` -> dry-run `update_ds_tokens` -> designer approval -> `update_ds_tokens` apply -> sync/reinspect. This includes responsive/mode-specific semantic spacing values and fractional/step-scale primitive names such as `space/0-5`.
+
+**Why:** BNN-46 showed that Figlets was identifying deterministic spacing alias repairs but telling designers there was no bulk apply payload. That contradicted the local-first repair promise and left a known fixture gap as manual follow-up.
+
+**Implementation expectation:** Planner and bridge apply must resolve spacing primitive aliases by numeric value first, then use legacy `space/<pixel>` name fallback only when no value match exists. This protects step-scale files where `space/12` may equal `48px` while `space/48` is a different primitive.
+
+**Boundary:** BNN-46 covers semantic spacing alias repair. Semantic color contrast conflicts where a shared foreground/icon token is used across multiple backgrounds are separate setup-gap scope, now tracked as BNN-48.
+
+---
+
 ## [2026-05-28] Same-session verification depends on active file identity
 
 **Decision:** The apply → sync → inspect loop must preserve a non-empty active file identity through plugin, receiver, and server path resolution. The Bridge should not emit an empty `fileKey` for an active Figma file; the receiver should heal and persist the best available key; server active-path helpers should resolve snapshots from the same key used by `getActiveFileKey()`.

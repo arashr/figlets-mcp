@@ -20,7 +20,7 @@ const CONFIRM_FLAG = '--yes-i-understand-this-mutates-figma';
 
 function usage() {
   return [
-    'Usage: node scripts/prepare-broken-ds-fixture.js ' + CONFIRM_FLAG + ' [--seed <seed>] [--config <path>]',
+    'Usage: node scripts/prepare-broken-ds-fixture.js ' + CONFIRM_FLAG + ' [--seed <seed>] [--config <path>] [--expected-file-name <name>]',
     '',
     'WARNING: This is developer test prep only. It resets local variables, styles, and canvas content',
     'in the currently open Figma file, builds a Figlets-style DS, then intentionally removes tokens',
@@ -32,12 +32,13 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const args = { seed: 'bnn-37', configPath: path.resolve('.local/bnn-37-broken-fixture/design-system.config.js'), confirmed: false };
+  const args = { seed: 'bnn-37', configPath: path.resolve('.local/bnn-37-broken-fixture/design-system.config.js'), confirmed: false, expectedFileName: '' };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === CONFIRM_FLAG) args.confirmed = true;
     else if (arg === '--seed') args.seed = argv[++i] || '';
     else if (arg === '--config') args.configPath = path.resolve(argv[++i] || '');
+    else if (arg === '--expected-file-name') args.expectedFileName = argv[++i] || '';
     else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error('Unknown argument: ' + arg);
   }
@@ -97,6 +98,7 @@ function postJson(url, body, timeoutMs) {
   plan.ds = require('../packages/figlets-mcp-server/src/figlets-core.js').dsConfig.readDsConfig(written.configPath);
   plan.configPath = written.configPath;
   plan.confirmation = CONFIRMATION_PHRASE;
+  if (args.expectedFileName) plan.expectedFileName = args.expectedFileName;
 
   const response = await postJson(getReceiverUrl() + '/request-prepare-broken-ds-fixture', plan, 185000);
   if (response.statusCode !== 200) {
@@ -121,6 +123,8 @@ function postJson(url, body, timeoutMs) {
     status: 'ok',
     seed: plan.seed,
     fileKey: result.fileKey || null,
+    fileName: result.fileName || null,
+    expectedFileName: args.expectedFileName || null,
     configPath: scopedConfigPath,
     stagingConfigPath: written.configPath,
     removedVariables: result.removedVariables || [],

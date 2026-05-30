@@ -107,6 +107,7 @@ module.exports = (async () => {
         FIGLETS_TEST_HTTP_RESPONSE: JSON.stringify({
           result: {
             fileKey: "local_cli_positive",
+            fileName: "Figlets Disposable Smoke",
             removedVariables: ["space/radius/md"],
             removedTextStyles: ["type/body/md"],
             trimmedModes: [{ collectionName: "4. Spacing", keepModeNames: ["Mobile"] }],
@@ -122,6 +123,8 @@ module.exports = (async () => {
         "cli-positive",
         "--config",
         configPath,
+        "--expected-file-name",
+        "Figlets Disposable Smoke",
       ], {
         cwd: root,
         env,
@@ -135,11 +138,14 @@ module.exports = (async () => {
       assert.strictEqual(request.pathname, "/request-prepare-broken-ds-fixture");
       assert.strictEqual(requestBody.seed, "cli-positive");
       assert.strictEqual(requestBody.confirmation, "RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE");
+      assert.strictEqual(requestBody.expectedFileName, "Figlets Disposable Smoke");
       assert.ok(requestBody.ds && requestBody.ds.project && requestBody.ds.project.name.includes("cli-positive"));
 
       const output = JSON.parse(result.stdout);
       assert.strictEqual(output.status, "ok");
       assert.strictEqual(output.fileKey, "local_cli_positive");
+      assert.strictEqual(output.fileName, "Figlets Disposable Smoke");
+      assert.strictEqual(output.expectedFileName, "Figlets Disposable Smoke");
       assert.strictEqual(output.message, "Prepared by fake receiver.");
       assert.strictEqual(
         output.configPath,

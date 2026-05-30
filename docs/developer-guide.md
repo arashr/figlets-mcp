@@ -92,14 +92,15 @@ The script resets local variables, local styles, and canvas content in the open 
 ```bash
 FIGLETS_DEV_BRIDGE=1 node scripts/prepare-broken-ds-fixture.js \
   --yes-i-understand-this-mutates-figma \
-  --seed bnn-37-smoke
+  --seed bnn-37-smoke \
+  --expected-file-name "Figlets Test"
 ```
 
 Reset/re-run steps:
 
 1. Open a fresh or disposable Figma file.
 2. Open the local Figlets Bridge plugin from this checkout.
-3. Run the command above with a seed. Reuse the same seed for repeatable gaps; change the seed for a different gap mix.
+3. Run the command above with a seed. Reuse the same seed for repeatable gaps; change the seed for a different gap mix. Pass the disposable file's exact Figma name with `--expected-file-name` when you want the bridge to refuse mutation if a different file is open.
 4. Run `sync_figma_data`, then manual smoke the designer workflows against the prepared broken file.
 
 The receiver endpoint is gated by `FIGLETS_DEV_BRIDGE=1` and returns 404 outside developer bridge mode. The CLI also refuses to run without `--yes-i-understand-this-mutates-figma`, and the bridge request includes the explicit confirmation phrase `RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE`.

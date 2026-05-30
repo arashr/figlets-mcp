@@ -4,6 +4,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]
+
+**Status:** `main` includes PR #17 / BNN-46 at merge `4a8eab1`. BNN-46 is Done in Linear. The obsolete BNN-46 stash was dropped, the merged branch was cleaned up, and the checkout returned to clean `main`.
+
+**BNN-46 shipped:** raw semantic spacing values that match existing spacing primitives are now repairable through Figlets planner/apply surfaces instead of dead-ending as manual follow-up. `audit_tokens` routes repairable semantic spacing hygiene to the token-gap flow, `inspect_ds_token_gaps` emits `spacing-alias-repair` gaps plus approval-ready `repairPlan.applyInput`, `update_ds_tokens` previews the exact alias rewires, and bridge apply uses value-first primitive lookup so step-scale files resolve values like `48` to the primitive whose value is `48` rather than blindly preferring `space/48`.
+
+**Verification:** full supported-runtime suite passed with interactive zsh / nvm Node: `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && which node && node -v && which npm && npm -v && npm test'` -> Node `v24.14.0`, npm `11.9.0`, **94/94** tests passed.
+
+**Manual smoke outcome:** the original BNN-46 spacing repair path is considered complete. Follow-on manual smoke exposed a separate semantic color repair trust issue: health-check can offer a safe-looking re-alias for a shared foreground/icon token, then reveal brand-subtle or muted/default failures on the next pass. That is tracked separately as **BNN-48**, an urgent V1 blocker, and should not be folded back into BNN-46.
+
+**Current V1 release posture:** BNN-26 remains blocked by BNN-48. BNN-46 is no longer a release blocker. Next priority is conflict-aware semantic color repair planning so health-check evaluates shared semantic tokens across all known backgrounds before presenting one-click repairs.
+
+---
+
 ### [2026-05-28 — BNN-41 and BNN-44 shipped; V1 smoke resumes]
 
 **Status:** `main` includes PR #13 / BNN-41 at merge `83d7023` and PR #14 / BNN-44 at merge `37beb33`. BNN-41 and BNN-44 are Done in Linear. The remaining V1 path is BNN-26 manual RC sign-off, then BNN-42 release execution.

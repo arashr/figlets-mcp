@@ -284,11 +284,28 @@ module.exports = (async () => {
     assert.strictEqual(receivedBody.dryRun, false);
 
     const updatedSnapshot = Object.assign({}, afterFoundationSnapshot, {
+      collections: afterFoundationSnapshot.collections.concat([{
+        id: "primitives",
+        name: "1. Primitives",
+        modes: [{ id: "default", modeId: "default", name: "Default" }],
+        variableIds: ["space-12", "space-16"],
+      }]),
       variables: [
+        { id: "space-12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 12 } },
+        { id: "space-16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 16 } },
         variable("space-radius-md", "space/radius/md"),
         variable("space-radius-lg", "space/radius/lg"),
         variable("space-border-default", "space/border/default"),
-        variable("space-component-md", "space/component/md"),
+        {
+          id: "space-component-md",
+          name: "space/component/md",
+          resolvedType: "FLOAT",
+          valuesByMode: {
+            m1: { type: "VARIABLE_ALIAS", id: "space-12" },
+            m2: { type: "VARIABLE_ALIAS", id: "space-16" },
+            m3: { type: "VARIABLE_ALIAS", id: "space-16" },
+          },
+        },
         variable("type-body-md-size", "type/body/md/size"),
         variable("type-body-md-line-height", "type/body/md/line-height"),
         variable("type-body-md-weight", "type/body/md/weight"),
@@ -317,8 +334,12 @@ module.exports = (async () => {
     assert.ok(!reinspected.tokenGaps.some(gap => gap.category === "radius"));
     assert.ok(!reinspected.tokenGaps.some(gap => gap.category === "border-width"));
     assert.ok(
-      !reinspected.tokenGaps.some(gap => gap.category === "spacing-semantics"),
-      "approved semantic spacing should be resolved after narrow apply"
+      !reinspected.tokenGaps.some(gap => gap.category === "spacing-semantics" && gap.gapType === "missing-variable"),
+      "missing semantic spacing variables should be resolved after narrow apply"
+    );
+    assert.ok(
+      !reinspected.tokenGaps.some(gap => gap.category === "spacing-semantics" && gap.gapType === "spacing-alias-repair"),
+      "semantic spacing alias repairs should be cleared when snapshot reflects applied aliases"
     );
     assert.ok(
       reinspected.tokenGaps.some(gap => gap.category === "typography" && gap.gapType === "missing-style"),

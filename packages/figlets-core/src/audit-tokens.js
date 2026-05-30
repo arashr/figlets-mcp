@@ -46,11 +46,24 @@ function tokenDomain(name) {
   return parts[0] || "";
 }
 
+function isPrimitiveSpacingStepToken(name) {
+  return /^(space|spacing)\/[\d]+(?:[-_][\d]+)*$/.test(String(name || ""));
+}
+
+function isSpacingSemanticTokenName(name) {
+  const value = String(name || "");
+  if (value.indexOf("space/") !== 0) return false;
+  if (/^space\/radius\//.test(value)) return false;
+  if (/^space\/border\//.test(value)) return false;
+  if (isPrimitiveSpacingStepToken(value)) return false;
+  return true;
+}
+
 function isPrimitiveLikeName(name) {
   const value = String(name || "");
   if (/^color\/[^/]+\/\d+$/.test(value)) return true;
   if (/^color\/scrim\//.test(value)) return true;
-  if (/^(space|spacing)\/\d+(?:_\d+)?$/.test(value)) return true;
+  if (isPrimitiveSpacingStepToken(value)) return true;
   if (/^(space|spacing)\/(radius|border)\//.test(value)) return true;
   if (/^type\/(size|line-height|tracking|weight)\//.test(value)) return true;
   if (/^type\/[^/]+\/[^/]+\/(line-height|size|tracking|weight)$/.test(value)) return true;
@@ -90,6 +103,7 @@ function auditTokens(input = {}) {
   }
 
   const unaliased = [];
+  const partiallyUnaliased = [];
   const rawPrimitives = [];
   const duplicateValueMap = {}; // "type::serializedValue" → [variableNames]
   const collectionConventions = {}; // collectionId → { convention → count }
@@ -114,6 +128,25 @@ function auditTokens(input = {}) {
       const row = { id, name, type: resolvedType, values: rawValues };
       if (isPrimitiveLikeName(name)) rawPrimitives.push(row);
       else unaliased.push(row);
+    } else if (
+      resolvedType === "FLOAT"
+      && isSpacingSemanticTokenName(name)
+      && hasAnyAlias
+      && !allRaw
+    ) {
+      const rawByMode = {};
+      for (const [modeId, val] of Object.entries(valuesByMode)) {
+        if (!isAlias(val)) rawByMode[modeId] = val;
+      }
+      if (Object.keys(rawByMode).length) {
+        partiallyUnaliased.push({
+          id,
+          name,
+          type: resolvedType,
+          rawByMode,
+          reason: "Some breakpoint modes still use raw pixel values instead of primitive aliases.",
+        });
+      }
     }
 
     // --- Duplicate value check ---
@@ -177,12 +210,14 @@ function auditTokens(input = {}) {
     summary: {
       totalVariables: variables.length,
       unaliasedCount: unaliased.length,
+      partiallyUnaliasedCount: partiallyUnaliased.length,
       rawPrimitiveCount: rawPrimitives.length,
       duplicateValueGroups: duplicateIssues.length,
       informationalDuplicateValueGroups: informationalDuplicates.length,
       collectionNamingIssues: namingIssues.length
     },
     unaliased,
+    partiallyUnaliased,
     rawPrimitives,
     duplicates,
     informationalDuplicates,
@@ -190,4 +225,9 @@ function auditTokens(input = {}) {
   };
 }
 
-module.exports = { auditTokens };
+module.exports = {
+  auditTokens,
+  isPrimitiveLikeName,
+  isPrimitiveSpacingStepToken,
+  isSpacingSemanticTokenName,
+};

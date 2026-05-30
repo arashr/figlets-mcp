@@ -11,6 +11,7 @@ const {
   ORCHESTRATION_APPLY_CATEGORIES,
   planTokenPruneFromSnapshot,
 } = require("./inspect-ds-token-gaps.js");
+const { withEffectiveSpacingSemantic } = require("./semantic-alias-repair.js");
 
 const updateDsTokensTool = {
   name: "update_ds_tokens",
@@ -142,6 +143,11 @@ function _buildDryRunReport(plannerResult, options) {
       _pushCategoryItem(report, gap.category, "typeMismatch", Object.assign(_toPreviewItem(gap), {
         actualType: gap.actualType,
       }));
+    } else if (gap.gapType === "spacing-alias-repair") {
+      _pushCategoryItem(report, gap.category, "wouldUpdateVariables", Object.assign(_toPreviewItem(gap), {
+        updates: gap.updates || [],
+        reason: gap.reason,
+      }));
     }
   }
   for (const update of plannerResult.existingUpdates || []) {
@@ -159,13 +165,15 @@ function _messageForReport(report, unknownCategories, createMissing) {
   for (const category of categories) {
     const item = report[category];
     const createCount = item.wouldCreateVariables.length + item.wouldCreateStyles.length;
+    const updateCount = item.wouldUpdateVariables.length;
     const refreshCount = item.wouldRefreshStyles.length;
     const missingCount = item.unmatched.length;
     const mismatchCount = item.typeMismatch.length;
     if (createMissing) {
       const createPart = `${createCount} would create`;
+      const updatePart = updateCount ? `, ${updateCount} would update` : "";
       const refreshPart = refreshCount ? `, ${refreshCount} would refresh` : "";
-      parts.push(`${category}: ${createPart}${refreshPart}, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
+      parts.push(`${category}: ${createPart}${updatePart}${refreshPart}, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
     } else {
       parts.push(`${category}: ${missingCount} missing, ${mismatchCount} type mismatch${mismatchCount === 1 ? "" : "es"}`);
     }
@@ -319,12 +327,33 @@ function _handleApplyDsTokens(args, configPath, ds) {
     };
   }
 
+  const dataSource = args.figmaDataPath
+    ? loadFigmaDataSource({ figmaDataPath: args.figmaDataPath })
+    : (loadActiveFigmaDataSource(args) || loadFigmaDataSource(args));
+  let bridgeDs = ds;
+  if (dataSource && resolved.bridgeCategories.indexOf("spacing-semantics") >= 0) {
+    const variableMap = new Map();
+    for (const variable of dataSource.figmaData.variables || []) {
+      if (variable && typeof variable.name === "string") variableMap.set(variable.name, variable);
+    }
+    bridgeDs = withEffectiveSpacingSemantic(ds, dataSource.figmaData, variableMap).ds;
+  }
+
+  const needsSpacingModes = resolved.bridgeCategories.indexOf("spacing-semantics") >= 0
+    && bridgeDs
+    && bridgeDs.spacing
+    && bridgeDs.spacing.semantic
+    && Object.keys(bridgeDs.spacing.semantic).some(key => {
+      const vals = bridgeDs.spacing.semantic[key];
+      return Array.isArray(vals) ? vals.length > 1 : false;
+    });
+
   return requestBridgePost("/request-update-tokens", {
-    DS: ds,
+    DS: bridgeDs,
     categories: resolved.bridgeCategories,
     createMissing: args.create_missing !== false,
     dryRun: false,
-    ensureCollectionModes: args.ensure_collection_modes === true,
+    ensureCollectionModes: args.ensure_collection_modes === true || needsSpacingModes,
     pruneOffConfigVariables: prune.off_config_variables,
     pruneOffConfigTextStyles: prune.off_config_text_styles,
     pruneOffConfigEffectStyles: prune.off_config_effect_styles,

@@ -1170,8 +1170,18 @@ async function _prepareBrokenDsFixtureForDevPrep(payload) {
   }
   if (!payload.ds) return { error: 'Prepared DS payload is required.' };
 
+  var fileName = figma.root ? figma.root.name : '';
+  if (payload.expectedFileName && fileName && String(payload.expectedFileName) !== fileName) {
+    return {
+      error: 'Refusing to prepare broken fixture because the open Figma file name does not match the expected file name.',
+      fileName: fileName,
+      expectedFileName: String(payload.expectedFileName),
+    };
+  }
+
   var result = {
     fileKey: _getFigletsFileKey(),
+    fileName: fileName,
     seed: payload.seed || null,
     reset: false,
     setup: null,
@@ -1215,33 +1225,24 @@ async function _prepareBrokenDsFixtureForDevPrep(payload) {
 async function _resetFigletsFile(opts) {
   opts = opts || {};
   var result = {
+    fileName: figma.root ? figma.root.name : '',
     removedVariables: 0,
     removedCollections: 0,
     removedTextStyles: 0,
     removedEffectStyles: 0,
     removedPages: 0,
     clearedPages: 0,
-    removedNodes: 0
+    removedNodes: 0,
+    remainingVariables: [],
+    remainingCollections: [],
+    remainingTextStyles: [],
+    remainingEffectStyles: []
   };
 
-  var vars = await figma.variables.getLocalVariablesAsync();
-  for (var vi = 0; vi < vars.length; vi++) {
-    try { vars[vi].remove(); result.removedVariables++; } catch (e) {}
-  }
-
-  var colls = await figma.variables.getLocalVariableCollectionsAsync();
-  for (var ci = 0; ci < colls.length; ci++) {
-    try { colls[ci].remove(); result.removedCollections++; } catch (e2) {}
-  }
-
-  var textStyles = await figma.getLocalTextStylesAsync();
-  for (var ti = 0; ti < textStyles.length; ti++) {
-    try { textStyles[ti].remove(); result.removedTextStyles++; } catch (e3) {}
-  }
-
-  var effectStyles = await figma.getLocalEffectStylesAsync();
-  for (var ei = 0; ei < effectStyles.length; ei++) {
-    try { effectStyles[ei].remove(); result.removedEffectStyles++; } catch (e4) {}
+  function _names(items) {
+    var out = [];
+    for (var i = 0; i < items.length; i++) out.push(items[i].name || items[i].id || 'unnamed');
+    return out;
   }
 
   var pages = figma.root.children.slice();
@@ -1261,6 +1262,45 @@ async function _resetFigletsFile(opts) {
     }
     keepPage.name = 'Page 1';
     result.clearedPages++;
+  }
+
+  var textStyles = await figma.getLocalTextStylesAsync();
+  for (var ti = 0; ti < textStyles.length; ti++) {
+    try { textStyles[ti].remove(); result.removedTextStyles++; } catch (e3) {}
+  }
+
+  var effectStyles = await figma.getLocalEffectStylesAsync();
+  for (var ei = 0; ei < effectStyles.length; ei++) {
+    try { effectStyles[ei].remove(); result.removedEffectStyles++; } catch (e4) {}
+  }
+
+  for (var pass = 0; pass < 3; pass++) {
+    var vars = await figma.variables.getLocalVariablesAsync();
+    if (!vars.length) break;
+    for (var vi = 0; vi < vars.length; vi++) {
+      try { vars[vi].remove(); result.removedVariables++; } catch (e) {}
+    }
+  }
+
+  for (var cpass = 0; cpass < 3; cpass++) {
+    var colls = await figma.variables.getLocalVariableCollectionsAsync();
+    if (!colls.length) break;
+    for (var ci = 0; ci < colls.length; ci++) {
+      try { colls[ci].remove(); result.removedCollections++; } catch (e2) {}
+    }
+  }
+
+  var remainingVars = await figma.variables.getLocalVariablesAsync();
+  var remainingColls = await figma.variables.getLocalVariableCollectionsAsync();
+  var remainingTextStyles = await figma.getLocalTextStylesAsync();
+  var remainingEffectStyles = await figma.getLocalEffectStylesAsync();
+  result.remainingVariables = _names(remainingVars);
+  result.remainingCollections = _names(remainingColls);
+  result.remainingTextStyles = _names(remainingTextStyles);
+  result.remainingEffectStyles = _names(remainingEffectStyles);
+
+  if (remainingVars.length || remainingColls.length || remainingTextStyles.length || remainingEffectStyles.length) {
+    result.warning = 'Some local Figma resources could not be removed during destructive fixture reset.';
   }
 
   return result;
@@ -5100,6 +5140,51 @@ async function _applyDsSetup(DS) {
     return map;
   }
 
+  var setupVariableCache = null;
+
+  async function buildSetupVariableCache() {
+    var allVars = await figma.variables.getLocalVariablesAsync();
+    var map = {};
+    for (var svi = 0; svi < allVars.length; svi++) {
+      map[allVars[svi].variableCollectionId + '\n' + allVars[svi].name] = allVars[svi];
+    }
+    setupVariableCache = map;
+    return map;
+  }
+
+  async function createSetupVariable(name, collection, type) {
+    var key = collection.id + '\n' + name;
+    var cache = setupVariableCache || await buildSetupVariableCache();
+    var existing = cache[key] || null;
+    if (existing && (!existing.resolvedType || existing.resolvedType === type)) {
+      return existing;
+    }
+    if (existing) {
+      try { existing.remove(); } catch (_) {}
+      delete cache[key];
+    }
+
+    try {
+      var created = figma.variables.createVariable(name, collection, type);
+      cache[key] = created;
+      return created;
+    } catch (err) {
+      if (!err || !/duplicate variable name/i.test(String(err.message || err))) throw err;
+      cache = await buildSetupVariableCache();
+      existing = cache[key] || null;
+      if (existing && (!existing.resolvedType || existing.resolvedType === type)) {
+        return existing;
+      }
+      if (existing) {
+        try { existing.remove(); } catch (_) {}
+        delete cache[key];
+      }
+      var retried = figma.variables.createVariable(name, collection, type);
+      cache[key] = retried;
+      return retried;
+    }
+  }
+
   function buildModeMap(collection, modeNames) {
     return _ensureCollectionModes(collection, modeNames).map;
   }
@@ -5227,7 +5312,7 @@ async function _applyDsSetup(DS) {
           var step = ramp.steps[si];
           var vName = ramp.folder + '/' + step[0];
           if (_primMergeMap[vName]) continue;
-          var v = figma.variables.createVariable(vName, primColl, 'COLOR');
+          var v = await createSetupVariable(vName, primColl, 'COLOR');
           _setVariableScopesForName(v, vName, 'COLOR');
           v.setValueForMode(primModeId, { r: step[1], g: step[2], b: step[3] });
         }
@@ -5250,7 +5335,7 @@ async function _applyDsSetup(DS) {
     for (var sci = 0; sci < SCRIMS.length; sci++) {
       var sc = SCRIMS[sci];
       if (_primMergeMap[sc.name]) continue;
-      var sv = figma.variables.createVariable(sc.name, primColl, 'COLOR');
+      var sv = await createSetupVariable(sc.name, primColl, 'COLOR');
       _setVariableScopesForName(sv, sc.name, 'COLOR');
       sv.setValueForMode(primModeId, { r: sc.r, g: sc.g, b: sc.b, a: sc.a });
     }
@@ -5268,7 +5353,7 @@ async function _applyDsSetup(DS) {
     for (var sfi = 0; sfi < SHADOW_FLOATS.length; sfi++) {
       var sf = SHADOW_FLOATS[sfi];
       if (_primMergeMap[sf.name]) continue;
-      var sfv = figma.variables.createVariable(sf.name, primColl, 'FLOAT');
+      var sfv = await createSetupVariable(sf.name, primColl, 'FLOAT');
       _setVariableScopesForName(sfv, sf.name, 'FLOAT');
       sfv.setValueForMode(primModeId, sf.value);
     }
@@ -5303,7 +5388,7 @@ async function _applyDsSetup(DS) {
     for (var tfi = 0; tfi < allTypeFloats.length; tfi++) {
       var tf = allTypeFloats[tfi];
       if (_primMergeMap[tf.name]) continue;
-      var tfv = figma.variables.createVariable(tf.name, primColl, 'FLOAT');
+      var tfv = await createSetupVariable(tf.name, primColl, 'FLOAT');
       _setVariableScopesForName(tfv, tf.name, 'FLOAT');
       tfv.setValueForMode(primModeId, tf.value);
     }
@@ -5320,7 +5405,7 @@ async function _applyDsSetup(DS) {
       var fam = famEntries[fami];
       var famVarName = _ff.replace('{variant}', fam.key);
       if (_primMergeMap[famVarName]) continue;
-      var famv = figma.variables.createVariable(famVarName, primColl, 'STRING');
+      var famv = await createSetupVariable(famVarName, primColl, 'STRING');
       _setVariableScopesForName(famv, famVarName, 'STRING');
       famv.setValueForMode(primModeId, fam.value);
     }
@@ -5331,7 +5416,7 @@ async function _applyDsSetup(DS) {
         var sp = DS.primitives.spacing[spi];
         var spVarName = 'space/' + sanitize(sp[0]);
         if (_primMergeMap[spVarName]) continue;
-        var spv = figma.variables.createVariable(spVarName, primColl, 'FLOAT');
+        var spv = await createSetupVariable(spVarName, primColl, 'FLOAT');
         _setVariableScopesForName(spv, spVarName, 'FLOAT');
         spv.setValueForMode(primModeId, sp[1]);
       }
@@ -5480,7 +5565,7 @@ async function _applyDsSetup(DS) {
       for (var ti = 0; ti < tokenNames.length; ti++) {
         var tName  = tokenNames[ti];
         var tEntry = tokenMap[tName];
-        var tVar   = figma.variables.createVariable(tName, semColl, 'COLOR');
+        var tVar   = await createSetupVariable(tName, semColl, 'COLOR');
         _setVariableScopesForName(tVar, tName, 'COLOR');
         if (tEntry.Light) {
           var tLAlias = makeAlias(tEntry.Light);
@@ -5496,7 +5581,7 @@ async function _applyDsSetup(DS) {
       var icons = sem.icons || [];
       for (var ii = 0; ii < icons.length; ii++) {
         var icon = icons[ii];
-        var iconVar = figma.variables.createVariable(icon.token, semColl, 'COLOR');
+        var iconVar = await createSetupVariable(icon.token, semColl, 'COLOR');
         _setVariableScopesForName(iconVar, icon.token, 'COLOR');
         if (icon.Light) { var ilAlias = makeAlias(icon.Light); if (ilAlias) iconVar.setValueForMode(lightModeId, ilAlias); }
         if (icon.Dark)  { var idAlias = makeAlias(icon.Dark);  if (idAlias) iconVar.setValueForMode(darkModeId,  idAlias); }
@@ -5509,7 +5594,7 @@ async function _applyDsSetup(DS) {
         var up = unpaired[upi];
         if (createdSemTokens.has(up.token)) continue;
         createdSemTokens.add(up.token);
-        var upVar = figma.variables.createVariable(up.token, semColl, 'COLOR');
+        var upVar = await createSetupVariable(up.token, semColl, 'COLOR');
         _setVariableScopesForName(upVar, up.token, 'COLOR');
         if (up.Light) {
           if (typeof up.Light === 'string' && up.Light.startsWith('color/scrim/')) {
@@ -5597,7 +5682,7 @@ async function _applyDsSetup(DS) {
 
       // size variable
       if (!_typoMergeMap[tokenBase + '/size']) {
-        var sizeVar = figma.variables.createVariable(tokenBase + '/size', typoColl, 'FLOAT');
+        var sizeVar = await createSetupVariable(tokenBase + '/size', typoColl, 'FLOAT');
         _setVariableScopesForName(sizeVar, tokenBase + '/size', 'FLOAT');
         for (var mi = 0; mi < modes3.length; mi++) {
           var modeName = modes3[mi];
@@ -5611,7 +5696,7 @@ async function _applyDsSetup(DS) {
 
       // line-height variable (px, not ratio — raw computed value)
       if (!_typoMergeMap[tokenBase + '/line-height']) {
-        var lhVar = figma.variables.createVariable(tokenBase + '/line-height', typoColl, 'FLOAT');
+        var lhVar = await createSetupVariable(tokenBase + '/line-height', typoColl, 'FLOAT');
         _setVariableScopesForName(lhVar, tokenBase + '/line-height', 'FLOAT');
         for (var lhi = 0; lhi < modes3.length; lhi++) {
           var lhModeId = typoModeMap[modes3[lhi]];
@@ -5622,7 +5707,7 @@ async function _applyDsSetup(DS) {
 
       // weight variable (alias to primitive)
       if (!_typoMergeMap[tokenBase + '/weight']) {
-        var weightVar = figma.variables.createVariable(tokenBase + '/weight', typoColl, 'FLOAT');
+        var weightVar = await createSetupVariable(tokenBase + '/weight', typoColl, 'FLOAT');
         _setVariableScopesForName(weightVar, tokenBase + '/weight', 'FLOAT');
         var weightPrimName = _tp3 + '/weight/' + (weightMap[weight] || 'regular');
         var weightAlias = typoAlias(weightPrimName);
@@ -5635,7 +5720,7 @@ async function _applyDsSetup(DS) {
 
       // tracking variable (alias to primitive)
       if (!_typoMergeMap[tokenBase + '/tracking']) {
-        var trackingVar = figma.variables.createVariable(tokenBase + '/tracking', typoColl, 'FLOAT');
+        var trackingVar = await createSetupVariable(tokenBase + '/tracking', typoColl, 'FLOAT');
         _setVariableScopesForName(trackingVar, tokenBase + '/tracking', 'FLOAT');
         var trackingKey = String(tracking);
         var trackingPrimName = _tp3 + '/tracking/' + (trackingMap[trackingKey] || trackingKey);
@@ -5650,7 +5735,7 @@ async function _applyDsSetup(DS) {
       // family variable (alias to font/sans)
       var famAlias3 = typoAlias(_fontFamilyPatternSetup.replace('{variant}', 'sans'));
       if (famAlias3 && !_typoMergeMap[tokenBase + '/family']) {
-        var famVar3 = figma.variables.createVariable(tokenBase + '/family', typoColl, 'STRING');
+        var famVar3 = await createSetupVariable(tokenBase + '/family', typoColl, 'STRING');
         _setVariableScopesForName(famVar3, tokenBase + '/family', 'STRING');
         for (var fmi = 0; fmi < modes3.length; fmi++) {
           famVar3.setValueForMode(typoModeMap[modes3[fmi]], famAlias3);
@@ -5720,7 +5805,7 @@ async function _applyDsSetup(DS) {
         var spSemName = 'space/' + semKey;
         if (_spaceMergeMap[spSemName]) continue;
         var vals = semantic[semKey];
-        var semVar = figma.variables.createVariable(spSemName, spacingColl, 'FLOAT');
+        var semVar = await createSetupVariable(spSemName, spacingColl, 'FLOAT');
         _setVariableScopesForName(semVar, spSemName, 'FLOAT');
         for (var seMi = 0; seMi < modes3.length; seMi++) {
           var seModeId = spaceModeMap[modes3[seMi]];
@@ -5737,7 +5822,7 @@ async function _applyDsSetup(DS) {
         if (!radius.hasOwnProperty(radKey)) continue;
         var radVarName = 'space/radius/' + radKey;
         if (_spaceMergeMap[radVarName]) continue;
-        var radVar = figma.variables.createVariable(radVarName, spacingColl, 'FLOAT');
+        var radVar = await createSetupVariable(radVarName, spacingColl, 'FLOAT');
         _setVariableScopesForName(radVar, radVarName, 'FLOAT');
         for (var rmi = 0; rmi < modes3.length; rmi++) {
           radVar.setValueForMode(spaceModeMap[modes3[rmi]], radius[radKey]);
@@ -5750,7 +5835,7 @@ async function _applyDsSetup(DS) {
         if (!border.hasOwnProperty(bKey)) continue;
         var bVarName = 'space/border/' + bKey;
         if (_spaceMergeMap[bVarName]) continue;
-        var bVar = figma.variables.createVariable(bVarName, spacingColl, 'FLOAT');
+        var bVar = await createSetupVariable(bVarName, spacingColl, 'FLOAT');
         _setVariableScopesForName(bVar, bVarName, 'FLOAT');
         for (var bmi = 0; bmi < modes3.length; bmi++) {
           bVar.setValueForMode(spaceModeMap[modes3[bmi]], border[bKey]);
@@ -5792,8 +5877,8 @@ async function _applyDsSetup(DS) {
       var offsetYId = primVarMapForElev['shadow/' + l + '/offset-y'];
       var radiusId  = primVarMapForElev['shadow/' + l + '/radius'];
 
-      var elevOffsetVar = figma.variables.createVariable('elevation/' + el.key + '/offset-y', elevColl, 'FLOAT');
-      var elevRadiusVar = figma.variables.createVariable('elevation/' + el.key + '/radius', elevColl, 'FLOAT');
+      var elevOffsetVar = await createSetupVariable('elevation/' + el.key + '/offset-y', elevColl, 'FLOAT');
+      var elevRadiusVar = await createSetupVariable('elevation/' + el.key + '/radius', elevColl, 'FLOAT');
       _setVariableScopesForName(elevOffsetVar, 'elevation/' + el.key + '/offset-y', 'FLOAT');
       _setVariableScopesForName(elevRadiusVar, 'elevation/' + el.key + '/radius', 'FLOAT');
       elevOffsetVar.setValueForMode(elevModeId, offsetYId ? { type: 'VARIABLE_ALIAS', id: offsetYId } : el.offsetY);
@@ -7026,13 +7111,26 @@ async function _updateDsTokens(payload) {
   var primColl = _collectionByName(primName);
   if (primColl) primCollId = primColl.id;
   var primByName = {};
+  var primByFloat = {};
   var idToName = {};
   for (var idn = 0; idn < allVars.length; idn++) {
     idToName[allVars[idn].id] = allVars[idn].name;
   }
   if (primCollId) {
+    var primDefaultModeId = primColl && primColl.modes && primColl.modes.length ? primColl.modes[0].modeId : null;
     for (var pvi = 0; pvi < allVars.length; pvi++) {
-      if (allVars[pvi].variableCollectionId === primCollId) primByName[allVars[pvi].name] = allVars[pvi].id;
+      var primVar = allVars[pvi];
+      if (primVar.variableCollectionId !== primCollId) continue;
+      primByName[primVar.name] = primVar.id;
+      if (!/^space\/[\d]+(?:[-_][\d]+)*$/.test(String(primVar.name || ''))) continue;
+      var primRaw = primDefaultModeId && primVar.valuesByMode
+        ? primVar.valuesByMode[primDefaultModeId]
+        : null;
+      if (primRaw && typeof primRaw === 'object' && primRaw.type === 'VARIABLE_ALIAS') primRaw = null;
+      var primNum = Number(primRaw);
+      if (isFinite(primNum) && !primByFloat[primNum]) {
+        primByFloat[primNum] = { id: primVar.id, name: primVar.name };
+      }
     }
   }
 
@@ -7066,9 +7164,12 @@ async function _updateDsTokens(payload) {
   for (var avid = 0; avid < allVars.length; avid++) allVariablesById[allVars[avid].id] = allVars[avid];
 
   function _resolveSpaceValue(rawVal) {
+    var num = Number(rawVal);
+    if (isFinite(num) && primByFloat[num]) {
+      return { type: 'VARIABLE_ALIAS', id: primByFloat[num].id };
+    }
     var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
     if (primByName[aliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[aliasName] };
-    var num = Number(rawVal);
     return isFinite(num) ? num : rawVal;
   }
 

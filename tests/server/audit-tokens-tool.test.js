@@ -67,6 +67,54 @@ try {
   }
 
   {
+    const configPath = path.join(TEMP_DIR, "design-system.config.js");
+    const repairableDataPath = path.join(TEMP_DIR, "figma-data-spacing-repair.json");
+    const repairableData = {
+      collections: [
+        {
+          id: "primitives",
+          name: "1. Primitives",
+          variableIds: ["p48"],
+          modes: [{ modeId: "default", name: "Default" }],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          variableIds: ["layout-lg"],
+          modes: [{ modeId: "mobile", name: "Mobile" }],
+        },
+      ],
+      variables: [
+        { id: "p48", name: "space/48", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+        {
+          id: "layout-lg",
+          name: "space/layout/lg",
+          resolvedType: "FLOAT",
+          valuesByMode: { mobile: 48 },
+        },
+      ],
+    };
+    fs.writeFileSync(configPath, "const DS = " + JSON.stringify({
+      collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+      spacing: { semantic: { "layout/lg": [48, 64, 96] } },
+    }, null, 2) + ";\n", "utf8");
+    fs.writeFileSync(repairableDataPath, JSON.stringify(repairableData), "utf-8");
+
+    const result = handleAuditTokens({ figmaDataPath: repairableDataPath });
+    const data = JSON.parse(result.content[0].text);
+    assert.ok(data.semanticAliasRepairModel, "audit should expose semantic alias repair model");
+    assert.ok(data.repairGuidance, "repairable raw semantic spacing should include repair guidance");
+    assert.ok(
+      data.repairableUnaliased.some(row => row.name === "space/layout/lg"),
+      "repairable unaliased spacing semantics should be separated from manual follow-up"
+    );
+    assert.ok(
+      !data.manualFollowUpUnaliased.some(row => row.name === "space/layout/lg"),
+      "repairable spacing semantics should not remain in manual follow-up bucket"
+    );
+  }
+
+  {
     // non-existent custom path throws
     assert.throws(
       () => handleAuditTokens({ figmaDataPath: "/tmp/figlets-test-nonexistent-99999.json" }),

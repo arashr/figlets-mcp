@@ -4,6 +4,11 @@ const fs = require("fs");
 const path = require("path");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/paths.js");
+const {
+  SEMANTIC_ALIAS_REPAIR_MODEL,
+  planSpacingSemanticAliasRepairs,
+  withEffectiveSpacingSemantic,
+} = require("./semantic-alias-repair.js");
 
 const inspectDsTokenGapsTool = {
   name: "inspect_ds_token_gaps",
@@ -166,6 +171,10 @@ function _variableByName(figmaData) {
     if (variable && typeof variable.name === "string") map.set(variable.name, variable);
   }
   return map;
+}
+
+function _isAliasValue(value) {
+  return Boolean(value && typeof value === "object" && value.type === "VARIABLE_ALIAS" && typeof value.id === "string");
 }
 
 function _styleNameSet(figmaData, key) {
@@ -527,6 +536,14 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const textStyleNames = _styleNameSet(figmaData, "textStyles");
   const effectStyleNames = _styleNameSet(figmaData, "effectStyles");
   const collectionNames = _collectionNameSet(figmaData);
+  const spacingEffective = withEffectiveSpacingSemantic(ds, figmaData, variableMap);
+  const planningDs = spacingEffective.ds;
+  const spacingAliasPlan = planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, {
+    effectiveDs: planningDs,
+    spacingSemanticMeta: spacingEffective.spacingSemanticMeta,
+  });
+  const spacingAliasRepairByName = new Map(spacingAliasPlan.repairs.map(item => [item.name, item]));
+  const spacingAliasDriftByName = new Map(spacingAliasPlan.configDrift.map(item => [item.name, item]));
 
   const tokenGaps = [];
   const existingUpdates = [];
@@ -615,7 +632,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         }
       }
     }
-    const expected = _expectedForCategory(ds, category);
+    const expected = _expectedForCategory(category === "spacing-semantics" ? planningDs : ds, category);
     for (const item of expected) {
       if (item.kind === "unavailable-source") {
         missingCapabilityNotes.push({
@@ -657,6 +674,110 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
           reason: "Phase 3A records the request but does not compare live values for stale updates yet.",
         }));
       }
+      if (category === "spacing-semantics" && existing && existing.resolvedType === item.expectedType) {
+        const plannedAliasRepair = spacingAliasRepairByName.get(item.name);
+        if (plannedAliasRepair) {
+          tokenGaps.push(Object.assign({}, item, {
+            gapType: "spacing-alias-repair",
+            kind: "variable",
+            updates: plannedAliasRepair.updates,
+            reason: "This semantic spacing variable uses raw values that match config and can alias to existing primitive spacing variables.",
+          }));
+          supportedCategoriesWithGaps.add(category);
+        }
+        const plannedDrift = spacingAliasDriftByName.get(item.name);
+        if (plannedDrift) {
+          tokenGaps.push(Object.assign({}, item, {
+            gapType: "spacing-alias-config-drift",
+            kind: "variable",
+            driftModes: plannedDrift.modes,
+            reason: "Figma raw values differ from config for one or more modes. Resolve drift before Figlets can propose primitive aliases.",
+          }));
+          supportedCategoriesWithGaps.add(category);
+        }
+      }
+    }
+  }
+
+  if (categories.indexOf("spacing-semantics") >= 0) {
+    const spacingGapNames = new Set(
+      tokenGaps.filter(gap => gap.category === "spacing-semantics").map(gap => gap.name)
+    );
+    const spacingCollection = _requiredCollectionForCategory(planningDs, "spacing-semantics");
+    for (const repair of spacingAliasPlan.repairs) {
+      if (spacingGapNames.has(repair.name)) continue;
+      tokenGaps.push({
+        name: repair.name,
+        category: "spacing-semantics",
+        kind: "variable",
+        expectedType: "FLOAT",
+        collection: spacingCollection,
+        gapType: "spacing-alias-repair",
+        updates: repair.updates,
+        reason: "This semantic spacing variable has breakpoint mode(s) still using raw pixel values that can alias to existing primitive spacing variables.",
+      });
+      spacingGapNames.add(repair.name);
+      supportedCategoriesWithGaps.add("spacing-semantics");
+    }
+    for (const drift of spacingAliasPlan.configDrift) {
+      if (spacingGapNames.has(drift.name)) continue;
+      tokenGaps.push({
+        name: drift.name,
+        category: "spacing-semantics",
+        kind: "variable",
+        expectedType: "FLOAT",
+        collection: spacingCollection,
+        gapType: "spacing-alias-config-drift",
+        driftModes: drift.modes,
+        reason: "Figma raw values differ from config for one or more modes. Resolve drift before Figlets can propose primitive aliases.",
+      });
+      spacingGapNames.add(drift.name);
+      supportedCategoriesWithGaps.add("spacing-semantics");
+    }
+    for (const missing of spacingAliasPlan.missingPrimitives) {
+      missingCapabilityNotes.push({
+        kind: "missing-primitive-for-alias-repair",
+        category: "spacing-semantics",
+        token: missing.name,
+        modes: missing.modes,
+        reason: "Matching primitive spacing variable(s) are missing for config-backed semantic values. Create them with update_ds_primitives before semantic alias repair.",
+        productGap: false,
+      });
+    }
+    if (Array.isArray(spacingAliasPlan.alreadyAliasedHealthy) && spacingAliasPlan.alreadyAliasedHealthy.length) {
+      missingCapabilityNotes.push({
+        kind: "spacing-semantics-already-healthy",
+        category: "spacing-semantics",
+        tokenCount: spacingAliasPlan.alreadyAliasedHealthy.length,
+        tokens: spacingAliasPlan.alreadyAliasedHealthy.slice(0, 12).map(item => item.name),
+        reason: spacingAliasPlan.alreadyAliasedHealthy.length + " semantic spacing token(s) already alias to primitives with the correct pixel values for each breakpoint mode. They are not alias-repair gaps and should not be reported as missing primitives. Optional step-scale naming (space/12 vs space/48) is a design decision, not a blocking hygiene issue.",
+        productGap: false,
+      });
+    }
+    if (Array.isArray(spacingAliasPlan.missingResponsiveModes) && spacingAliasPlan.missingResponsiveModes.length) {
+      const spacingCollection = _requiredCollectionForCategory(planningDs, "spacing-semantics");
+      const foundationRepair = _foundationRepairForCategory(planningDs, "spacing-semantics", spacingCollection);
+      if (foundationRepair) {
+        const repairKey = foundationRepair.kind + "\n" + foundationRepair.name;
+        if (!foundationRepairKeys.has(repairKey)) {
+          foundationRepairKeys.add(repairKey);
+          foundationRepairs.push(Object.assign({}, foundationRepair, {
+            missingModes: spacingAliasPlan.missingResponsiveModes,
+            reason: "Add configured breakpoint modes to " + spacingCollection + " before responsive semantic spacing alias repairs can run for Mobile, Tablet, and Desktop.",
+          }));
+        }
+      }
+      missingCapabilityNotes.push({
+        kind: "missing-foundation-modes",
+        category: "spacing-semantics",
+        collection: spacingCollection,
+        missingModes: spacingAliasPlan.missingResponsiveModes,
+        repairTool: "apply_ds_foundation_repairs",
+        alternateRepairTool: "update_ds_tokens",
+        repairReady: Boolean(foundationRepair),
+        reason: "Semantic spacing alias repair needs breakpoint modes on the Spacing collection. Approved apply can add them with ensure_collection_modes, then rerun inspect and apply spacing-semantics.",
+        productGap: false,
+      });
     }
   }
 
@@ -671,6 +792,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const missingVariables = tokenGaps.filter(gap => gap.gapType === "missing-variable");
   const missingStyles = tokenGaps.filter(gap => gap.gapType === "missing-style");
   const typeMismatches = tokenGaps.filter(gap => gap.gapType === "type-mismatch");
+  const spacingAliasRepairGaps = tokenGaps.filter(gap => gap.gapType === "spacing-alias-repair");
+  const spacingAliasConfigDriftGaps = tokenGaps.filter(gap => gap.gapType === "spacing-alias-config-drift");
   const categoriesWithGaps = Array.from(supportedCategoriesWithGaps).sort();
   for (const category of categoriesWithGaps) {
     if (APPLY_CATEGORIES.has(category) || PRIMITIVE_APPLY_CATEGORIES.has(category) || ORCHESTRATION_APPLY_CATEGORIES.has(category)) continue;
@@ -691,10 +814,24 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     missingVariables,
     missingStyles,
     typeMismatches,
+    spacingAliasRepairs: spacingAliasRepairGaps,
+    spacingAliasConfigDrift: spacingAliasConfigDriftGaps,
+    semanticAliasRepairModel: SEMANTIC_ALIAS_REPAIR_MODEL,
+    spacingAliasPlanSummary: {
+      repairableTokens: spacingAliasPlan.repairs.length,
+      configDriftTokens: spacingAliasPlan.configDrift.length,
+      missingPrimitiveTokens: spacingAliasPlan.missingPrimitives.length,
+      spacingAlreadyHealthyCount: (spacingAliasPlan.alreadyAliasedHealthy || []).length,
+      missingResponsiveModes: (spacingAliasPlan.missingResponsiveModes || []).length,
+      spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
+    },
+    spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
+    spacingMissingResponsiveModes: spacingAliasPlan.missingResponsiveModes || [],
   });
   const summary = {
     missingVariableCount: missingVariables.length,
-    staleVariableCount: 0,
+    staleVariableCount: spacingAliasRepairGaps.length,
+    configDriftCount: spacingAliasConfigDriftGaps.length,
     missingStyleCount: missingStyles.length,
     staleStyleCount: 0,
     typeMismatchCount: typeMismatches.length,
@@ -703,9 +840,11 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     plannedCategoryCount: categoriesWithGaps.length,
   };
 
-  const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount;
+  const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount;
   return {
     message: _composeMessage(summary),
+    semanticAliasRepairModel: spacingAliasPlan.model || SEMANTIC_ALIAS_REPAIR_MODEL,
+    spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
     approvalBoundary: gapTotal ? TOKEN_GAP_APPROVAL_BOUNDARY : null,
     summary,
     repairPlan,
@@ -713,6 +852,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       missingVariables: missingVariables.slice(0, 10),
       missingStyles: missingStyles.slice(0, 10),
       typeMismatches: typeMismatches.slice(0, 10),
+      spacingAliasRepairs: spacingAliasRepairGaps.slice(0, 10),
+      spacingAliasConfigDrift: spacingAliasConfigDriftGaps.slice(0, 10),
       unsupportedCategories,
     },
     tokenGaps,
@@ -748,7 +889,10 @@ function _buildRepairPlan(context) {
       || (context.typeMismatches || []).some(gap => gap.category === category)
     )
     .sort();
-  const total = (context.missingVariables || []).length + (context.missingStyles || []).length + (context.typeMismatches || []).length;
+  const total = (context.missingVariables || []).length
+    + (context.missingStyles || []).length
+    + (context.typeMismatches || []).length
+    + (context.spacingAliasRepairs || []).length;
   const previewInput = {
     config_path: context.configPath,
     categories,
@@ -758,7 +902,7 @@ function _buildRepairPlan(context) {
   };
   const ensureCollectionModes = (context.foundationRepairs || []).some(item =>
     Array.isArray(item.missingModes) && item.missingModes.length > 0
-  );
+  ) || (context.spacingMissingResponsiveModes || []).length > 0;
   const applyInput = {
     config_path: context.configPath,
     categories: applyCategories,
@@ -833,10 +977,13 @@ function _buildRepairPlan(context) {
         ? "Figlets can create " + foundationCollections.length + " missing foundation collection shell" + (foundationCollections.length === 1 ? "" : "s") + " before the token update. This creates configured collections and modes only; it does not create variables or styles until the next approved update_ds_tokens step."
         : "No missing foundation collection repair is needed.",
     },
+    semanticAliasRepairModel: context.semanticAliasRepairModel || SEMANTIC_ALIAS_REPAIR_MODEL,
+    spacingAliasPlanSummary: context.spacingAliasPlanSummary || null,
     counts: {
       missingVariables: (context.missingVariables || []).length,
       missingStyles: (context.missingStyles || []).length,
       typeMismatches: (context.typeMismatches || []).length,
+      spacingAliasConfigDrift: (context.spacingAliasConfigDrift || []).length,
       total,
       applySupportedCategories: applyCategories.length,
       optionalTotal: 0,
@@ -854,6 +1001,8 @@ function _buildRepairPlan(context) {
 function _buildDesignerPresentation(context, total) {
   const missingVariables = context.missingVariables || [];
   const missingStyles = context.missingStyles || [];
+  const spacingAliasRepairs = context.spacingAliasRepairs || [];
+  const spacingAliasConfigDrift = context.spacingAliasConfigDrift || [];
   const notes = context.missingCapabilityNotes || [];
   const foundationRepairs = context.foundationRepairs || [];
   const lines = [];
@@ -878,6 +1027,42 @@ function _buildDesignerPresentation(context, total) {
       sections.push({
         title: "Styles to create",
         message: `Figlets can preview ${missingStyles.length} missing text/effect style${missingStyles.length === 1 ? "" : "s"} from config.`,
+      });
+    }
+    if (spacingAliasRepairs.length) {
+      const changes = [];
+      for (const repair of spacingAliasRepairs) {
+        for (const update of repair.updates || []) {
+          changes.push(repair.name + " [" + update.modeName + "] -> " + update.toAliasName);
+        }
+      }
+      sections.push({
+        title: "Semantic spacing alias repairs",
+        message: "Figlets can replace raw semantic spacing values that match config with existing primitive aliases: "
+          + changes.slice(0, 6).join(", ")
+          + (changes.length > 6 ? ", and more." : "."),
+      });
+    }
+    if ((context.spacingMissingResponsiveModes || []).length) {
+      sections.push({
+        title: "Spacing breakpoint modes required",
+        message: "Semantic spacing alias repair needs Mobile, Tablet, and Desktop modes on the Spacing collection. Figlets can add the missing modes on approved apply (ensure_collection_modes), then you should rerun inspect and apply spacing-semantics so every device mode is updated.",
+      });
+    }
+    if (spacingAliasConfigDrift.length) {
+      const driftLines = [];
+      for (const drift of spacingAliasConfigDrift) {
+        for (const mode of drift.driftModes || []) {
+          driftLines.push(
+            drift.name + " [" + mode.modeName + "]: Figma " + mode.currentValue + " vs config " + mode.configExpected
+          );
+        }
+      }
+      sections.push({
+        title: "Semantic spacing config drift",
+        message: "These semantic spacing modes differ from config and need a designer decision before aliasing: "
+          + driftLines.slice(0, 4).join("; ")
+          + (driftLines.length > 4 ? "; and more." : "."),
       });
     }
   } else {
@@ -918,6 +1103,12 @@ function _buildDesignerPresentation(context, total) {
       foundationRepairs: foundationRepairs.length,
       productGaps: notes.filter(note => note.productGap).length,
     },
+    proposedChanges: spacingAliasRepairs.flatMap(repair => (repair.updates || []).map(update => ({
+      token: repair.name,
+      mode: update.modeName,
+      action: "alias-to-existing-primitive",
+      toAlias: update.toAliasName,
+    }))),
   };
 }
 
@@ -933,7 +1124,8 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 };
 
 function _composeMessage(summary) {
-  const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount;
+  const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount
+    + (summary.staleVariableCount || 0) + (summary.configDriftCount || 0);
   if (!total && !summary.unsupportedCategoryCount) {
     return "No config-backed non-color token gaps found in the inspected categories.";
   }
@@ -941,6 +1133,8 @@ function _composeMessage(summary) {
   if (summary.missingVariableCount) parts.push(`${summary.missingVariableCount} missing variable${summary.missingVariableCount === 1 ? "" : "s"}`);
   if (summary.missingStyleCount) parts.push(`${summary.missingStyleCount} missing style${summary.missingStyleCount === 1 ? "" : "s"}`);
   if (summary.typeMismatchCount) parts.push(`${summary.typeMismatchCount} type mismatch${summary.typeMismatchCount === 1 ? "" : "es"}`);
+  if (summary.staleVariableCount) parts.push(`${summary.staleVariableCount} alias repair${summary.staleVariableCount === 1 ? "" : "s"}`);
+  if (summary.configDriftCount) parts.push(`${summary.configDriftCount} config drift mode${summary.configDriftCount === 1 ? "" : "s"}`);
   if (summary.unsupportedCategoryCount) parts.push(`${summary.unsupportedCategoryCount} unsupported categor${summary.unsupportedCategoryCount === 1 ? "y" : "ies"}`);
   const gapSummary = `Figlets found ${parts.join(", ")} in the config-backed token planner.`;
   if (!total) {

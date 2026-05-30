@@ -125,6 +125,60 @@ module.exports = (async () => {
     }
 
     {
+      const aliasRepairDataPath = path.join(tmp, "figma-data-spacing-alias-repair.json");
+      const aliasRepairSnapshot = {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["space-12", "space-16"],
+            modes: [{ id: "default", modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["space-component-md"],
+            modes: [
+              { id: "mobile", modeId: "mobile", name: "Mobile" },
+              { id: "tablet", modeId: "tablet", name: "Tablet" },
+              { id: "desktop", modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "space-12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 12 } },
+          { id: "space-16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 16 } },
+          {
+            id: "space-component-md",
+            name: "space/component/md",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 12, tablet: 16, desktop: 16 },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      };
+      fs.writeFileSync(aliasRepairDataPath, JSON.stringify(aliasRepairSnapshot, null, 2), "utf8");
+      const result = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath: aliasRepairDataPath,
+        categories: ["spacing-semantics"],
+        create_missing: true,
+        dry_run: true,
+      });
+      assert.ok(!result.error, result.error);
+      assert.ok(
+        result.report["spacing-semantics"].wouldUpdateVariables.some(item => item.name === "space/component/md"),
+        "dry-run should surface deterministic semantic spacing alias rewires as wouldUpdateVariables"
+      );
+      const spacingUpdate = result.report["spacing-semantics"].wouldUpdateVariables.find(item => item.name === "space/component/md");
+      assert.ok(
+        spacingUpdate.updates.some(update => update.modeName === "Mobile" && update.toAliasName === "space/12"),
+        "dry-run should include exact mode-level alias target details for semantic spacing repairs"
+      );
+    }
+
+    {
       const pruneFigmaDataPath = path.join(tmp, "figma-data-prune.json");
       const pruneSnapshot = {
         collections: [

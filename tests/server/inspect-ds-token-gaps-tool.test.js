@@ -93,8 +93,8 @@ module.exports = (() => {
   });
 
   assert.deepStrictEqual(
-    Object.keys(result).slice(0, 5),
-    ["message", "approvalBoundary", "summary", "repairPlan", "topFindings"],
+    Object.keys(result).slice(0, 7),
+    ["message", "semanticAliasRepairModel", "spacingSemanticSource", "approvalBoundary", "summary", "repairPlan", "topFindings"],
     "agent-actionable output should be first"
   );
   assert.ok(result.approvalBoundary && result.approvalBoundary.readOnlyUntilApproval === true);
@@ -247,6 +247,250 @@ module.exports = (() => {
         && change.toAlias === "space/12"
       ),
       "designer presentation should include exact token/mode alias mapping"
+    );
+    assert.ok(spacingAliasPlan.semanticAliasRepairModel, "planner should expose semantic alias repair model");
+    assert.ok(
+      spacingAliasPlan.repairPlan.semanticAliasRepairModel.intendedValuesSource === "config",
+      "repair plan should document config-backed intended values"
+    );
+  }
+
+  {
+    const bootstrapSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
+      {
+        collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+        spacing: {},
+      },
+      {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["p12", "p16", "p24"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-lg"],
+            modes: [
+              { modeId: "mobile", name: "Mobile" },
+              { modeId: "tablet", name: "Tablet" },
+              { modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+          { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
+          {
+            id: "layout-lg",
+            name: "space/layout/lg",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 48, tablet: 64, desktop: 96 },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      },
+      {
+        configPath: "/tmp/design-system.config.js",
+        categories: ["spacing-semantics"],
+      }
+    );
+    assert.strictEqual(bootstrapSpacing.spacingSemanticSource, "figma-snapshot-inference");
+    assert.ok(
+      bootstrapSpacing.repairPlan.applyInput.categories.includes("spacing-semantics"),
+      "bootstrap config without spacing.semantic should still plan alias repairs from snapshot inference"
+    );
+  }
+
+  {
+    const bootstrapAliasedSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
+      {
+        collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+        spacing: {},
+      },
+      {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["p12", "p16", "p24"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-lg"],
+            modes: [
+              { modeId: "mobile", name: "Mobile" },
+              { modeId: "tablet", name: "Tablet" },
+              { modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+          { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
+          {
+            id: "layout-lg",
+            name: "space/layout/lg",
+            resolvedType: "FLOAT",
+            valuesByMode: {
+              mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+              tablet: { type: "VARIABLE_ALIAS", id: "p16" },
+              desktop: { type: "VARIABLE_ALIAS", id: "p24" },
+            },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      },
+      {
+        configPath: "/tmp/design-system.config.js",
+        categories: ["spacing-semantics"],
+      }
+    );
+    assert.strictEqual(bootstrapAliasedSpacing.spacingSemanticSource, "figma-snapshot-resolved");
+    assert.strictEqual(
+      bootstrapAliasedSpacing.repairPlan.spacingAliasPlanSummary.missingPrimitiveTokens,
+      0,
+      "fully aliased bootstrap spacing should not surface missing-primitive notes"
+    );
+    assert.ok(
+      bootstrapAliasedSpacing.repairPlan.missingCapabilityNotes.some(
+        note => note.kind === "spacing-semantics-already-healthy"
+      ),
+      "inspect should document healthy aliased semantics instead of missing primitives"
+    );
+    assert.ok(
+      !bootstrapAliasedSpacing.repairPlan.missingCapabilityNotes.some(
+        note => note.kind === "missing-primitive-for-alias-repair"
+      )
+    );
+  }
+
+  {
+    const representativeSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
+      Object.assign({}, DS, {
+        spacing: {
+          semantic: {
+            "layout/lg": [48, 64, 96],
+            "touch/comfortable": [48, 48, 40],
+          },
+          radius: DS.spacing.radius,
+          border: DS.spacing.border,
+        },
+      }),
+      {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["p12", "p16", "p24", "p40"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-lg", "touch-comfortable"],
+            modes: [
+              { modeId: "mobile", name: "Mobile" },
+              { modeId: "tablet", name: "Tablet" },
+              { modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+          { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
+          { id: "p40", name: "space/40", resolvedType: "FLOAT", valuesByMode: { default: 40 } },
+          {
+            id: "layout-lg",
+            name: "space/layout/lg",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 48, tablet: 64, desktop: 96 },
+          },
+          {
+            id: "touch-comfortable",
+            name: "space/touch/comfortable",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 48, tablet: 48, desktop: 40 },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      },
+      {
+        configPath: "/tmp/design-system.config.js",
+        categories: ["spacing-semantics"],
+      }
+    );
+    const repairs = representativeSpacing.tokenGaps.filter(gap => gap.gapType === "spacing-alias-repair");
+    assert.ok(repairs.some(gap => gap.name === "space/layout/lg"), "layout/lg should be repairable");
+    assert.ok(repairs.some(gap => gap.name === "space/touch/comfortable"), "touch/comfortable should be repairable");
+    assert.ok(
+      representativeSpacing.repairPlan.designerPresentation.proposedChanges.some(change =>
+        change.token === "space/touch/comfortable" && change.toAlias === "space/40" && change.mode === "Desktop"
+      ),
+      "designer presentation should list touch/comfortable alias targets"
+    );
+  }
+
+  {
+    const configDrift = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [
+        {
+          id: "primitives",
+          name: "1. Primitives",
+          variableIds: ["space-12", "space-16"],
+          modes: [{ modeId: "default", name: "Default" }],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          variableIds: ["component-md"],
+          modes: [
+            { modeId: "mobile", name: "Mobile" },
+            { modeId: "tablet", name: "Tablet" },
+            { modeId: "desktop", name: "Desktop" },
+          ],
+        },
+      ],
+      variables: [
+        { id: "space-12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 12 } },
+        { id: "space-16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 16 } },
+        {
+          id: "component-md",
+          name: "space/component/md",
+          resolvedType: "FLOAT",
+          valuesByMode: { mobile: 12, tablet: 99, desktop: 16 },
+        },
+      ],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["spacing-semantics"],
+    });
+    assert.ok(
+      configDrift.tokenGaps.some(gap => gap.gapType === "spacing-alias-config-drift" && gap.name === "space/component/md"),
+      "config drift should surface as a separate gap type"
+    );
+    const driftRepair = configDrift.tokenGaps.find(gap => gap.gapType === "spacing-alias-repair" && gap.name === "space/component/md");
+    if (driftRepair) {
+      assert.ok(
+        !driftRepair.updates.some(update => update.modeName === "Tablet"),
+        "drifted modes must not be included in alias repair proposals"
+      );
+    }
+    assert.ok(
+      configDrift.repairPlan.designerPresentation.sections.some(section => section.title === "Semantic spacing config drift"),
+      "designer presentation should call out config drift explicitly"
     );
   }
 
@@ -597,8 +841,8 @@ module.exports = (() => {
     });
     assert.ok(!handled.error, handled.error);
     assert.deepStrictEqual(
-      Object.keys(handled).slice(0, 5),
-      ["message", "approvalBoundary", "summary", "repairPlan", "topFindings"]
+      Object.keys(handled).slice(0, 7),
+      ["message", "semanticAliasRepairModel", "spacingSemanticSource", "approvalBoundary", "summary", "repairPlan", "topFindings"]
     );
     assert.strictEqual(handled.config.path, configPath);
     assert.strictEqual(handled.snapshot.path, figmaDataPath);

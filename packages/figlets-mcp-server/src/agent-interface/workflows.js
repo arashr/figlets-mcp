@@ -90,6 +90,21 @@ const DESIGNER_FLOW_HARD_RULES = {
   designerPresentationRule:
     "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Before approval, show every ready-to-apply entry from designerPresentation.proposedChanges or the What will change section (token, action, mode aliases, reason) — not only a count. Keep optional and needs-designer-decision tiers separate. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
   missingCapabilityResponse: "If the Figlets workflow output does not expose the needed planner or apply payload, say this is a Figlets product/tool gap or proposed Figlets bulk-update scope instead of inventing a script or saying the gaps cannot be fixed.",
+  neverLeaveDesignerModeForImplementation: {
+    stopImmediatelyWhenYouWould: [
+      "edit figlets-mcp, figma-bridge-plugin, or package source files",
+      "patch the MCP server or bridge as a workaround for a missing Figlets tool",
+      "run npm test, git commits, or repo inspection to fix a designer spacing/token request",
+      "switch to Developer Mode without the designer explicitly asking for repo work",
+    ],
+    requiredResponse:
+      "Stop and tell the designer Figlets cannot complete that part yet (Figlets product/tool gap, missing repair payload, or reconnect/reload Figlets MCP). Stay in Designer Mode. Do not edit the repository unless the designer explicitly pivots to a developer task.",
+    designerShouldNotNeedToSay: [
+      "do not edit figlet",
+      "do not edit the repo",
+      "stay in designer mode",
+    ],
+  },
 };
 
 const NEW_DS_SETUP_INTAKE_CONTRACT = {
@@ -841,6 +856,7 @@ function getStartGuide() {
       "The agent should summarize tool results in plain language instead of dumping JSON.",
       "Design-system reviews, checks, audits, setup-gap investigations, and contrast investigations must use the Figlets workflow and the Figlets MCP tools/scripts named by figlets_workflow_guide.",
       "Do not write custom scripts, inspect local snapshots or tool-results, read MCP transcript files, or use raw Figma APIs for designer-facing Figlets review unless the designer explicitly asks to go out of bounds.",
+      "If Figlets tools cannot complete the designer request, stop immediately and report a Figlets product/tool gap. Never edit repo, plugin, or MCP server code, and never switch to Developer Mode, unless the designer explicitly asks for implementation work.",
     ],
     hardRules: clone(DESIGNER_FLOW_HARD_RULES),
     scope: {

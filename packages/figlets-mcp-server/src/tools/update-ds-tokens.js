@@ -11,6 +11,7 @@ const {
   ORCHESTRATION_APPLY_CATEGORIES,
   planTokenPruneFromSnapshot,
 } = require("./inspect-ds-token-gaps.js");
+const { withEffectiveSpacingSemantic } = require("./semantic-alias-repair.js");
 
 const updateDsTokensTool = {
   name: "update_ds_tokens",
@@ -326,12 +327,33 @@ function _handleApplyDsTokens(args, configPath, ds) {
     };
   }
 
+  const dataSource = args.figmaDataPath
+    ? loadFigmaDataSource({ figmaDataPath: args.figmaDataPath })
+    : (loadActiveFigmaDataSource(args) || loadFigmaDataSource(args));
+  let bridgeDs = ds;
+  if (dataSource && resolved.bridgeCategories.indexOf("spacing-semantics") >= 0) {
+    const variableMap = new Map();
+    for (const variable of dataSource.figmaData.variables || []) {
+      if (variable && typeof variable.name === "string") variableMap.set(variable.name, variable);
+    }
+    bridgeDs = withEffectiveSpacingSemantic(ds, dataSource.figmaData, variableMap).ds;
+  }
+
+  const needsSpacingModes = resolved.bridgeCategories.indexOf("spacing-semantics") >= 0
+    && bridgeDs
+    && bridgeDs.spacing
+    && bridgeDs.spacing.semantic
+    && Object.keys(bridgeDs.spacing.semantic).some(key => {
+      const vals = bridgeDs.spacing.semantic[key];
+      return Array.isArray(vals) ? vals.length > 1 : false;
+    });
+
   return requestBridgePost("/request-update-tokens", {
-    DS: ds,
+    DS: bridgeDs,
     categories: resolved.bridgeCategories,
     createMissing: args.create_missing !== false,
     dryRun: false,
-    ensureCollectionModes: args.ensure_collection_modes === true,
+    ensureCollectionModes: args.ensure_collection_modes === true || needsSpacingModes,
     pruneOffConfigVariables: prune.off_config_variables,
     pruneOffConfigTextStyles: prune.off_config_text_styles,
     pruneOffConfigEffectStyles: prune.off_config_effect_styles,

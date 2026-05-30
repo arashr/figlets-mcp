@@ -89,20 +89,45 @@ const mockData = {
 {
   // Test 6: numeric primitive ramps are inventory, not unaliased defects.
   const primitiveRamp = {
-    collections: [{ id: "p", name: "Primitives", variableIds: ["p1", "p2", "s1", "t1"] }],
+    collections: [{ id: "p", name: "Primitives", variableIds: ["p1", "p2", "s1", "s2", "t1"] }],
     variables: [
       { id: "p1", name: "color/neutral/100", resolvedType: "COLOR", valuesByMode: { m: { r: 1, g: 1, b: 1, a: 1 } } },
       { id: "p2", name: "color/neutral-variant/100", resolvedType: "COLOR", valuesByMode: { m: { r: 1, g: 1, b: 1, a: 1 } } },
       { id: "s1", name: "space/0_5", resolvedType: "FLOAT", valuesByMode: { m: 2 } },
+      { id: "s2", name: "space/0-5", resolvedType: "FLOAT", valuesByMode: { m: 3 } },
       { id: "t1", name: "type/size/md", resolvedType: "FLOAT", valuesByMode: { m: 16 } },
     ]
   };
   const result = auditTokens(primitiveRamp);
   assert.strictEqual(result.summary.unaliasedCount, 0);
-  assert.strictEqual(result.summary.rawPrimitiveCount, 4);
+  assert.strictEqual(result.summary.rawPrimitiveCount, 5);
+  assert.ok(
+    !result.unaliased.some(row => row.name === "space/0-5"),
+    "fractional primitive steps with hyphens (space/0-5) are inventory, not unaliased defects"
+  );
   assert.strictEqual(result.summary.collectionNamingIssues, 0, "numeric leaves and kebab path segments should not look like mixed naming");
   assert.strictEqual(result.summary.duplicateValueGroups, 0, "cross-ramp primitive coincidences should not be issue duplicates");
   assert.ok(result.summary.informationalDuplicateValueGroups >= 1, "cross-ramp primitive coincidences remain available as info");
+}
+
+{
+  const partialSpacing = {
+    collections: [{ id: "s", name: "4. Spacing", variableIds: ["v1"] }],
+    variables: [{
+      id: "v1",
+      name: "space/stack/xl",
+      resolvedType: "FLOAT",
+      valuesByMode: {
+        m1: { type: "VARIABLE_ALIAS", id: "p1" },
+        m2: 40,
+        m3: 48,
+      },
+    }],
+  };
+  const result = auditTokens(partialSpacing);
+  assert.strictEqual(result.summary.unaliasedCount, 0, "not all modes raw — should not count as fully unaliased");
+  assert.strictEqual(result.summary.partiallyUnaliasedCount, 1);
+  assert.strictEqual(result.partiallyUnaliased[0].name, "space/stack/xl");
 }
 
 {

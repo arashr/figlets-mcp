@@ -7026,13 +7026,26 @@ async function _updateDsTokens(payload) {
   var primColl = _collectionByName(primName);
   if (primColl) primCollId = primColl.id;
   var primByName = {};
+  var primByFloat = {};
   var idToName = {};
   for (var idn = 0; idn < allVars.length; idn++) {
     idToName[allVars[idn].id] = allVars[idn].name;
   }
   if (primCollId) {
+    var primDefaultModeId = primColl && primColl.modes && primColl.modes.length ? primColl.modes[0].modeId : null;
     for (var pvi = 0; pvi < allVars.length; pvi++) {
-      if (allVars[pvi].variableCollectionId === primCollId) primByName[allVars[pvi].name] = allVars[pvi].id;
+      var primVar = allVars[pvi];
+      if (primVar.variableCollectionId !== primCollId) continue;
+      primByName[primVar.name] = primVar.id;
+      if (!/^space\/[\d]+(?:[-_][\d]+)*$/.test(String(primVar.name || ''))) continue;
+      var primRaw = primDefaultModeId && primVar.valuesByMode
+        ? primVar.valuesByMode[primDefaultModeId]
+        : null;
+      if (primRaw && typeof primRaw === 'object' && primRaw.type === 'VARIABLE_ALIAS') primRaw = null;
+      var primNum = Number(primRaw);
+      if (isFinite(primNum) && !primByFloat[primNum]) {
+        primByFloat[primNum] = { id: primVar.id, name: primVar.name };
+      }
     }
   }
 
@@ -7069,6 +7082,9 @@ async function _updateDsTokens(payload) {
     var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
     if (primByName[aliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[aliasName] };
     var num = Number(rawVal);
+    if (isFinite(num) && primByFloat[num]) {
+      return { type: 'VARIABLE_ALIAS', id: primByFloat[num].id };
+    }
     return isFinite(num) ? num : rawVal;
   }
 

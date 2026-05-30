@@ -1,11 +1,13 @@
 const fs = require("fs");
+const path = require("path");
 const { auditTokens } = require("../figlets-core.js");
 const { FIGMA_DATA_PATH, DS_CONTEXT_PATH, getActiveFilePaths } = require("../utils/paths.js");
+const { enrichAuditTokensWithSpacingAliasRepairs } = require("./semantic-alias-repair.js");
 
 const auditTokensTool = {
   name: "audit_tokens",
   description:
-    "Analyzes the local Figma design system snapshot for token health issues: non-primitive raw values that should probably reference tokens, same-domain duplicate values, and naming convention inconsistencies within collections. Raw primitive values are counted as inventory, not defects. Run sync_figma_data and detect_design_system first to ensure the snapshot is current.",
+    "Analyzes the local Figma design system snapshot for token health issues: non-primitive raw values that should probably reference tokens, same-domain duplicate values, and naming convention inconsistencies within collections. Raw primitive values are counted as inventory, not defects. When design-system.config.js is available, repairable raw semantic spacing tokens are routed to inspect_ds_token_gaps / update_ds_tokens instead of dead-ending as manual follow-up. Run sync_figma_data and detect_design_system first to ensure the snapshot is current.",
   inputSchema: {
     type: "object",
     properties: {
@@ -28,12 +30,23 @@ function loadDsContext(dsContextPath) {
   }
 }
 
+function loadDsForAudit(configPath) {
+  if (!configPath || !fs.existsSync(configPath)) return null;
+  try {
+    const { readDsConfig } = require("../figlets-core.js").dsConfig;
+    return readDsConfig(configPath);
+  } catch {
+    return null;
+  }
+}
+
 function handleAuditTokens(args = {}) {
   const activePaths = getActiveFilePaths();
   const dataPath = args.figmaDataPath
-    ? require("path").resolve(args.figmaDataPath)
+    ? path.resolve(args.figmaDataPath)
     : activePaths.data;
   const dsContextPath = activePaths.dsContext;
+  const configPath = activePaths.config;
 
   if (!fs.existsSync(dataPath)) {
     throw new Error(
@@ -56,8 +69,15 @@ function handleAuditTokens(args = {}) {
     contextIndexes
   });
 
+  const ds = loadDsForAudit(configPath);
+  const enriched = enrichAuditTokensWithSpacingAliasRepairs(result, {
+    ds,
+    figmaData: rawData,
+    configPath,
+  });
+
   return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }]
   };
 }
 

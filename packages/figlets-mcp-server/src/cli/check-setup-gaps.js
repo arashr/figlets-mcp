@@ -194,12 +194,16 @@ function _formatSemanticNamingConflict(item) {
   const tokens = item.tokens || {};
   const surfaceBased = Array.isArray(tokens.surfaceBased) ? tokens.surfaceBased : [];
   const roleBased = Array.isArray(tokens.roleBased) ? tokens.roleBased : [];
+  const invalidOnBackground = Array.isArray(tokens.invalidOnBackground) ? tokens.invalidOnBackground : [];
   const recommendation = item.canonicalRecommendation || {};
   const lines = [
-    `"${item.family}" ${item.role} mixes surface-based and role-based names`
+    item.conflictType === "invalid-on-background"
+      ? `"${item.family}" ${item.role} has invalid on-* background naming`
+      : `"${item.family}" ${item.role} mixes surface-based and role-based names`
   ];
   if (surfaceBased.length) lines.push(`    surface-based: ${surfaceBased.map(name => `"${name}"`).join(", ")}`);
-  if (roleBased.length) lines.push(`    role-based: ${roleBased.map(name => `"${name}"`).join(", ")}`);
+  if (invalidOnBackground.length) lines.push(`    invalid background: ${invalidOnBackground.map(name => `"${name}"`).join(", ")}`);
+  else if (roleBased.length) lines.push(`    role-based: ${roleBased.map(name => `"${name}"`).join(", ")}`);
   if (recommendation.convention) {
     lines.push(`    recommendation: ${recommendation.convention}`);
   }

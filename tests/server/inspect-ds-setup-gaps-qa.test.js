@@ -634,8 +634,8 @@ module.exports = (() => {
     const mixedDuplicateIntentResult = inspectDsSetupGapsFromFigmaData(mixedDuplicateIntentSnap);
     assert.strictEqual(
       mixedDuplicateIntentResult.summary.semanticNamingConflictCount,
-      3,
-      "mixed duplicate-intent snapshots should surface text, icon, and bg/fill conflicts"
+      2,
+      "mixed duplicate-intent snapshots should surface text/icon conflicts without treating bg/* and fill/* as competitors"
     );
     const dangerTextConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
       item.family === "danger" && item.role === "foreground"
@@ -651,10 +651,11 @@ module.exports = (() => {
     const infoBackgroundConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
       item.family === "info" && item.role === "background"
     );
-    assert.ok(infoBackgroundConflict, "bg/info vs fill/info should be reported as surface/fill duplicate intent");
-    assert.deepStrictEqual(infoBackgroundConflict.tokens.surfaceBased, ["color/bg/info"]);
-    assert.deepStrictEqual(infoBackgroundConflict.tokens.roleBased, ["color/fill/info"]);
-    assert.strictEqual(infoBackgroundConflict.canonicalRecommendation.convention, "role-based");
+    assert.strictEqual(
+      infoBackgroundConflict,
+      undefined,
+      "bg/info and fill/info are related background roles, not duplicate competitors"
+    );
     assert.ok(
       mixedDuplicateIntentResult.topFindings.highConfidenceIssues.some(item => item.kind === "duplicate-intent-semantic"),
       "top findings should include semantic naming conflicts"
@@ -686,6 +687,8 @@ module.exports = (() => {
     const invalidOnBackgroundVars = [
       sem("bg-danger", "color/bg/danger", alias("r700"), alias("r700")),
       sem("bg-on-danger", "color/bg/on-danger", alias("r700"), alias("r700")),
+      sem("text-on-danger", "color/text/on-danger", alias("n50"), alias("n950")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("n50"), alias("n950")),
       sem("surface-info", "color/surface/info", alias("n50"), alias("n950")),
       sem("surface-on-info", "color/surface/on-info", alias("n50"), alias("n950")),
     ];
@@ -706,8 +709,10 @@ module.exports = (() => {
       item.family === "danger" && item.role === "background"
     );
     assert.ok(dangerBgConflict, "bg/danger vs bg/on-danger should be a semantic naming conflict");
+    assert.strictEqual(dangerBgConflict.conflictType, "invalid-on-background");
     assert.deepStrictEqual(dangerBgConflict.tokens.surfaceBased, ["color/bg/danger"]);
     assert.deepStrictEqual(dangerBgConflict.tokens.roleBased, ["color/bg/on-danger"]);
+    assert.deepStrictEqual(dangerBgConflict.tokens.invalidOnBackground, ["color/bg/on-danger"]);
     assert.strictEqual(dangerBgConflict.canonicalRecommendation.convention, "surface-based");
     assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.keep, ["color/bg/danger"]);
     assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.review, ["color/bg/on-danger"]);
@@ -719,8 +724,19 @@ module.exports = (() => {
       item.family === "info" && item.role === "background"
     );
     assert.ok(infoSurfaceConflict, "surface/info vs surface/on-info should also be caught");
+    assert.strictEqual(infoSurfaceConflict.conflictType, "invalid-on-background");
     assert.deepStrictEqual(infoSurfaceConflict.tokens.surfaceBased, ["color/surface/info"]);
     assert.deepStrictEqual(infoSurfaceConflict.tokens.roleBased, ["color/surface/on-info"]);
+    assert.deepStrictEqual(
+      invalidOnBackgroundResult.contrastFailures.filter(item => item.bg === "color/bg/on-danger"),
+      [],
+      "invalid bg/on-* variables should not drive text contrast repair suggestions"
+    );
+    assert.deepStrictEqual(
+      invalidOnBackgroundResult.iconContrastFailures.filter(item => item.bg === "color/bg/on-danger"),
+      [],
+      "invalid bg/on-* variables should not drive icon contrast repair suggestions"
+    );
   }
 
   // ── Config context is a suppressive hint, not the source of truth. When a

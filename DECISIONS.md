@@ -12,7 +12,7 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Implementation expectation:** The setup-gap planner exposes a dedicated `semanticNamingConflicts` category with conflicting token sets, convention labels, canonical recommendation hints, `repairTier: "needs-designer-decision"`, and no `applyInput` migration payload. Designer-facing summaries must list the exact conflicting tokens before asking for a decision.
 
-**Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output. `bg/on-*`, `surface/on-*`, and `background/on-*` backgrounds should group with their stripped family and recommend the plain background token as canonical when present.
+**Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output. `bg/on-*`, `surface/on-*`, and `background/on-*` backgrounds should group with their stripped family and recommend the plain background token as canonical when present. Plain `bg/*` and `fill/*` tokens are not competitors by themselves; `fill/*` is a legitimate related background role and should not be included in the conflict list for invalid `bg/on-*` findings.
 
 ---
 

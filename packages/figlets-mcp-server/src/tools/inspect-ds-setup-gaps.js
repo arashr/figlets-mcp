@@ -120,6 +120,19 @@ function _familyKeyForParts(parts, roleIndex) {
   return beforeRole.length ? beforeRole.join("/") : parts.slice(1).join("/");
 }
 
+function _isInvalidOnBackgroundParts(parts, roleIndex) {
+  if (!Array.isArray(parts) || roleIndex < 0) return false;
+  const roleSegment = _norm(parts[roleIndex]);
+  if (!/^(surface|bg|background|fill)$/.test(roleSegment)) return false;
+  return /^on-[^/]+$/.test(_norm(parts[roleIndex + 1] || ""));
+}
+
+function _isInvalidOnBackgroundName(name) {
+  const parts = String(name || "").split("/");
+  const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+  return bgIndex >= 0 && _isInvalidOnBackgroundParts(parts, bgIndex);
+}
+
 function _candidateNameForRole(exampleName, role, preferredFamilies) {
   const parts = String(exampleName || "").split("/");
   const info = _roleForParts(parts);
@@ -170,6 +183,7 @@ function _clusterSemanticFamilies(semanticVars) {
     const parts = variable.name.split("/");
     const info = _roleForParts(parts);
     if (!info) continue;
+    if (info.role === "background" && _isInvalidOnBackgroundParts(parts, info.roleIndex)) continue;
     const key = _familyKeyForParts(parts, info.roleIndex);
     if (!key) continue;
     if (!clusters.has(key)) {
@@ -194,7 +208,7 @@ function _roleConventionForName(name) {
   if (!family) return null;
 
   if (info.role === "background") {
-    const hasOnLeaf = /^on-[^/]+$/.test(normalizedLeaf);
+    const hasOnLeaf = _isInvalidOnBackgroundParts(parts, info.roleIndex);
     const convention = hasOnLeaf
       ? "invalid-on-background"
       : roleSegment === "fill"
@@ -254,20 +268,20 @@ function _canonicalNamingRecommendation(familyConventions, role, tokens) {
       reason: "A bg/surface/background token exists for this family, so the plain role token is likely the safer canonical path.",
     };
   }
-  if (role === "background" && hasRoleBasedCompanion && !hasSurfaceBasedCompanion) {
-    return {
-      convention: "role-based",
-      keep: tokens.roleBased.slice(),
-      review: tokens.surfaceBased.slice(),
-      reason: "This family already uses on-* foreground/icon/border roles, so color/fill/* is likely the safer background convention.",
-    };
-  }
   if (role === "background" && hasInvalidOnBackground && hasSurface) {
     return {
       convention: "surface-based",
       keep: tokens.surfaceBased.slice(),
       review: tokens.roleBased.slice(),
       reason: "Background roles should not use on-* leaves; keep the plain bg/surface/background token and review the on-* background duplicate.",
+    };
+  }
+  if (role === "background" && hasRoleBasedCompanion && !hasSurfaceBasedCompanion) {
+    return {
+      convention: "role-based",
+      keep: tokens.roleBased.slice(),
+      review: tokens.surfaceBased.slice(),
+      reason: "This family already uses on-* foreground/icon/border roles, so color/fill/* is likely the safer background convention.",
     };
   }
   if (role === "background" && hasSurfaceBasedCompanion && !hasRoleBasedCompanion) {
@@ -307,9 +321,35 @@ function _detectSemanticNamingConflicts(semanticVars) {
         surfaceBased = entries
           .filter(entry => entry.convention === "surface-based-background")
           .map(entry => entry.name);
-        roleBased = entries
-          .filter(entry => entry.convention === "role-based-fill" || entry.convention === "invalid-on-background")
+        const invalidOnBackground = entries
+          .filter(entry => entry.convention === "invalid-on-background")
           .map(entry => entry.name);
+        const relatedFill = entries
+          .filter(entry => entry.convention === "role-based-fill")
+          .map(entry => entry.name);
+        if (!surfaceBased.length || !invalidOnBackground.length) continue;
+        surfaceBased = Array.from(new Set(surfaceBased)).sort();
+        roleBased = Array.from(new Set(invalidOnBackground)).sort();
+        const tokens = {
+          surfaceBased,
+          roleBased,
+          invalidOnBackground: roleBased.slice(),
+        };
+        if (relatedFill.length) tokens.relatedFill = Array.from(new Set(relatedFill)).sort();
+        const recommendation = _canonicalNamingRecommendation(familyConventions, role, tokens);
+        conflicts.push({
+          kind: "duplicate-intent-semantic",
+          conflictType: "invalid-on-background",
+          family,
+          role,
+          conventions: ["plain-background", "invalid-on-background"],
+          tokens,
+          canonicalRecommendation: recommendation,
+          repairTier: "needs-designer-decision",
+          agentAction: "ask-designer",
+          reason: "This family has a background token with an on-* leaf. on-* names describe foreground roles, so this should be reviewed separately from legitimate fill/* backgrounds.",
+        });
+        continue;
       } else {
         surfaceBased = entries
           .filter(entry => entry.convention === "surface-based-role")
@@ -1171,6 +1211,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     if (_norm(parts[bgIndex]) === "fill") continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     if (configuredText && byName.has(configuredText)) continue;
@@ -1292,6 +1333,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     const candidate = (configuredText && byName.has(configuredText))
@@ -1350,6 +1392,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     const configuredIcon = semanticContext.pairIconByBg.get(variable.name);
     let iconName = null;
     if (configuredIcon && byName.has(configuredIcon)) {
@@ -1448,6 +1491,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     const fgName = _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
     if (!fgName) continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);

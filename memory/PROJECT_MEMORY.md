@@ -18,6 +18,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Manual smoke fixture:** the developer-only broken DS fixture now seeds BNN-45 conflicts during reset, including `color/bg/danger` + `color/bg/on-danger` and `color/bg/info` + `color/bg/on-info`, so `check my design system using figlets` can validate the real designer-facing output.
 
+**Gemini manual-smoke refinement:** Gemini Flash initially summarized background conflicts as `color/bg/danger` vs `color/bg/on-danger`, `color/fill/danger`. That was wrong framing. `fill/*` is a legitimate related background role, not a competitor to `bg/*`; only `bg/on-*` is malformed. The planner now treats invalid `bg/on-*` / `surface/on-*` / `background/on-*` names as naming-only findings, excludes them from text/icon contrast repair planning, and no longer flags plain `bg/*` vs `fill/*` coexistence as a duplicate.
+
 ---
 
 ### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]

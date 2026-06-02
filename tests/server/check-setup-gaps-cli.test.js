@@ -310,6 +310,46 @@ module.exports = (async () => {
     assert.ok(infoIdx < brandIdx, "high-confidence neighboring outlines should render before medium advisories");
   }
 
+  // Invalid on-* background naming should not be described as role-based fill competition.
+  {
+    const out = formatCheckReport({
+      receiverUrl: "http://127.0.0.1:17337",
+      receiverRunning: true,
+      pluginConnected: true,
+      activeFileKey: "abc123",
+      sync: { ok: true },
+      refresh: { dryRun: true, changes: [], skipped: [], summary: { changedCount: 0, skippedCount: 0 } },
+      gaps: {
+        semanticGaps: [], missingBackgrounds: [], incompleteModes: [], contrastFailures: [], iconContrastFailures: [], brokenAliases: [], foundationRoleFindings: [], companionAdvisories: [],
+        semanticNamingConflicts: [{
+          kind: "duplicate-intent-semantic",
+          conflictType: "invalid-on-background",
+          family: "danger",
+          role: "background",
+          tokens: {
+            surfaceBased: ["color/bg/danger"],
+            roleBased: ["color/bg/on-danger"],
+            invalidOnBackground: ["color/bg/on-danger"],
+            relatedFill: ["color/fill/danger"],
+          },
+          canonicalRecommendation: {
+            convention: "surface-based",
+            keep: ["color/bg/danger"],
+            review: ["color/bg/on-danger"],
+            reason: "Background roles should not use on-* leaves; keep the plain bg/surface/background token and review the on-* background duplicate.",
+          },
+        }],
+        contrastAlgorithm: "wcag",
+        summary: emptySummary({ semanticNamingConflictCount: 1 }),
+      },
+    });
+    assert.ok(out.includes('"danger" background has invalid on-* background naming'));
+    assert.ok(out.includes('surface-based: "color/bg/danger"'));
+    assert.ok(out.includes('invalid background: "color/bg/on-danger"'));
+    assert.ok(!out.includes('role-based: "color/bg/on-danger"'));
+    assert.ok(!out.includes("color/fill/danger"), "related fill token should not be rendered as a competitor");
+  }
+
   // APCA-mode label propagates + near-miss tag + hex render + snapshot
   {
     const out = formatCheckReport({

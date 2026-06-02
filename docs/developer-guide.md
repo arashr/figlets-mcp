@@ -87,7 +87,7 @@ Optional offline analysis: export or sync Figma JSON, then use CLIs under `packa
 
 BNN-37 manual smoke prep is intentionally developer-only. It is not an MCP designer tool and must not appear in designer menus, plugin skills, or commands. Use it only in a fresh/disposable Figma file.
 
-The script resets local variables, local styles, and canvas content in the open file, builds a realistic Figlets-style design system, then intentionally removes a seeded set of semantic foreground companions, token variables, a text style, and extra spacing modes. It can also create raw binding-audit target nodes. After the bridge reports the file key, the script copies the prepared config to `.local/<fileKey>/design-system.config.js` so config-backed smoke checks still know which tokens were intentionally removed.
+The script resets local variables, local styles, and canvas content in the open file, builds a realistic Figlets-style design system, then intentionally removes a seeded set of semantic foreground companions, token variables, a text style, and extra spacing modes. It also seeds BNN-45 semantic naming conflicts such as `color/bg/danger` + `color/bg/on-danger`, and can create raw binding-audit target nodes. After the bridge reports the file key, the script copies the prepared config to `.local/<fileKey>/design-system.config.js` so config-backed smoke checks still know which tokens were intentionally removed.
 
 ```bash
 FIGLETS_DEV_BRIDGE=1 node scripts/prepare-broken-ds-fixture.js \

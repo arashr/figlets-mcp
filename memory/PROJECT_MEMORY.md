@@ -16,6 +16,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Regression coverage:** role-based-only `fill/*` + `text/on-*`/`icon/on-*` systems stay clean; surface-based-only `bg/*` + `text/*`/`icon/*` systems stay clean; mixed duplicate-intent snapshots surface dedicated conflicts without entering `applyInput`.
 
+**Manual smoke fixture:** the developer-only broken DS fixture now seeds BNN-45 conflicts during reset, including `color/bg/danger` + `color/bg/on-danger` and `color/surface/info` + `color/surface/on-info`, so `check my design system using figlets` can validate the real designer-facing output.
+
 ---
 
 ### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]

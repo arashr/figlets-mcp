@@ -1,6 +1,6 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
-var _bridgeBuild = '0.1.0-dev+bnn44.20260528.2';
+var _bridgeBuild = '0.1.0-dev+bnn45.20260602.1';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -1124,6 +1124,58 @@ async function _removeLocalVariablesByName(names) {
   return result;
 }
 
+async function _createSemanticNamingConflictVariablesForDevPrep(entries) {
+  var requested = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  var result = { createdVariables: [], existingVariables: [], missingSources: [], failed: [] };
+  if (!requested.length) return result;
+
+  var vars = await figma.variables.getLocalVariablesAsync();
+  var collections = await figma.variables.getLocalVariableCollectionsAsync();
+  var byName = {};
+  var collectionById = {};
+  for (var ci = 0; ci < collections.length; ci++) {
+    if (collections[ci] && collections[ci].id) collectionById[collections[ci].id] = collections[ci];
+  }
+  for (var vi = 0; vi < vars.length; vi++) {
+    if (vars[vi] && vars[vi].name) byName[vars[vi].name] = vars[vi];
+  }
+
+  for (var ri = 0; ri < requested.length; ri++) {
+    var item = requested[ri] || {};
+    var sourceName = String(item.source || '').trim();
+    var targetName = String(item.target || '').trim();
+    if (!sourceName || !targetName) continue;
+
+    var source = byName[sourceName];
+    if (!source) {
+      result.missingSources.push({ source: sourceName, target: targetName, kind: item.kind || null });
+      continue;
+    }
+    if (byName[targetName]) {
+      result.existingVariables.push({ source: sourceName, target: targetName, kind: item.kind || null });
+      continue;
+    }
+    var collection = collectionById[source.variableCollectionId];
+    if (!collection) {
+      result.failed.push({ source: sourceName, target: targetName, kind: item.kind || null, error: 'Source collection was not found.' });
+      continue;
+    }
+
+    try {
+      var created = figma.variables.createVariable(targetName, collection, source.resolvedType || 'COLOR');
+      var modeIds = Object.keys(source.valuesByMode || {});
+      for (var mi = 0; mi < modeIds.length; mi++) {
+        created.setValueForMode(modeIds[mi], source.valuesByMode[modeIds[mi]]);
+      }
+      byName[targetName] = created;
+      result.createdVariables.push({ source: sourceName, target: targetName, kind: item.kind || null });
+    } catch (err) {
+      result.failed.push({ source: sourceName, target: targetName, kind: item.kind || null, error: err && err.message ? err.message : String(err) });
+    }
+  }
+  return result;
+}
+
 async function _createBrokenFixtureBindingTargets() {
   var page = figma.createPage();
   page.name = 'BNN-37 Binding Audit Targets';
@@ -1190,6 +1242,7 @@ async function _prepareBrokenDsFixtureForDevPrep(payload) {
     removedTextStyles: [],
     missingTextStyles: [],
     trimmedModes: [],
+    semanticNamingConflicts: null,
     bindingAuditTargets: null
   };
 
@@ -1213,6 +1266,8 @@ async function _prepareBrokenDsFixtureForDevPrep(payload) {
     var trimResult = await _trimCollectionModesForDevPrep(trims[ti] || {});
     result.trimmedModes.push(trimResult);
   }
+
+  result.semanticNamingConflicts = await _createSemanticNamingConflictVariablesForDevPrep(gaps.createSemanticNamingConflicts || []);
 
   if (gaps.createBindingAuditTargets) {
     result.bindingAuditTargets = await _createBrokenFixtureBindingTargets();

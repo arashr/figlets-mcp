@@ -104,6 +104,10 @@ function buildBrokenDsFixturePlan(options) {
         { collectionName: '4. Spacing', keepModeNames: ['Mobile'] },
       ],
       createBindingAuditTargets: true,
+      createSemanticNamingConflicts: [
+        { source: 'color/bg/danger', target: 'color/bg/on-danger', kind: 'invalid-on-background' },
+        { source: 'color/surface/info', target: 'color/surface/on-info', kind: 'invalid-on-background' },
+      ],
     },
   };
 }

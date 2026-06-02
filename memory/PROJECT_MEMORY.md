@@ -6,7 +6,7 @@ Active context for the project so future sessions can recover quickly without re
 
 ### [2026-06-02 — BNN-45 implemented; mixed semantic naming conflicts surfaced]
 
-**Status:** BNN-45 is implemented on branch `codex/bnn-45-semantic-naming-duplicates`. Linear is ready for completion after PR/merge handling. Workspace verification passed with `npm test` → **94/94** tests passed.
+**Status:** BNN-45 is complete on branch `codex/bnn-45-semantic-naming-duplicates`. Linear is Done. Workspace verification passed with `npm test` → **94/94** tests passed, and Gemini 3.5 Flash low manual smoke passed on the reset `Figlets Test` fixture.
 
 **Shipped in branch:** `inspect_ds_setup_gaps` now detects duplicate-intent semantic naming conflicts where the same family mixes surface/plain role tokens with role-based `on-*`/`fill/*` tokens, such as `color/text/danger` vs `color/text/on-danger`, `color/icon/danger` vs `color/icon/on-danger`, and `color/bg/info` vs `color/fill/info`. Follow-up edge coverage also catches invalid background leaves like `color/bg/on-danger` and `color/surface/on-info` by grouping them with the plain `danger` / `info` family and recommending the plain background token as canonical.
 
@@ -25,6 +25,8 @@ Active context for the project so future sessions can recover quickly without re
 **Manual smoke checkpoint:** Gemini 3.5 Flash low on the reset `Figlets Test` fixture now reports the BNN-45 area in a much better shape: it detects mixed naming conventions, says the file leans surface-based (39 vs 13), asks whether to keep the majority surface-based system, and keeps naming consolidation as a needs-input item rather than a ready repair. Remaining tolerable UX issues: the agent still exposed tool/script/work-path traces before its answer, and non-BNN-45 findings were summarized rather than fully detailed.
 
 **Post-apply manual smoke:** After applying the 10 ready setup repairs, Gemini re-verified the changes and found 3 newly available setup repairs while keeping 11 naming conflicts in the needs-input lane. When asked to keep surface-based naming, it correctly identified naming consolidation/migration as a Figlets product/tool gap instead of writing scripts or deleting variables. This is the desired BNN-45 boundary. Minor wording caveat remains: it still says “role-based names” around examples like `color/bg/on-danger`; acceptable for now because it no longer presents `fill/*` as an equal competitor or offers auto-migration.
+
+**Final manual smoke:** The 3 remaining setup repairs were applied and verified (`color/icon/brand-subtle`, `color/border/muted`, `color/icon/brand` Light re-alias). Health check then reported 0 missing backgrounds, 0 missing foreground companions, 0 text contrast failures, and 0 missing semantic setup gaps. The 11 naming mismatches remained product-gap/decision items, and the agent offered sensible next workflows (showcase, QA binding audit, DESIGN.md export).
 
 ---
 

@@ -4,6 +4,20 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-02] Semantic naming consolidation needs a structured migration boundary
+
+**Decision:** BNN-45's `semanticNamingConflicts` should remain read-only detection until a separate BNN-49 planner/apply boundary exists. Once the designer chooses a canonical convention, Figlets may plan consolidation, but only through a structured dry-run and explicitly approved apply payload.
+
+**Why:** Naming cleanup can affect live Figma variable links. A token that looks redundant in a snapshot may still be bound directly to layers, used as an alias target, or intentionally retained for compatibility. Figlets should not silently delete, rename, or rewire semantic variables just because the majority convention is clear.
+
+**Implementation expectation:** The next surface should list canonical variables, duplicate/conflicting variables, alias/value equivalence, likely binding impact when available, and safe versus unsafe operations. Safe operations may be apply-ready only after designer approval. Destructive cleanup, including delete/deprecate/rename behavior, must be separated from non-destructive remap/alias work and carry a clear binding-safety warning.
+
+**Surface choice:** Before adding a public tool, check `docs/bulk-repair-api-implementation-plan.md`. Extending `inspect_ds_setup_gaps` / `apply_ds_setup_repairs` is acceptable only if the approval boundary still fits setup repair. A new planner/apply surface is justified if naming consolidation needs a different decision payload, dry-run shape, or safety model.
+
+**Regression:** `color/fill/*` must not become an equal competitor to `color/bg/*`; role-based `fill/*` remains a valid related background role. Invalid background names such as `color/bg/on-danger` can be consolidation candidates, but plain `bg/*` and `fill/*` coexistence alone is not a duplicate-intent conflict.
+
+---
+
 ## [2026-06-02] Mixed semantic naming conflicts are read-only designer decisions
 
 **Decision:** `inspect_ds_setup_gaps` should treat mixed surface/plain and role-based semantic naming for the same family as a high-priority duplicate-intent diagnostic, not as an automatic repair. Examples include `color/text/danger` with `color/text/on-danger`, `color/icon/danger` with `color/icon/on-danger`, `color/bg/info` with `color/fill/info`, and invalid background leaves like `color/bg/danger` with `color/bg/on-danger`.

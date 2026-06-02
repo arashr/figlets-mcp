@@ -4,6 +4,22 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-02 — BNN-49 opened for semantic naming consolidation product gap]
+
+**Status:** Follow-up Linear issue **BNN-49** was created after BNN-45 manual smoke: [Add structured semantic naming consolidation planner/apply surface after BNN-45](https://linear.app/arashr/issue/BNN-49/add-structured-semantic-naming-consolidation-plannerapply-surface). It is High priority in the Figlets MCP project and currently in Backlog.
+
+**Why it exists:** BNN-45 now detects mixed semantic naming conflicts and correctly keeps them as designer-decision items. The exposed product gap is what happens next: after the designer chooses a canonical convention, for example keeping the majority surface-based system, Figlets cannot yet produce a structured dry-run or approved migration/remap payload. Agents must currently stop and call this a Figlets product/tool gap.
+
+**Intended scope:** Add a Figlets-owned structured planner/apply path for semantic naming consolidation. The planner should accept the existing `semanticNamingConflicts` context plus a chosen convention (`surface-based` or `role-based`), list exact canonical and duplicate variables, explain value/alias equivalence and binding/link safety, and separate safe remap/alias/deprecation work from risky delete or rename operations.
+
+**Safety boundary:** Do not use ad hoc raw Figma scripts or generic mutation APIs. Any consolidation must be represented as a structured Figlets payload, dry-run first, with explicit designer approval before writes. Deleting or deprecating variables must be clearly separated because existing Figma variable links may break.
+
+**Implementation question for BNN-49:** Per `docs/bulk-repair-api-implementation-plan.md`, decide explicitly whether to extend `inspect_ds_setup_gaps` / `apply_ds_setup_repairs` or add a new public surface because the approval boundary is different. The likely shape is a read-only consolidation planner first, then a narrow apply path for approved safe operations.
+
+**Manual test target:** Reset the developer-only broken DS fixture on `Figlets Test`, run health-check on a weaker model, choose the majority convention when naming conflicts appear, expect a Figlets-owned dry-run plan, approve safe steps, then sync/re-run and verify conflicts are cleared or explicitly left as unsafe/designer-decision items.
+
+---
+
 ### [2026-06-02 — BNN-45 implemented; mixed semantic naming conflicts surfaced]
 
 **Status:** BNN-45 is complete on branch `codex/bnn-45-semantic-naming-duplicates`. Linear is Done. Workspace verification passed with `npm test` → **94/94** tests passed, and Gemini 3.5 Flash low manual smoke passed on the reset `Figlets Test` fixture.

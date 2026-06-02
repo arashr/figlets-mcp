@@ -24,7 +24,7 @@ assert.deepStrictEqual(
   first.gaps.createSemanticNamingConflicts,
   [
     { source: "color/bg/danger", target: "color/bg/on-danger", kind: "invalid-on-background" },
-    { source: "color/surface/info", target: "color/surface/on-info", kind: "invalid-on-background" },
+    { source: "color/bg/info", target: "color/bg/on-info", kind: "invalid-on-background" },
   ],
   "fixture should seed BNN-45 semantic naming conflicts for manual health-check smoke"
 );

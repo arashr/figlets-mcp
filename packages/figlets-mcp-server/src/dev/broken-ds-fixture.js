@@ -106,7 +106,7 @@ function buildBrokenDsFixturePlan(options) {
       createBindingAuditTargets: true,
       createSemanticNamingConflicts: [
         { source: 'color/bg/danger', target: 'color/bg/on-danger', kind: 'invalid-on-background' },
-        { source: 'color/surface/info', target: 'color/surface/on-info', kind: 'invalid-on-background' },
+        { source: 'color/bg/info', target: 'color/bg/on-info', kind: 'invalid-on-background' },
       ],
     },
   };

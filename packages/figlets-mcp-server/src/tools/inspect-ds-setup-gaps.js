@@ -103,6 +103,12 @@ function _roleForParts(parts) {
 function _familyKeyForParts(parts, roleIndex) {
   const roleSegment = _norm(parts[roleIndex]);
   const afterRole = parts.slice(roleIndex + 1);
+  if (afterRole.length && /^(surface|bg|background|fill)$/.test(roleSegment)) {
+    const leaf = _norm(afterRole[0]);
+    if (/^on-[^/]+$/.test(leaf)) {
+      return [leaf.replace(/^on-/, "")].concat(afterRole.slice(1)).join("/");
+    }
+  }
   if (afterRole.length && /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment)) {
     const leaf = _norm(afterRole[0]);
     if (/^on-[^/]+$/.test(leaf)) {
@@ -188,13 +194,19 @@ function _roleConventionForName(name) {
   if (!family) return null;
 
   if (info.role === "background") {
-    const convention = roleSegment === "fill" ? "role-based-fill" : "surface-based-background";
+    const hasOnLeaf = /^on-[^/]+$/.test(normalizedLeaf);
+    const convention = hasOnLeaf
+      ? "invalid-on-background"
+      : roleSegment === "fill"
+        ? "role-based-fill"
+        : "surface-based-background";
     return {
       name,
       role: "background",
       family,
       convention,
       familySegment: roleSegment,
+      leaf: normalizedLeaf,
       impliedCanonical: convention === "role-based-fill" ? "role-based" : "surface-based",
     };
   }
@@ -216,6 +228,7 @@ function _canonicalNamingRecommendation(familyConventions, role, tokens) {
   const backgroundConventions = familyConventions.background || [];
   const hasFill = backgroundConventions.some(entry => entry.convention === "role-based-fill");
   const hasSurface = backgroundConventions.some(entry => entry.convention === "surface-based-background");
+  const hasInvalidOnBackground = backgroundConventions.some(entry => entry.convention === "invalid-on-background");
   const hasRoleBasedCompanion = Object.keys(familyConventions).some(key =>
     key !== "background" &&
     familyConventions[key].some(entry => entry.convention === "role-based-on-fill")
@@ -247,6 +260,14 @@ function _canonicalNamingRecommendation(familyConventions, role, tokens) {
       keep: tokens.roleBased.slice(),
       review: tokens.surfaceBased.slice(),
       reason: "This family already uses on-* foreground/icon/border roles, so color/fill/* is likely the safer background convention.",
+    };
+  }
+  if (role === "background" && hasInvalidOnBackground && hasSurface) {
+    return {
+      convention: "surface-based",
+      keep: tokens.surfaceBased.slice(),
+      review: tokens.roleBased.slice(),
+      reason: "Background roles should not use on-* leaves; keep the plain bg/surface/background token and review the on-* background duplicate.",
     };
   }
   if (role === "background" && hasSurfaceBasedCompanion && !hasRoleBasedCompanion) {
@@ -287,7 +308,7 @@ function _detectSemanticNamingConflicts(semanticVars) {
           .filter(entry => entry.convention === "surface-based-background")
           .map(entry => entry.name);
         roleBased = entries
-          .filter(entry => entry.convention === "role-based-fill")
+          .filter(entry => entry.convention === "role-based-fill" || entry.convention === "invalid-on-background")
           .map(entry => entry.name);
       } else {
         surfaceBased = entries

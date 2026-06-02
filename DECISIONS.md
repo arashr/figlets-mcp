@@ -6,13 +6,13 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ## [2026-06-02] Mixed semantic naming conflicts are read-only designer decisions
 
-**Decision:** `inspect_ds_setup_gaps` should treat mixed surface/plain and role-based semantic naming for the same family as a high-priority duplicate-intent diagnostic, not as an automatic repair. Examples include `color/text/danger` with `color/text/on-danger`, `color/icon/danger` with `color/icon/on-danger`, and `color/bg/info` with `color/fill/info`.
+**Decision:** `inspect_ds_setup_gaps` should treat mixed surface/plain and role-based semantic naming for the same family as a high-priority duplicate-intent diagnostic, not as an automatic repair. Examples include `color/text/danger` with `color/text/on-danger`, `color/icon/danger` with `color/icon/on-danger`, `color/bg/info` with `color/fill/info`, and invalid background leaves like `color/bg/danger` with `color/bg/on-danger`.
 
 **Why:** These pairs can imply different usage contexts even when they look like the same intent. Figlets can explain the ambiguity and suggest a likely canonical convention from nearby tokens, but it should not silently migrate aliases, deprecate tokens, or pick winners without a designer-approved migration boundary.
 
 **Implementation expectation:** The setup-gap planner exposes a dedicated `semanticNamingConflicts` category with conflicting token sets, convention labels, canonical recommendation hints, `repairTier: "needs-designer-decision"`, and no `applyInput` migration payload. Designer-facing summaries must list the exact conflicting tokens before asking for a decision.
 
-**Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output.
+**Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output. `bg/on-*`, `surface/on-*`, and `background/on-*` backgrounds should group with their stripped family and recommend the plain background token as canonical when present.
 
 ---
 

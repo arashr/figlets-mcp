@@ -8,7 +8,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Status:** BNN-45 is implemented on branch `codex/bnn-45-semantic-naming-duplicates`. Linear is ready for completion after PR/merge handling. Workspace verification passed with `npm test` → **94/94** tests passed.
 
-**Shipped in branch:** `inspect_ds_setup_gaps` now detects duplicate-intent semantic naming conflicts where the same family mixes surface/plain role tokens with role-based `on-*`/`fill/*` tokens, such as `color/text/danger` vs `color/text/on-danger`, `color/icon/danger` vs `color/icon/on-danger`, and `color/bg/info` vs `color/fill/info`.
+**Shipped in branch:** `inspect_ds_setup_gaps` now detects duplicate-intent semantic naming conflicts where the same family mixes surface/plain role tokens with role-based `on-*`/`fill/*` tokens, such as `color/text/danger` vs `color/text/on-danger`, `color/icon/danger` vs `color/icon/on-danger`, and `color/bg/info` vs `color/fill/info`. Follow-up edge coverage also catches invalid background leaves like `color/bg/on-danger` and `color/surface/on-info` by grouping them with the plain `danger` / `info` family and recommending the plain background token as canonical.
 
 **Output shape:** findings are exposed as `semanticNamingConflicts` with `kind: "duplicate-intent-semantic"`, family/role, conflicting token sets, convention labels, canonical recommendation hints, `repairTier: "needs-designer-decision"`, and `agentAction: "ask-designer"`. They also appear in `topFindings`, summary counts, top-level message, repair-plan `missingCapabilityNotes`, designer presentation `needsDesignerDecision`, and the setup-gap CLI report.
 

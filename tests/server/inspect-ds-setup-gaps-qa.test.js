@@ -682,6 +682,46 @@ module.exports = (() => {
       "designer presentation should list the conflicting tokens, not just a count"
     );
   }
+  {
+    const invalidOnBackgroundVars = [
+      sem("bg-danger", "color/bg/danger", alias("r700"), alias("r700")),
+      sem("bg-on-danger", "color/bg/on-danger", alias("r700"), alias("r700")),
+      sem("surface-info", "color/surface/info", alias("n50"), alias("n950")),
+      sem("surface-on-info", "color/surface/on-info", alias("n50"), alias("n950")),
+    ];
+    const invalidOnBackgroundSnap = {
+      variables: primitives.concat(invalidOnBackgroundVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: invalidOnBackgroundVars.map(v => v.id) },
+      ],
+    };
+    const invalidOnBackgroundResult = inspectDsSetupGapsFromFigmaData(invalidOnBackgroundSnap);
+    assert.strictEqual(
+      invalidOnBackgroundResult.summary.semanticNamingConflictCount,
+      2,
+      "bg/on-* and surface/on-* backgrounds should be grouped with their plain background family"
+    );
+    const dangerBgConflict = invalidOnBackgroundResult.semanticNamingConflicts.find(item =>
+      item.family === "danger" && item.role === "background"
+    );
+    assert.ok(dangerBgConflict, "bg/danger vs bg/on-danger should be a semantic naming conflict");
+    assert.deepStrictEqual(dangerBgConflict.tokens.surfaceBased, ["color/bg/danger"]);
+    assert.deepStrictEqual(dangerBgConflict.tokens.roleBased, ["color/bg/on-danger"]);
+    assert.strictEqual(dangerBgConflict.canonicalRecommendation.convention, "surface-based");
+    assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.keep, ["color/bg/danger"]);
+    assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.review, ["color/bg/on-danger"]);
+    assert.ok(
+      dangerBgConflict.canonicalRecommendation.reason.includes("should not use on-* leaves"),
+      "invalid on-* background conflicts should explain why the plain background is canonical"
+    );
+    const infoSurfaceConflict = invalidOnBackgroundResult.semanticNamingConflicts.find(item =>
+      item.family === "info" && item.role === "background"
+    );
+    assert.ok(infoSurfaceConflict, "surface/info vs surface/on-info should also be caught");
+    assert.deepStrictEqual(infoSurfaceConflict.tokens.surfaceBased, ["color/surface/info"]);
+    assert.deepStrictEqual(infoSurfaceConflict.tokens.roleBased, ["color/surface/on-info"]);
+  }
 
   // ── Config context is a suppressive hint, not the source of truth. When a
   // bg is explicitly paired to a shared foreground, the naming fallback should

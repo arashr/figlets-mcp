@@ -587,6 +587,100 @@ module.exports = (() => {
       ),
       "icon contrast QA should evaluate fill/* backgrounds against existing icon/on-* companions"
     );
+    assert.strictEqual(
+      roleBasedWithFillResult.semanticNamingConflicts.length,
+      0,
+      "role-based-only fill/text-on/icon-on naming should not be treated as duplicate intent"
+    );
+  }
+  {
+    const surfaceBasedOnlyVars = [
+      sem("bg-danger", "color/bg/danger", alias("r700"), alias("r700")),
+      sem("text-danger", "color/text/danger", alias("n950"), alias("n50")),
+      sem("icon-danger", "color/icon/danger", alias("n950"), alias("n50")),
+    ];
+    const surfaceBasedOnlySnap = {
+      variables: primitives.concat(surfaceBasedOnlyVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: surfaceBasedOnlyVars.map(v => v.id) },
+      ],
+    };
+    const surfaceBasedOnlyResult = inspectDsSetupGapsFromFigmaData(surfaceBasedOnlySnap);
+    assert.strictEqual(
+      surfaceBasedOnlyResult.semanticNamingConflicts.length,
+      0,
+      "surface-based-only bg/text/icon naming should not be treated as duplicate intent"
+    );
+  }
+  {
+    const mixedDuplicateIntentVars = [
+      sem("fill-danger", "color/fill/danger", alias("r700"), alias("r700")),
+      sem("text-danger", "color/text/danger", alias("r700"), alias("r700")),
+      sem("text-on-danger", "color/text/on-danger", alias("n50"), alias("n950")),
+      sem("icon-danger", "color/icon/danger", alias("r700"), alias("r700")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("n50"), alias("n950")),
+      sem("bg-info", "color/bg/info", alias("n50"), alias("n950")),
+      sem("fill-info", "color/fill/info", alias("r700"), alias("r700")),
+      sem("text-on-info", "color/text/on-info", alias("n50"), alias("n950")),
+    ];
+    const mixedDuplicateIntentSnap = {
+      variables: primitives.concat(mixedDuplicateIntentVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: mixedDuplicateIntentVars.map(v => v.id) },
+      ],
+    };
+    const mixedDuplicateIntentResult = inspectDsSetupGapsFromFigmaData(mixedDuplicateIntentSnap);
+    assert.strictEqual(
+      mixedDuplicateIntentResult.summary.semanticNamingConflictCount,
+      3,
+      "mixed duplicate-intent snapshots should surface text, icon, and bg/fill conflicts"
+    );
+    const dangerTextConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
+      item.family === "danger" && item.role === "foreground"
+    );
+    assert.ok(dangerTextConflict, "text/danger vs text/on-danger should be a dedicated semantic naming conflict");
+    assert.deepStrictEqual(dangerTextConflict.tokens.surfaceBased, ["color/text/danger"]);
+    assert.deepStrictEqual(dangerTextConflict.tokens.roleBased, ["color/text/on-danger"]);
+    assert.strictEqual(dangerTextConflict.canonicalRecommendation.convention, "role-based");
+    assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.keep, ["color/text/on-danger"]);
+    assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.review, ["color/text/danger"]);
+    assert.strictEqual(dangerTextConflict.repairTier, "needs-designer-decision");
+    assert.strictEqual(dangerTextConflict.agentAction, "ask-designer");
+    const infoBackgroundConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
+      item.family === "info" && item.role === "background"
+    );
+    assert.ok(infoBackgroundConflict, "bg/info vs fill/info should be reported as surface/fill duplicate intent");
+    assert.deepStrictEqual(infoBackgroundConflict.tokens.surfaceBased, ["color/bg/info"]);
+    assert.deepStrictEqual(infoBackgroundConflict.tokens.roleBased, ["color/fill/info"]);
+    assert.strictEqual(infoBackgroundConflict.canonicalRecommendation.convention, "role-based");
+    assert.ok(
+      mixedDuplicateIntentResult.topFindings.highConfidenceIssues.some(item => item.kind === "duplicate-intent-semantic"),
+      "top findings should include semantic naming conflicts"
+    );
+    const mixedPlan = _buildRepairPlan(mixedDuplicateIntentResult);
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(mixedPlan.applyInput, "namingMigrations"),
+      false,
+      "naming conflicts should not be exposed as auto-migration payloads"
+    );
+    assert.ok(
+      mixedPlan.missingCapabilityNotes.some(note =>
+        note.kind === "naming-system-mismatch" &&
+        note.family === "danger" &&
+        note.role === "foreground"
+      ),
+      "repair plan should surface naming conflicts as designer decisions"
+    );
+    assert.ok(
+      mixedPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
+        change.reason === "mixed semantic naming" &&
+        change.summaryLine.includes("color/text/danger") &&
+        change.summaryLine.includes("color/text/on-danger")
+      ),
+      "designer presentation should list the conflicting tokens, not just a count"
+    );
   }
 
   // ── Config context is a suppressive hint, not the source of truth. When a

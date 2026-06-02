@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-02] Mixed semantic naming conflicts are read-only designer decisions
+
+**Decision:** `inspect_ds_setup_gaps` should treat mixed surface/plain and role-based semantic naming for the same family as a high-priority duplicate-intent diagnostic, not as an automatic repair. Examples include `color/text/danger` with `color/text/on-danger`, `color/icon/danger` with `color/icon/on-danger`, and `color/bg/info` with `color/fill/info`.
+
+**Why:** These pairs can imply different usage contexts even when they look like the same intent. Figlets can explain the ambiguity and suggest a likely canonical convention from nearby tokens, but it should not silently migrate aliases, deprecate tokens, or pick winners without a designer-approved migration boundary.
+
+**Implementation expectation:** The setup-gap planner exposes a dedicated `semanticNamingConflicts` category with conflicting token sets, convention labels, canonical recommendation hints, `repairTier: "needs-designer-decision"`, and no `applyInput` migration payload. Designer-facing summaries must list the exact conflicting tokens before asking for a decision.
+
+**Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output.
+
+---
+
 ## [2026-05-30] Semantic spacing alias hygiene is repairable token-gap scope
 
 **Decision:** Raw values in semantic spacing variables are repairable Figlets token-gap hygiene when the intended value can be matched to an existing primitive spacing variable. `audit_tokens` may flag or route the hygiene issue, but the structured repair path is `inspect_ds_token_gaps` -> dry-run `update_ds_tokens` -> designer approval -> `update_ds_tokens` apply -> sync/reinspect. This includes responsive/mode-specific semantic spacing values and fractional/step-scale primitive names such as `space/0-5`.

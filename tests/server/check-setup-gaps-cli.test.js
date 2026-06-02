@@ -14,6 +14,7 @@ function emptySummary(extra) {
     incompleteModeCount: 0,
     contrastFailureCount: 0,
     iconContrastFailureCount: 0,
+    semanticNamingConflictCount: 0,
     brokenAliasCount: 0,
     foundationRoleFindingCount: 0,
     companionAdvisoryCount: 0,
@@ -154,6 +155,26 @@ module.exports = (async () => {
         iconContrastFailures: [
           { kind: "icon-contrast-failure", bg: "color/surface/danger", icon: "color/icon/danger", mode: "Light", algorithm: "wcag-non-text", score: 1, threshold: 3 },
         ],
+        semanticNamingConflicts: [
+          {
+            kind: "duplicate-intent-semantic",
+            family: "danger",
+            role: "foreground",
+            conventions: ["surface-based", "role-based"],
+            tokens: {
+              surfaceBased: ["color/text/danger"],
+              roleBased: ["color/text/on-danger"],
+            },
+            canonicalRecommendation: {
+              convention: "role-based",
+              keep: ["color/text/on-danger"],
+              review: ["color/text/danger"],
+              reason: "A color/fill/* background exists for this family, so the on-* role convention is likely the safer canonical path.",
+            },
+            repairTier: "needs-designer-decision",
+            agentAction: "ask-designer",
+          },
+        ],
         brokenAliases: [
           { kind: "broken-alias", holder: "color/surface/danger", mode: "Dark", missingTargetId: "deleted-id" },
         ],
@@ -174,7 +195,7 @@ module.exports = (async () => {
           semanticGapCount: 2, proposedCount: 1, unresolvedCount: 1,
           missingSemanticRoleCount: 1, highConfidenceSemanticRoleGapCount: 1,
           missingBackgroundCount: 1, incompleteModeCount: 1, contrastFailureCount: 1,
-          iconContrastFailureCount: 1,
+          iconContrastFailureCount: 1, semanticNamingConflictCount: 1,
           brokenAliasCount: 1, foundationRoleFindingCount: 1, companionAdvisoryCount: 1,
         }),
       },
@@ -183,13 +204,14 @@ module.exports = (async () => {
     assert.ok(out.includes('Brand "Primary" step 500'));
 
     // Header summarizes total findings + algorithm
-    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 10 findings (contrast checked with WCAG ratio)"));
+    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 11 findings (contrast checked with WCAG ratio)"));
 
     // Severity ordering: broken aliases first, then contrast, then missing fg/bg, modes, advisories
     const orderTokens = [
       "Broken aliases in the semantic layer:",
       "Contrast failures:",
       "Icon contrast failures:",
+      "Semantic naming conflicts:",
       "Likely semantic-family gaps:",
       "Foundational role gaps:",
       "Possible naming gaps:",
@@ -206,6 +228,12 @@ module.exports = (async () => {
 
     // Missing-fg framing: no "ready to repair", no "would add", no plannedAliases preview
     assert.ok(out.includes("Likely semantic-family gaps: 1 (1 high-confidence)"));
+    assert.ok(out.includes("Semantic naming conflicts: 1"));
+    assert.ok(out.includes('"danger" foreground mixes surface-based and role-based names'));
+    assert.ok(out.includes('surface-based: "color/text/danger"'));
+    assert.ok(out.includes('role-based: "color/text/on-danger"'));
+    assert.ok(out.includes("recommendation: role-based"));
+    assert.ok(out.includes("choose one canonical naming path"));
     assert.ok(out.includes('high confidence: "success" is missing icon'));
     assert.ok(out.includes('possible token: "color/icon/success"'));
     assert.ok(out.includes("next step: ask the designer before treating this as a repair"));
@@ -244,6 +272,7 @@ module.exports = (async () => {
     assert.ok(out.includes("URGENT: 1 semantic token references variables that were deleted"));
     assert.ok(out.includes("A11Y: 1 pair fails the contrast threshold") || out.includes("A11Y: 1 pairs fail"));
     assert.ok(out.includes("A11Y: 1 icon role fails WCAG non-text contrast (3:1)."));
+    assert.ok(out.includes("1 semantic naming conflict could represent duplicate intent"));
     assert.ok(out.includes("1 semantic family looks incomplete (1 high-confidence). Ask before repairing."));
     assert.ok(out.includes("1 foundational semantic role missing."));
     assert.ok(out.includes("2 backgrounds missing a foreground companion"));

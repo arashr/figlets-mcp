@@ -4,6 +4,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-02 — BNN-45 implemented; mixed semantic naming conflicts surfaced]
+
+**Status:** BNN-45 is implemented on branch `codex/bnn-45-semantic-naming-duplicates`. Linear is ready for completion after PR/merge handling. Workspace verification passed with `npm test` → **94/94** tests passed.
+
+**Shipped in branch:** `inspect_ds_setup_gaps` now detects duplicate-intent semantic naming conflicts where the same family mixes surface/plain role tokens with role-based `on-*`/`fill/*` tokens, such as `color/text/danger` vs `color/text/on-danger`, `color/icon/danger` vs `color/icon/on-danger`, and `color/bg/info` vs `color/fill/info`.
+
+**Output shape:** findings are exposed as `semanticNamingConflicts` with `kind: "duplicate-intent-semantic"`, family/role, conflicting token sets, convention labels, canonical recommendation hints, `repairTier: "needs-designer-decision"`, and `agentAction: "ask-designer"`. They also appear in `topFindings`, summary counts, top-level message, repair-plan `missingCapabilityNotes`, designer presentation `needsDesignerDecision`, and the setup-gap CLI report.
+
+**Boundary:** BNN-45 deliberately does not add automatic naming migrations, alias rewires, or deprecation writes. Even when Figlets can infer a likely canonical convention from surrounding context, consolidation still needs explicit designer approval and a future structured migration/apply surface.
+
+**Regression coverage:** role-based-only `fill/*` + `text/on-*`/`icon/on-*` systems stay clean; surface-based-only `bg/*` + `text/*`/`icon/*` systems stay clean; mixed duplicate-intent snapshots surface dedicated conflicts without entering `applyInput`.
+
+---
+
 ### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]
 
 **Status:** `main` includes PR #17 / BNN-46 at merge `4a8eab1`. BNN-46 is Done in Linear. The obsolete BNN-46 stash was dropped, the merged branch was cleaned up, and the checkout returned to clean `main`.

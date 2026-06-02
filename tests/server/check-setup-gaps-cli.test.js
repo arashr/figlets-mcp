@@ -171,6 +171,8 @@ module.exports = (async () => {
               review: ["color/text/danger"],
               reason: "A color/fill/* background exists for this family, so the on-* role convention is likely the safer canonical path.",
             },
+            decisionQuestion: "Your current semantic color setup leans role-based. Do you want to keep going that way, or move this area toward a surface-based convention?",
+            linkSafetyWarning: "Do not delete or deprecate extra semantic variables blindly: existing Figma layers may already be bound to them. Use a designer-approved migration/remap plan before removing aliases or variables.",
             repairTier: "needs-designer-decision",
             agentAction: "ask-designer",
           },
@@ -233,6 +235,8 @@ module.exports = (async () => {
     assert.ok(out.includes('surface-based: "color/text/danger"'));
     assert.ok(out.includes('role-based: "color/text/on-danger"'));
     assert.ok(out.includes("recommendation: role-based"));
+    assert.ok(out.includes("question: Your current semantic color setup leans role-based"));
+    assert.ok(out.includes("warning: Do not delete or deprecate extra semantic variables blindly"));
     assert.ok(out.includes("choose one canonical naming path"));
     assert.ok(out.includes('high confidence: "success" is missing icon'));
     assert.ok(out.includes('possible token: "color/icon/success"'));
@@ -338,6 +342,8 @@ module.exports = (async () => {
             review: ["color/bg/on-danger"],
             reason: "Background roles should not use on-* leaves; keep the plain bg/surface/background token and review the on-* background duplicate.",
           },
+          decisionQuestion: "Your current semantic color setup leans role-based. Do you want to keep going that way, or move this area toward a surface-based convention?",
+          linkSafetyWarning: "Do not delete or deprecate extra semantic variables blindly: existing Figma layers may already be bound to them. Use a designer-approved migration/remap plan before removing aliases or variables.",
         }],
         contrastAlgorithm: "wcag",
         summary: emptySummary({ semanticNamingConflictCount: 1 }),
@@ -346,6 +352,8 @@ module.exports = (async () => {
     assert.ok(out.includes('"danger" background has invalid on-* background naming'));
     assert.ok(out.includes('surface-based: "color/bg/danger"'));
     assert.ok(out.includes('invalid background: "color/bg/on-danger"'));
+    assert.ok(out.includes("question: Your current semantic color setup leans role-based"));
+    assert.ok(out.includes("warning: Do not delete or deprecate extra semantic variables blindly"));
     assert.ok(!out.includes('role-based: "color/bg/on-danger"'));
     assert.ok(!out.includes("color/fill/danger"), "related fill token should not be rendered as a competitor");
   }

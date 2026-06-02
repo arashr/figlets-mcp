@@ -646,6 +646,15 @@ module.exports = (() => {
     assert.strictEqual(dangerTextConflict.canonicalRecommendation.convention, "role-based");
     assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.keep, ["color/text/on-danger"]);
     assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.review, ["color/text/danger"]);
+    assert.strictEqual(dangerTextConflict.namingBias.majority, "role-based");
+    assert.ok(
+      dangerTextConflict.decisionQuestion.includes("leans role-based"),
+      "naming conflict should ask whether to follow the file's majority convention"
+    );
+    assert.ok(
+      dangerTextConflict.linkSafetyWarning.includes("bound"),
+      "naming conflict should warn that deleting extra semantics can break existing variable links"
+    );
     assert.strictEqual(dangerTextConflict.repairTier, "needs-designer-decision");
     assert.strictEqual(dangerTextConflict.agentAction, "ask-designer");
     const infoBackgroundConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
@@ -678,9 +687,11 @@ module.exports = (() => {
       mixedPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
         change.reason === "mixed semantic naming" &&
         change.summaryLine.includes("color/text/danger") &&
-        change.summaryLine.includes("color/text/on-danger")
+        change.summaryLine.includes("color/text/on-danger") &&
+        change.summaryLine.includes("leans role-based") &&
+        change.summaryLine.includes("existing Figma layers may already be bound")
       ),
-      "designer presentation should list the conflicting tokens, not just a count"
+      "designer presentation should list the conflicting tokens, majority prompt, and binding warning"
     );
   }
   {

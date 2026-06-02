@@ -210,6 +210,12 @@ function _formatSemanticNamingConflict(item) {
   if (recommendation.reason) {
     lines.push(`    reason: ${recommendation.reason}`);
   }
+  if (item.decisionQuestion) {
+    lines.push(`    question: ${item.decisionQuestion}`);
+  }
+  if (item.linkSafetyWarning) {
+    lines.push(`    warning: ${item.linkSafetyWarning}`);
+  }
   lines.push("    next step: choose one canonical naming path before migration/deprecation");
   return lines;
 }

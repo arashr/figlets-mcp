@@ -300,6 +300,53 @@ function _canonicalNamingRecommendation(familyConventions, role, tokens) {
   };
 }
 
+function _semanticNamingBias(entries) {
+  const counts = { roleBased: 0, surfaceBased: 0, invalid: 0 };
+  for (const entry of entries || []) {
+    if (!entry || !entry.role) continue;
+    if (entry.convention === "invalid-on-background") {
+      counts.invalid += 1;
+      continue;
+    }
+    if (entry.convention === "role-based-fill" || entry.convention === "role-based-on-fill") {
+      counts.roleBased += 1;
+      continue;
+    }
+    if (entry.convention === "surface-based-background" || entry.convention === "surface-based-role") {
+      counts.surfaceBased += 1;
+    }
+  }
+  const total = counts.roleBased + counts.surfaceBased;
+  let majority = "mixed";
+  if (total > 0) {
+    const delta = counts.roleBased - counts.surfaceBased;
+    if (Math.abs(delta) >= Math.max(2, Math.ceil(total * 0.15))) {
+      majority = delta > 0 ? "role-based" : "surface-based";
+    }
+  }
+  return {
+    roleBasedCount: counts.roleBased,
+    surfaceBasedCount: counts.surfaceBased,
+    invalidCount: counts.invalid,
+    majority,
+    question: majority === "role-based"
+      ? "Your current semantic color setup leans role-based. Do you want to keep going that way, or move this area toward a surface-based convention?"
+      : majority === "surface-based"
+        ? "Your current semantic color setup leans surface-based. Do you want to keep going that way, or move this area toward a role-based convention?"
+        : "Your semantic color setup is mixed. Do you want to standardize this area toward role-based or surface-based naming?",
+  };
+}
+
+function _flattenConventionEntries(byFamily) {
+  const entries = [];
+  for (const familyConventions of byFamily.values()) {
+    for (const role of Object.keys(familyConventions)) {
+      entries.push(...familyConventions[role]);
+    }
+  }
+  return entries;
+}
+
 function _detectSemanticNamingConflicts(semanticVars) {
   const byFamily = new Map();
   for (const variable of semanticVars) {
@@ -308,9 +355,11 @@ function _detectSemanticNamingConflicts(semanticVars) {
     if (!byFamily.has(entry.family)) byFamily.set(entry.family, {});
     const familyConventions = byFamily.get(entry.family);
     if (!familyConventions[entry.role]) familyConventions[entry.role] = [];
-    familyConventions[entry.role].push(entry);
+      familyConventions[entry.role].push(entry);
   }
 
+  const namingBias = _semanticNamingBias(_flattenConventionEntries(byFamily));
+  const linkSafetyWarning = "Do not delete or deprecate extra semantic variables blindly: existing Figma layers may already be bound to them. Use a designer-approved migration/remap plan before removing aliases or variables.";
   const conflicts = [];
   for (const [family, familyConventions] of byFamily) {
     for (const role of Object.keys(familyConventions)) {
@@ -345,6 +394,9 @@ function _detectSemanticNamingConflicts(semanticVars) {
           conventions: ["plain-background", "invalid-on-background"],
           tokens,
           canonicalRecommendation: recommendation,
+          namingBias,
+          decisionQuestion: namingBias.question,
+          linkSafetyWarning,
           repairTier: "needs-designer-decision",
           agentAction: "ask-designer",
           reason: "This family has a background token with an on-* leaf. on-* names describe foreground roles, so this should be reviewed separately from legitimate fill/* backgrounds.",
@@ -370,6 +422,9 @@ function _detectSemanticNamingConflicts(semanticVars) {
         conventions: ["surface-based", "role-based"],
         tokens,
         canonicalRecommendation: recommendation,
+        namingBias,
+        decisionQuestion: namingBias.question,
+        linkSafetyWarning,
         repairTier: "needs-designer-decision",
         agentAction: "ask-designer",
         reason: "This family mixes plain semantic names and on-* role names for the same apparent intent, which makes audits and downstream binding choices ambiguous.",
@@ -2031,6 +2086,9 @@ function _buildRepairPlan(result) {
       role: conflict.role,
       tokens: conflict.tokens,
       canonicalRecommendation: conflict.canonicalRecommendation,
+      namingBias: conflict.namingBias,
+      decisionQuestion: conflict.decisionQuestion,
+      linkSafetyWarning: conflict.linkSafetyWarning,
       reason: "Figlets found mixed semantic naming conventions for the same apparent intent. Consolidation needs a designer-approved migration/deprecation decision.",
       agentAction: "ask-designer",
     });
@@ -2175,12 +2233,14 @@ function _buildProposedSetupChanges(context) {
       const roleBased = Array.isArray(tokens.roleBased) ? tokens.roleBased : [];
       const recommendation = note.canonicalRecommendation || {};
       const canonical = recommendation.convention || "designer-decision";
+      const question = note.decisionQuestion ? ` ${note.decisionQuestion}` : "";
+      const warning = note.linkSafetyWarning ? ` Warning: ${note.linkSafetyWarning}` : "";
       needsDesignerDecision.push({
         tier: "needs designer decision",
         token: `${note.family}/${note.role}`,
         action: "choose canonical naming",
         reason: "mixed semantic naming",
-        summaryLine: `Choose canonical naming for ${note.family} ${note.role}: ${surfaceBased.join(", ")} conflicts with ${roleBased.join(", ")} (${canonical}).`,
+        summaryLine: `Choose canonical naming for ${note.family} ${note.role}: ${surfaceBased.join(", ")} conflicts with ${roleBased.join(", ")} (${canonical}).${question}${warning}`,
       });
     }
   }

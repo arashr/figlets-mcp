@@ -20,6 +20,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Gemini manual-smoke refinement:** Gemini Flash initially summarized background conflicts as `color/bg/danger` vs `color/bg/on-danger`, `color/fill/danger`. That was wrong framing. `fill/*` is a legitimate related background role, not a competitor to `bg/*`; only `bg/on-*` is malformed. The planner now treats invalid `bg/on-*` / `surface/on-*` / `background/on-*` names as naming-only findings, excludes them from text/icon contrast repair planning, and no longer flags plain `bg/*` vs `fill/*` coexistence as a duplicate.
 
+**Naming decision guidance:** BNN-45 conflicts now include `namingBias` counts for role-based vs surface-based semantic conventions, a decision question that leans with the file majority (for example, “your setup leans role-based...”), and a binding-safety warning. Agents should warn that deleting/deprecating extra semantic variables can break existing Figma variable links and should require a migration/remap plan.
+
 ---
 
 ### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]

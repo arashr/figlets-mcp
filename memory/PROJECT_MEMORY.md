@@ -22,6 +22,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Naming decision guidance:** BNN-45 conflicts now include `namingBias` counts for role-based vs surface-based semantic conventions, a decision question that leans with the file majority (for example, “your setup leans role-based...”), and a binding-safety warning. Agents should warn that deleting/deprecating extra semantic variables can break existing Figma variable links and should require a migration/remap plan.
 
+**Manual smoke checkpoint:** Gemini 3.5 Flash low on the reset `Figlets Test` fixture now reports the BNN-45 area in a much better shape: it detects mixed naming conventions, says the file leans surface-based (39 vs 13), asks whether to keep the majority surface-based system, and keeps naming consolidation as a needs-input item rather than a ready repair. Remaining tolerable UX issues: the agent still exposed tool/script/work-path traces before its answer, and non-BNN-45 findings were summarized rather than fully detailed.
+
 ---
 
 ### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]

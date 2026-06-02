@@ -24,6 +24,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Manual smoke checkpoint:** Gemini 3.5 Flash low on the reset `Figlets Test` fixture now reports the BNN-45 area in a much better shape: it detects mixed naming conventions, says the file leans surface-based (39 vs 13), asks whether to keep the majority surface-based system, and keeps naming consolidation as a needs-input item rather than a ready repair. Remaining tolerable UX issues: the agent still exposed tool/script/work-path traces before its answer, and non-BNN-45 findings were summarized rather than fully detailed.
 
+**Post-apply manual smoke:** After applying the 10 ready setup repairs, Gemini re-verified the changes and found 3 newly available setup repairs while keeping 11 naming conflicts in the needs-input lane. When asked to keep surface-based naming, it correctly identified naming consolidation/migration as a Figlets product/tool gap instead of writing scripts or deleting variables. This is the desired BNN-45 boundary. Minor wording caveat remains: it still says “role-based names” around examples like `color/bg/on-danger`; acceptable for now because it no longer presents `fill/*` as an equal competitor or offers auto-migration.
+
 ---
 
 ### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]

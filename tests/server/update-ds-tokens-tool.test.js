@@ -828,6 +828,41 @@ module.exports = (async () => {
     }
 
     {
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        spacing_semantic_repairs: [],
+        create_missing: true,
+        dry_run: false,
+      });
+      assert.ok(
+        result.error && result.error.includes("spacing_semantic_repairs was provided"),
+        "explicit but empty exact semantic spacing repairs should fail closed before bridge apply"
+      );
+      assert.ok(
+        result.error.includes("omit the field entirely for a full category apply"),
+        "error should distinguish exact subset apply from full category apply"
+      );
+    }
+
+    {
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        spacing_semantic_repairs: [{
+          name: "space/layout/lg",
+          updates: [],
+        }],
+        create_missing: true,
+        dry_run: false,
+      });
+      assert.ok(
+        result.error && result.error.includes("spacing_semantic_repairs was provided"),
+        "malformed exact semantic spacing repairs should not silently widen to full category apply"
+      );
+    }
+
+    {
       const capturePath = path.join(tmp, "capture-explicit-ensure-modes.json");
       stubUpdateTokensRoute(hookPath, capturePath, {
         dryRun: false,

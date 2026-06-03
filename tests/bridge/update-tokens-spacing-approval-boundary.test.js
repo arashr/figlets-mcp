@@ -150,4 +150,78 @@ module.exports = (async () => {
     !variables.some(variable => variable.name === "space/component/md"),
     "exact spacing repair payload must not create unrelated semantic spacing variables"
   );
+
+  const malformedExactResult = await context.module.exports._updateDsTokens({
+    DS: {
+      collections: {
+        primitives: "1. Primitives",
+        spacing: "4. Spacing",
+      },
+      breakpoints: { modes: ["Mobile", "Tablet", "Desktop"] },
+      spacing: {
+        semantic: {
+          "layout/lg": [48, 64, 96],
+          "component/md": [48, 64, 64],
+        },
+        radius: {},
+        border: {},
+      },
+    },
+    categories: ["spacing-semantics"],
+    createMissing: true,
+    dryRun: false,
+    ensureCollectionModes: false,
+    spacingSemanticRepairs: [],
+  });
+  assert.ok(
+    malformedExactResult.error && malformedExactResult.error.includes("Refusing to fall back"),
+    "explicit but empty exact spacing repair payload must fail closed instead of applying the full category"
+  );
+  assert.ok(
+    !variables.some(variable => variable.name === "space/component/md"),
+    "empty exact payload must not fall back to creating unrelated semantic spacing variables"
+  );
+
+  variables.find(variable => variable.name === "space/layout/lg").valuesByMode.mobile = 48;
+  const staleAliasResult = await context.module.exports._updateDsTokens({
+    DS: {
+      collections: {
+        primitives: "1. Primitives",
+        spacing: "4. Spacing",
+      },
+      breakpoints: { modes: ["Mobile", "Tablet", "Desktop"] },
+      spacing: {
+        semantic: {
+          "layout/lg": [48, 64, 96],
+        },
+        radius: {},
+        border: {},
+      },
+    },
+    categories: ["spacing-semantics"],
+    createMissing: true,
+    dryRun: false,
+    ensureCollectionModes: false,
+    spacingSemanticRepairs: [{
+      name: "space/layout/lg",
+      updates: [{
+        modeId: "mobile",
+        modeName: "Mobile",
+        toAliasId: "space-12-stale-id",
+        toAliasName: "space/12",
+        configExpected: 48,
+      }],
+    }],
+  });
+  assert.ok(!staleAliasResult.error, staleAliasResult.error);
+  assert.strictEqual(
+    variables.find(variable => variable.name === "space/layout/lg").valuesByMode.mobile,
+    48,
+    "stale approved alias id must not fall back to alias name or configExpected raw value"
+  );
+  assert.strictEqual(
+    staleAliasResult.report["spacing-semantics"].unmatched.length,
+    1,
+    "stale approved alias target should be reported as unmatched"
+  );
 })();

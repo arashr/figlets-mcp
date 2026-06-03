@@ -7064,6 +7064,7 @@ async function _updateDsTokens(payload) {
   var createMissing = !(payload && payload.createMissing === false);
   var dryRun = !!(payload && payload.dryRun);
   var ensureCollectionModes = !!(payload && payload.ensureCollectionModes);
+  var exactSpacingRepairsProvided = !!(payload && Object.prototype.hasOwnProperty.call(payload, 'spacingSemanticRepairs'));
   var spacingSemanticRepairs = Array.isArray(payload && payload.spacingSemanticRepairs)
     ? payload.spacingSemanticRepairs
     : [];
@@ -7308,16 +7309,28 @@ async function _updateDsTokens(payload) {
 
   function _desiredApprovedUpdateValue(update) {
     if (!update) return null;
-    if (update.toAliasId && allVariablesById[update.toAliasId]) return { type: 'VARIABLE_ALIAS', id: update.toAliasId };
-    if (update.toAliasName && primByName[update.toAliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[update.toAliasName] };
-    if (update.configExpected != null) return _resolveSpaceValue(update.configExpected);
+    if (update.toAliasId) {
+      return allVariablesById[update.toAliasId] ? { type: 'VARIABLE_ALIAS', id: update.toAliasId } : null;
+    }
+    if (update.toAliasName) {
+      return primByName[update.toAliasName] ? { type: 'VARIABLE_ALIAS', id: primByName[update.toAliasName] } : null;
+    }
     return null;
+  }
+
+  if (exactSpacingRepairsProvided && categories.indexOf('spacing-semantics') >= 0 && !_tokenUpdateEntriesFromSpacingRepairs(spacingSemanticRepairs).length) {
+    return {
+      error: 'Invalid approval boundary: spacingSemanticRepairs was provided but no exact token/mode alias repair entries were usable. Refusing to fall back to full spacing-semantics apply.',
+      dryRun: dryRun,
+      categories: categories,
+      report: {},
+    };
   }
 
   var report = {};
   for (var cati = 0; cati < categories.length; cati++) {
     var category = categories[cati];
-    var entries = category === 'spacing-semantics' && spacingSemanticRepairs.length
+    var entries = category === 'spacing-semantics' && exactSpacingRepairsProvided
       ? _tokenUpdateEntriesFromSpacingRepairs(spacingSemanticRepairs)
       : _tokenUpdateEntriesForCategory(DS, category);
     var catReport = _emptyTokenUpdateReport();

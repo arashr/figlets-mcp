@@ -271,6 +271,14 @@ function _normalizeSpacingSemanticRepairs(input) {
   return repairs;
 }
 
+function _hasSpacingSemanticRepairsInput(args) {
+  return !!(args && Object.prototype.hasOwnProperty.call(args, "spacing_semantic_repairs"));
+}
+
+function _invalidSpacingSemanticRepairsError() {
+  return "Invalid approval boundary: spacing_semantic_repairs was provided but did not contain any exact token/mode alias repair entries copied from inspect_ds_token_gaps.repairPlan.applyInput. Stop and rerun inspect_ds_token_gaps, then pass the exact approved spacing_semantic_repairs entries or omit the field entirely for a full category apply.";
+}
+
 function _pruneCategoriesForRequest(args, plannerCategories) {
   const requested = _requestedCategories(args);
   return requested.length ? requested : (plannerCategories || []);
@@ -404,7 +412,17 @@ function _handleApplyDsTokens(args, configPath, ds) {
     bridgeDs = withEffectiveSpacingSemantic(ds, dataSource.figmaData, variableMap).ds;
   }
 
+  const spacingSemanticRepairsProvided = _hasSpacingSemanticRepairsInput(args);
   const spacingSemanticRepairs = _normalizeSpacingSemanticRepairs(args.spacing_semantic_repairs);
+  if (spacingSemanticRepairsProvided && resolved.bridgeCategories.indexOf("spacing-semantics") >= 0 && !spacingSemanticRepairs.length) {
+    return {
+      error: _invalidSpacingSemanticRepairsError(),
+      dryRun: false,
+      configPath,
+      categories: resolved.requested,
+      missingCapabilityNotes,
+    };
+  }
   if (args.ensure_collection_modes === true && spacingSemanticRepairs.length) {
     return {
       error: "Invalid approval boundary: update_ds_tokens cannot combine ensure_collection_modes with spacing_semantic_repairs. Apply missing collection modes with apply_ds_foundation_repairs after separate approval, then sync/reinspect and request a separate approval for the exact semantic spacing alias repairs.",
@@ -524,6 +542,20 @@ function handleUpdateDsTokens(args = {}) {
     include_existing_updates: false,
     include_existing_style_refreshes: true,
   });
+  const spacingSemanticRepairsProvided = _hasSpacingSemanticRepairsInput(args);
+  const spacingSemanticRepairs = _normalizeSpacingSemanticRepairs(args.spacing_semantic_repairs);
+  if (
+    spacingSemanticRepairsProvided
+    && ((plannerResult.categories && plannerResult.categories.supported) || []).indexOf("spacing-semantics") >= 0
+    && !spacingSemanticRepairs.length
+  ) {
+    return {
+      error: _invalidSpacingSemanticRepairsError(),
+      dryRun: true,
+      configPath,
+      categories: (plannerResult.categories && plannerResult.categories.supported) || [],
+    };
+  }
   const report = _buildDryRunReport(plannerResult, {
     create_missing: args.create_missing,
     spacing_semantic_repairs: args.spacing_semantic_repairs,

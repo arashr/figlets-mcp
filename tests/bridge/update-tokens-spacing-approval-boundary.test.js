@@ -224,4 +224,63 @@ module.exports = (async () => {
     1,
     "stale approved alias target should be reported as unmatched"
   );
+
+  collections.find(collection => collection.name === "4. Spacing").modes = [
+    { modeId: "mobile", name: "Mobile" },
+    { modeId: "tablet", name: "Tablet" },
+  ];
+  variables.find(variable => variable.name === "space/layout/lg").valuesByMode = {
+    mobile: 48,
+    tablet: 64,
+  };
+  const staleSecondModeResult = await context.module.exports._updateDsTokens({
+    DS: {
+      collections: {
+        primitives: "1. Primitives",
+        spacing: "4. Spacing",
+      },
+      breakpoints: { modes: ["Mobile", "Tablet", "Desktop"] },
+      spacing: {
+        semantic: {
+          "layout/lg": [48, 64, 96],
+        },
+        radius: {},
+        border: {},
+      },
+    },
+    categories: ["spacing-semantics"],
+    createMissing: true,
+    dryRun: false,
+    ensureCollectionModes: false,
+    spacingSemanticRepairs: [{
+      name: "space/layout/lg",
+      updates: [
+        {
+          modeId: "mobile",
+          modeName: "Mobile",
+          toAliasId: "space-12",
+          toAliasName: "space/12",
+          configExpected: 48,
+        },
+        {
+          modeId: "tablet",
+          modeName: "Tablet",
+          toAliasId: "space-16-stale-id",
+          toAliasName: "space/16",
+          configExpected: 64,
+        },
+      ],
+    }],
+  });
+  assert.ok(!staleSecondModeResult.error, staleSecondModeResult.error);
+  assertJsonEqual(
+    variables.find(variable => variable.name === "space/layout/lg").valuesByMode,
+    { mobile: 48, tablet: 64 },
+    "one stale approved mode target must prevent all writes for that exact token repair"
+  );
+  assert.strictEqual(
+    staleSecondModeResult.report["spacing-semantics"].unmatched.length,
+    1,
+    "multi-mode exact repair with a stale target should be unmatched instead of partially mutated"
+  );
 })();

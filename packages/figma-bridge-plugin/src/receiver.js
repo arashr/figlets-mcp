@@ -23,6 +23,7 @@ let pendingQaAuditRequest = null;
 let pendingUpdatePrimitivesRequest = null;
 let pendingUpdateTokensRequest = null;
 let pendingSetupRepairsRequest = null;
+let pendingSemanticNamingConsolidationRequest = null;
 let pendingFoundationRepairsRequest = null;
 let pendingResetRequest = null;
 let pendingRemoveTextStylesRequest = null;
@@ -231,6 +232,7 @@ const server = http.createServer((req, res) => {
       updatePrimitivesLive: pluginCapabilities.indexOf('update-primitives') !== -1,
       updateTokensLive: pluginCapabilities.indexOf('update-tokens') !== -1,
       setupRepairsLive: pluginCapabilities.indexOf('setup-repairs') !== -1,
+      semanticNamingConsolidationLive: pluginCapabilities.indexOf('semantic-naming-consolidation') !== -1,
       dataPath: healthPaths.data,
       selectionPath: healthPaths.selection
     }));
@@ -718,6 +720,67 @@ const server = http.createServer((req, res) => {
         pendingSetupRepairsRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingSetupRepairsRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingSetupRepairsRequest = null;
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/request-semantic-naming-consolidation') {
+    if (pendingPollResponse) {
+      if (!_pluginHasCapability('semantic-naming-consolidation')) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'The Figlets Bridge plugin is connected but does not advertise semantic naming consolidation. Reload the plugin in Figma Desktop so it loads the latest local code.',
+          activeSessionId: pendingPollSessionId || null,
+          pluginCapabilities: activePluginCapabilities
+        }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'apply-semantic-naming-consolidation', data: payload }));
+        _clearPendingPoll();
+
+        pendingSemanticNamingConsolidationRequest = res;
+
+        const semanticNamingTimer = setTimeout(() => {
+          if (pendingSemanticNamingConsolidationRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Semantic naming consolidation timed out.' }));
+            pendingSemanticNamingConsolidationRequest = null;
+          }
+        }, 60000);
+        if (semanticNamingTimer.unref) semanticNamingTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-semantic-naming-consolidation') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = {}; }
+      _persistSessionFileKey(req, parsed);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingSemanticNamingConsolidationRequest) {
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingSemanticNamingConsolidationRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingSemanticNamingConsolidationRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingSemanticNamingConsolidationRequest = null;
       }
     });
     return;

@@ -428,6 +428,7 @@
     'update-tokens',
     'foundation-repairs',
     'setup-repairs',
+    'semantic-naming-consolidation',
     'reset-figlets-file'
   ];
 
@@ -715,6 +716,13 @@
           document.getElementById('substatus').innerText = 'Creating approved semantic variables.';
           _appendLog('Received command: apply_ds_setup_repairs.');
           parent.postMessage({ pluginMessage: { type: 'apply-setup-repairs', data: data.data } }, '*');
+        } else if (data.command === 'apply-semantic-naming-consolidation') {
+          isExtracting = true;
+          _armWatchdog('Semantic naming consolidation', 60000);
+          document.getElementById('status').innerText = 'Consolidating semantic names...';
+          document.getElementById('substatus').innerText = 'Renaming approved duplicate variables.';
+          _appendLog('Received command: apply_ds_semantic_naming_consolidation.');
+          parent.postMessage({ pluginMessage: { type: 'apply-semantic-naming-consolidation', data: data.data } }, '*');
         } else if (data.command === 'reset-figlets-file') {
           isExtracting = true;
           _armWatchdog('Reset', 60000);
@@ -917,6 +925,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send foundation repair result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'semantic-naming-consolidation-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch(RECEIVER_URL + '/sync-semantic-naming-consolidation?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Consolidation failed.' : 'Semantic names consolidated.';
+        _appendLog(msg.data.error ? 'Semantic naming consolidation failed in plugin.' : 'Semantic naming consolidation result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
+        _appendLog('Failed to send semantic naming consolidation result to receiver.');
       }
       isExtracting = false;
       poll();

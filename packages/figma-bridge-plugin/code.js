@@ -1,6 +1,6 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
-var _bridgeBuild = '0.1.0-dev+bnn45.20260602.1';
+var _bridgeBuild = '0.1.0-dev+bnn49.20260602.1';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -464,6 +464,23 @@ figma.ui.onmessage = async (msg) => {
     } catch (err) {
       _appendSessionLog('apply_ds_setup_repairs failed: ' + err.message);
       figma.ui.postMessage({ type: 'setup-repairs-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
+  if (msg.type === 'apply-semantic-naming-consolidation') {
+    try {
+      _appendSessionLog('Executing apply_ds_semantic_naming_consolidation.');
+      const result = await _applySemanticNamingConsolidation(msg.data || {});
+      figma.ui.postMessage({ type: 'semantic-naming-consolidation-done', fileKey: _getFigletsFileKey(), data: result });
+      if (result && result.error) {
+        _appendSessionLog('apply_ds_semantic_naming_consolidation failed: ' + result.error);
+      } else {
+        _appendSessionLog('Completed apply_ds_semantic_naming_consolidation.');
+        figma.notify('Semantic naming consolidation applied.');
+      }
+    } catch (err) {
+      _appendSessionLog('apply_ds_semantic_naming_consolidation failed: ' + err.message);
+      figma.ui.postMessage({ type: 'semantic-naming-consolidation-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
     }
   }
 
@@ -8076,6 +8093,133 @@ async function _applyDsSetupRepairs(payload) {
     updateSkipped: updateSkipped,
     updateUnresolved: updateUnresolved,
     message: msgParts.join(', ') + '.',
+  };
+}
+
+async function _applySemanticNamingConsolidation(payload) {
+  var renames = (payload && Array.isArray(payload.renameVariables)) ? payload.renameVariables : [];
+  if (!renames.length) return { error: 'No approved semantic naming renames provided.' };
+
+  var allVars = await figma.variables.getLocalVariablesAsync();
+  var byId = {};
+  var byName = {};
+  for (var vi = 0; vi < allVars.length; vi++) {
+    byId[allVars[vi].id] = allVars[vi];
+    byName[allVars[vi].name] = allVars[vi];
+  }
+
+  var renamed = [];
+  var skipped = [];
+  var unresolved = [];
+
+  function _isPrimitiveColorName(name) {
+    if (typeof name !== 'string') return false;
+    var parts = name.split('/');
+    return parts.length === 3 && parts[0] === 'color' && /^\d+$/.test(parts[2]);
+  }
+
+  function _isSemanticColorName(name) {
+    return typeof name === 'string' && name.indexOf('color/') === 0 && !_isPrimitiveColorName(name);
+  }
+
+  function _deprecatedSemanticName(name) {
+    return '_deprecated/' + String(name || '').replace(/^\/+/, '');
+  }
+
+  function _semanticNamingValueSignature(value) {
+    if (value == null) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value);
+    if (value.type === 'VARIABLE_ALIAS') return 'alias:' + value.id;
+    var keys = Object.keys(value).sort();
+    var out = {};
+    for (var ki = 0; ki < keys.length; ki++) out[keys[ki]] = value[keys[ki]];
+    return JSON.stringify(out);
+  }
+
+  for (var ri = 0; ri < renames.length; ri++) {
+    var item = renames[ri] || {};
+    var id = item.id || '';
+    var expectedCurrentName = item.expectedCurrentName || '';
+    var newName = item.newName || '';
+    var canonicalName = item.canonicalName || '';
+    var canonicalId = item.canonicalId || '';
+    var expectedEquivalence = item.expectedEquivalence || null;
+    if (!id || !expectedCurrentName || !newName || !canonicalName || !canonicalId || !expectedEquivalence) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Rename requires id, expectedCurrentName, newName, canonicalName, canonicalId, and expectedEquivalence from the dry-run plan.' });
+      continue;
+    }
+    if (!_isSemanticColorName(expectedCurrentName) || !_isSemanticColorName(canonicalName) || newName !== _deprecatedSemanticName(expectedCurrentName)) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Rename is not a planner-approved semantic color compatibility rename.' });
+      continue;
+    }
+    var variable = byId[id];
+    if (!variable) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Variable id not found in current Figma file.' });
+      continue;
+    }
+    if (variable.name !== expectedCurrentName) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, actualName: variable.name, newName: newName, canonicalName: canonicalName, reason: 'Current variable name changed since approval.' });
+      continue;
+    }
+    if (variable.resolvedType !== 'COLOR') {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Duplicate variable is not a COLOR semantic variable.' });
+      continue;
+    }
+    var canonicalVar = byId[canonicalId];
+    if (!canonicalVar || canonicalVar.name !== canonicalName || byName[canonicalName] !== canonicalVar) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Canonical variable not found in current Figma file.' });
+      continue;
+    }
+    if (canonicalVar.resolvedType !== 'COLOR') {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Canonical variable is not a COLOR semantic variable.' });
+      continue;
+    }
+    var modes = Array.isArray(expectedEquivalence.modes) ? expectedEquivalence.modes : [];
+    if ((expectedEquivalence.status !== 'equivalent' && expectedEquivalence.status !== 'different') || !modes.length) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Approved value signatures are missing.' });
+      continue;
+    }
+    var stale = false;
+    for (var mi = 0; mi < modes.length; mi++) {
+      var approvedMode = modes[mi] || {};
+      var modeId = approvedMode.modeId || '';
+      var currentCanonicalSignature = _semanticNamingValueSignature(canonicalVar.valuesByMode ? canonicalVar.valuesByMode[modeId] : null);
+      var currentDuplicateSignature = _semanticNamingValueSignature(variable.valuesByMode ? variable.valuesByMode[modeId] : null);
+      if (
+        currentCanonicalSignature !== approvedMode.canonicalSignature ||
+        currentDuplicateSignature !== approvedMode.duplicateSignature
+      ) {
+        stale = true;
+        break;
+      }
+    }
+    if (stale) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Current values changed since approval.' });
+      continue;
+    }
+    if (byName[newName] && byName[newName].id !== id) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: 'Target compatibility name already exists.' });
+      continue;
+    }
+    if (variable.name === newName) {
+      skipped.push({ id: id, name: newName, canonicalName: canonicalName, reason: 'Already renamed.' });
+      continue;
+    }
+    try {
+      delete byName[variable.name];
+      variable.name = newName;
+      byName[newName] = variable;
+      renamed.push({ id: id, from: expectedCurrentName, to: newName, canonicalName: canonicalName, preservesVariableId: true });
+    } catch (err) {
+      unresolved.push({ id: id, expectedCurrentName: expectedCurrentName, newName: newName, canonicalName: canonicalName, reason: err.message || 'Rename failed.' });
+    }
+  }
+
+  return {
+    renamed: renamed,
+    skipped: skipped,
+    unresolved: unresolved,
+    message: renamed.length + ' renamed, ' + skipped.length + ' skipped, ' + unresolved.length + ' unresolved.',
   };
 }
 

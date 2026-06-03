@@ -4,6 +4,20 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-03] Spacing foundation modes and semantic alias repairs are separate approvals
+
+**Decision:** Missing Spacing collection modes, such as Tablet/Desktop, are foundation repairs and must not be created as a side effect of `update_ds_tokens` semantic spacing alias repair. A designer-approved semantic spacing repair may apply only the exact token/mode entries that were previewed and approved. If the designer approves only Mobile raw-value alias fixes, Figlets must write only those Mobile aliases.
+
+**Why:** BNN-52 manual testing showed that a Mobile-only approval could create Tablet/Desktop modes, duplicate Mobile values into those modes, and then alias all modes. That widened the approval boundary and made generated breakpoint values look intentionally validated when they were only Figma's duplicated defaults.
+
+**Implementation expectation:** `inspect_ds_token_gaps` may expose exact `spacing_semantic_repairs` for semantic spacing token/mode rows. `update_ds_tokens` must reject bundled foundation mode creation plus exact spacing alias repair, and it must fail closed when exact spacing repairs are explicitly present but empty or malformed. Bridge apply must not fall back to broader category repair, `configExpected`, or raw values when an approved alias target is stale/missing.
+
+**Write safety:** For multi-mode exact repairs, all approved mode targets for a token must resolve before any mode for that token is written. If one approved mode is stale or invalid, the token repair should be reported unmatched/failed without partially mutating earlier modes.
+
+**Workflow consequence:** Agents should present foundation mode creation and semantic token alias updates as separate options. After an approved foundation repair, apply only `foundationRepairPlan.applyInput`, sync/reinspect, and stop before any token apply.
+
+---
+
 ## [2026-06-02] Semantic naming consolidation needs a structured migration boundary
 
 **Decision:** BNN-45's `semanticNamingConflicts` should remain read-only detection until a separate BNN-49 planner/apply boundary exists. Once the designer chooses a canonical convention, Figlets may plan consolidation, but only through a structured dry-run and explicitly approved apply payload.

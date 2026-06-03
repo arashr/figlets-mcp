@@ -4,6 +4,22 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-03 — BNN-52 shipped; spacing mode creation split from alias repair]
+
+**Status:** BNN-52 is Done in Linear and merged to `main` via [PR #19](https://github.com/arashr/figlets-mcp/pull/19) at merge commit `83da403`. The BNN-52 branch was pruned and the workspace returned to clean `main`.
+
+**Why it existed:** Manual testing exposed a P0 approval-boundary bug: the designer approved fixing raw Mobile semantic spacing values, but Figlets also created missing Tablet/Desktop spacing modes and then aliased all modes. That silently widened a Mobile-only repair into a foundation/responsive change and made duplicated Mobile values look like validated breakpoint values.
+
+**Shipped:** `update_ds_tokens` no longer infers missing spacing modes during semantic spacing alias repair. `inspect_ds_token_gaps` can emit exact `spacing_semantic_repairs` entries for token/mode rows, so a Mobile-only repair can be previewed and applied without creating Tablet/Desktop modes or touching unrelated tokens. Foundation collection/mode creation remains a separate `foundationRepairPlan` approval path followed by sync/reinspect/stop.
+
+**Review hardening:** Galileo reviewed PR #19 and found two must-fix issues, then one remaining multi-mode edge case. The final code now fails closed when exact spacing repairs are explicitly present but empty/malformed, avoids fallback through `configExpected` when an approved alias target is stale/missing, and prevalidates all approved mode targets for a token before any write so partial multi-mode mutation cannot occur.
+
+**Verification:** Targeted bridge/server tests passed, full supported-runtime suite passed with `npm test` -> **97/97**, and `git diff --check` passed. Manual validation confirmed: applying only the four Mobile raw spacing alias repairs fixed Mobile only; Tablet/Desktop modes were not created as a side effect; foundation mode creation was offered/applied separately and stopped after sync.
+
+**Follow-ups:** BNN-51 remains next for first-message health-check surfacing and response-detail boundaries. BNN-53 remains separate for broader approval-boundary/response-contract audit work. Product copy should keep warning that newly created Figma modes initially duplicate the existing mode values and are not validated responsive spacing.
+
+---
+
 ### [2026-06-02 — BNN-49 opened for semantic naming consolidation product gap]
 
 **Status:** Follow-up Linear issue **BNN-49** was created after BNN-45 manual smoke: [Add structured semantic naming consolidation planner/apply surface after BNN-45](https://linear.app/arashr/issue/BNN-49/add-structured-semantic-naming-consolidation-plannerapply-surface). It is High priority in the Figlets MCP project and currently in Backlog.

@@ -4,6 +4,34 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-02] Semantic naming consolidation needs a structured migration boundary
+
+**Decision:** BNN-45's `semanticNamingConflicts` should remain read-only detection until a separate BNN-49 planner/apply boundary exists. Once the designer chooses a canonical convention, Figlets may plan consolidation, but only through a structured dry-run and explicitly approved apply payload.
+
+**Why:** Naming cleanup can affect live Figma variable links. A token that looks redundant in a snapshot may still be bound directly to layers, used as an alias target, or intentionally retained for compatibility. Figlets should not silently delete, rename, or rewire semantic variables just because the majority convention is clear.
+
+**Implementation expectation:** The next surface should list canonical variables, duplicate/conflicting variables, alias/value equivalence, likely binding impact when available, and safe versus unsafe operations. Safe operations may be apply-ready only after designer approval. Destructive cleanup, including delete/deprecate/rename behavior, must be separated from non-destructive remap/alias work and carry a clear binding-safety warning.
+
+**Surface choice:** Before adding a public tool, check `docs/bulk-repair-api-implementation-plan.md`. Extending `inspect_ds_setup_gaps` / `apply_ds_setup_repairs` is acceptable only if the approval boundary still fits setup repair. A new planner/apply surface is justified if naming consolidation needs a different decision payload, dry-run shape, or safety model.
+
+**Regression:** `color/fill/*` must not become an equal competitor to `color/bg/*`; role-based `fill/*` remains a valid related background role. Invalid background names such as `color/bg/on-danger` can be consolidation candidates, but plain `bg/*` and `fill/*` coexistence alone is not a duplicate-intent conflict.
+
+---
+
+## [2026-06-02] Mixed semantic naming conflicts are read-only designer decisions
+
+**Decision:** `inspect_ds_setup_gaps` should treat mixed surface/plain and role-based semantic naming for the same family as a high-priority duplicate-intent diagnostic, not as an automatic repair. Examples include `color/text/danger` with `color/text/on-danger`, `color/icon/danger` with `color/icon/on-danger`, `color/bg/info` with `color/fill/info`, and invalid background leaves like `color/bg/danger` with `color/bg/on-danger`.
+
+**Why:** These pairs can imply different usage contexts even when they look like the same intent. Figlets can explain the ambiguity and suggest a likely canonical convention from nearby tokens, but it should not silently migrate aliases, deprecate tokens, or pick winners without a designer-approved migration boundary.
+
+**Implementation expectation:** The setup-gap planner exposes a dedicated `semanticNamingConflicts` category with conflicting token sets, convention labels, canonical recommendation hints, `repairTier: "needs-designer-decision"`, and no `applyInput` migration payload. Designer-facing summaries must list the exact conflicting tokens before asking for a decision.
+
+**Decision guidance:** Naming-conflict findings should include a file-level convention bias instead of pretending every conflict is isolated. Count role-based vs surface-based semantic conventions, ask a plain-language question that leans with the majority convention, and warn that deleting/deprecating extra semantic variables may break Figma layers already bound to those variables. Any cleanup should go through an approved migration/remap plan.
+
+**Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output. `bg/on-*`, `surface/on-*`, and `background/on-*` backgrounds should group with their stripped family and recommend the plain background token as canonical when present. Plain `bg/*` and `fill/*` tokens are not competitors by themselves; `fill/*` is a legitimate related background role and should not be included in the conflict list for invalid `bg/on-*` findings.
+
+---
+
 ## [2026-05-30] Semantic spacing alias hygiene is repairable token-gap scope
 
 **Decision:** Raw values in semantic spacing variables are repairable Figlets token-gap hygiene when the intended value can be matched to an existing primitive spacing variable. `audit_tokens` may flag or route the hygiene issue, but the structured repair path is `inspect_ds_token_gaps` -> dry-run `update_ds_tokens` -> designer approval -> `update_ds_tokens` apply -> sync/reinspect. This includes responsive/mode-specific semantic spacing values and fractional/step-scale primitive names such as `space/0-5`.

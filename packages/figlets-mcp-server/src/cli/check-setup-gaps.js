@@ -190,6 +190,36 @@ function _formatFoundationRole(item) {
   return lines;
 }
 
+function _formatSemanticNamingConflict(item) {
+  const tokens = item.tokens || {};
+  const surfaceBased = Array.isArray(tokens.surfaceBased) ? tokens.surfaceBased : [];
+  const roleBased = Array.isArray(tokens.roleBased) ? tokens.roleBased : [];
+  const invalidOnBackground = Array.isArray(tokens.invalidOnBackground) ? tokens.invalidOnBackground : [];
+  const recommendation = item.canonicalRecommendation || {};
+  const lines = [
+    item.conflictType === "invalid-on-background"
+      ? `"${item.family}" ${item.role} has invalid on-* background naming`
+      : `"${item.family}" ${item.role} mixes surface-based and role-based names`
+  ];
+  if (surfaceBased.length) lines.push(`    surface-based: ${surfaceBased.map(name => `"${name}"`).join(", ")}`);
+  if (invalidOnBackground.length) lines.push(`    invalid background: ${invalidOnBackground.map(name => `"${name}"`).join(", ")}`);
+  else if (roleBased.length) lines.push(`    role-based: ${roleBased.map(name => `"${name}"`).join(", ")}`);
+  if (recommendation.convention) {
+    lines.push(`    recommendation: ${recommendation.convention}`);
+  }
+  if (recommendation.reason) {
+    lines.push(`    reason: ${recommendation.reason}`);
+  }
+  if (item.decisionQuestion) {
+    lines.push(`    question: ${item.decisionQuestion}`);
+  }
+  if (item.linkSafetyWarning) {
+    lines.push(`    warning: ${item.linkSafetyWarning}`);
+  }
+  lines.push("    next step: choose one canonical naming path before migration/deprecation");
+  return lines;
+}
+
 function _renderSection(lines, items, header, formatter, max) {
   if (!Array.isArray(items) || !items.length) return;
   lines.push("");
@@ -287,6 +317,7 @@ function formatCheckReport(state) {
       + (summary.incompleteModeCount || 0)
       + (summary.contrastFailureCount || 0)
       + (summary.iconContrastFailureCount || 0)
+      + (summary.semanticNamingConflictCount || 0)
       + (summary.brokenAliasCount || 0)
       + (summary.foundationRoleFindingCount || 0)
       + (summary.companionAdvisoryCount || 0);
@@ -333,7 +364,15 @@ function formatCheckReport(state) {
       _formatIconContrastFailure
     );
 
-    // 4. Likely family-level setup gaps
+    // 4. Mixed naming systems that create duplicate intent
+    _renderSection(
+      lines,
+      gaps.semanticNamingConflicts || [],
+      `Semantic naming conflicts: ${summary.semanticNamingConflictCount || 0}`,
+      _formatSemanticNamingConflict
+    );
+
+    // 5. Likely family-level setup gaps
     _renderSection(
       lines,
       gaps.missingSemanticRoles || [],
@@ -341,7 +380,7 @@ function formatCheckReport(state) {
       _formatMissingSemanticRole
     );
 
-    // 5. Required/foundational semantic roles
+    // 6. Required/foundational semantic roles
     _renderSection(
       lines,
       gaps.foundationRoleFindings || [],
@@ -349,7 +388,7 @@ function formatCheckReport(state) {
       _formatFoundationRole
     );
 
-    // 6. Missing foregrounds
+    // 7. Missing foregrounds
     _renderSection(
       lines,
       gaps.semanticGaps || [],
@@ -357,7 +396,7 @@ function formatCheckReport(state) {
       _formatMissingFgGap
     );
 
-    // 7. Missing backgrounds
+    // 8. Missing backgrounds
     _renderSection(
       lines,
       gaps.missingBackgrounds || [],
@@ -365,7 +404,7 @@ function formatCheckReport(state) {
       (item) => `"${item.fg}" expects "${item.expectedBg}" — missing in Figma`
     );
 
-    // 8. Incomplete modes
+    // 9. Incomplete modes
     _renderSection(
       lines,
       gaps.incompleteModes || [],
@@ -373,7 +412,7 @@ function formatCheckReport(state) {
       (item) => `"${item.token}" missing value in: ${item.missingModes.join(", ")}`
     );
 
-    // 9. Companion advisories (and any DS-wide role suppression)
+    // 10. Companion advisories (and any DS-wide role suppression)
     if (Array.isArray(gaps.suppressedAdvisoryRoles) && gaps.suppressedAdvisoryRoles.length) {
       lines.push("");
       for (const s of gaps.suppressedAdvisoryRoles) {
@@ -401,6 +440,7 @@ function formatCheckReport(state) {
     + (summary.incompleteModeCount || 0)
     + (summary.contrastFailureCount || 0)
     + (summary.iconContrastFailureCount || 0)
+    + (summary.semanticNamingConflictCount || 0)
     + (summary.brokenAliasCount || 0)
     + (summary.foundationRoleFindingCount || 0)
     + (summary.companionAdvisoryCount || 0);
@@ -424,6 +464,9 @@ function formatCheckReport(state) {
     if (summary.iconContrastFailureCount) {
       const verb = summary.iconContrastFailureCount === 1 ? "fails" : "fail";
       lines.push(`- A11Y: ${summary.iconContrastFailureCount} icon role${summary.iconContrastFailureCount === 1 ? "" : "s"} ${verb} WCAG non-text contrast (3:1).`);
+    }
+    if (summary.semanticNamingConflictCount) {
+      lines.push(`- ${summary.semanticNamingConflictCount} semantic naming conflict${summary.semanticNamingConflictCount === 1 ? "" : "s"} could represent duplicate intent. Choose a canonical path before migration/deprecation.`);
     }
     if (summary.missingSemanticRoleCount) {
       const high = summary.highConfidenceSemanticRoleGapCount || 0;

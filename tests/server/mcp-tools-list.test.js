@@ -73,6 +73,8 @@ module.exports = new Promise((resolve, reject) => {
       assert.ok(toolNames.indexOf("inspect_ds_token_gaps") >= 0, "tools/list should expose inspect_ds_token_gaps");
       assert.ok(toolNames.indexOf("update_ds_tokens") >= 0, "tools/list should expose update_ds_tokens");
       assert.ok(toolNames.indexOf("apply_ds_foundation_repairs") >= 0, "tools/list should expose apply_ds_foundation_repairs");
+      assert.ok(toolNames.indexOf("plan_ds_semantic_naming_consolidation") >= 0, "tools/list should expose semantic naming consolidation planner");
+      assert.ok(toolNames.indexOf("apply_ds_semantic_naming_consolidation") >= 0, "tools/list should expose semantic naming consolidation apply");
       finish();
     } catch (err) {
       err.message += `\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`;

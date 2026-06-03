@@ -4,6 +4,48 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-02 — BNN-49 opened for semantic naming consolidation product gap]
+
+**Status:** Follow-up Linear issue **BNN-49** was created after BNN-45 manual smoke: [Add structured semantic naming consolidation planner/apply surface after BNN-45](https://linear.app/arashr/issue/BNN-49/add-structured-semantic-naming-consolidation-plannerapply-surface). It is High priority in the Figlets MCP project and currently in Backlog.
+
+**Why it exists:** BNN-45 now detects mixed semantic naming conflicts and correctly keeps them as designer-decision items. The exposed product gap is what happens next: after the designer chooses a canonical convention, for example keeping the majority surface-based system, Figlets cannot yet produce a structured dry-run or approved migration/remap payload. Agents must currently stop and call this a Figlets product/tool gap.
+
+**Intended scope:** Add a Figlets-owned structured planner/apply path for semantic naming consolidation. The planner should accept the existing `semanticNamingConflicts` context plus a chosen convention (`surface-based` or `role-based`), list exact canonical and duplicate variables, explain value/alias equivalence and binding/link safety, and separate safe remap/alias/deprecation work from risky delete or rename operations.
+
+**Safety boundary:** Do not use ad hoc raw Figma scripts or generic mutation APIs. Any consolidation must be represented as a structured Figlets payload, dry-run first, with explicit designer approval before writes. Deleting or deprecating variables must be clearly separated because existing Figma variable links may break.
+
+**Implementation question for BNN-49:** Per `docs/bulk-repair-api-implementation-plan.md`, decide explicitly whether to extend `inspect_ds_setup_gaps` / `apply_ds_setup_repairs` or add a new public surface because the approval boundary is different. The likely shape is a read-only consolidation planner first, then a narrow apply path for approved safe operations.
+
+**Manual test target:** Reset the developer-only broken DS fixture on `Figlets Test`, run health-check on a weaker model, choose the majority convention when naming conflicts appear, expect a Figlets-owned dry-run plan, approve safe steps, then sync/re-run and verify conflicts are cleared or explicitly left as unsafe/designer-decision items.
+
+---
+
+### [2026-06-02 — BNN-45 implemented; mixed semantic naming conflicts surfaced]
+
+**Status:** BNN-45 is complete on branch `codex/bnn-45-semantic-naming-duplicates`. Linear is Done. Workspace verification passed with `npm test` → **94/94** tests passed, and Gemini 3.5 Flash low manual smoke passed on the reset `Figlets Test` fixture.
+
+**Shipped in branch:** `inspect_ds_setup_gaps` now detects duplicate-intent semantic naming conflicts where the same family mixes surface/plain role tokens with role-based `on-*`/`fill/*` tokens, such as `color/text/danger` vs `color/text/on-danger`, `color/icon/danger` vs `color/icon/on-danger`, and `color/bg/info` vs `color/fill/info`. Follow-up edge coverage also catches invalid background leaves like `color/bg/on-danger` and `color/surface/on-info` by grouping them with the plain `danger` / `info` family and recommending the plain background token as canonical.
+
+**Output shape:** findings are exposed as `semanticNamingConflicts` with `kind: "duplicate-intent-semantic"`, family/role, conflicting token sets, convention labels, canonical recommendation hints, `repairTier: "needs-designer-decision"`, and `agentAction: "ask-designer"`. They also appear in `topFindings`, summary counts, top-level message, repair-plan `missingCapabilityNotes`, designer presentation `needsDesignerDecision`, and the setup-gap CLI report.
+
+**Boundary:** BNN-45 deliberately does not add automatic naming migrations, alias rewires, or deprecation writes. Even when Figlets can infer a likely canonical convention from surrounding context, consolidation still needs explicit designer approval and a future structured migration/apply surface.
+
+**Regression coverage:** role-based-only `fill/*` + `text/on-*`/`icon/on-*` systems stay clean; surface-based-only `bg/*` + `text/*`/`icon/*` systems stay clean; mixed duplicate-intent snapshots surface dedicated conflicts without entering `applyInput`.
+
+**Manual smoke fixture:** the developer-only broken DS fixture now seeds BNN-45 conflicts during reset, including `color/bg/danger` + `color/bg/on-danger` and `color/bg/info` + `color/bg/on-info`, so `check my design system using figlets` can validate the real designer-facing output.
+
+**Gemini manual-smoke refinement:** Gemini Flash initially summarized background conflicts as `color/bg/danger` vs `color/bg/on-danger`, `color/fill/danger`. That was wrong framing. `fill/*` is a legitimate related background role, not a competitor to `bg/*`; only `bg/on-*` is malformed. The planner now treats invalid `bg/on-*` / `surface/on-*` / `background/on-*` names as naming-only findings, excludes them from text/icon contrast repair planning, and no longer flags plain `bg/*` vs `fill/*` coexistence as a duplicate.
+
+**Naming decision guidance:** BNN-45 conflicts now include `namingBias` counts for role-based vs surface-based semantic conventions, a decision question that leans with the file majority (for example, “your setup leans role-based...”), and a binding-safety warning. Agents should warn that deleting/deprecating extra semantic variables can break existing Figma variable links and should require a migration/remap plan.
+
+**Manual smoke checkpoint:** Gemini 3.5 Flash low on the reset `Figlets Test` fixture now reports the BNN-45 area in a much better shape: it detects mixed naming conventions, says the file leans surface-based (39 vs 13), asks whether to keep the majority surface-based system, and keeps naming consolidation as a needs-input item rather than a ready repair. Remaining tolerable UX issues: the agent still exposed tool/script/work-path traces before its answer, and non-BNN-45 findings were summarized rather than fully detailed.
+
+**Post-apply manual smoke:** After applying the 10 ready setup repairs, Gemini re-verified the changes and found 3 newly available setup repairs while keeping 11 naming conflicts in the needs-input lane. When asked to keep surface-based naming, it correctly identified naming consolidation/migration as a Figlets product/tool gap instead of writing scripts or deleting variables. This is the desired BNN-45 boundary. Minor wording caveat remains: it still says “role-based names” around examples like `color/bg/on-danger`; acceptable for now because it no longer presents `fill/*` as an equal competitor or offers auto-migration.
+
+**Final manual smoke:** The 3 remaining setup repairs were applied and verified (`color/icon/brand-subtle`, `color/border/muted`, `color/icon/brand` Light re-alias). Health check then reported 0 missing backgrounds, 0 missing foreground companions, 0 text contrast failures, and 0 missing semantic setup gaps. The 11 naming mismatches remained product-gap/decision items, and the agent offered sensible next workflows (showcase, QA binding audit, DESIGN.md export).
+
+---
+
 ### [2026-05-30 — BNN-46 shipped; semantic color conflict split to BNN-48]
 
 **Status:** `main` includes PR #17 / BNN-46 at merge `4a8eab1`. BNN-46 is Done in Linear. The obsolete BNN-46 stash was dropped, the merged branch was cleaned up, and the checkout returned to clean `main`.

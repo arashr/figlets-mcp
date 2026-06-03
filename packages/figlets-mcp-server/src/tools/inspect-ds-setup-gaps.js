@@ -103,6 +103,12 @@ function _roleForParts(parts) {
 function _familyKeyForParts(parts, roleIndex) {
   const roleSegment = _norm(parts[roleIndex]);
   const afterRole = parts.slice(roleIndex + 1);
+  if (afterRole.length && /^(surface|bg|background|fill)$/.test(roleSegment)) {
+    const leaf = _norm(afterRole[0]);
+    if (/^on-[^/]+$/.test(leaf)) {
+      return [leaf.replace(/^on-/, "")].concat(afterRole.slice(1)).join("/");
+    }
+  }
   if (afterRole.length && /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment)) {
     const leaf = _norm(afterRole[0]);
     if (/^on-[^/]+$/.test(leaf)) {
@@ -112,6 +118,19 @@ function _familyKeyForParts(parts, roleIndex) {
   if (afterRole.length) return afterRole.join("/");
   const beforeRole = parts.slice(1, roleIndex);
   return beforeRole.length ? beforeRole.join("/") : parts.slice(1).join("/");
+}
+
+function _isInvalidOnBackgroundParts(parts, roleIndex) {
+  if (!Array.isArray(parts) || roleIndex < 0) return false;
+  const roleSegment = _norm(parts[roleIndex]);
+  if (!/^(surface|bg|background|fill)$/.test(roleSegment)) return false;
+  return /^on-[^/]+$/.test(_norm(parts[roleIndex + 1] || ""));
+}
+
+function _isInvalidOnBackgroundName(name) {
+  const parts = String(name || "").split("/");
+  const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+  return bgIndex >= 0 && _isInvalidOnBackgroundParts(parts, bgIndex);
 }
 
 function _candidateNameForRole(exampleName, role, preferredFamilies) {
@@ -164,6 +183,7 @@ function _clusterSemanticFamilies(semanticVars) {
     const parts = variable.name.split("/");
     const info = _roleForParts(parts);
     if (!info) continue;
+    if (info.role === "background" && _isInvalidOnBackgroundParts(parts, info.roleIndex)) continue;
     const key = _familyKeyForParts(parts, info.roleIndex);
     if (!key) continue;
     if (!clusters.has(key)) {
@@ -175,6 +195,243 @@ function _clusterSemanticFamilies(semanticVars) {
     clusters.get(key).roles[info.role].push(variable.name);
   }
   return Array.from(clusters.values()).sort((a, b) => a.family.localeCompare(b.family));
+}
+
+function _roleConventionForName(name) {
+  const parts = String(name || "").split("/");
+  const info = _roleForParts(parts);
+  if (!info) return null;
+  const roleSegment = _norm(parts[info.roleIndex]);
+  const leaf = parts[info.roleIndex + 1] || "";
+  const normalizedLeaf = _norm(leaf);
+  const family = _familyKeyForParts(parts, info.roleIndex);
+  if (!family) return null;
+
+  if (info.role === "background") {
+    const hasOnLeaf = _isInvalidOnBackgroundParts(parts, info.roleIndex);
+    const convention = hasOnLeaf
+      ? "invalid-on-background"
+      : roleSegment === "fill"
+        ? "role-based-fill"
+        : "surface-based-background";
+    return {
+      name,
+      role: "background",
+      family,
+      convention,
+      familySegment: roleSegment,
+      leaf: normalizedLeaf,
+      impliedCanonical: convention === "role-based-fill" ? "role-based" : "surface-based",
+    };
+  }
+
+  const canUseOnLeaf = /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment);
+  const roleBased = canUseOnLeaf && /^on-[^/]+$/.test(normalizedLeaf);
+  return {
+    name,
+    role: info.role,
+    family,
+    convention: roleBased ? "role-based-on-fill" : "surface-based-role",
+    familySegment: roleSegment,
+    leaf: normalizedLeaf,
+    impliedCanonical: roleBased ? "role-based" : "surface-based",
+  };
+}
+
+function _canonicalNamingRecommendation(familyConventions, role, tokens) {
+  const backgroundConventions = familyConventions.background || [];
+  const hasFill = backgroundConventions.some(entry => entry.convention === "role-based-fill");
+  const hasSurface = backgroundConventions.some(entry => entry.convention === "surface-based-background");
+  const hasInvalidOnBackground = backgroundConventions.some(entry => entry.convention === "invalid-on-background");
+  const hasRoleBasedCompanion = Object.keys(familyConventions).some(key =>
+    key !== "background" &&
+    familyConventions[key].some(entry => entry.convention === "role-based-on-fill")
+  );
+  const hasSurfaceBasedCompanion = Object.keys(familyConventions).some(key =>
+    key !== "background" &&
+    familyConventions[key].some(entry => entry.convention === "surface-based-role")
+  );
+
+  if (hasFill && !hasSurface && role !== "background") {
+    return {
+      convention: "role-based",
+      keep: tokens.roleBased.slice(),
+      review: tokens.surfaceBased.slice(),
+      reason: "A color/fill/* background exists for this family, so the on-* role convention is likely the safer canonical path.",
+    };
+  }
+  if (hasSurface && !hasFill && role !== "background") {
+    return {
+      convention: "surface-based",
+      keep: tokens.surfaceBased.slice(),
+      review: tokens.roleBased.slice(),
+      reason: "A bg/surface/background token exists for this family, so the plain role token is likely the safer canonical path.",
+    };
+  }
+  if (role === "background" && hasInvalidOnBackground && hasSurface) {
+    return {
+      convention: "surface-based",
+      keep: tokens.surfaceBased.slice(),
+      review: tokens.roleBased.slice(),
+      reason: "Background roles should not use on-* leaves; keep the plain bg/surface/background token and review the on-* background duplicate.",
+    };
+  }
+  if (role === "background" && hasRoleBasedCompanion && !hasSurfaceBasedCompanion) {
+    return {
+      convention: "role-based",
+      keep: tokens.roleBased.slice(),
+      review: tokens.surfaceBased.slice(),
+      reason: "This family already uses on-* foreground/icon/border roles, so color/fill/* is likely the safer background convention.",
+    };
+  }
+  if (role === "background" && hasSurfaceBasedCompanion && !hasRoleBasedCompanion) {
+    return {
+      convention: "surface-based",
+      keep: tokens.surfaceBased.slice(),
+      review: tokens.roleBased.slice(),
+      reason: "This family already uses plain foreground/icon/border roles, so bg/surface/background is likely the safer background convention.",
+    };
+  }
+  return {
+    convention: "designer-decision",
+    keep: [],
+    review: tokens.surfaceBased.concat(tokens.roleBased).sort(),
+    reason: "Both naming systems are present or the surrounding context is incomplete, so Figlets should not pick a canonical token automatically.",
+  };
+}
+
+function _semanticNamingBias(entries) {
+  const counts = { roleBased: 0, surfaceBased: 0, invalid: 0 };
+  for (const entry of entries || []) {
+    if (!entry || !entry.role) continue;
+    if (entry.convention === "invalid-on-background") {
+      counts.invalid += 1;
+      continue;
+    }
+    if (entry.convention === "role-based-fill" || entry.convention === "role-based-on-fill") {
+      counts.roleBased += 1;
+      continue;
+    }
+    if (entry.convention === "surface-based-background" || entry.convention === "surface-based-role") {
+      counts.surfaceBased += 1;
+    }
+  }
+  const total = counts.roleBased + counts.surfaceBased;
+  let majority = "mixed";
+  if (total > 0) {
+    const delta = counts.roleBased - counts.surfaceBased;
+    if (Math.abs(delta) >= Math.max(2, Math.ceil(total * 0.15))) {
+      majority = delta > 0 ? "role-based" : "surface-based";
+    }
+  }
+  return {
+    roleBasedCount: counts.roleBased,
+    surfaceBasedCount: counts.surfaceBased,
+    invalidCount: counts.invalid,
+    majority,
+    question: majority === "role-based"
+      ? "Your current semantic color setup leans role-based. Do you want to keep going that way, or move this area toward a surface-based convention?"
+      : majority === "surface-based"
+        ? "Your current semantic color setup leans surface-based. Do you want to keep going that way, or move this area toward a role-based convention?"
+        : "Your semantic color setup is mixed. Do you want to standardize this area toward role-based or surface-based naming?",
+  };
+}
+
+function _flattenConventionEntries(byFamily) {
+  const entries = [];
+  for (const familyConventions of byFamily.values()) {
+    for (const role of Object.keys(familyConventions)) {
+      entries.push(...familyConventions[role]);
+    }
+  }
+  return entries;
+}
+
+function _detectSemanticNamingConflicts(semanticVars) {
+  const byFamily = new Map();
+  for (const variable of semanticVars) {
+    const entry = _roleConventionForName(variable && variable.name);
+    if (!entry) continue;
+    if (!byFamily.has(entry.family)) byFamily.set(entry.family, {});
+    const familyConventions = byFamily.get(entry.family);
+    if (!familyConventions[entry.role]) familyConventions[entry.role] = [];
+      familyConventions[entry.role].push(entry);
+  }
+
+  const namingBias = _semanticNamingBias(_flattenConventionEntries(byFamily));
+  const linkSafetyWarning = "Do not delete or deprecate extra semantic variables blindly: existing Figma layers may already be bound to them. Use a designer-approved migration/remap plan before removing aliases or variables.";
+  const conflicts = [];
+  for (const [family, familyConventions] of byFamily) {
+    for (const role of Object.keys(familyConventions)) {
+      const entries = familyConventions[role];
+      let surfaceBased = [];
+      let roleBased = [];
+      if (role === "background") {
+        surfaceBased = entries
+          .filter(entry => entry.convention === "surface-based-background")
+          .map(entry => entry.name);
+        const invalidOnBackground = entries
+          .filter(entry => entry.convention === "invalid-on-background")
+          .map(entry => entry.name);
+        const relatedFill = entries
+          .filter(entry => entry.convention === "role-based-fill")
+          .map(entry => entry.name);
+        if (!surfaceBased.length || !invalidOnBackground.length) continue;
+        surfaceBased = Array.from(new Set(surfaceBased)).sort();
+        roleBased = Array.from(new Set(invalidOnBackground)).sort();
+        const tokens = {
+          surfaceBased,
+          roleBased,
+          invalidOnBackground: roleBased.slice(),
+        };
+        if (relatedFill.length) tokens.relatedFill = Array.from(new Set(relatedFill)).sort();
+        const recommendation = _canonicalNamingRecommendation(familyConventions, role, tokens);
+        conflicts.push({
+          kind: "duplicate-intent-semantic",
+          conflictType: "invalid-on-background",
+          family,
+          role,
+          conventions: ["plain-background", "invalid-on-background"],
+          tokens,
+          canonicalRecommendation: recommendation,
+          namingBias,
+          decisionQuestion: namingBias.question,
+          linkSafetyWarning,
+          repairTier: "needs-designer-decision",
+          agentAction: "ask-designer",
+          reason: "This family has a background token with an on-* leaf. on-* names describe foreground roles, so this should be reviewed separately from legitimate fill/* backgrounds.",
+        });
+        continue;
+      } else {
+        surfaceBased = entries
+          .filter(entry => entry.convention === "surface-based-role")
+          .map(entry => entry.name);
+        roleBased = entries
+          .filter(entry => entry.convention === "role-based-on-fill")
+          .map(entry => entry.name);
+      }
+      if (!surfaceBased.length || !roleBased.length) continue;
+      surfaceBased = Array.from(new Set(surfaceBased)).sort();
+      roleBased = Array.from(new Set(roleBased)).sort();
+      const tokens = { surfaceBased, roleBased };
+      const recommendation = _canonicalNamingRecommendation(familyConventions, role, tokens);
+      conflicts.push({
+        kind: "duplicate-intent-semantic",
+        family,
+        role,
+        conventions: ["surface-based", "role-based"],
+        tokens,
+        canonicalRecommendation: recommendation,
+        namingBias,
+        decisionQuestion: namingBias.question,
+        linkSafetyWarning,
+        repairTier: "needs-designer-decision",
+        agentAction: "ask-designer",
+        reason: "This family mixes plain semantic names and on-* role names for the same apparent intent, which makes audits and downstream binding choices ambiguous.",
+      });
+    }
+  }
+  return conflicts.sort((a, b) => a.family.localeCompare(b.family) || a.role.localeCompare(b.role));
 }
 
 function _roleEvidence(cluster) {
@@ -995,6 +1252,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   const allColorNames = colorVars.map(v => v.name);
   const algorithm = options.algorithm === "apca" ? "apca" : "wcag";
   const semanticFamilies = _clusterSemanticFamilies(semanticVars);
+  const semanticNamingConflicts = _detectSemanticNamingConflicts(semanticVars);
   const semanticContext = _semanticContextFromConfig(options.existingDs);
   const foundationRoleFindings = _foundationRoleFindings(allColorNames, semanticContext);
 
@@ -1008,6 +1266,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     if (_norm(parts[bgIndex]) === "fill") continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     if (configuredText && byName.has(configuredText)) continue;
@@ -1129,6 +1388,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
     const candidate = (configuredText && byName.has(configuredText))
@@ -1187,6 +1447,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     const configuredIcon = semanticContext.pairIconByBg.get(variable.name);
     let iconName = null;
     if (configuredIcon && byName.has(configuredIcon)) {
@@ -1285,6 +1546,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     const parts = variable.name.split("/");
     const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
     if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
     const fgName = _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
     if (!fgName) continue;
     const configuredText = semanticContext.pairTextByBg.get(variable.name);
@@ -1493,6 +1755,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     .filter(adv => adv.missing.length);
 
   const highConfidenceIssues = []
+    .concat(semanticNamingConflicts.map(item => Object.assign({ priority: "high" }, item)))
     .concat(iconContrastFailures.map(item => Object.assign({ priority: "high" }, item)))
     .concat(missingSemanticRoles.filter(gap => gap.confidence === "high").map(item => Object.assign({ priority: "high" }, item)))
     .concat(contrastFailures.filter(f => !f.nearMiss).map(item => Object.assign({ priority: "high" }, item)))
@@ -1507,6 +1770,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     incompleteModes,
     contrastFailures,
     iconContrastFailures,
+    semanticNamingConflicts,
     brokenAliases,
     foundationRoleFindings,
     optionalSemanticRoleFindings,
@@ -1521,6 +1785,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     topFindings: {
       highConfidenceIssues,
       iconContrastFailures: iconContrastFailures.slice(0, 8),
+      semanticNamingConflicts: semanticNamingConflicts.slice(0, 8),
       highConfidenceMissingRoles: missingSemanticRoles.filter(gap => gap.confidence === "high").slice(0, 8),
       optionalRoleRepairs: optionalSemanticRoleFindings.filter(gap => gap.plannedRoleRepair).slice(0, 8),
     },
@@ -1536,6 +1801,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       contrastNearMissCount: contrastFailures.filter(f => f.nearMiss).length,
       iconContrastFailureCount: iconContrastFailures.length,
       iconContrastNearMissCount: iconContrastFailures.filter(f => f.nearMiss).length,
+      semanticNamingConflictCount: semanticNamingConflicts.length,
       brokenAliasCount: brokenAliases.length,
       foundationRoleFindingCount: foundationRoleFindings.length,
       companionAdvisoryCount: companionAdvisories.length,
@@ -1691,6 +1957,7 @@ function handleInspectDsSetupGaps(input = {}) {
     missingSemanticRoles: result.missingSemanticRoles,
     contrastFailures: result.contrastFailures,
     iconContrastFailures: result.iconContrastFailures,
+    semanticNamingConflicts: result.semanticNamingConflicts,
     missingBackgrounds: result.missingBackgrounds,
     incompleteModes: result.incompleteModes,
     brokenAliases: result.brokenAliases,
@@ -1809,6 +2076,20 @@ function _buildRepairPlan(result) {
       suggestedName: gap.suggestedName,
       evidence: gap.evidence,
       reason: "Figlets found semantic roles without a background, but does not bulk-create missing backgrounds unless a future config-backed planner provides explicit aliases.",
+      agentAction: "ask-designer",
+    });
+  }
+  for (const conflict of result.semanticNamingConflicts || []) {
+    missingCapabilityNotes.push({
+      kind: "naming-system-mismatch",
+      family: conflict.family,
+      role: conflict.role,
+      tokens: conflict.tokens,
+      canonicalRecommendation: conflict.canonicalRecommendation,
+      namingBias: conflict.namingBias,
+      decisionQuestion: conflict.decisionQuestion,
+      linkSafetyWarning: conflict.linkSafetyWarning,
+      reason: "Figlets found mixed semantic naming conventions for the same apparent intent. Consolidation needs a designer-approved migration/deprecation decision.",
       agentAction: "ask-designer",
     });
   }
@@ -1934,17 +2215,34 @@ function _buildProposedSetupChanges(context) {
   }
 
   for (const note of context.missingCapabilityNotes || []) {
-    if (note.kind !== "missing-background") continue;
-    const token = note.token || note.suggestedName || note.family;
-    needsDesignerDecision.push({
-      tier: "needs designer decision",
-      token,
-      action: "design decision",
-      reason: "missing background",
-      summaryLine: note.token
-        ? `${token} needs a background role decision before Figlets can create anything.`
-        : `${note.family || "semantic family"} needs a background role decision.`,
-    });
+    if (note.kind === "missing-background") {
+      const token = note.token || note.suggestedName || note.family;
+      needsDesignerDecision.push({
+        tier: "needs designer decision",
+        token,
+        action: "design decision",
+        reason: "missing background",
+        summaryLine: note.token
+          ? `${token} needs a background role decision before Figlets can create anything.`
+          : `${note.family || "semantic family"} needs a background role decision.`,
+      });
+    }
+    if (note.kind === "naming-system-mismatch") {
+      const tokens = note.tokens || {};
+      const surfaceBased = Array.isArray(tokens.surfaceBased) ? tokens.surfaceBased : [];
+      const roleBased = Array.isArray(tokens.roleBased) ? tokens.roleBased : [];
+      const recommendation = note.canonicalRecommendation || {};
+      const canonical = recommendation.convention || "designer-decision";
+      const question = note.decisionQuestion ? ` ${note.decisionQuestion}` : "";
+      const warning = note.linkSafetyWarning ? ` Warning: ${note.linkSafetyWarning}` : "";
+      needsDesignerDecision.push({
+        tier: "needs designer decision",
+        token: `${note.family}/${note.role}`,
+        action: "choose canonical naming",
+        reason: "mixed semantic naming",
+        summaryLine: `Choose canonical naming for ${note.family} ${note.role}: ${surfaceBased.join(", ")} conflicts with ${roleBased.join(", ")} (${canonical}).${question}${warning}`,
+      });
+    }
   }
 
   return { readyToApply, optional, needsDesignerDecision };
@@ -1983,9 +2281,21 @@ function _buildDesignerPresentation(context) {
 
   if (proposedChanges.needsDesignerDecision.length) {
     const missingBg = proposedChanges.needsDesignerDecision;
-    lines.push(
-      `${missingBg.length} background role${missingBg.length === 1 ? " needs" : "s need"} your design decision before Figlets can create anything.`
-    );
+    const missingBgCount = missingBg.filter(change => change.reason === "missing background").length;
+    const namingCount = missingBg.filter(change => change.reason === "mixed semantic naming").length;
+    if (missingBgCount && !namingCount) {
+      lines.push(
+        `${missingBgCount} background role${missingBgCount === 1 ? " needs" : "s need"} your design decision before Figlets can create anything.`
+      );
+    } else if (namingCount && !missingBgCount) {
+      lines.push(
+        `${namingCount} semantic naming conflict${namingCount === 1 ? " needs" : "s need"} your design decision before Figlets can migrate or deprecate anything.`
+      );
+    } else {
+      lines.push(
+        `${missingBg.length} item${missingBg.length === 1 ? " needs" : "s need"} your design decision before Figlets can create, migrate, or deprecate anything.`
+      );
+    }
     sections.push({
       title: "Needs your call (not in apply payload)",
       message: missingBg.map(change => change.summaryLine).join("\n"),
@@ -2027,6 +2337,7 @@ function _buildDesignerPresentation(context) {
       missingBackgroundDecisions: proposedChanges.needsDesignerDecision.length,
       findings: {
         missingBackgrounds: summary.missingBackgroundCount || 0,
+        semanticNamingConflicts: summary.semanticNamingConflictCount || 0,
         semanticRoleGaps: summary.missingSemanticRoleCount || 0,
         iconContrastFailures: summary.iconContrastFailureCount || 0,
       },
@@ -2042,6 +2353,7 @@ function _composeMessage(s) {
   if (s.incompleteModeCount) parts.push(`${s.incompleteModeCount} token${s.incompleteModeCount === 1 ? "" : "s"} with incomplete modes`);
   if (s.contrastFailureCount) parts.push(`${s.contrastFailureCount} contrast failure${s.contrastFailureCount === 1 ? "" : "s"}`);
   if (s.iconContrastFailureCount) parts.push(`${s.iconContrastFailureCount} icon contrast failure${s.iconContrastFailureCount === 1 ? "" : "s"}`);
+  if (s.semanticNamingConflictCount) parts.push(`${s.semanticNamingConflictCount} semantic naming conflict${s.semanticNamingConflictCount === 1 ? "" : "s"}`);
   if (s.brokenAliasCount) parts.push(`${s.brokenAliasCount} broken alias${s.brokenAliasCount === 1 ? "" : "es"}`);
   if (s.foundationRoleFindingCount) parts.push(`${s.foundationRoleFindingCount} foundation role gap${s.foundationRoleFindingCount === 1 ? "" : "s"}`);
   if (s.companionAdvisoryCount) parts.push(`${s.companionAdvisoryCount} pair${s.companionAdvisoryCount === 1 ? "" : "s"} missing border/icon (advisory)`);

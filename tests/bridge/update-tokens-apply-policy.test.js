@@ -65,11 +65,17 @@ module.exports = (() => {
   assert.ok(code.includes("async function _applyDsFoundationRepairs"), "bridge should expose a narrow foundation repair helper");
   assert.ok(code.includes("createVariableCollection(name)"), "foundation repair can create approved collection shells");
   assert.ok(code.includes("Collection is not an approved config-backed foundation repair"), "foundation repair should reject arbitrary collections");
+  assert.ok(code.includes("async function _applySemanticNamingConsolidation"), "bridge should expose semantic naming consolidation helper");
+  assert.ok(code.includes("variable.name = newName"), "semantic naming consolidation should rename variables instead of deleting them");
+  assert.ok(code.includes("Current variable name changed since approval"), "semantic naming consolidation should reject stale approvals");
 
   assert.ok(ui.includes("'update-tokens'"), "UI should advertise update-tokens capability");
   assert.ok(ui.includes("'foundation-repairs'"), "UI should advertise foundation-repairs capability");
+  assert.ok(ui.includes("'semantic-naming-consolidation'"), "UI should advertise semantic naming consolidation capability");
   assert.ok(ui.includes("data.command === 'apply-foundation-repairs'"), "UI should dispatch foundation repair commands");
   assert.ok(ui.includes("sync-foundation-repairs"), "UI should post foundation repair results back to receiver");
+  assert.ok(ui.includes("data.command === 'apply-semantic-naming-consolidation'"), "UI should dispatch semantic naming consolidation commands");
+  assert.ok(ui.includes("sync-semantic-naming-consolidation"), "UI should post semantic naming consolidation results back to receiver");
   assert.ok(ui.includes("data.command === 'update-tokens'"), "UI should dispatch update-tokens commands");
   assert.ok(ui.includes("sync-update-tokens"), "UI should post update token results back to receiver");
   assert.ok(ui.includes("http://localhost:17337"), "UI should use the Figlets-specific bridge port");
@@ -81,6 +87,9 @@ module.exports = (() => {
   assert.ok(receiver.includes("/request-foundation-repairs"), "receiver should expose request-foundation-repairs");
   assert.ok(receiver.includes("/sync-foundation-repairs"), "receiver should accept sync-foundation-repairs results");
   assert.ok(receiver.includes("_pluginHasCapability('foundation-repairs')"), "receiver should gate foundation repairs on advertised capability");
+  assert.ok(receiver.includes("/request-semantic-naming-consolidation"), "receiver should expose request-semantic-naming-consolidation");
+  assert.ok(receiver.includes("/sync-semantic-naming-consolidation"), "receiver should accept sync-semantic-naming-consolidation results");
+  assert.ok(receiver.includes("_pluginHasCapability('semantic-naming-consolidation')"), "receiver should gate semantic naming consolidation on advertised capability");
   assert.ok(receiver.includes("/sync-update-tokens"), "receiver should accept sync-update-tokens results");
   assert.ok(receiver.includes("_pluginHasCapability('update-tokens')"), "receiver should gate token updates on advertised capability");
 })();

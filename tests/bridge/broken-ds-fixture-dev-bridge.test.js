@@ -4,6 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { CONFIRMATION_PHRASE } = require("../../packages/figlets-mcp-server/src/dev/broken-ds-fixture.js");
+const bridgeCode = fs.readFileSync(path.resolve(__dirname, "../../packages/figma-bridge-plugin/code.js"), "utf8");
 
 function requestJson(url, options, body) {
   const payload = body == null ? "" : JSON.stringify(body);
@@ -30,6 +31,12 @@ function requestJson(url, options, body) {
 }
 
 module.exports = (async () => {
+  assert.ok(
+    bridgeCode.includes("function _createSemanticNamingConflictVariablesForDevPrep") &&
+      bridgeCode.includes("gaps.createSemanticNamingConflicts"),
+    "developer broken fixture bridge must be able to seed BNN-45 semantic naming conflicts"
+  );
+
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-broken-fixture-bridge-"));
   const receiverPath = path.resolve(__dirname, "../../packages/figma-bridge-plugin/src/receiver.js");
   const originalLocalDir = process.env.FIGLETS_LOCAL_DIR;

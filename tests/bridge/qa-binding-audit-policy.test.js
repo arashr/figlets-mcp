@@ -101,7 +101,7 @@ assert.ok(
 
 assert.ok(
   code.includes("figma.showUI(__html__, { width: 296, height: 348, themeColors: true });") &&
-    code.includes("var _bridgeBuild = '0.1.0-dev+bnn44.") &&
+    code.includes("var _bridgeBuild = '0.1.0-dev+bnn49.") &&
     code.includes("if (msg.type === 'ui-resize')") &&
     code.includes("figma.ui.resize(msg.expanded ? 576 : 296, 348);") &&
     ui.includes("id=\"log-toggle\"") &&

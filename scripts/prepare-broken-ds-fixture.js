@@ -130,6 +130,7 @@ function postJson(url, body, timeoutMs) {
     removedVariables: result.removedVariables || [],
     removedTextStyles: result.removedTextStyles || [],
     trimmedModes: result.trimmedModes || [],
+    semanticNamingConflicts: result.semanticNamingConflicts || null,
     bindingAuditTargets: result.bindingAuditTargets || null,
     message: result.message || 'Broken DS fixture prepared.',
   }, null, 2));

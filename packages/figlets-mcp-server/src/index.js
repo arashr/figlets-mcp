@@ -16,6 +16,12 @@ const { inspectDsTokenGapsTool, handleInspectDsTokenGaps } = require("./tools/in
 const { updateDsTokensTool, handleUpdateDsTokens } = require("./tools/update-ds-tokens.js");
 const { applyDsFoundationRepairsTool, handleApplyDsFoundationRepairs } = require("./tools/apply-ds-foundation-repairs.js");
 const { applyDsSetupRepairsTool, handleApplyDsSetupRepairs } = require("./tools/apply-ds-setup-repairs.js");
+const {
+  planSemanticNamingConsolidationTool,
+  applySemanticNamingConsolidationTool,
+  handlePlanSemanticNamingConsolidation,
+  handleApplySemanticNamingConsolidation,
+} = require("./tools/semantic-naming-consolidation.js");
 const { refreshDsConfigFromFigmaTool, handleRefreshDsConfigFromFigma } = require("./tools/refresh-ds-config-from-figma.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
@@ -584,6 +590,79 @@ server.tool(
   async (args) => {
     try {
       const result = await handleApplyDsSetupRepairs(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- plan_ds_semantic_naming_consolidation ---
+server.tool(
+  planSemanticNamingConsolidationTool.name,
+  planSemanticNamingConsolidationTool.description,
+  {
+    canonicalConvention: z.enum(["surface-based", "role-based"]).describe("The naming convention the designer chose after reviewing semanticNamingConflicts."),
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
+  },
+  async (args) => {
+    try {
+      const result = handlePlanSemanticNamingConsolidation(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- apply_ds_semantic_naming_consolidation ---
+server.tool(
+  applySemanticNamingConsolidationTool.name,
+  applySemanticNamingConsolidationTool.description,
+  {
+    canonicalConvention: z.enum(["surface-based", "role-based"]).describe("The naming convention approved by the designer."),
+    renameVariables: z.array(z.object({
+      id: z.string().describe("Figma variable id copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput."),
+      expectedCurrentName: z.string().describe("Current variable name expected when the designer approved the plan."),
+      newName: z.string().describe("Compatibility namespace name to assign while preserving the variable id."),
+      canonicalName: z.string().describe("Canonical variable name the duplicate maps to."),
+      canonicalId: z.string().describe("Canonical Figma variable id copied from the dry-run plan."),
+      family: z.string().optional(),
+      role: z.string().optional(),
+      expectedEquivalence: z.object({
+        status: z.string(),
+        modeCount: z.number().optional(),
+        modes: z.array(z.object({
+          modeId: z.string(),
+          mode: z.string().optional(),
+          canonicalSignature: z.string(),
+          duplicateSignature: z.string()
+        }))
+      }).describe("Per-mode value/alias signatures copied from the dry-run plan."),
+      reason: z.string().optional()
+    })).describe("Approved rename entries copied or filtered from plan_ds_semantic_naming_consolidation.repairPlan.applyInput.renameVariables.")
+  },
+  async (args) => {
+    try {
+      const result = await handleApplySemanticNamingConsolidation(args || {});
       if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

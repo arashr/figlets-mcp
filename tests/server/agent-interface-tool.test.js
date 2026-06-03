@@ -274,13 +274,21 @@ try {
       "audit_tokens",
       "inspect_ds_setup_gaps",
       "apply_ds_setup_repairs",
-      "inspect_ds_setup_gaps",
+      "plan_ds_semantic_naming_consolidation",
+      "apply_ds_semantic_naming_consolidation",
     ]);
+    const verifyStep = guide.steps.find(step => step.id === "verify-health-check");
+    assert.deepStrictEqual(verifyStep.tools, ["sync_figma_data", "detect_design_system", "audit_tokens", "inspect_ds_setup_gaps"]);
     assert.ok(guide.summary.includes("semantic setup"));
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("each exact proposed change")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("repairPlan.applyInput")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.designerMessage.includes("preserving each aliases object unchanged")));
+    assert.ok(guide.steps.some(step => step.tool === "plan_ds_semantic_naming_consolidation" && step.kind === "read"));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_semantic_naming_consolidation" && step.requiresApproval === true && step.designerMessage.includes("preserve variable IDs")));
+    assert.ok(verifyStep.designerMessage.includes("same read-only health-check sequence"));
+    assert.ok(verifyStep.designerMessage.includes("sync_figma_data, detect_design_system, audit_tokens, then inspect_ds_setup_gaps"));
+    assert.ok(verifyStep.designerMessage.includes("will not call the file clean"));
     assert.ok(!guide.next.includes("setup-gap-qa"));
   }
 

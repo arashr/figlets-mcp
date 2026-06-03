@@ -111,6 +111,12 @@ module.exports = (async () => {
             removedVariables: ["space/radius/md"],
             removedTextStyles: ["type/body/md"],
             trimmedModes: [{ collectionName: "4. Spacing", keepModeNames: ["Mobile"] }],
+            semanticNamingConflicts: {
+              createdVariables: [{ source: "color/bg/danger", target: "color/bg/on-danger", kind: "invalid-on-background" }],
+              existingVariables: [],
+              missingSources: [],
+              failed: [],
+            },
             bindingAuditTargets: { ok: true },
             message: "Prepared by fake receiver.",
           },
@@ -140,6 +146,13 @@ module.exports = (async () => {
       assert.strictEqual(requestBody.confirmation, "RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE");
       assert.strictEqual(requestBody.expectedFileName, "Figlets Disposable Smoke");
       assert.ok(requestBody.ds && requestBody.ds.project && requestBody.ds.project.name.includes("cli-positive"));
+      assert.deepStrictEqual(
+        requestBody.gaps.createSemanticNamingConflicts,
+        [
+          { source: "color/bg/danger", target: "color/bg/on-danger", kind: "invalid-on-background" },
+          { source: "color/bg/info", target: "color/bg/on-info", kind: "invalid-on-background" },
+        ]
+      );
 
       const output = JSON.parse(result.stdout);
       assert.strictEqual(output.status, "ok");
@@ -147,6 +160,9 @@ module.exports = (async () => {
       assert.strictEqual(output.fileName, "Figlets Disposable Smoke");
       assert.strictEqual(output.expectedFileName, "Figlets Disposable Smoke");
       assert.strictEqual(output.message, "Prepared by fake receiver.");
+      assert.deepStrictEqual(output.semanticNamingConflicts.createdVariables, [
+        { source: "color/bg/danger", target: "color/bg/on-danger", kind: "invalid-on-background" },
+      ]);
       assert.strictEqual(
         output.configPath,
         path.join(tempDir, "local", "local_cli_positive", "design-system.config.js")

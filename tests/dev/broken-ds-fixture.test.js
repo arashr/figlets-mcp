@@ -20,6 +20,14 @@ assert.ok(first.gaps.removeVariables.some(name => /^color\//.test(name)), "plan 
 assert.deepStrictEqual(first.gaps.removeTextStyles, ["type/body/md"]);
 assert.deepStrictEqual(first.gaps.trimCollectionModes, [{ collectionName: "4. Spacing", keepModeNames: ["Mobile"] }]);
 assert.strictEqual(first.gaps.createBindingAuditTargets, true);
+assert.deepStrictEqual(
+  first.gaps.createSemanticNamingConflicts,
+  [
+    { source: "color/bg/danger", target: "color/bg/on-danger", kind: "invalid-on-background" },
+    { source: "color/bg/info", target: "color/bg/on-info", kind: "invalid-on-background" },
+  ],
+  "fixture should seed BNN-45 semantic naming conflicts for manual health-check smoke"
+);
 
 const different = buildBrokenDsFixturePlan({ seed: "different-seed" });
 assert.notDeepStrictEqual(first.gaps.removeVariables, different.gaps.removeVariables, "different seeds should vary the broken variable set");

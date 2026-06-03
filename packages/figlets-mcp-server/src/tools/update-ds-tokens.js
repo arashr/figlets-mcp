@@ -45,6 +45,32 @@ const updateDsTokensTool = {
         type: "boolean",
         description: "When true on apply, add configured breakpoint modes to existing Spacing and Typography collections before responsive token writes. Prefer inspect_ds_token_gaps.repairPlan.applyInput.ensure_collection_modes after designer approval."
       },
+      spacing_semantic_repairs: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            updates: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  modeId: { type: "string" },
+                  modeName: { type: "string" },
+                  toAliasId: { type: "string" },
+                  toAliasName: { type: "string" },
+                  configExpected: { type: "number" }
+                },
+                additionalProperties: true
+              }
+            }
+          },
+          required: ["name", "updates"],
+          additionalProperties: false
+        },
+        description: "Optional exact semantic spacing alias repairs copied from inspect_ds_token_gaps. When provided, update_ds_tokens applies only these token/mode entries instead of the whole spacing-semantics category."
+      },
       prune: {
         type: "object",
         properties: {
@@ -123,8 +149,14 @@ function _toPreviewItem(gap) {
 function _buildDryRunReport(plannerResult, options) {
   const createMissing = options.create_missing !== false;
   const report = _reportForCategories(plannerResult.categories.supported || []);
+  const spacingSemanticRepairs = _normalizeSpacingSemanticRepairs(options.spacing_semantic_repairs);
+  const exactSpacingRepairByName = new Map(spacingSemanticRepairs.map(repair => [repair.name, repair]));
+  const exactSpacingRequested = exactSpacingRepairByName.size > 0;
 
   for (const gap of plannerResult.tokenGaps || []) {
+    if (exactSpacingRequested && gap.category === "spacing-semantics" && gap.gapType !== "spacing-alias-repair") {
+      continue;
+    }
     if (gap.gapType === "missing-variable") {
       _pushCategoryItem(
         report,
@@ -144,8 +176,20 @@ function _buildDryRunReport(plannerResult, options) {
         actualType: gap.actualType,
       }));
     } else if (gap.gapType === "spacing-alias-repair") {
+      let updates = gap.updates || [];
+      if (exactSpacingRequested && gap.category === "spacing-semantics") {
+        const exactRepair = exactSpacingRepairByName.get(gap.name);
+        if (!exactRepair) continue;
+        const approvedModes = new Set((exactRepair.updates || []).map(update =>
+          (update.modeId ? "id:" + update.modeId : "") + "|" + (update.modeName ? "name:" + update.modeName.toLowerCase() : "")
+        ));
+        updates = updates.filter(update => approvedModes.has(
+          (update.modeId ? "id:" + update.modeId : "") + "|" + (update.modeName ? "name:" + String(update.modeName).toLowerCase() : "")
+        ));
+        if (!updates.length) continue;
+      }
       _pushCategoryItem(report, gap.category, "wouldUpdateVariables", Object.assign(_toPreviewItem(gap), {
-        updates: gap.updates || [],
+        updates,
         reason: gap.reason,
       }));
     }
@@ -204,6 +248,35 @@ function _legacyColorPruneRequested(prune) {
 function _tokenPruneRequested(prune) {
   const normalized = _normalizePruneOptions(prune);
   return normalized.off_config_variables || normalized.off_config_text_styles || normalized.off_config_effect_styles;
+}
+
+function _normalizeSpacingSemanticRepairs(input) {
+  if (!Array.isArray(input)) return [];
+  const repairs = [];
+  for (const repair of input) {
+    if (!repair || typeof repair !== "object") continue;
+    const name = String(repair.name || "").trim();
+    if (!name || !Array.isArray(repair.updates)) continue;
+    const updates = repair.updates
+      .filter(update => update && typeof update === "object")
+      .map(update => Object.assign({}, update, {
+        modeId: update.modeId != null ? String(update.modeId) : undefined,
+        modeName: update.modeName != null ? String(update.modeName) : undefined,
+        toAliasId: update.toAliasId != null ? String(update.toAliasId) : undefined,
+        toAliasName: update.toAliasName != null ? String(update.toAliasName) : undefined,
+      }))
+      .filter(update => update.modeId || update.modeName);
+    if (updates.length) repairs.push({ name, updates });
+  }
+  return repairs;
+}
+
+function _hasSpacingSemanticRepairsInput(args) {
+  return !!(args && Object.prototype.hasOwnProperty.call(args, "spacing_semantic_repairs"));
+}
+
+function _invalidSpacingSemanticRepairsError() {
+  return "Invalid approval boundary: spacing_semantic_repairs was provided but did not contain any exact token/mode alias repair entries copied from inspect_ds_token_gaps.repairPlan.applyInput. Stop and rerun inspect_ds_token_gaps, then pass the exact approved spacing_semantic_repairs entries or omit the field entirely for a full category apply.";
 }
 
 function _pruneCategoriesForRequest(args, plannerCategories) {
@@ -339,21 +412,34 @@ function _handleApplyDsTokens(args, configPath, ds) {
     bridgeDs = withEffectiveSpacingSemantic(ds, dataSource.figmaData, variableMap).ds;
   }
 
-  const needsSpacingModes = resolved.bridgeCategories.indexOf("spacing-semantics") >= 0
-    && bridgeDs
-    && bridgeDs.spacing
-    && bridgeDs.spacing.semantic
-    && Object.keys(bridgeDs.spacing.semantic).some(key => {
-      const vals = bridgeDs.spacing.semantic[key];
-      return Array.isArray(vals) ? vals.length > 1 : false;
-    });
+  const spacingSemanticRepairsProvided = _hasSpacingSemanticRepairsInput(args);
+  const spacingSemanticRepairs = _normalizeSpacingSemanticRepairs(args.spacing_semantic_repairs);
+  if (spacingSemanticRepairsProvided && resolved.bridgeCategories.indexOf("spacing-semantics") >= 0 && !spacingSemanticRepairs.length) {
+    return {
+      error: _invalidSpacingSemanticRepairsError(),
+      dryRun: false,
+      configPath,
+      categories: resolved.requested,
+      missingCapabilityNotes,
+    };
+  }
+  if (args.ensure_collection_modes === true && spacingSemanticRepairs.length) {
+    return {
+      error: "Invalid approval boundary: update_ds_tokens cannot combine ensure_collection_modes with spacing_semantic_repairs. Apply missing collection modes with apply_ds_foundation_repairs after separate approval, then sync/reinspect and request a separate approval for the exact semantic spacing alias repairs.",
+      dryRun: false,
+      configPath,
+      categories: resolved.requested,
+      missingCapabilityNotes,
+    };
+  }
 
   return requestBridgePost("/request-update-tokens", {
     DS: bridgeDs,
     categories: resolved.bridgeCategories,
     createMissing: args.create_missing !== false,
     dryRun: false,
-    ensureCollectionModes: args.ensure_collection_modes === true || needsSpacingModes,
+    ensureCollectionModes: args.ensure_collection_modes === true,
+    spacingSemanticRepairs,
     pruneOffConfigVariables: prune.off_config_variables,
     pruneOffConfigTextStyles: prune.off_config_text_styles,
     pruneOffConfigEffectStyles: prune.off_config_effect_styles,
@@ -456,7 +542,24 @@ function handleUpdateDsTokens(args = {}) {
     include_existing_updates: false,
     include_existing_style_refreshes: true,
   });
-  const report = _buildDryRunReport(plannerResult, { create_missing: args.create_missing });
+  const spacingSemanticRepairsProvided = _hasSpacingSemanticRepairsInput(args);
+  const spacingSemanticRepairs = _normalizeSpacingSemanticRepairs(args.spacing_semantic_repairs);
+  if (
+    spacingSemanticRepairsProvided
+    && ((plannerResult.categories && plannerResult.categories.supported) || []).indexOf("spacing-semantics") >= 0
+    && !spacingSemanticRepairs.length
+  ) {
+    return {
+      error: _invalidSpacingSemanticRepairsError(),
+      dryRun: true,
+      configPath,
+      categories: (plannerResult.categories && plannerResult.categories.supported) || [],
+    };
+  }
+  const report = _buildDryRunReport(plannerResult, {
+    create_missing: args.create_missing,
+    spacing_semantic_repairs: args.spacing_semantic_repairs,
+  });
   const unknownCategories = (plannerResult.categories && plannerResult.categories.unsupported) || [];
   const missingCapabilityNotes = (plannerResult.repairPlan && plannerResult.repairPlan.missingCapabilityNotes || []).slice();
   if (_legacyColorPruneRequested(prune)) {
@@ -499,7 +602,7 @@ function handleUpdateDsTokens(args = {}) {
     },
     applySupported: true,
     supportedApplyCategories: Array.from(SUPPORTED_APPLY_CATEGORIES).sort(),
-    nextStep: "Show this dry-run report to the designer. If missingCapabilityNotes includes missing-foundation-collection or missing-foundation-modes, use inspect_ds_token_gaps.repairPlan.foundationRepairPlan and apply_ds_foundation_repairs after approval, or approved update_ds_tokens with ensure_collection_modes. If they approve radius, border-width, semantic spacing, narrow typography/elevation slices, or broad typography/elevation orchestration, call update_ds_tokens with dry_run:false for those approved categories. Approved off-config prune uses repairPlan/preview prune flags only. Broad typography/elevation apply runs typography-variables then typography-styles (and elevation analog) in one call. Primitive/color categories belong on update_ds_primitives.",
+    nextStep: "Show this dry-run report to the designer. If missingCapabilityNotes includes missing-foundation-collection or missing-foundation-modes, present foundation collection/mode creation as a separate option and approval. If approved, apply only the foundation repair, then sync and reinspect, then stop before semantic spacing or responsive token writes. Do not ask for one approval that covers both foundation repair and token apply. If they separately approve radius, border-width, semantic spacing, narrow typography/elevation slices, or broad typography/elevation orchestration, call update_ds_tokens with dry_run:false for those approved categories. Approved off-config prune uses repairPlan/preview prune flags only. Broad typography/elevation apply runs typography-variables then typography-styles (and elevation analog) in one call. Primitive/color categories belong on update_ds_primitives.",
   };
 }
 

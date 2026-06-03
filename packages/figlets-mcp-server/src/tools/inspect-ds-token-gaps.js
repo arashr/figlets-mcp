@@ -594,7 +594,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         collection: requiredCollection,
         repairTool: "apply_ds_foundation_repairs",
         repairReady: Boolean(foundationRepair),
-        reason: "This token category needs a configured foundation collection that is not present in the synced Figma snapshot. Figlets can create the missing collection shell after designer approval, then continue token completion.",
+        reason: "This token category needs a configured foundation collection that is not present in the synced Figma snapshot. Present foundation collection creation as a separate option. If the designer approves it, create only the missing collection shell, then sync and reinspect, then stop before any token apply.",
         productGap: false,
       });
       foundationBlockedApplyCategories.add(category);
@@ -619,12 +619,15 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
           collection: requiredCollection,
           missingModes,
           repairTool: "apply_ds_foundation_repairs",
-          alternateRepairTool: "update_ds_tokens",
           repairReady: Boolean(foundationRepair),
-          reason: "This token category needs configured breakpoint modes on " + requiredCollection + ". Run apply_ds_foundation_repairs after approval, or approved update_ds_tokens with ensure_collection_modes.",
+          reason: "This token category needs configured breakpoint modes on " + requiredCollection + ". Present mode creation as a separate option. If the designer approves it, run only apply_ds_foundation_repairs, then sync and reinspect, then stop before any token apply.",
           productGap: false,
         });
-        if (category === "spacing-semantics" || category === "typography-variables" || category === "typography-styles") {
+        if (
+          (category === "spacing-semantics" && !(spacingAliasPlan.repairs || []).length)
+          || category === "typography-variables"
+          || category === "typography-styles"
+        ) {
           foundationBlockedApplyCategories.add(category);
         }
         if (category === "typography") {
@@ -773,9 +776,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         collection: spacingCollection,
         missingModes: spacingAliasPlan.missingResponsiveModes,
         repairTool: "apply_ds_foundation_repairs",
-        alternateRepairTool: "update_ds_tokens",
         repairReady: Boolean(foundationRepair),
-        reason: "Semantic spacing alias repair needs breakpoint modes on the Spacing collection. Approved apply can add them with ensure_collection_modes, then rerun inspect and apply spacing-semantics.",
+        reason: "Semantic spacing alias repair needs breakpoint modes on the Spacing collection. Present mode creation as a separate option. If the designer approves it, add missing modes as a foundation repair only, then sync and reinspect, then stop before any spacing alias apply.",
         productGap: false,
       });
     }
@@ -871,6 +873,7 @@ function _buildRepairPlan(context) {
   const categories = context.categoriesWithGaps || [];
   const foundationBlocked = new Set(context.foundationBlockedApplyCategories || []);
   const applyCategorySet = new Set(categories.filter(category => APPLY_CATEGORIES.has(category) && !foundationBlocked.has(category)));
+  if ((context.spacingAliasRepairs || []).length) applyCategorySet.add("spacing-semantics");
   if (categories.indexOf("typography") >= 0 && !foundationBlocked.has("typography")) {
     const typographySlices = _typographyApplySlices(context);
     if (typographySlices.length === 2) applyCategorySet.add("typography");
@@ -900,9 +903,6 @@ function _buildRepairPlan(context) {
     include_existing_updates: !!context.includeExistingUpdates,
     dry_run: true,
   };
-  const ensureCollectionModes = (context.foundationRepairs || []).some(item =>
-    Array.isArray(item.missingModes) && item.missingModes.length > 0
-  ) || (context.spacingMissingResponsiveModes || []).length > 0;
   const applyInput = {
     config_path: context.configPath,
     categories: applyCategories,
@@ -910,7 +910,12 @@ function _buildRepairPlan(context) {
     include_existing_updates: false,
     dry_run: false,
   };
-  if (ensureCollectionModes) applyInput.ensure_collection_modes = true;
+  if (applyCategories.indexOf("spacing-semantics") >= 0 && (context.spacingAliasRepairs || []).length) {
+    applyInput.spacing_semantic_repairs = (context.spacingAliasRepairs || []).map(repair => ({
+      name: repair.name,
+      updates: (repair.updates || []).map(update => Object.assign({}, update)),
+    }));
+  }
   const foundationCollections = context.foundationRepairs || [];
   const foundationApplyInput = {
     config_path: context.configPath,
@@ -993,7 +998,7 @@ function _buildRepairPlan(context) {
     missingCapabilityNotes: context.missingCapabilityNotes || [],
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
-      ? "STOP before any Figma write. This inspect pass is read-only. Run dry-run previews (repairPlan.previewInput and primitiveRepairPlan.previewInput when present), summarize repairPlan.designerPresentation in plain language, and wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Only after approval: apply_ds_foundation_repairs with foundationRepairPlan.applyInput when collections are missing, then update_ds_primitives with primitiveRepairPlan.applyInput when present, then update_ds_tokens with repairPlan.applyInput. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
+      ? "STOP before any Figma write. This inspect pass is read-only. Run dry-run previews (repairPlan.previewInput and primitiveRepairPlan.previewInput when present), summarize repairPlan.designerPresentation in plain language, and wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
       : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
 }
@@ -1046,7 +1051,7 @@ function _buildDesignerPresentation(context, total) {
     if ((context.spacingMissingResponsiveModes || []).length) {
       sections.push({
         title: "Spacing breakpoint modes required",
-        message: "Semantic spacing alias repair needs Mobile, Tablet, and Desktop modes on the Spacing collection. Figlets can add the missing modes on approved apply (ensure_collection_modes), then you should rerun inspect and apply spacing-semantics so every device mode is updated.",
+        message: "Semantic spacing alias repair needs Mobile, Tablet, and Desktop modes on the Spacing collection. Present missing mode creation as a separate option. If approved, Figlets should add only the missing modes as a foundation repair, then sync and reinspect, then stop before any spacing alias apply.",
       });
     }
     if (spacingAliasConfigDrift.length) {
@@ -1072,10 +1077,10 @@ function _buildDesignerPresentation(context, total) {
   if (notes.length) {
     const productGapNotes = notes.filter(note => note.productGap);
     if (foundationRepairs.length) {
-      lines.push(`${foundationRepairs.length} missing foundation collection${foundationRepairs.length === 1 ? "" : "s"} can be created after approval before token completion continues.`);
+      lines.push(`${foundationRepairs.length} missing foundation collection or mode repair${foundationRepairs.length === 1 ? "" : "s"} can be created as a separate option. Approval for this step must apply only foundationRepairPlan.applyInput; after sync/reinspect, stop before any token apply.`);
       sections.push({
         title: "Foundation repair",
-        message: `Figlets can create ${foundationRepairs.map(item => item.name).join(", ")} as collection shell${foundationRepairs.length === 1 ? "" : "s"} with configured modes.`,
+        message: `Figlets can create ${foundationRepairs.map(item => item.name).join(", ")} as collection shell or mode repair${foundationRepairs.length === 1 ? "" : "s"} with configured modes. This is a separate approval boundary from semantic token alias repairs.`,
       });
     }
     if (productGapNotes.length) {

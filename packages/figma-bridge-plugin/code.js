@@ -6907,6 +6907,29 @@ function _tokenUpdateEntriesForCategory(DS, category) {
   return entries;
 }
 
+function _tokenUpdateEntriesFromSpacingRepairs(repairs) {
+  var entries = [];
+  if (!Array.isArray(repairs)) return entries;
+  for (var ri = 0; ri < repairs.length; ri++) {
+    var repair = repairs[ri];
+    if (!repair || typeof repair.name !== 'string' || !Array.isArray(repair.updates)) continue;
+    var updates = [];
+    for (var ui = 0; ui < repair.updates.length; ui++) {
+      var update = repair.updates[ui];
+      if (!update || typeof update !== 'object') continue;
+      updates.push(update);
+    }
+    if (!updates.length) continue;
+    entries.push({
+      name: repair.name,
+      type: 'FLOAT',
+      resolveSpaceAlias: true,
+      approvedUpdates: updates,
+    });
+  }
+  return entries;
+}
+
 function _tokenValueEq(a, b) {
   if (a && b && a.type === 'VARIABLE_ALIAS' && b.type === 'VARIABLE_ALIAS') {
     return a.id === b.id;
@@ -7041,6 +7064,10 @@ async function _updateDsTokens(payload) {
   var createMissing = !(payload && payload.createMissing === false);
   var dryRun = !!(payload && payload.dryRun);
   var ensureCollectionModes = !!(payload && payload.ensureCollectionModes);
+  var exactSpacingRepairsProvided = !!(payload && Object.prototype.hasOwnProperty.call(payload, 'spacingSemanticRepairs'));
+  var spacingSemanticRepairs = Array.isArray(payload && payload.spacingSemanticRepairs)
+    ? payload.spacingSemanticRepairs
+    : [];
   var pruneOffConfigVariables = !!(payload && payload.pruneOffConfigVariables);
   var pruneOffConfigTextStyles = !!(payload && payload.pruneOffConfigTextStyles);
   var pruneOffConfigEffectStyles = !!(payload && payload.pruneOffConfigEffectStyles);
@@ -7267,10 +7294,61 @@ async function _updateDsTokens(payload) {
     return _resolveTokenUpdateValue(entry, entry.value);
   }
 
+  function _approvedUpdateForMode(entry, mode) {
+    if (!entry || !Array.isArray(entry.approvedUpdates)) return null;
+    var modeName = String(mode && mode.modeName || '').toLowerCase();
+    var modeId = String(mode && mode.modeId || '');
+    for (var aui = 0; aui < entry.approvedUpdates.length; aui++) {
+      var update = entry.approvedUpdates[aui];
+      if (!update) continue;
+      if (update.modeId && String(update.modeId) === modeId) return update;
+      if (update.modeName && String(update.modeName).toLowerCase() === modeName) return update;
+    }
+    return null;
+  }
+
+  function _desiredApprovedUpdateValue(update) {
+    if (!update) return null;
+    if (update.toAliasId) {
+      return allVariablesById[update.toAliasId] ? { type: 'VARIABLE_ALIAS', id: update.toAliasId } : null;
+    }
+    if (update.toAliasName) {
+      return primByName[update.toAliasName] ? { type: 'VARIABLE_ALIAS', id: primByName[update.toAliasName] } : null;
+    }
+    return null;
+  }
+
+  function _approvedDesiredValuesForEntry(entry, modeOrder) {
+    if (!entry || !Array.isArray(entry.approvedUpdates)) return null;
+    var values = [];
+    for (var pvm = 0; pvm < modeOrder.length; pvm++) {
+      var mode = modeOrder[pvm];
+      var approved = _approvedUpdateForMode(entry, mode);
+      if (!approved) continue;
+      var desired = _desiredApprovedUpdateValue(approved);
+      if (desired == null) {
+        return { error: true, values: [] };
+      }
+      values.push({ modeId: mode.modeId, value: desired });
+    }
+    return { error: false, values: values };
+  }
+
+  if (exactSpacingRepairsProvided && categories.indexOf('spacing-semantics') >= 0 && !_tokenUpdateEntriesFromSpacingRepairs(spacingSemanticRepairs).length) {
+    return {
+      error: 'Invalid approval boundary: spacingSemanticRepairs was provided but no exact token/mode alias repair entries were usable. Refusing to fall back to full spacing-semantics apply.',
+      dryRun: dryRun,
+      categories: categories,
+      report: {},
+    };
+  }
+
   var report = {};
   for (var cati = 0; cati < categories.length; cati++) {
     var category = categories[cati];
-    var entries = _tokenUpdateEntriesForCategory(DS, category);
+    var entries = category === 'spacing-semantics' && exactSpacingRepairsProvided
+      ? _tokenUpdateEntriesFromSpacingRepairs(spacingSemanticRepairs)
+      : _tokenUpdateEntriesForCategory(DS, category);
     var catReport = _emptyTokenUpdateReport();
     var targetColl = spacingColl;
     var targetName = spacingName;
@@ -7293,7 +7371,12 @@ async function _updateDsTokens(payload) {
       catReport.entries += 1;
       var existing = byName[entry.name];
       var item = _tokenUpdateItem(entry.name, entry.type, targetName);
+      var exactApprovedUpdates = Array.isArray(entry.approvedUpdates);
       if (!existing) {
+        if (exactApprovedUpdates) {
+          catReport.unmatched.push(item);
+          continue;
+        }
         if (!createMissing) {
           catReport.unmatched.push(item);
           continue;
@@ -7336,8 +7419,23 @@ async function _updateDsTokens(payload) {
       }
 
       var changed = false;
+      var exactDesiredValues = exactApprovedUpdates ? _approvedDesiredValuesForEntry(entry, modeOrder) : null;
+      if (exactDesiredValues && exactDesiredValues.error) {
+        catReport.unmatched.push(item);
+        continue;
+      }
       for (var vm = 0; vm < modeOrder.length; vm++) {
-        var desiredValue = _desiredForMode(entry, modeOrder[vm].bpIndex);
+        var exactDesired = null;
+        if (exactApprovedUpdates) {
+          for (var edv = 0; edv < exactDesiredValues.values.length; edv++) {
+            if (exactDesiredValues.values[edv].modeId === modeOrder[vm].modeId) {
+              exactDesired = exactDesiredValues.values[edv].value;
+              break;
+            }
+          }
+          if (exactDesired == null) continue;
+        }
+        var desiredValue = exactApprovedUpdates ? exactDesired : _desiredForMode(entry, modeOrder[vm].bpIndex);
         if (desiredValue == null) {
           catReport.unmatched.push(item);
           changed = false;
@@ -7350,12 +7448,27 @@ async function _updateDsTokens(payload) {
       }
       if (!changed) continue;
       if (dryRun) {
-        catReport.wouldUpdateVariables.push(item);
+        catReport.wouldUpdateVariables.push(exactApprovedUpdates
+          ? Object.assign({}, item, { updates: entry.approvedUpdates.slice() })
+          : item);
         continue;
       }
       _setVariableScopesForName(existing, entry.name, entry.type);
+      var writeValues = exactApprovedUpdates ? exactDesiredValues.values : null;
       for (var sm = 0; sm < modeOrder.length; sm++) {
-        existing.setValueForMode(modeOrder[sm].modeId, _desiredForMode(entry, modeOrder[sm].bpIndex));
+        var desiredSetValue = null;
+        if (exactApprovedUpdates) {
+          for (var wv = 0; wv < writeValues.length; wv++) {
+            if (writeValues[wv].modeId === modeOrder[sm].modeId) {
+              desiredSetValue = writeValues[wv].value;
+              break;
+            }
+          }
+          if (desiredSetValue == null) continue;
+        } else {
+          desiredSetValue = _desiredForMode(entry, modeOrder[sm].bpIndex);
+        }
+        existing.setValueForMode(modeOrder[sm].modeId, desiredSetValue);
       }
       catReport.updatedVariables.push(_tokenUpdateChangedItem(existing, item, modeOrder, idToName));
     }

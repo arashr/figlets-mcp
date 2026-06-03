@@ -241,6 +241,17 @@ module.exports = (() => {
       "planner should expose exact mode-level alias target for approval"
     );
     assert.ok(
+      Array.isArray(spacingAliasPlan.repairPlan.applyInput.spacing_semantic_repairs),
+      "applyInput should carry exact semantic spacing repair entries for approval-boundary-safe apply"
+    );
+    assert.ok(
+      spacingAliasPlan.repairPlan.applyInput.spacing_semantic_repairs.some(repair =>
+        repair.name === "space/component/md" &&
+        repair.updates.some(update => update.modeName === "Mobile" && update.toAliasName === "space/12")
+      ),
+      "exact semantic spacing apply payload should include token/mode alias targets"
+    );
+    assert.ok(
       spacingAliasPlan.repairPlan.designerPresentation.proposedChanges.some(change =>
         change.token === "space/component/md"
         && change.mode === "Mobile"
@@ -816,14 +827,112 @@ module.exports = (() => {
       ),
       "missing breakpoint modes on an existing Spacing collection should be reported"
     );
-    assert.strictEqual(missingModes.repairPlan.applyInput.ensure_collection_modes, true);
+    assert.strictEqual(
+      missingModes.repairPlan.applyInput.ensure_collection_modes,
+      undefined,
+      "missing modes should stay out of update_ds_tokens applyInput unless separately approved"
+    );
     assert.ok(
       !missingModes.repairPlan.applyInput.categories.includes("spacing-semantics"),
-      "responsive spacing apply should stay blocked until modes exist or ensure_collection_modes runs"
+      "spacing-semantics should stay blocked when missing modes exist and there are no exact existing-mode alias repairs"
     );
     assert.ok(
       missingModes.repairPlan.foundationRepairPlan.applyInput.collections.some(item => item.kind === "spacing"),
       "missing modes should still route through foundation repair on the existing collection"
+    );
+  }
+
+  {
+    const mobileOnlySpacing = inspectDsTokenGapsFromConfigAndFigmaData(Object.assign({}, DS, {
+      spacing: Object.assign({}, DS.spacing, {
+        semantic: {
+          "layout/lg": [48, 64, 96],
+          "layout/xl": [64, 96, 128],
+          "touch/min": [44, 44, 44],
+          "touch/comfortable": [48, 48, 40],
+          "component/md": [24, 32, 32],
+        },
+      }),
+    }), {
+      collections: [
+        {
+          id: "primitives",
+          name: "1. Primitives",
+          modes: [{ modeId: "default", name: "Default" }],
+          variableIds: ["space-11", "space-12", "space-16"],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          modes: [{ modeId: "mobile", name: "Mobile" }],
+          variableIds: ["layout-lg", "layout-xl", "touch-min", "touch-comfortable"],
+        },
+      ],
+      variables: [
+        { id: "space-11", name: "space/11", resolvedType: "FLOAT", valuesByMode: { default: 44 } },
+        { id: "space-12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+        { id: "space-16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+        { id: "layout-lg", name: "space/layout/lg", resolvedType: "FLOAT", valuesByMode: { mobile: 48 } },
+        { id: "layout-xl", name: "space/layout/xl", resolvedType: "FLOAT", valuesByMode: { mobile: 64 } },
+        { id: "touch-min", name: "space/touch/min", resolvedType: "FLOAT", valuesByMode: { mobile: 44 } },
+        { id: "touch-comfortable", name: "space/touch/comfortable", resolvedType: "FLOAT", valuesByMode: { mobile: 48 } },
+      ],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["spacing-semantics"],
+    });
+    assert.deepStrictEqual(
+      mobileOnlySpacing.repairPlan.applyInput.categories,
+      ["spacing-semantics"],
+      "Mobile-only raw alias repairs should be apply-ready even when Tablet/Desktop modes are missing"
+    );
+    assert.strictEqual(
+      mobileOnlySpacing.repairPlan.applyInput.ensure_collection_modes,
+      undefined,
+      "Mobile-only exact alias repair must not create Tablet/Desktop modes"
+    );
+    assert.ok(
+      mobileOnlySpacing.repairPlan.missingCapabilityNotes.some(note =>
+        note.kind === "missing-foundation-modes" &&
+        note.category === "spacing-semantics" &&
+        note.missingModes.includes("Tablet") &&
+        note.missingModes.includes("Desktop") &&
+        note.reason.includes("separate option") &&
+        note.reason.includes("stop before any spacing alias apply")
+      ),
+      "missing Tablet/Desktop modes should remain a separate foundation repair suggestion"
+    );
+    assert.ok(
+      mobileOnlySpacing.repairPlan.agentInstruction.includes("separate options with separate approvals"),
+      "agent instruction should not allow one approval to cover modes and spacing aliases"
+    );
+    assert.ok(
+      mobileOnlySpacing.repairPlan.agentInstruction.includes("then stop before any primitive or semantic token write"),
+      "foundation approval should stop after mode creation and reinspect"
+    );
+    assert.ok(
+      mobileOnlySpacing.repairPlan.designerPresentation.sections.some(section =>
+        section.title === "Spacing breakpoint modes required" &&
+        section.message.includes("separate option") &&
+        section.message.includes("stop before any spacing alias apply")
+      ),
+      "designer presentation should separate missing modes from Mobile alias repairs"
+    );
+    const exactRepairs = mobileOnlySpacing.repairPlan.applyInput.spacing_semantic_repairs || [];
+    assert.deepStrictEqual(
+      exactRepairs.map(repair => repair.name).sort(),
+      ["space/layout/lg", "space/layout/xl", "space/touch/comfortable", "space/touch/min"].sort(),
+      "applyInput should contain exactly the four existing Mobile raw semantic spacing repairs"
+    );
+    for (const repair of exactRepairs) {
+      assert.strictEqual(repair.updates.length, 1, repair.name + " should include only the approved existing Mobile mode");
+      assert.strictEqual(repair.updates[0].modeName, "Mobile");
+    }
+    assert.ok(
+      !exactRepairs.some(repair => repair.name === "space/component/md"),
+      "exact Mobile alias repair must not include unrelated semantic spacing tokens"
     );
   }
 

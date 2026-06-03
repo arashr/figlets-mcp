@@ -23,6 +23,13 @@ const TOKEN_GAP_APPROVAL_CONTRACT = {
   goalPhraseIsNotApproval: true,
   requiredBeforeWrite:
     "Explicit designer approval after dry-run previews (for example: yes, proceed, or apply).",
+  separateWriteBoundaries: [
+    "foundation collection or mode creation",
+    "primitive token updates",
+    "semantic token updates",
+  ],
+  foundationBoundaryRule:
+    "Foundation collection/mode creation must be presented as its own option and approval. If approved, apply only apply_ds_foundation_repairs, then sync and reinspect, then stop before any primitive or semantic token write.",
   routingExamplesThatAreNotApproval: [
     "complete missing config-backed tokens",
     "complete tokens",
@@ -77,7 +84,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "If schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh structured repairPlan.applyInput instead of retrying invented arguments.",
     "If repairPlan.optionalApplyInput is non-empty, present it as optional bulk creation that needs separate approval.",
     "If inspect_ds_setup_gaps reports semanticNamingConflicts, ask the designer to choose surface-based or role-based naming. After that choice, call plan_ds_semantic_naming_consolidation; show every proposed rename line; only after approval pass repairPlan.applyInput unchanged to apply_ds_semantic_naming_consolidation.",
-    "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps, dry-run preview with repairPlan.previewInput and primitiveRepairPlan.previewInput, ask for explicit designer approval, then apply_ds_foundation_repairs when foundationRepairPlan applies, update_ds_primitives when primitiveRepairPlan applies, and update_ds_tokens when repairPlan.applyInput applies. A routing goal phrase is not approval to write.",
+    "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps and dry-run previews. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs, then sync and reinspect, then stop before primitive or semantic token writes. Never ask for one approval that covers foundation repair and token apply.",
     "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability; call qa_binding_audit({ fix: true }) only for fixableNow after approval.",
     "Do not create tokens from qa_binding_audit findings unless a Figlets token-completion planner provides the payload.",
     "If no Figlets repair payload exists, report a Figlets product/tool gap instead of saying the gaps cannot be fixed.",
@@ -306,14 +313,14 @@ const WORKFLOWS = [
       {
         id: "approve-token-plan",
         kind: "confirmation",
-        designerMessage: "I'll summarize the dry-run plan (foundation modes, primitives, semantic tokens) and wait for your explicit approval. A goal phrase like 'complete missing tokens' is not permission to write.",
+        designerMessage: "I'll summarize foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. A goal phrase like 'complete missing tokens' is not permission to write, and one approval must not cover both foundation repair and token apply.",
       },
       {
         id: "apply-foundation",
         kind: "write",
         tool: "apply_ds_foundation_repairs",
         requiresApproval: true,
-        designerMessage: "After you approve, I'll apply only repairPlan.foundationRepairPlan.applyInput.",
+        designerMessage: "If you approve foundation collection or mode creation, I'll apply only repairPlan.foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write.",
       },
       {
         id: "apply-primitives",
@@ -327,7 +334,7 @@ const WORKFLOWS = [
         kind: "write",
         tool: "update_ds_tokens",
         requiresApproval: true,
-        designerMessage: "After you approve, I'll apply only the approved repairPlan.applyInput categories through update_ds_tokens.",
+        designerMessage: "After a separate token-update approval, I'll apply only the approved repairPlan.applyInput categories through update_ds_tokens. If spacing_semantic_repairs is present, that approval covers only the listed token/mode repairs and must not create missing breakpoint modes.",
       },
       {
         id: "verify",

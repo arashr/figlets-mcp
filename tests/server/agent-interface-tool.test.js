@@ -243,7 +243,14 @@ try {
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_foundation_repairs" && step.requiresApproval === true));
     const approveStep = guide.steps.find(step => step.id === "approve-token-plan");
     assert.ok(approveStep.designerMessage.includes("not permission to write"));
+    assert.ok(approveStep.designerMessage.includes("separate options with separate approvals"));
+    assert.ok(approveStep.designerMessage.includes("one approval must not cover both foundation repair and token apply"));
+    const foundationStep = guide.steps.find(step => step.id === "apply-foundation");
+    assert.ok(foundationStep.designerMessage.includes("then stop before any primitive or semantic token write"));
+    const tokenStep = guide.steps.find(step => step.id === "apply-tokens");
+    assert.ok(tokenStep.designerMessage.includes("must not create missing breakpoint modes"));
     assert.ok(guide.approvalContract && guide.approvalContract.goalPhraseIsNotApproval === true);
+    assert.ok(guide.approvalContract.foundationBoundaryRule.includes("then stop before any primitive or semantic token write"));
 
     const route = routeIntent("complete missing config-backed tokens");
     assert.strictEqual(route.workflow.id, "token-gap-completion");
@@ -254,6 +261,7 @@ try {
     assert.ok(handled.approvalContract);
     assert.ok(handled.message.includes("dry_run:false"));
     assert.ok(handled.message.includes("Routing goal phrases are not approval"));
+    assert.ok(handled.message.includes("separate approvals"));
   }
 
   {

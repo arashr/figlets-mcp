@@ -6907,6 +6907,29 @@ function _tokenUpdateEntriesForCategory(DS, category) {
   return entries;
 }
 
+function _tokenUpdateEntriesFromSpacingRepairs(repairs) {
+  var entries = [];
+  if (!Array.isArray(repairs)) return entries;
+  for (var ri = 0; ri < repairs.length; ri++) {
+    var repair = repairs[ri];
+    if (!repair || typeof repair.name !== 'string' || !Array.isArray(repair.updates)) continue;
+    var updates = [];
+    for (var ui = 0; ui < repair.updates.length; ui++) {
+      var update = repair.updates[ui];
+      if (!update || typeof update !== 'object') continue;
+      updates.push(update);
+    }
+    if (!updates.length) continue;
+    entries.push({
+      name: repair.name,
+      type: 'FLOAT',
+      resolveSpaceAlias: true,
+      approvedUpdates: updates,
+    });
+  }
+  return entries;
+}
+
 function _tokenValueEq(a, b) {
   if (a && b && a.type === 'VARIABLE_ALIAS' && b.type === 'VARIABLE_ALIAS') {
     return a.id === b.id;
@@ -7041,6 +7064,9 @@ async function _updateDsTokens(payload) {
   var createMissing = !(payload && payload.createMissing === false);
   var dryRun = !!(payload && payload.dryRun);
   var ensureCollectionModes = !!(payload && payload.ensureCollectionModes);
+  var spacingSemanticRepairs = Array.isArray(payload && payload.spacingSemanticRepairs)
+    ? payload.spacingSemanticRepairs
+    : [];
   var pruneOffConfigVariables = !!(payload && payload.pruneOffConfigVariables);
   var pruneOffConfigTextStyles = !!(payload && payload.pruneOffConfigTextStyles);
   var pruneOffConfigEffectStyles = !!(payload && payload.pruneOffConfigEffectStyles);
@@ -7267,10 +7293,33 @@ async function _updateDsTokens(payload) {
     return _resolveTokenUpdateValue(entry, entry.value);
   }
 
+  function _approvedUpdateForMode(entry, mode) {
+    if (!entry || !Array.isArray(entry.approvedUpdates)) return null;
+    var modeName = String(mode && mode.modeName || '').toLowerCase();
+    var modeId = String(mode && mode.modeId || '');
+    for (var aui = 0; aui < entry.approvedUpdates.length; aui++) {
+      var update = entry.approvedUpdates[aui];
+      if (!update) continue;
+      if (update.modeId && String(update.modeId) === modeId) return update;
+      if (update.modeName && String(update.modeName).toLowerCase() === modeName) return update;
+    }
+    return null;
+  }
+
+  function _desiredApprovedUpdateValue(update) {
+    if (!update) return null;
+    if (update.toAliasId && allVariablesById[update.toAliasId]) return { type: 'VARIABLE_ALIAS', id: update.toAliasId };
+    if (update.toAliasName && primByName[update.toAliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[update.toAliasName] };
+    if (update.configExpected != null) return _resolveSpaceValue(update.configExpected);
+    return null;
+  }
+
   var report = {};
   for (var cati = 0; cati < categories.length; cati++) {
     var category = categories[cati];
-    var entries = _tokenUpdateEntriesForCategory(DS, category);
+    var entries = category === 'spacing-semantics' && spacingSemanticRepairs.length
+      ? _tokenUpdateEntriesFromSpacingRepairs(spacingSemanticRepairs)
+      : _tokenUpdateEntriesForCategory(DS, category);
     var catReport = _emptyTokenUpdateReport();
     var targetColl = spacingColl;
     var targetName = spacingName;
@@ -7293,7 +7342,12 @@ async function _updateDsTokens(payload) {
       catReport.entries += 1;
       var existing = byName[entry.name];
       var item = _tokenUpdateItem(entry.name, entry.type, targetName);
+      var exactApprovedUpdates = Array.isArray(entry.approvedUpdates);
       if (!existing) {
+        if (exactApprovedUpdates) {
+          catReport.unmatched.push(item);
+          continue;
+        }
         if (!createMissing) {
           catReport.unmatched.push(item);
           continue;
@@ -7337,7 +7391,11 @@ async function _updateDsTokens(payload) {
 
       var changed = false;
       for (var vm = 0; vm < modeOrder.length; vm++) {
-        var desiredValue = _desiredForMode(entry, modeOrder[vm].bpIndex);
+        var approvedUpdate = exactApprovedUpdates ? _approvedUpdateForMode(entry, modeOrder[vm]) : null;
+        if (exactApprovedUpdates && !approvedUpdate) continue;
+        var desiredValue = exactApprovedUpdates
+          ? _desiredApprovedUpdateValue(approvedUpdate)
+          : _desiredForMode(entry, modeOrder[vm].bpIndex);
         if (desiredValue == null) {
           catReport.unmatched.push(item);
           changed = false;
@@ -7350,12 +7408,19 @@ async function _updateDsTokens(payload) {
       }
       if (!changed) continue;
       if (dryRun) {
-        catReport.wouldUpdateVariables.push(item);
+        catReport.wouldUpdateVariables.push(exactApprovedUpdates
+          ? Object.assign({}, item, { updates: entry.approvedUpdates.slice() })
+          : item);
         continue;
       }
       _setVariableScopesForName(existing, entry.name, entry.type);
       for (var sm = 0; sm < modeOrder.length; sm++) {
-        existing.setValueForMode(modeOrder[sm].modeId, _desiredForMode(entry, modeOrder[sm].bpIndex));
+        var approvedSetUpdate = exactApprovedUpdates ? _approvedUpdateForMode(entry, modeOrder[sm]) : null;
+        if (exactApprovedUpdates && !approvedSetUpdate) continue;
+        var desiredSetValue = exactApprovedUpdates
+          ? _desiredApprovedUpdateValue(approvedSetUpdate)
+          : _desiredForMode(entry, modeOrder[sm].bpIndex);
+        existing.setValueForMode(modeOrder[sm].modeId, desiredSetValue);
       }
       catReport.updatedVariables.push(_tokenUpdateChangedItem(existing, item, modeOrder, idToName));
     }

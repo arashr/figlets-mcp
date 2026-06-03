@@ -88,6 +88,81 @@ module.exports = (async () => {
     }
 
     {
+      const exactConfigPath = path.join(tmp, "design-system-exact-mobile-spacing.config.js");
+      const exactSnapshotPath = path.join(tmp, "figma-data-exact-mobile-spacing.json");
+      const exactDs = Object.assign({}, DS, {
+        spacing: {
+          semantic: {
+            "layout/lg": [48, 64, 96],
+            "layout/xl": [64, 96, 128],
+            "touch/min": [44, 44, 44],
+            "touch/comfortable": [48, 48, 40],
+            "component/md": [24, 32, 32],
+          },
+          radius: {},
+          border: {},
+        },
+      });
+      const exactSnapshot = {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["space-11", "space-12", "space-16"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-lg", "layout-xl", "touch-min", "touch-comfortable"],
+            modes: [{ modeId: "mobile", name: "Mobile" }],
+          },
+        ],
+        variables: [
+          { id: "space-11", name: "space/11", resolvedType: "FLOAT", valuesByMode: { default: 44 } },
+          { id: "space-12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          { id: "space-16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+          { id: "layout-lg", name: "space/layout/lg", resolvedType: "FLOAT", valuesByMode: { mobile: 48 } },
+          { id: "layout-xl", name: "space/layout/xl", resolvedType: "FLOAT", valuesByMode: { mobile: 64 } },
+          { id: "touch-min", name: "space/touch/min", resolvedType: "FLOAT", valuesByMode: { mobile: 44 } },
+          { id: "touch-comfortable", name: "space/touch/comfortable", resolvedType: "FLOAT", valuesByMode: { mobile: 48 } },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      };
+      fs.writeFileSync(exactConfigPath, "const DS = " + JSON.stringify(exactDs, null, 2) + ";\n", "utf8");
+      fs.writeFileSync(exactSnapshotPath, JSON.stringify(exactSnapshot, null, 2), "utf8");
+      const result = handleUpdateDsTokens({
+        config_path: exactConfigPath,
+        figmaDataPath: exactSnapshotPath,
+        categories: ["spacing-semantics"],
+        spacing_semantic_repairs: [
+          { name: "space/layout/lg", updates: [{ modeId: "mobile", modeName: "Mobile", toAliasId: "space-12", toAliasName: "space/12", configExpected: 48 }] },
+          { name: "space/layout/xl", updates: [{ modeId: "mobile", modeName: "Mobile", toAliasId: "space-16", toAliasName: "space/16", configExpected: 64 }] },
+          { name: "space/touch/min", updates: [{ modeId: "mobile", modeName: "Mobile", toAliasId: "space-11", toAliasName: "space/11", configExpected: 44 }] },
+          { name: "space/touch/comfortable", updates: [{ modeId: "mobile", modeName: "Mobile", toAliasId: "space-12", toAliasName: "space/12", configExpected: 48 }] },
+        ],
+        create_missing: true,
+        dry_run: true,
+      });
+      assert.ok(!result.error, result.error);
+      assert.deepStrictEqual(
+        result.report["spacing-semantics"].wouldUpdateVariables.map(item => item.name).sort(),
+        ["space/layout/lg", "space/layout/xl", "space/touch/comfortable", "space/touch/min"].sort(),
+        "exact spacing repair dry-run should preview only the approved token subset"
+      );
+      assert.strictEqual(
+        result.report["spacing-semantics"].wouldCreateVariables.length,
+        0,
+        "exact spacing repair dry-run must not preview unrelated semantic spacing creation"
+      );
+      for (const item of result.report["spacing-semantics"].wouldUpdateVariables) {
+        assert.strictEqual(item.updates.length, 1, item.name + " should preview only the approved Mobile update");
+        assert.strictEqual(item.updates[0].modeName, "Mobile");
+      }
+    }
+
+    {
       const result = handleUpdateDsTokens({
         config_path: configPath,
         figmaDataPath,
@@ -692,6 +767,118 @@ module.exports = (async () => {
       assert.ok(receivedBody.DS, "spacing-semantics apply should send DS to bridge hook");
       assert.deepStrictEqual(receivedBody.categories, ["spacing-semantics"]);
       assert.strictEqual(receivedBody.dryRun, false);
+      assert.strictEqual(
+        receivedBody.ensureCollectionModes,
+        false,
+        "spacing-semantics apply must not implicitly create configured breakpoint modes"
+      );
+    }
+
+    {
+      const capturePath = path.join(tmp, "capture-exact-spacing-repairs.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["spacing-semantics"],
+        unknownCategories: [],
+        report: {
+          "spacing-semantics": {
+            entries: 1,
+            createdVariables: [],
+            updatedVariables: [{ name: "space/layout/lg" }],
+            wouldCreateVariables: [],
+            wouldUpdateVariables: [],
+            createdStyles: [],
+            refreshedStyles: [],
+            unmatched: [],
+            typeMismatch: [],
+            fontLoadFailures: [],
+          },
+        },
+        message: "spacing-semantics: 1 changed",
+      });
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        spacing_semantic_repairs: [{
+          name: "space/layout/lg",
+          updates: [{
+            modeId: "mobile",
+            modeName: "Mobile",
+            toAliasId: "space-12",
+            toAliasName: "space/12",
+            configExpected: 48,
+          }],
+        }],
+        create_missing: true,
+        dry_run: false,
+      });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(receivedBody.ensureCollectionModes, false);
+      assert.deepStrictEqual(receivedBody.spacingSemanticRepairs, [{
+        name: "space/layout/lg",
+        updates: [{
+          modeId: "mobile",
+          modeName: "Mobile",
+          toAliasId: "space-12",
+          toAliasName: "space/12",
+          configExpected: 48,
+        }],
+      }]);
+    }
+
+    {
+      const capturePath = path.join(tmp, "capture-explicit-ensure-modes.json");
+      stubUpdateTokensRoute(hookPath, capturePath, {
+        dryRun: false,
+        categories: ["spacing-semantics"],
+        unknownCategories: [],
+        report: {},
+        ensuredModes: [{ collection: "4. Spacing", createdModes: ["Tablet", "Desktop"] }],
+        message: "collection modes ensured",
+      });
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        ensure_collection_modes: true,
+        create_missing: true,
+        dry_run: false,
+      });
+      const receivedBody = readBridgeHookCapture(capturePath);
+      assert.ok(!result.error, result.error);
+      assert.strictEqual(
+        receivedBody.ensureCollectionModes,
+        true,
+        "explicitly approved ensure_collection_modes should still be forwarded"
+      );
+    }
+
+    {
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        ensure_collection_modes: true,
+        spacing_semantic_repairs: [{
+          name: "space/layout/lg",
+          updates: [{
+            modeId: "mobile",
+            modeName: "Mobile",
+            toAliasId: "space-12",
+            toAliasName: "space/12",
+            configExpected: 48,
+          }],
+        }],
+        create_missing: true,
+        dry_run: false,
+      });
+      assert.ok(
+        result.error && result.error.includes("Invalid approval boundary"),
+        "bundled mode creation and exact spacing alias repair should be rejected"
+      );
+      assert.ok(
+        result.error.includes("separate approval"),
+        "error should explain the separate approval boundary"
+      );
     }
 
     {

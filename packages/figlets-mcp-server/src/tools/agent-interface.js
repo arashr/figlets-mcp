@@ -673,7 +673,7 @@ function handleFigletsWorkflowGuide(args) {
   }
   if (workflow.id === "token-gap-completion" && workflow.approvalContract) {
     response.approvalContract = workflow.approvalContract;
-    response.message = `Workflow guide: ${workflow.title}. Follow the steps in order through dry-run previews first. Do not call apply_ds_foundation_repairs, update_ds_primitives, or update_ds_tokens with dry_run:false until the designer explicitly approves after seeing the plan. Routing goal phrases are not approval to write. Use repairPlan.foundationRepairPlan.applyInput, repairPlan.primitiveRepairPlan.applyInput, and repairPlan.applyInput exactly after approval. Summarize plainly and ask for approval before any write step.`;
+    response.message = `Workflow guide: ${workflow.title}. Follow the steps in order through dry-run previews first. Do not call apply_ds_foundation_repairs, update_ds_primitives, or update_ds_tokens with dry_run:false until the designer explicitly approves the specific write boundary after seeing the plan. Routing goal phrases are not approval to write. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan is approved, use only repairPlan.foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Use repairPlan.primitiveRepairPlan.applyInput and repairPlan.applyInput exactly only after their own separate approvals. Summarize plainly and ask for approval before any write step.`;
   }
   return response;
 }

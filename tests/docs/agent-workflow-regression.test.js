@@ -280,6 +280,137 @@ try {
     assert.strictEqual(handled.hardRules.setupRepairPayloadHandoff.target, "repairPlan.tool / apply_ds_setup_repairs");
   }
 
+  // --- Unsafe pattern 3c: widening a narrow approval into a broader category write ---
+  {
+    const widenedBoundary = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "token-gap-completion" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+        approvedBoundary: "spacing-mobile-aliases",
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        writeBoundary: "spacing-semantics-all-modes",
+      },
+    });
+    assert.strictEqual(widenedBoundary.status, "blocked");
+    const scope = findCheck(widenedBoundary, "write_scope_boundary");
+    assert.strictEqual(scope.status, "fail");
+    assert.ok(scope.message.includes("designer-approved boundary"));
+    assert.ok(scope.nextAction.includes("approve this exact boundary"));
+    assert.strictEqual(widenedBoundary.nextAction.type, "ask_user");
+
+    const exactSubsetWithCategoryPayload = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "token-gap-completion" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        approvalScope: "exact-subset",
+        exactSubsetRequested: true,
+        payloadGranularity: "category-level",
+      },
+    });
+    assert.strictEqual(exactSubsetWithCategoryPayload.status, "blocked");
+    const categoryScope = findCheck(exactSubsetWithCategoryPayload, "write_scope_boundary");
+    assert.strictEqual(categoryScope.status, "fail");
+    assert.ok(categoryScope.message.includes("category-level payload"));
+    assert.ok(categoryScope.nextAction.includes("token-level repairPlan entries"));
+    assert.ok(categoryScope.nextAction.includes("product/tool gap"));
+  }
+
+  // --- Unsafe pattern 3d: continuing after foundation/apply unlocks new work ---
+  {
+    const foundationThenTokens = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "token-gap-completion" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+        lastAppliedBoundary: "foundation",
+        postApplySyncReinspectCompleted: false,
+        separateApprovalAfterReinspect: false,
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        writeBoundary: "semantic-token",
+      },
+    });
+    assert.strictEqual(foundationThenTokens.status, "blocked");
+    const stop = findCheck(foundationThenTokens, "post_apply_stop_boundary");
+    assert.strictEqual(stop.status, "fail");
+    assert.ok(stop.message.includes("sync, reinspect"));
+    assert.ok(stop.nextAction.includes("separate approval"));
+    assert.strictEqual(foundationThenTokens.nextAction.type, "call_tool");
+
+    const unlockedNewRepairs = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+        lastAppliedBoundary: "semantic-setup",
+        lastApplyUnlockedNewRepairs: true,
+        postApplySyncReinspectCompleted: true,
+        separateApprovalAfterReinspect: false,
+      },
+      requestedAction: {
+        tool: "apply_ds_setup_repairs",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        writeBoundary: "newly-unlocked-setup-repairs",
+      },
+    });
+    assert.strictEqual(unlockedNewRepairs.status, "blocked");
+    const unlockedStop = findCheck(unlockedNewRepairs, "post_apply_stop_boundary");
+    assert.strictEqual(unlockedStop.status, "fail");
+    assert.ok(unlockedStop.nextAction.includes("fresh approval boundary"));
+  }
+
+  // --- Unsafe pattern 3e: applying QA designer-decision suggestions through fix:true ---
+  {
+    const designerDecisionBinding = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "qa-binding-audit" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+      },
+      repairPlanState: {
+        fixableNowCount: 1,
+        needsDesignerDecisionCount: 1,
+        hasDesignerDecisionApplyInput: false,
+      },
+      requestedAction: {
+        tool: "qa_binding_audit",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        includesDesignerDecision: true,
+      },
+    });
+    assert.strictEqual(designerDecisionBinding.status, "blocked");
+    const decision = findCheck(designerDecisionBinding, "binding_designer_decision_boundary");
+    assert.strictEqual(decision.status, "fail");
+    assert.ok(decision.message.includes("fixableNow"));
+    assert.ok(decision.nextAction.includes("product/tool gap"));
+  }
+
   // --- Unsafe pattern 4: treating stale MCP host output as repo regression ---
   {
     assert.ok(
@@ -457,8 +588,11 @@ try {
       "setup_proposal_boundary",
       "approval_boundary",
       "repair_payload_source",
+      "write_scope_boundary",
+      "post_apply_stop_boundary",
       "product_gap_response",
       "binding_fixability_boundary",
+      "binding_designer_decision_boundary",
       "stale_host_suspicion",
       "bridge_readiness",
       "release_docs_readiness",

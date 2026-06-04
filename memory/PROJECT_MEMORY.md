@@ -4,6 +4,26 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-04 — BNN-53 in progress; Agent Interface red-team checks added]
+
+**Status:** BNN-53 is active on branch `codex/bnn-53-approval-boundary-red-team`. Linear is `In Progress`. The initial implementation adds host-neutral approval-boundary red-team checks to `figlets_health_check`, plus developer-facing manual smoke guidance.
+
+**Why it exists:** BNN-51 and BNN-52 fixed concrete health-check/token-gap bugs, but manual testing kept revealing approval-scope bugs only after realistic narrow requests. BNN-53 is the broader product-safety pass to catch the next one before a designer finds it.
+
+**Current implementation:** `figlets_health_check` now reports:
+
+- `write_scope_boundary`: blocks a write when the requested write boundary differs from the designer-approved boundary, or when an exact-subset request is backed only by a category-level payload.
+- `post_apply_stop_boundary`: blocks continued writes after a foundation repair or newly unlocked repairs until the agent syncs/reinspects, reports the fresh plan, and gets separate approval.
+- `binding_designer_decision_boundary`: blocks applying QA binding `needsDesignerDecision` suggestions through `qa_binding_audit({ fix: true })` unless Figlets exposes a separate designer-decision apply payload.
+
+**Manual smoke checklist:** `docs/developer-guide.md` now includes an approval-boundary red-team smoke checklist for disposable fixtures: health-check first answer, exact Mobile spacing alias subset, foundation modes only, newly unlocked repairs, naming consolidation, QA binding designer-decision suggestions, and other write flows.
+
+**Verification:** Focused `tests/docs/agent-workflow-regression.test.js` and `tests/server/agent-interface-tool.test.js` pass. Full supported-runtime suite passed with `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && npm test'` -> **97/97**. `git diff --check` still needs to be run before PR.
+
+**Next:** Run `git diff --check`, commit, open PR, request review. If review is clean, move Linear to review and give Arash the manual-test expectations.
+
+---
+
 ### [2026-06-04 — BNN-51 shipped; health-check includes token-gap suggestions]
 
 **Status:** BNN-51 is ready to merge via [PR #20](https://github.com/arashr/figlets-mcp/pull/20) on branch `codex/bnn-51-health-check-token-gap-suggestions`. Linear is in review pending merge/cleanup. The implementation updates the health-check Agent Interface contract so `inspect_ds_token_gaps` runs as a read-only suggestion step in the main “check my design system” flow.

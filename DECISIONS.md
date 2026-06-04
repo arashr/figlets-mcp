@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-04] Approval-boundary red-team checks live in the Agent Interface
+
+**Decision:** Figlets' Agent Interface health checker now explicitly red-teams write scope widening, exact-subset requests backed by category-level payloads, continuation after foundation/apply steps, and QA binding designer-decision writes through `fix:true`. These checks are guidance/runtime-readiness checks, not new Figma mutation behavior.
+
+**Why:** BNN-53 exists because recent manual smoke kept exposing the same class of issue in different clothes: a designer approves one narrow thing, then the agent or tool path either writes a broader category, creates foundation modes as a side effect, continues into newly unlocked work, or tries to apply medium-confidence/designer-decision suggestions through the wrong surface.
+
+**Boundary:** Actual repair tools still own deterministic apply safety. The Agent Interface checker is an early stop sign for agents before they call mutating tools. It should say "use exact repairPlan entries" or "product/tool gap" instead of letting an agent invent payloads or silently widen approval.
+
+**Manual smoke:** Developer smoke for BNN-53 should use a disposable fixture and test hostile prompts around health-check, exact Mobile spacing aliases, foundation modes only, newly unlocked repairs, naming consolidation, QA binding designer decisions, and other write flows. The expected invariant remains: inspect, show exact structured repair plan, apply only approved entries, sync/reinspect, and stop if new work appears.
+
+---
+
 ## [2026-06-04] Health-check includes token-gap suggestions in the main DS audit
 
 **Decision:** “Check my design system” (`health-check`) now includes a read-only `inspect_ds_token_gaps` suggestion step after semantic setup QA. Health-check should surface config-backed token-gap findings, including missing Spacing Tablet/Desktop modes, in the first design-system audit response instead of requiring designers to discover a separate token-gap workflow.

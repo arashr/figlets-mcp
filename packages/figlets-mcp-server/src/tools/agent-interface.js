@@ -97,6 +97,28 @@ function _isWriteTool(toolName) {
   return MUTATING_TOOLS.has(toolName) || toolName === "qa_binding_audit:fix";
 }
 
+function _normalizeBoundary(value) {
+  if (!_nonEmpty(value)) return "";
+  return String(value).trim().toLowerCase().replace(/[_\s]+/g, "-");
+}
+
+function _sameApprovalBoundary(approvedBoundary, writeBoundary) {
+  const approved = _normalizeBoundary(approvedBoundary);
+  const write = _normalizeBoundary(writeBoundary);
+  if (!approved || !write) return true;
+  if (approved === write) return true;
+  if (approved === "all" || approved === "all-ready-safe" || approved === "all-currently-ready-safe") return true;
+  return false;
+}
+
+function _isCategoryLevelPayload(value) {
+  const normalized = _normalizeBoundary(value);
+  return normalized === "category" ||
+    normalized === "category-level" ||
+    normalized === "broad-category" ||
+    normalized === "categories";
+}
+
 function _statusRank(status) {
   if (status === "fail") return 4;
   if (status === "warn") return 3;
@@ -192,6 +214,22 @@ function _chooseNextAction(checks, fallback) {
       message: actionable.nextAction,
     };
   }
+  if (actionable.id === "write_scope_boundary") {
+    return {
+      type: "ask_user",
+      tool: actionable.recommendedTool || null,
+      argsSource: actionable.recommendedPayloadSource || "exact Figlets repairPlan entries",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "post_apply_stop_boundary") {
+    return {
+      type: "call_tool",
+      tool: actionable.recommendedTool || null,
+      argsSource: actionable.recommendedPayloadSource || "sync/reinspect result",
+      message: actionable.nextAction,
+    };
+  }
   if (actionable.id === "product_gap_response") {
     return {
       type: "report_product_gap",
@@ -242,6 +280,7 @@ function handleFigletsHealthCheck(args) {
   const requestedKind = requestedAction.kind || (_isWriteTool(requestedTool) ? "write" : "unknown");
   const pendingWriteTool = workflowState.pendingWriteTool || (requestedKind === "write" ? requestedTool : "");
   const approvalStatus = workflowState.approvalStatus || "unknown";
+  const writeRequested = requestedKind === "write" || !!pendingWriteTool;
 
   if (mode === "designer" && !_truthy(workflowState.figletsStartCalled)) {
     checks.push(_makeCheck({
@@ -446,7 +485,7 @@ function handleFigletsHealthCheck(args) {
     }));
   }
 
-  if ((requestedKind === "write" || pendingWriteTool) && approvalStatus !== "granted") {
+  if (writeRequested && approvalStatus !== "granted") {
     checks.push(_makeCheck({
       id: "approval_boundary",
       title: "Approval boundary",
@@ -464,7 +503,7 @@ function handleFigletsHealthCheck(args) {
       title: "Approval boundary",
       status: "pass",
       severity: "info",
-      message: requestedKind === "write" || pendingWriteTool
+      message: writeRequested
         ? "A write is pending and approval is marked granted."
         : "No write is pending.",
       evidence: [`approvalStatus=${approvalStatus}`],
@@ -472,7 +511,7 @@ function handleFigletsHealthCheck(args) {
     }));
   }
 
-  if ((requestedKind === "write" || pendingWriteTool) && requestedAction.payloadSource === "hand_authored") {
+  if (writeRequested && requestedAction.payloadSource === "hand_authored") {
     checks.push(_makeCheck({
       id: "repair_payload_source",
       title: "Repair payload source",
@@ -493,6 +532,94 @@ function handleFigletsHealthCheck(args) {
       message: "No hand-authored repair payload risk detected.",
       evidence: requestedAction.payloadSource ? [`payloadSource=${requestedAction.payloadSource}`] : [],
       nextAction: "Keep using structured Figlets repairPlan payloads for approved repairs.",
+    }));
+  }
+
+  const approvedBoundary = requestedAction.approvedBoundary || workflowState.approvedBoundary || "";
+  const writeBoundary = requestedAction.writeBoundary || requestedAction.boundary || "";
+  const exactSubsetRequested = _truthy(requestedAction.exactSubsetRequested) ||
+    _truthy(workflowState.exactSubsetRequested) ||
+    _normalizeBoundary(requestedAction.approvalScope || workflowState.approvalScope) === "exact-subset";
+  const payloadGranularity = requestedAction.payloadGranularity || repairPlanState.payloadGranularity || "";
+  const scopeWidened = writeRequested && !_sameApprovalBoundary(approvedBoundary, writeBoundary);
+  const categoryForExactSubset = writeRequested && exactSubsetRequested && _isCategoryLevelPayload(payloadGranularity);
+  if (scopeWidened || categoryForExactSubset) {
+    checks.push(_makeCheck({
+      id: "write_scope_boundary",
+      title: "Write scope boundary",
+      status: "fail",
+      severity: "error",
+      message: scopeWidened
+        ? "The requested write boundary does not match the designer-approved boundary."
+        : "A category-level payload cannot safely satisfy an exact subset approval request.",
+      evidence: [
+        approvedBoundary ? `approvedBoundary=${approvedBoundary}` : null,
+        writeBoundary ? `writeBoundary=${writeBoundary}` : null,
+        `exactSubsetRequested=${Boolean(exactSubsetRequested)}`,
+        payloadGranularity ? `payloadGranularity=${payloadGranularity}` : null,
+      ].filter(Boolean),
+      nextAction: scopeWidened
+        ? "Stop before writing. Ask the designer to approve this exact boundary, or call the planner again and pass only the approved structured entries."
+        : "Stop before writing. Use token-level repairPlan entries for the approved subset, or report a Figlets product/tool gap if the current surface cannot represent the subset.",
+      recommendedTool: requestedTool || pendingWriteTool,
+      recommendedPayloadSource: "exact repairPlan entries",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "write_scope_boundary",
+      title: "Write scope boundary",
+      status: "pass",
+      severity: "info",
+      message: "No scope-widening write boundary risk detected.",
+      evidence: [
+        approvedBoundary ? `approvedBoundary=${approvedBoundary}` : null,
+        writeBoundary ? `writeBoundary=${writeBoundary}` : null,
+        payloadGranularity ? `payloadGranularity=${payloadGranularity}` : null,
+      ].filter(Boolean),
+      nextAction: "Keep approved boundaries exact; use entry-level payloads when the designer approves specific fixes.",
+    }));
+  }
+
+  const lastAppliedBoundary = _normalizeBoundary(workflowState.lastAppliedBoundary || "");
+  const lastApplyUnlockedRepairs = _truthy(workflowState.lastApplyUnlockedNewRepairs);
+  const postApplySyncReinspectCompleted = _truthy(workflowState.postApplySyncReinspectCompleted);
+  const separateApprovalAfterReinspect = _truthy(workflowState.separateApprovalAfterReinspect);
+  const requestsAnotherWriteAfterFoundation = writeRequested &&
+    lastAppliedBoundary === "foundation" &&
+    _normalizeBoundary(writeBoundary || requestedTool) !== "foundation" &&
+    requestedTool !== "apply_ds_foundation_repairs";
+  const requestsWriteAfterUnlockedRepairs = writeRequested && lastApplyUnlockedRepairs;
+  if ((requestsAnotherWriteAfterFoundation || requestsWriteAfterUnlockedRepairs) &&
+    (!postApplySyncReinspectCompleted || !separateApprovalAfterReinspect)) {
+    checks.push(_makeCheck({
+      id: "post_apply_stop_boundary",
+      title: "Post-apply stop boundary",
+      status: "fail",
+      severity: "error",
+      message: "After a foundation repair or a write that unlocks new work, the agent must sync, reinspect, report the new plan, and stop before continuing to another write.",
+      evidence: [
+        lastAppliedBoundary ? `lastAppliedBoundary=${lastAppliedBoundary}` : null,
+        `lastApplyUnlockedNewRepairs=${Boolean(lastApplyUnlockedRepairs)}`,
+        `postApplySyncReinspectCompleted=${Boolean(postApplySyncReinspectCompleted)}`,
+        `separateApprovalAfterReinspect=${Boolean(separateApprovalAfterReinspect)}`,
+        requestedTool ? `requestedTool=${requestedTool}` : null,
+      ].filter(Boolean),
+      nextAction: "Run the read-only verification/sync sequence, summarize any newly available work as a fresh approval boundary, and ask for a separate approval before the next write.",
+      recommendedTool: workflowId === "health-check" ? "sync_figma_data" : "inspect_ds_token_gaps",
+      recommendedPayloadSource: "fresh post-apply inspection result",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "post_apply_stop_boundary",
+      title: "Post-apply stop boundary",
+      status: "pass",
+      severity: "info",
+      message: "No unsafe continuation after an apply step detected.",
+      evidence: [
+        lastAppliedBoundary ? `lastAppliedBoundary=${lastAppliedBoundary}` : null,
+        `lastApplyUnlockedNewRepairs=${Boolean(lastApplyUnlockedRepairs)}`,
+      ].filter(Boolean),
+      nextAction: "After any write, sync/reinspect and ask separately before applying newly surfaced work.",
     }));
   }
 
@@ -546,6 +673,38 @@ function handleFigletsHealthCheck(args) {
       message: "No unsafe binding fix request detected.",
       evidence: [],
       nextAction: "Use qa_binding_audit({ fix: true }) only for fixableNow after approval.",
+    }));
+  }
+
+  const includesDesignerDecisionBinding = isQaFix && (
+    _truthy(requestedAction.includesDesignerDecision) ||
+    _normalizeBoundary(requestedAction.fixability) === "needsdesignerdecision" ||
+    Number(repairPlanState.needsDesignerDecisionCount || 0) > 0 && _truthy(requestedAction.applyDesignerDecisions)
+  );
+  if (includesDesignerDecisionBinding && !_truthy(repairPlanState.hasDesignerDecisionApplyInput)) {
+    checks.push(_makeCheck({
+      id: "binding_designer_decision_boundary",
+      title: "Binding designer decision boundary",
+      status: "fail",
+      severity: "error",
+      message: "qa_binding_audit({ fix: true }) only applies fixableNow findings; designer-decision binding suggestions need a separate exposed apply payload.",
+      evidence: [
+        `needsDesignerDecisionCount=${Number(repairPlanState.needsDesignerDecisionCount || 0)}`,
+        "hasDesignerDecisionApplyInput=false",
+      ],
+      nextAction: "Stop before writing designer-decision bindings through fix:true. Use the exposed designer-decision apply payload if Figlets provides one, or report a Figlets product/tool gap.",
+      recommendedTool: "qa_binding_audit",
+      recommendedPayloadSource: "designer-decision apply payload",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "binding_designer_decision_boundary",
+      title: "Binding designer decision boundary",
+      status: "pass",
+      severity: "info",
+      message: "No unsafe designer-decision binding apply request detected.",
+      evidence: [],
+      nextAction: "Keep fix:true limited to fixableNow; use a separate payload for approved designer-decision suggestions.",
     }));
   }
 

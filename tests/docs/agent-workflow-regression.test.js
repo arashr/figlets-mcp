@@ -480,6 +480,11 @@ try {
       "product gap docs"
     );
     assertDocsInclude(
+      ["docs/developer-guide.md"],
+      ["update_ds_tokens.spacing_semantic_repairs", "MCP tool schema"],
+      "stale MCP schema manual smoke note"
+    );
+    assertDocsInclude(
       ["AGENTS.md", "CLAUDE.md"],
       ["do not tell the designer the gaps cannot be fixed"],
       "anti-dead-end root docs"

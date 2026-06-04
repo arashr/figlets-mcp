@@ -123,6 +123,8 @@ High-risk prompts to run against weaker agents:
 
 When a test fails, capture the user prompt, agent output, approved boundary, actual write, and whether the failure was a tool contract problem or agent guidance problem. Put concrete product bugs into Linear instead of expanding this checklist into implementation work.
 
+Stale-session check: if an agent says `update_ds_tokens` cannot accept exact `spacing_semantic_repairs`, restart/reconnect the MCP host/server for that agent. The current server schema exposes `update_ds_tokens.spacing_semantic_repairs`; the Figma Bridge plugin build marker only proves the Figma-side plugin is fresh, not that the agent's MCP tool schema was refreshed.
+
 ## Agent PR review protocol
 
 Use **[agent-pr-review-protocol.md](./agent-pr-review-protocol.md)** when agents open, review, or merge Figlets PRs. New PRs should use **[.github/pull_request_template.md](../.github/pull_request_template.md)** so Linear, scope, tests, manual verification, agent review, and merge notes stay visible.

@@ -6,7 +6,7 @@ Active context for the project so future sessions can recover quickly without re
 
 ### [2026-06-04 — BNN-53 in progress; Agent Interface red-team checks added]
 
-**Status:** BNN-53 is active on branch `codex/bnn-53-approval-boundary-red-team`. Linear is `In Progress`. The initial implementation adds host-neutral approval-boundary red-team checks to `figlets_health_check`, plus developer-facing manual smoke guidance.
+**Status:** BNN-53 is active on branch `codex/bnn-53-approval-boundary-red-team` with [PR #21](https://github.com/arashr/figlets-mcp/pull/21) open. Linear is `In Review`. The implementation adds host-neutral approval-boundary red-team checks to `figlets_health_check`, plus developer-facing manual smoke guidance.
 
 **Why it exists:** BNN-51 and BNN-52 fixed concrete health-check/token-gap bugs, but manual testing kept revealing approval-scope bugs only after realistic narrow requests. BNN-53 is the broader product-safety pass to catch the next one before a designer finds it.
 
@@ -18,9 +18,11 @@ Active context for the project so future sessions can recover quickly without re
 
 **Manual smoke checklist:** `docs/developer-guide.md` now includes an approval-boundary red-team smoke checklist for disposable fixtures: health-check first answer, exact Mobile spacing alias subset, foundation modes only, newly unlocked repairs, naming consolidation, QA binding designer-decision suggestions, and other write flows.
 
-**Verification:** Focused `tests/docs/agent-workflow-regression.test.js` and `tests/server/agent-interface-tool.test.js` pass. Full supported-runtime suite passed with `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && npm test'` -> **97/97**. `git diff --check` still needs to be run before PR.
+**Review checkpoint:** Arendt reviewed PR #21 and requested one must-fix: `qa_binding_audit({ fix: true })` in the natural MCP call shape must be classified as a write and run the designer-decision binding guard, not only synthetic `qa_binding_audit:fix` or explicit `kind: "write"` shapes.
 
-**Next:** Run `git diff --check`, commit, open PR, request review. If review is clean, move Linear to review and give Arash the manual-test expectations.
+**Verification:** Focused `tests/docs/agent-workflow-regression.test.js` and `tests/server/agent-interface-tool.test.js` pass. Full supported-runtime suite passed with `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && npm test'` -> **97/97**. `git diff --check` passed before PR.
+
+**Next:** Patch Arendt's must-fix, rerun focused/full verification, commit/push, then request re-review. If clean, give Arash the manual-test expectations for weaker-agent smoke.
 
 ---
 

@@ -277,7 +277,10 @@ function handleFigletsHealthCheck(args) {
   const workflow = _knownWorkflow(workflowId);
   const completedTools = _array(workflowState.completedTools);
   const requestedTool = requestedAction.tool || workflowState.pendingWriteTool || "";
-  const requestedKind = requestedAction.kind || (_isWriteTool(requestedTool) ? "write" : "unknown");
+  const requestedArgs = requestedAction.args || requestedAction.arguments || {};
+  const requestedQaFix = requestedTool === "qa_binding_audit" &&
+    (_truthy(requestedAction.fix) || _truthy(requestedArgs.fix));
+  const requestedKind = requestedAction.kind || (_isWriteTool(requestedTool) || requestedQaFix ? "write" : "unknown");
   const pendingWriteTool = workflowState.pendingWriteTool || (requestedKind === "write" ? requestedTool : "");
   const approvalStatus = workflowState.approvalStatus || "unknown";
   const writeRequested = requestedKind === "write" || !!pendingWriteTool;
@@ -650,7 +653,7 @@ function handleFigletsHealthCheck(args) {
     }));
   }
 
-  const isQaFix = requestedTool === "qa_binding_audit:fix" ||
+  const isQaFix = requestedTool === "qa_binding_audit:fix" || requestedQaFix ||
     (requestedTool === "qa_binding_audit" && requestedKind === "write");
   if (isQaFix && (Number(repairPlanState.fixableNowCount || 0) <= 0 || approvalStatus !== "granted")) {
     checks.push(_makeCheck({

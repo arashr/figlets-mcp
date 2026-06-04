@@ -409,6 +409,32 @@ try {
     assert.strictEqual(decision.status, "fail");
     assert.ok(decision.message.includes("fixableNow"));
     assert.ok(decision.nextAction.includes("product/tool gap"));
+
+    const naturalFixShape = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "qa-binding-audit" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+      },
+      repairPlanState: {
+        fixableNowCount: 1,
+        needsDesignerDecisionCount: 1,
+        hasDesignerDecisionApplyInput: false,
+      },
+      requestedAction: {
+        tool: "qa_binding_audit",
+        args: { fix: true },
+        payloadSource: "repairPlan.applyInput",
+        includesDesignerDecision: true,
+      },
+    });
+    assert.strictEqual(naturalFixShape.status, "blocked");
+    assert.strictEqual(findCheck(naturalFixShape, "binding_fixability_boundary").status, "pass");
+    const naturalDecision = findCheck(naturalFixShape, "binding_designer_decision_boundary");
+    assert.strictEqual(naturalDecision.status, "fail");
+    assert.ok(naturalDecision.message.includes("fixableNow"));
   }
 
   // --- Unsafe pattern 4: treating stale MCP host output as repo regression ---

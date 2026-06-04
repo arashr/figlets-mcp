@@ -4,6 +4,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-04 — BNN-51 shipped; health-check includes token-gap suggestions]
+
+**Status:** BNN-51 is ready to merge via [PR #20](https://github.com/arashr/figlets-mcp/pull/20) on branch `codex/bnn-51-health-check-token-gap-suggestions`. Linear is in review pending merge/cleanup. The implementation updates the health-check Agent Interface contract so `inspect_ds_token_gaps` runs as a read-only suggestion step in the main “check my design system” flow.
+
+**Why it exists:** Manual testing showed that the broken fixture had `4. Spacing` trimmed to Mobile-only, but the first health-check answer did not surface the missing Tablet/Desktop modes. Designers had to ask follow-up questions to discover token-gap findings, which made the main DS audit feel incomplete.
+
+**Current implementation:** The health-check routed response now lists a fifth read-only step: inspect config-backed token-gap suggestions, including missing collection modes. The workflow guide now includes `inspect_ds_token_gaps` before approval, adds dry-run preview steps before health-check token/primitive writes, and reruns it during verification alongside `sync_figma_data`, `detect_design_system`, `audit_tokens`, and `inspect_ds_setup_gaps`.
+
+**Approval boundary:** Token-gap findings remain separate from semantic setup repairs. Foundation collection/mode creation, primitive token updates, and semantic token updates each require separate approval. If a foundation repair is approved, agents must apply only `foundationRepairPlan.applyInput`, sync/reinspect, and stop before primitive or semantic token writes. Manual smoke showed the first answer now surfaces token gaps, but the next-step prompt still favored semantic color/naming; guidance was tightened so health-check next steps must include available token-gap/foundation boundaries too. The acceptable output now ends with a numbered repair choice menu: category options in designer goal language, `all` ready safe repairs with explicit inclusions/exclusions, and `specific/other` for exact fixes. Menu labels should not expose implementation terms such as `dry-run`.
+
+**Verification:** Focused Agent Interface and plugin instruction tests pass. Full supported-runtime suite passed with `npm test` -> **97/97**. Manual Figma reset/smoke on `Figlets Test` passed: first health-check response surfaced token gaps, named missing Spacing Tablet/Desktop modes, separated semantic color, optional role, naming, foundation spacing modes, and spacing alias options, used human goal-language menu labels, and made no Figma writes. Arash confirmed the numbered choices are visible in the host even if they do not survive copy/paste.
+
+---
+
 ### [2026-06-03 — BNN-52 shipped; spacing mode creation split from alias repair]
 
 **Status:** BNN-52 is Done in Linear and merged to `main` via [PR #19](https://github.com/arashr/figlets-mcp/pull/19) at merge commit `83da403`. The BNN-52 branch was pruned and the workspace returned to clean `main`.

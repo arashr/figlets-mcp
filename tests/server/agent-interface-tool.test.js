@@ -117,6 +117,8 @@ try {
     assert.ok(route.designerResponse.startsWith("# Figlets"));
     assert.ok(route.designerResponse.includes("I'll review your design system using the Figlets health check."));
     assert.ok(route.designerResponse.includes("1. Sync the current Figma file"));
+    assert.ok(route.designerResponse.includes("5. Inspect config-backed token-gap suggestions"));
+    assert.ok(route.designerResponse.includes("semantic setup findings separately from token-gap suggestions"));
     assert.ok(!route.designerResponse.includes("| What you can ask for |"));
   }
 
@@ -281,21 +283,41 @@ try {
       "detect_design_system",
       "audit_tokens",
       "inspect_ds_setup_gaps",
+      "inspect_ds_token_gaps",
       "apply_ds_setup_repairs",
       "plan_ds_semantic_naming_consolidation",
       "apply_ds_semantic_naming_consolidation",
+      "update_ds_tokens",
+      "update_ds_primitives",
+      "apply_ds_foundation_repairs",
+      "update_ds_primitives",
+      "update_ds_tokens",
     ]);
     const verifyStep = guide.steps.find(step => step.id === "verify-health-check");
-    assert.deepStrictEqual(verifyStep.tools, ["sync_figma_data", "detect_design_system", "audit_tokens", "inspect_ds_setup_gaps"]);
-    assert.ok(guide.summary.includes("semantic setup"));
+    assert.deepStrictEqual(verifyStep.tools, ["sync_figma_data", "detect_design_system", "audit_tokens", "inspect_ds_setup_gaps", "inspect_ds_token_gaps"]);
+    assert.ok(guide.summary.includes("semantic setup plus token-gap suggestions"));
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
-    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("each exact proposed change")));
+    assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.kind === "read" && step.tool === "inspect_ds_token_gaps"));
+    assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("missing foundation collections or modes")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("semantic setup repairs separate from token-gap")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("summarized by category")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("include every available boundary")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("numbered all option")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("includes/excludes")));
+    assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("numbered specific/other option")));
+    assert.ok(guide.steps.some(step => step.id === "preview-token-repairs" && step.kind === "read" && step.tool === "update_ds_tokens" && step.options && step.options.dry_run === true));
+    assert.ok(guide.steps.some(step => step.id === "preview-token-repairs" && step.designerMessage.includes("before asking for token-write approval")));
+    assert.ok(guide.steps.some(step => step.id === "preview-token-primitives" && step.kind === "read" && step.tool === "update_ds_primitives" && step.options && step.options.dry_run === true));
+    assert.ok(guide.steps.some(step => step.id === "preview-token-primitives" && step.designerMessage.includes("before asking for primitive-write approval")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("repairPlan.applyInput")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.designerMessage.includes("preserving each aliases object unchanged")));
     assert.ok(guide.steps.some(step => step.tool === "plan_ds_semantic_naming_consolidation" && step.kind === "read"));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_semantic_naming_consolidation" && step.requiresApproval === true && step.designerMessage.includes("preserve variable IDs")));
+    assert.ok(guide.steps.some(step => step.tool === "apply_ds_foundation_repairs" && step.requiresApproval === true && step.designerMessage.includes("then stop before primitive or semantic token writes")));
+    assert.ok(guide.steps.some(step => step.tool === "update_ds_primitives" && step.requiresApproval === true && step.designerMessage.includes("primitive token repair")));
+    assert.ok(guide.steps.some(step => step.tool === "update_ds_tokens" && step.requiresApproval === true && step.designerMessage.includes("must not create missing breakpoint modes")));
     assert.ok(verifyStep.designerMessage.includes("same read-only health-check sequence"));
-    assert.ok(verifyStep.designerMessage.includes("sync_figma_data, detect_design_system, audit_tokens, then inspect_ds_setup_gaps"));
+    assert.ok(verifyStep.designerMessage.includes("sync_figma_data, detect_design_system, audit_tokens, inspect_ds_setup_gaps, then inspect_ds_token_gaps"));
     assert.ok(verifyStep.designerMessage.includes("will not call the file clean"));
     assert.ok(!guide.next.includes("setup-gap-qa"));
   }
@@ -318,6 +340,15 @@ try {
     assert.ok(handled.message.includes("structured repairPlan payloads"));
     assert.ok(handled.presentationRule.includes("designerPresentation"));
     assert.ok(handled.presentationRule.includes("What will change"));
+    assert.ok(handled.presentationRule.includes("missing Tablet/Desktop modes"));
+    assert.ok(handled.presentationRule.includes("final next-step prompt"));
+    assert.ok(handled.presentationRule.includes("numbered repair choice menu"));
+    assert.ok(handled.presentationRule.includes("designer goal language"));
+    assert.ok(handled.presentationRule.includes("all ready safe repairs"));
+    assert.ok(handled.presentationRule.includes("included/excluded categories"));
+    assert.ok(handled.presentationRule.includes("specific/other"));
+    assert.ok(handled.presentationRule.includes("Do not use implementation terms like dry-run in menu labels"));
+    assert.ok(handled.presentationRule.includes("confirmation happens before changes"));
     assert.ok(handled.presentationRule.includes("Avoid technical verification matrices"));
   }
 

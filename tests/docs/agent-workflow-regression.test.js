@@ -268,7 +268,17 @@ try {
       start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")),
       "Agent Interface should forbid alias counts/summaries"
     );
+    assert.ok(
+      start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")),
+      "Agent Interface should name the exact semantic spacing repair payload"
+    );
+    assert.ok(
+      start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")),
+      "Agent Interface should forbid pivoting Mobile-only spacing approval into foundation mode creation"
+    );
     assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.preserveAliases, true);
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.preserveUpdates, true);
+    assert.ok(start.hardRules.spacingSemanticRepairPayloadHandoff.invalidPayloadRecovery.includes("rerun inspect_ds_token_gaps"));
 
     const guide = getWorkflowGuide("health-check");
     const applyStep = guide.steps.find(step => step.tool === "apply_ds_setup_repairs");

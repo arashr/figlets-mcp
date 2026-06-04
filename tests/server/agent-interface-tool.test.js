@@ -78,9 +78,16 @@ try {
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("pass that exact object")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("schema validation rejects")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Do not replace the exact entries with token names")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")));
     assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.source, "inspect_ds_setup_gaps.repairPlan.applyInput");
     assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.preserveAliases, true);
     assert.ok(start.hardRules.setupRepairPayloadHandoff.invalidPayloadRecovery.includes("rerun inspect_ds_setup_gaps"));
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.source, "inspect_ds_token_gaps.repairPlan.applyInput.spacing_semantic_repairs");
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.target, "update_ds_tokens.spacing_semantic_repairs");
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.preserveUpdates, true);
+    assert.ok(start.hardRules.spacingSemanticRepairPayloadHandoff.mobileOnlyRule.includes("must not be redirected"));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("fixableNow")));
     assert.ok(start.responseContract.bulkUpdateRule.includes("inspect_ds_token_gaps"));
     assert.ok(start.hardRules.appliesTo.includes("design-system review"));

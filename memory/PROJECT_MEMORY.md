@@ -20,6 +20,8 @@ Active context for the project so future sessions can recover quickly without re
 
 **Review checkpoint:** Arendt reviewed PR #21 and requested one must-fix: `qa_binding_audit({ fix: true })` in the natural MCP call shape must be classified as a write and run the designer-decision binding guard, not only synthetic `qa_binding_audit:fix` or explicit `kind: "write"` shapes.
 
+**Manual smoke checkpoint:** Arash tested the health-check flow and it stayed good until approving the Mobile-only spacing alias fixes. The weaker agent reported that Figlets refused broad fallback, which is good safety behavior, but also claimed the exact Mobile repair was blocked and suggested adding Tablet/Desktop modes as the clean next move. That is not the desired BNN-52/BNN-53 behavior. In a current build, `inspect_ds_token_gaps.repairPlan.applyInput.spacing_semantic_repairs` should contain the exact four Mobile repairs and `update_ds_tokens` should consume that array. PR #21 now tightens Agent Interface guidance to tell agents to copy `spacing_semantic_repairs` unchanged, preserve each `updates` object, rerun `inspect_ds_token_gaps` on schema rejection, and never redirect a Mobile-only approval into foundation mode creation.
+
 **Verification:** Focused `tests/docs/agent-workflow-regression.test.js` and `tests/server/agent-interface-tool.test.js` pass. Full supported-runtime suite passed with `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && npm test'` -> **97/97**. `git diff --check` passed before PR.
 
 **Next:** Patch Arendt's must-fix, rerun focused/full verification, commit/push, then request re-review. If clean, give Arash the manual-test expectations for weaker-agent smoke.

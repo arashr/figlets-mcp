@@ -4,6 +4,22 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-04] Health-check includes token-gap suggestions in the main DS audit
+
+**Decision:** “Check my design system” (`health-check`) now includes a read-only `inspect_ds_token_gaps` suggestion step after semantic setup QA. Health-check should surface config-backed token-gap findings, including missing Spacing Tablet/Desktop modes, in the first design-system audit response instead of requiring designers to discover a separate token-gap workflow.
+
+**Why:** BNN-51 manual testing showed that the broken fixture intentionally trimmed `4. Spacing` to Mobile-only, but health-check did not mention the missing Tablet/Desktop modes. Because token-gap and semantic setup are both design-system health concerns, hiding token-gap suggestions behind a follow-up made the audit feel incomplete and inconsistent.
+
+**Boundary:** Component-level audits remain separate flows. Token-gap writes still require explicit approval per boundary: foundation collection/mode creation, primitive updates, and semantic token updates must be presented separately. If foundation repair is approved, apply only `foundationRepairPlan.applyInput`, sync/reinspect, and stop before primitive or semantic token writes.
+
+**Designer-facing shape:** Health-check summaries should distinguish semantic setup repairs from token-gap/foundation suggestions. Token gaps should be summarized by category in the first answer; exact token/mode rows should appear when asking approval for that token-gap boundary, not as a giant raw dump.
+
+**Repair choice menu:** When repairable findings exist, the health-check should end with clear numbered choices: one numbered option per available repair category, then an `all` option for all currently ready safe repairs, then a `specific/other` option where the designer can name exact fixes. Category choices must preserve approval boundaries; `all` must explicitly say which categories it includes and which optional, designer-decision, or separate-boundary categories it excludes unless the designer explicitly includes them.
+
+**Menu language:** Menu labels should be written in designer goal language, not tool mechanics. Prefer labels like “Fix the 4 spacing alias repairs” or “Review and fix spacing aliases” and mention that confirmation will happen before changes. Do not use “dry-run” as a menu option label even though the implementation still dry-runs before writes.
+
+---
+
 ## [2026-06-03] Spacing foundation modes and semantic alias repairs are separate approvals
 
 **Decision:** Missing Spacing collection modes, such as Tablet/Desktop, are foundation repairs and must not be created as a side effect of `update_ds_tokens` semantic spacing alias repair. A designer-approved semantic spacing repair may apply only the exact token/mode entries that were previewed and approved. If the designer approves only Mobile raw-value alias fixes, Figlets must write only those Mobile aliases.
@@ -124,9 +140,11 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
-## [2026-05-26] Health-check and token-gap-completion are separate designer workflows
+## [2026-05-26] Health-check and token-gap-completion are separate designer workflows (superseded by BNN-51)
 
-**Decision:** “Check my design system” (`health-check`) runs `sync_figma_data` → `detect_design_system` → `audit_tokens` → `inspect_ds_setup_gaps` (semantic color setup, icon contrast, missing roles) with optional setup repair apply after approval. It does not call `inspect_ds_token_gaps`. Config-backed typography/spacing/radius/border-width/elevation completion belongs to `token-gap-completion` (`inspect_ds_token_gaps` → dry-run previews → approved apply). Binding-audit fixability belongs to `qa-binding-audit`.
+**Decision at the time:** “Check my design system” (`health-check`) ran `sync_figma_data` → `detect_design_system` → `audit_tokens` → `inspect_ds_setup_gaps` (semantic color setup, icon contrast, missing roles) with optional setup repair apply after approval. It did not call `inspect_ds_token_gaps`. Config-backed typography/spacing/radius/border-width/elevation completion belonged to `token-gap-completion` (`inspect_ds_token_gaps` → dry-run previews → approved apply). Binding-audit fixability belonged to `qa-binding-audit`.
+
+**Superseded:** BNN-51 changed this boundary on 2026-06-04. Health-check now includes read-only token-gap suggestions in the main DS audit, while token/foundation writes still keep the same separate approval boundaries.
 
 **Why:** Designers asking to “check” the system should get semantic setup and token hygiene first without mixing two different repair planners in one confusing pass. BNN-35 manual evidence showed setup-repair handoffs work on weaker agents; token-gap and binding-audit remain on the BNN-26 smoke matrix.
 

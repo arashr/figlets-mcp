@@ -84,6 +84,9 @@ const DESIGNER_FLOW_HARD_RULES = {
     "If schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh structured repairPlan.applyInput instead of retrying invented arguments.",
     "If repairPlan.optionalApplyInput is non-empty, present it as optional bulk creation that needs separate approval.",
     "If inspect_ds_setup_gaps reports semanticNamingConflicts, ask the designer to choose surface-based or role-based naming. After that choice, call plan_ds_semantic_naming_consolidation; show every proposed rename line; only after approval pass repairPlan.applyInput unchanged to apply_ds_semantic_naming_consolidation.",
+    "For health-check, run inspect_ds_token_gaps as a read-only suggestion step before summarizing the design-system audit. Surface token-gap findings by category, including missing foundation collection/mode suggestions, without forcing the designer into a separate token-gap workflow.",
+    "When health-check finds both semantic setup repairs and token-gap suggestions, the next-step prompt must offer both boundaries. Do not make semantic color repair or naming consolidation the only clean next step if inspect_ds_token_gaps found foundation modes, primitive gaps, or semantic token repairs.",
+    "End health-check repair summaries with a numbered repair choice menu: one numbered option per available repair category, then a numbered all option, then a numbered specific/other option where the designer can name exact fixes. Category choices must use designer goal language such as fix, review, plan, add, or create; do not use implementation terms like dry-run in the menu label. If a selected category needs a dry-run preview before writing, say the designer will review the proposed changes and be asked for confirmation before anything changes. Category choices must preserve separate write boundaries; all must state exactly which ready safe categories it includes and which optional, designer-decision, or separate-boundary items it excludes.",
     "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps and dry-run previews. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs, then sync and reinspect, then stop before primitive or semantic token writes. Never ask for one approval that covers foundation repair and token apply.",
     "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability; call qa_binding_audit({ fix: true }) only for fixableNow after approval.",
     "Do not create tokens from qa_binding_audit findings unless a Figlets token-completion planner provides the payload.",
@@ -98,7 +101,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     forbiddenAliasSubstitutes: ["counts", "summaries", "booleans", "prose-derived values"],
   },
   designerPresentationRule:
-    "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Before approval, show every ready-to-apply entry from designerPresentation.proposedChanges or the What will change section (token, action, mode aliases, reason) — not only a count. Keep optional and needs-designer-decision tiers separate. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
+    "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Before approval, show every ready-to-apply entry from designerPresentation.proposedChanges or the What will change section (token, action, mode aliases, reason) — not only a count. Keep optional and needs-designer-decision tiers separate. For inspect_ds_token_gaps in health-check, summarize token gaps by category and call out foundation mode suggestions such as missing Tablet/Desktop modes; show exact token/mode repair rows only when asking approval for that token-gap boundary. The final next-step prompt should include available token-gap boundaries alongside semantic setup and naming choices, formatted as a numbered repair choice menu with goal-language category options, an all-ready-safe-repairs option that names included/excluded categories, and a specific/other option. Menu labels should say what the designer is trying to accomplish, not tool mechanics like dry-run. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
   missingCapabilityResponse: "If the Figlets workflow output does not expose the needed planner or apply payload, say this is a Figlets product/tool gap or proposed Figlets bulk-update scope instead of inventing a script or saying the gaps cannot be fixed.",
   neverLeaveDesignerModeForImplementation: {
     stopImmediatelyWhenYouWould: [
@@ -187,7 +190,7 @@ const WORKFLOWS = [
   {
     id: "health-check",
     title: "Full Design System Health Check",
-    summary: "Sync the current Figma file, detect design-system capabilities, audit token health, and surface high-confidence semantic setup issues.",
+    summary: "Sync the current Figma file, detect design-system capabilities, audit token health, and surface semantic setup plus token-gap suggestions.",
     intents: [
       "check my design system",
       "health check",
@@ -231,9 +234,15 @@ const WORKFLOWS = [
         designerMessage: "I'll check semantic setup gaps, icon contrast, and missing neighboring roles before calling the system healthy.",
       },
       {
+        id: "token-gap-suggestions",
+        kind: "read",
+        tool: "inspect_ds_token_gaps",
+        designerMessage: "I'll also inspect config-backed token gaps, including missing foundation collections or modes, and summarize them by category without changing Figma.",
+      },
+      {
         id: "approve-repairs",
         kind: "confirmation",
-        designerMessage: "If the QA found setup gaps, I'll list each exact proposed change from repairPlan.designerPresentation (token, action, Light/Dark aliases, reason), keep optional convention repairs separate, and ask which repairPlan.applyInput entries you want applied.",
+        designerMessage: "If the QA found setup gaps or token-gap suggestions, I'll keep semantic setup repairs separate from token-gap foundation, primitive, and semantic-token options. Setup repairs list each exact proposed change from repairPlan.designerPresentation; token gaps are summarized by category until you ask to preview or approve that boundary. When I ask what to do next, I will include every available boundary instead of naming only semantic color or naming choices, ending with a numbered all option that says exactly what it includes/excludes and a numbered specific/other option for exact fixes.",
       },
       {
         id: "apply-approved-repairs",
@@ -256,10 +265,45 @@ const WORKFLOWS = [
         designerMessage: "If you approve the dry-run rename list, I'll pass plan_ds_semantic_naming_consolidation.repairPlan.applyInput unchanged and preserve variable IDs. I will not delete variables.",
       },
       {
+        id: "preview-token-repairs",
+        kind: "read",
+        tool: "update_ds_tokens",
+        options: { dry_run: true },
+        designerMessage: "If you want to continue with semantic token-gap repairs from the health check, I'll dry-run inspect_ds_token_gaps.repairPlan.previewInput before asking for token-write approval.",
+      },
+      {
+        id: "preview-token-primitives",
+        kind: "read",
+        tool: "update_ds_primitives",
+        options: { dry_run: true },
+        designerMessage: "If primitiveRepairPlan is present, I'll dry-run primitive typography or shadow updates before asking for primitive-write approval.",
+      },
+      {
+        id: "apply-approved-foundation-repairs",
+        kind: "write",
+        tool: "apply_ds_foundation_repairs",
+        requiresApproval: true,
+        designerMessage: "If you approve token-gap foundation repair, I'll apply only inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput, then sync and reinspect, then stop before primitive or semantic token writes.",
+      },
+      {
+        id: "apply-approved-token-primitives",
+        kind: "write",
+        tool: "update_ds_primitives",
+        requiresApproval: true,
+        designerMessage: "If you separately approve primitive token repair, I'll apply only inspect_ds_token_gaps.repairPlan.primitiveRepairPlan.applyInput through update_ds_primitives.",
+      },
+      {
+        id: "apply-approved-token-repairs",
+        kind: "write",
+        tool: "update_ds_tokens",
+        requiresApproval: true,
+        designerMessage: "If you separately approve semantic token repair, I'll apply only inspect_ds_token_gaps.repairPlan.applyInput through update_ds_tokens. Exact spacing_semantic_repairs cover only listed token/mode rows and must not create missing breakpoint modes.",
+      },
+      {
         id: "verify-health-check",
         kind: "read",
-        tools: ["sync_figma_data", "detect_design_system", "audit_tokens", "inspect_ds_setup_gaps"],
-        designerMessage: "After naming consolidation, I'll rerun the same read-only health-check sequence as the initial check: sync_figma_data, detect_design_system, audit_tokens, then inspect_ds_setup_gaps. I'll report semantic naming conflicts separately from token hygiene, contrast failures, apply-ready repairs, and optional advisories, and I will not call the file clean unless the full follow-up health check is clean.",
+        tools: ["sync_figma_data", "detect_design_system", "audit_tokens", "inspect_ds_setup_gaps", "inspect_ds_token_gaps"],
+        designerMessage: "After approved repairs, I'll rerun the same read-only health-check sequence as the initial check: sync_figma_data, detect_design_system, audit_tokens, inspect_ds_setup_gaps, then inspect_ds_token_gaps. I'll report semantic naming conflicts separately from token hygiene, token-gap suggestions, contrast failures, apply-ready repairs, and optional advisories, and I will not call the file clean unless the full follow-up health check is clean.",
       },
     ],
     next: ["token-gap-completion", "build-showcase", "component-docs", "export-design-md", "qa-binding-audit"],
@@ -648,8 +692,9 @@ function _workflowStartResponse(workflow) {
       "2. Detect design-system structure",
       "3. Audit token health",
       "4. Check semantic setup gaps, icon contrast, and missing roles",
+      "5. Inspect config-backed token-gap suggestions, including missing collection modes",
       "",
-      "I'll summarize the findings in plain language before suggesting any repairs. If a write is needed, I'll ask before changing Figma.",
+      "I'll summarize semantic setup findings separately from token-gap suggestions. If a write is needed, I'll ask before changing Figma and keep foundation, primitive, and semantic-token approvals separate.",
       "",
       "Please make sure the Figlets Bridge plugin is open in Figma, then I'll begin.",
     ].join("\n");

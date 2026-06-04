@@ -7336,7 +7336,7 @@ async function _updateDsTokens(payload) {
 
   if (exactSpacingRepairsProvided && categories.indexOf('spacing-semantics') >= 0 && !_tokenUpdateEntriesFromSpacingRepairs(spacingSemanticRepairs).length) {
     return {
-      error: 'Invalid approval boundary: spacingSemanticRepairs was provided but no exact token/mode alias repair entries were usable. Refusing to fall back to full spacing-semantics apply.',
+      error: 'Invalid approval boundary: spacingSemanticRepairs was provided but no exact token/mode alias repair entries were usable. Refusing to fall back to full spacing-semantics apply. Rerun inspect_ds_token_gaps and pass repairPlan.applyInput.spacing_semantic_repairs unchanged, preserving each repair name and updates array; do not replace it with names, counts, or summary rows.',
       dryRun: dryRun,
       categories: categories,
       report: {},

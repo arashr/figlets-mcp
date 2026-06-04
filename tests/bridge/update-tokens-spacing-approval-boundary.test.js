@@ -178,6 +178,11 @@ module.exports = (async () => {
     "explicit but empty exact spacing repair payload must fail closed instead of applying the full category"
   );
   assert.ok(
+    malformedExactResult.error.includes("repairPlan.applyInput.spacing_semantic_repairs unchanged") &&
+      malformedExactResult.error.includes("preserving each repair name and updates array"),
+    "malformed exact payload error should tell agents to copy the exact planner entries instead of reporting a vague tool gap"
+  );
+  assert.ok(
     !variables.some(variable => variable.name === "space/component/md"),
     "empty exact payload must not fall back to creating unrelated semantic spacing variables"
   );

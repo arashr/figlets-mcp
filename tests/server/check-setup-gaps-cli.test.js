@@ -157,21 +157,23 @@ module.exports = (async () => {
         ],
         semanticNamingConflicts: [
           {
-            kind: "duplicate-intent-semantic",
+            kind: "semantic-naming-diagnostic",
+            conflictType: "invalid-on-background",
             family: "danger",
-            role: "foreground",
-            conventions: ["surface-based", "role-based"],
+            role: "background",
+            conventions: ["plain-background", "invalid-on-background"],
             tokens: {
-              surfaceBased: ["color/text/danger"],
-              roleBased: ["color/text/on-danger"],
+              surfaceBased: ["color/bg/danger"],
+              roleBased: ["color/bg/on-danger"],
+              invalidOnBackground: ["color/bg/on-danger"],
             },
             canonicalRecommendation: {
-              convention: "role-based",
-              keep: ["color/text/on-danger"],
-              review: ["color/text/danger"],
-              reason: "A color/fill/* background exists for this family, so the on-* role convention is likely the safer canonical path.",
+              convention: "plain-background",
+              keep: ["color/bg/danger"],
+              review: ["color/bg/on-danger"],
+              reason: "Background roles should not use on-* leaves; keep the matching plain background token and review the invalid background name.",
             },
-            decisionQuestion: "Your current semantic color setup leans role-based. Do you want to keep going that way, or move this area toward a surface-based convention?",
+            decisionQuestion: "Figlets infers an element-first semantic color grammar. Review only the invalid or ambiguous naming outliers before any migration.",
             linkSafetyWarning: "Do not delete or deprecate extra semantic variables blindly: existing Figma layers may already be bound to them. Use a designer-approved migration/remap plan before removing aliases or variables.",
             repairTier: "needs-designer-decision",
             agentAction: "ask-designer",
@@ -213,7 +215,7 @@ module.exports = (async () => {
       "Broken aliases in the semantic layer:",
       "Contrast failures:",
       "Icon contrast failures:",
-      "Semantic naming conflicts:",
+      "Semantic naming review items:",
       "Likely semantic-family gaps:",
       "Foundational role gaps:",
       "Possible naming gaps:",
@@ -230,14 +232,14 @@ module.exports = (async () => {
 
     // Missing-fg framing: no "ready to repair", no "would add", no plannedAliases preview
     assert.ok(out.includes("Likely semantic-family gaps: 1 (1 high-confidence)"));
-    assert.ok(out.includes("Semantic naming conflicts: 1"));
-    assert.ok(out.includes('"danger" foreground mixes surface-based and role-based names'));
-    assert.ok(out.includes('surface-based: "color/text/danger"'));
-    assert.ok(out.includes('role-based: "color/text/on-danger"'));
-    assert.ok(out.includes("recommendation: role-based"));
-    assert.ok(out.includes("question: Your current semantic color setup leans role-based"));
+    assert.ok(out.includes("Semantic naming review items: 1"));
+    assert.ok(out.includes('"danger" background has invalid on-* background naming'));
+    assert.ok(out.includes('surface-based: "color/bg/danger"'));
+    assert.ok(out.includes('invalid background: "color/bg/on-danger"'));
+    assert.ok(out.includes("recommendation: plain-background"));
+    assert.ok(out.includes("question: Figlets infers an element-first semantic color grammar"));
     assert.ok(out.includes("warning: Do not delete or deprecate extra semantic variables blindly"));
-    assert.ok(out.includes("choose one canonical naming path"));
+    assert.ok(out.includes("confirm the intended semantic color grammar/context"));
     assert.ok(out.includes('high confidence: "success" is missing icon'));
     assert.ok(out.includes('possible token: "color/icon/success"'));
     assert.ok(out.includes("next step: ask the designer before treating this as a repair"));
@@ -276,7 +278,7 @@ module.exports = (async () => {
     assert.ok(out.includes("URGENT: 1 semantic token references variables that were deleted"));
     assert.ok(out.includes("A11Y: 1 pair fails the contrast threshold") || out.includes("A11Y: 1 pairs fail"));
     assert.ok(out.includes("A11Y: 1 icon role fails WCAG non-text contrast (3:1)."));
-    assert.ok(out.includes("1 semantic naming conflict could represent duplicate intent"));
+    assert.ok(out.includes("1 semantic naming item need grammar/context review"));
     assert.ok(out.includes("1 semantic family looks incomplete (1 high-confidence). Ask before repairing."));
     assert.ok(out.includes("1 foundational semantic role missing."));
     assert.ok(out.includes("2 backgrounds missing a foreground companion"));
@@ -326,7 +328,7 @@ module.exports = (async () => {
       gaps: {
         semanticGaps: [], missingBackgrounds: [], incompleteModes: [], contrastFailures: [], iconContrastFailures: [], brokenAliases: [], foundationRoleFindings: [], companionAdvisories: [],
         semanticNamingConflicts: [{
-          kind: "duplicate-intent-semantic",
+          kind: "semantic-naming-diagnostic",
           conflictType: "invalid-on-background",
           family: "danger",
           role: "background",
@@ -337,12 +339,12 @@ module.exports = (async () => {
             relatedFill: ["color/fill/danger"],
           },
           canonicalRecommendation: {
-            convention: "surface-based",
+            convention: "plain-background",
             keep: ["color/bg/danger"],
             review: ["color/bg/on-danger"],
             reason: "Background roles should not use on-* leaves; keep the plain bg/surface/background token and review the on-* background duplicate.",
           },
-          decisionQuestion: "Your current semantic color setup leans role-based. Do you want to keep going that way, or move this area toward a surface-based convention?",
+          decisionQuestion: "Figlets infers an element-first semantic color grammar. Review only the invalid or ambiguous naming outliers before any migration.",
           linkSafetyWarning: "Do not delete or deprecate extra semantic variables blindly: existing Figma layers may already be bound to them. Use a designer-approved migration/remap plan before removing aliases or variables.",
         }],
         contrastAlgorithm: "wcag",
@@ -352,7 +354,7 @@ module.exports = (async () => {
     assert.ok(out.includes('"danger" background has invalid on-* background naming'));
     assert.ok(out.includes('surface-based: "color/bg/danger"'));
     assert.ok(out.includes('invalid background: "color/bg/on-danger"'));
-    assert.ok(out.includes("question: Your current semantic color setup leans role-based"));
+    assert.ok(out.includes("question: Figlets infers an element-first semantic color grammar"));
     assert.ok(out.includes("warning: Do not delete or deprecate extra semantic variables blindly"));
     assert.ok(!out.includes('role-based: "color/bg/on-danger"'));
     assert.ok(!out.includes("color/fill/danger"), "related fill token should not be rendered as a competitor");

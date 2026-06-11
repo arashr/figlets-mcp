@@ -4,6 +4,7 @@ const { getActiveFileConfigPath } = require("../utils/paths.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { computePlannedAliases, loadDsConfigSafe } = require("../utils/accessible-repair-aliases.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
+const { classifySemanticColorGrammar } = require("./semantic-color-grammar.js");
 
 const inspectDsSetupGapsTool = {
   name: "inspect_ds_setup_gaps",
@@ -76,10 +77,6 @@ function _familyFromOnRoleLeaf(leaf) {
   if (fillMatch) return fillMatch[2];
   if (/^on-[^/]+$/.test(value)) return value.replace(/^on-/, "");
   return value;
-}
-
-function _isContextualOnBackgroundLeaf(leaf) {
-  return /^on-(fill|surface|bg|background)-.+$/.test(_norm(leaf));
 }
 
 function _sameCaseSegment(sourceSegment, replacement) {
@@ -209,243 +206,117 @@ function _clusterSemanticFamilies(semanticVars) {
   return Array.from(clusters.values()).sort((a, b) => a.family.localeCompare(b.family));
 }
 
-function _roleConventionForName(name) {
-  const parts = String(name || "").split("/");
-  const info = _roleForParts(parts);
-  if (!info) return null;
-  const roleSegment = _norm(parts[info.roleIndex]);
-  const leaf = parts[info.roleIndex + 1] || "";
-  const normalizedLeaf = _norm(leaf);
-  const family = _familyKeyForParts(parts, info.roleIndex);
-  if (!family) return null;
-
-  if (info.role === "background") {
-    const hasOnLeaf = _isInvalidOnBackgroundParts(parts, info.roleIndex);
-    const convention = hasOnLeaf
-      ? "invalid-on-background"
-      : roleSegment === "fill"
-        ? "role-based-fill"
-        : "surface-based-background";
-    return {
-      name,
-      role: "background",
-      family,
-      convention,
-      familySegment: roleSegment,
-      leaf: normalizedLeaf,
-      impliedCanonical: convention === "role-based-fill" ? "role-based" : "surface-based",
-    };
-  }
-
-  const canUseOnLeaf = /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment);
-  const roleBased = canUseOnLeaf && /^on-[^/]+$/.test(normalizedLeaf);
-  return {
-    name,
-    role: info.role,
-    family,
-    convention: roleBased
-      ? (_isContextualOnBackgroundLeaf(normalizedLeaf) ? "contextual-on-background-role" : "role-based-on-fill")
-      : "surface-based-role",
-    familySegment: roleSegment,
-    leaf: normalizedLeaf,
-    impliedCanonical: roleBased ? "role-based" : "surface-based",
+function _detectSemanticNamingConflicts(semanticVars, grammarReport) {
+  const report = grammarReport || classifySemanticColorGrammar(semanticVars);
+  const classifications = Array.isArray(report.tokenClassifications) ? report.tokenClassifications : [];
+  const diagnostics = Array.isArray(report.diagnostics) ? report.diagnostics : [];
+  const names = new Set((semanticVars || []).map(variable => variable && variable.name).filter(Boolean));
+  const byName = new Map(classifications.map(item => [item.name, item]));
+  const namingBias = {
+    inferredGrammar: report.inferredGrammar || "unknown",
+    confidence: report.confidence || 0,
+    grammarCandidates: report.grammarCandidates || [],
+    question: report.inferredGrammar && report.inferredGrammar !== "unknown"
+      ? `Figlets infers a ${report.inferredGrammar} semantic color grammar. Review only the invalid or ambiguous naming outliers before any migration.`
+      : "Figlets cannot infer a semantic color grammar confidently enough to recommend naming migration. Review the odd names before any rename plan.",
   };
-}
-
-function _canonicalNamingRecommendation(familyConventions, role, tokens) {
-  const backgroundConventions = familyConventions.background || [];
-  const hasFill = backgroundConventions.some(entry => entry.convention === "role-based-fill");
-  const hasSurface = backgroundConventions.some(entry => entry.convention === "surface-based-background");
-  const hasInvalidOnBackground = backgroundConventions.some(entry => entry.convention === "invalid-on-background");
-  const hasRoleBasedCompanion = Object.keys(familyConventions).some(key =>
-    key !== "background" &&
-    familyConventions[key].some(entry => entry.convention === "role-based-on-fill")
-  );
-  const hasSurfaceBasedCompanion = Object.keys(familyConventions).some(key =>
-    key !== "background" &&
-    familyConventions[key].some(entry => entry.convention === "surface-based-role")
-  );
-
-  if (hasFill && !hasSurface && role !== "background") {
-    return {
-      convention: "role-based",
-      keep: tokens.roleBased.slice(),
-      review: tokens.surfaceBased.slice(),
-      reason: "A color/fill/* background exists for this family, so the on-* role convention is likely the safer canonical path.",
-    };
-  }
-  if (hasSurface && !hasFill && role !== "background") {
-    return {
-      convention: "surface-based",
-      keep: tokens.surfaceBased.slice(),
-      review: tokens.roleBased.slice(),
-      reason: "A bg/surface/background token exists for this family, so the plain role token is likely the safer canonical path.",
-    };
-  }
-  if (role === "background" && hasInvalidOnBackground && hasSurface) {
-    return {
-      convention: "surface-based",
-      keep: tokens.surfaceBased.slice(),
-      review: tokens.roleBased.slice(),
-      reason: "Background roles should not use on-* leaves; keep the plain bg/surface/background token and review the on-* background duplicate.",
-    };
-  }
-  if (role === "background" && hasRoleBasedCompanion && !hasSurfaceBasedCompanion) {
-    return {
-      convention: "role-based",
-      keep: tokens.roleBased.slice(),
-      review: tokens.surfaceBased.slice(),
-      reason: "This family already uses on-* foreground/icon/border roles, so color/fill/* is likely the safer background convention.",
-    };
-  }
-  if (role === "background" && hasSurfaceBasedCompanion && !hasRoleBasedCompanion) {
-    return {
-      convention: "surface-based",
-      keep: tokens.surfaceBased.slice(),
-      review: tokens.roleBased.slice(),
-      reason: "This family already uses plain foreground/icon/border roles, so bg/surface/background is likely the safer background convention.",
-    };
-  }
-  return {
-    convention: "designer-decision",
-    keep: [],
-    review: tokens.surfaceBased.concat(tokens.roleBased).sort(),
-    reason: "Both naming systems are present or the surrounding context is incomplete, so Figlets should not pick a canonical token automatically.",
-  };
-}
-
-function _semanticNamingBias(entries) {
-  const counts = { roleBased: 0, surfaceBased: 0, invalid: 0 };
-  for (const entry of entries || []) {
-    if (!entry || !entry.role) continue;
-    if (entry.convention === "invalid-on-background") {
-      counts.invalid += 1;
-      continue;
-    }
-    if (entry.convention === "role-based-fill" || entry.convention === "role-based-on-fill" || entry.convention === "contextual-on-background-role") {
-      counts.roleBased += 1;
-      continue;
-    }
-    if (entry.convention === "surface-based-background" || entry.convention === "surface-based-role") {
-      counts.surfaceBased += 1;
-    }
-  }
-  const total = counts.roleBased + counts.surfaceBased;
-  let majority = "mixed";
-  if (total > 0) {
-    const delta = counts.roleBased - counts.surfaceBased;
-    if (Math.abs(delta) >= Math.max(2, Math.ceil(total * 0.15))) {
-      majority = delta > 0 ? "role-based" : "surface-based";
-    }
-  }
-  return {
-    roleBasedCount: counts.roleBased,
-    surfaceBasedCount: counts.surfaceBased,
-    invalidCount: counts.invalid,
-    majority,
-    question: majority === "role-based"
-      ? "Your current semantic color setup leans role-based. Do you want to keep going that way, or move this area toward a surface-based convention?"
-      : majority === "surface-based"
-        ? "Your current semantic color setup leans surface-based. Do you want to keep going that way, or move this area toward a role-based convention?"
-        : "Your semantic color setup is mixed. Do you want to standardize this area toward role-based or surface-based naming?",
-  };
-}
-
-function _flattenConventionEntries(byFamily) {
-  const entries = [];
-  for (const familyConventions of byFamily.values()) {
-    for (const role of Object.keys(familyConventions)) {
-      entries.push(...familyConventions[role]);
-    }
-  }
-  return entries;
-}
-
-function _detectSemanticNamingConflicts(semanticVars) {
-  const byFamily = new Map();
-  for (const variable of semanticVars) {
-    const entry = _roleConventionForName(variable && variable.name);
-    if (!entry) continue;
-    if (!byFamily.has(entry.family)) byFamily.set(entry.family, {});
-    const familyConventions = byFamily.get(entry.family);
-    if (!familyConventions[entry.role]) familyConventions[entry.role] = [];
-      familyConventions[entry.role].push(entry);
-  }
-
-  const namingBias = _semanticNamingBias(_flattenConventionEntries(byFamily));
   const linkSafetyWarning = "Do not delete or deprecate extra semantic variables blindly: existing Figma layers may already be bound to them. Use a designer-approved migration/remap plan before removing aliases or variables.";
   const conflicts = [];
-  for (const [family, familyConventions] of byFamily) {
-    for (const role of Object.keys(familyConventions)) {
-      const entries = familyConventions[role];
-      let surfaceBased = [];
-      let roleBased = [];
-      if (role === "background") {
-        surfaceBased = entries
-          .filter(entry => entry.convention === "surface-based-background")
-          .map(entry => entry.name);
-        const invalidOnBackground = entries
-          .filter(entry => entry.convention === "invalid-on-background")
-          .map(entry => entry.name);
-        const relatedFill = entries
-          .filter(entry => entry.convention === "role-based-fill")
-          .map(entry => entry.name);
-        if (!surfaceBased.length || !invalidOnBackground.length) continue;
-        surfaceBased = Array.from(new Set(surfaceBased)).sort();
-        roleBased = Array.from(new Set(invalidOnBackground)).sort();
-        const tokens = {
-          surfaceBased,
-          roleBased,
-          invalidOnBackground: roleBased.slice(),
-        };
-        if (relatedFill.length) tokens.relatedFill = Array.from(new Set(relatedFill)).sort();
-        const recommendation = _canonicalNamingRecommendation(familyConventions, role, tokens);
-        conflicts.push({
-          kind: "duplicate-intent-semantic",
-          conflictType: "invalid-on-background",
-          family,
-          role,
-          conventions: ["plain-background", "invalid-on-background"],
-          tokens,
-          canonicalRecommendation: recommendation,
-          namingBias,
-          decisionQuestion: namingBias.question,
-          linkSafetyWarning,
-          repairTier: "needs-designer-decision",
-          agentAction: "ask-designer",
-          reason: "This family has a background token with an on-* leaf. on-* names describe foreground roles, so this should be reviewed separately from legitimate fill/* backgrounds.",
-        });
-        continue;
-      } else {
-        surfaceBased = entries
-          .filter(entry => entry.convention === "surface-based-role")
-          .map(entry => entry.name);
-        roleBased = entries
-          .filter(entry => entry.convention === "role-based-on-fill")
-          .map(entry => entry.name);
-      }
-      if (!surfaceBased.length || !roleBased.length) continue;
-      surfaceBased = Array.from(new Set(surfaceBased)).sort();
-      roleBased = Array.from(new Set(roleBased)).sort();
-      const tokens = { surfaceBased, roleBased };
-      const recommendation = _canonicalNamingRecommendation(familyConventions, role, tokens);
-      conflicts.push({
-        kind: "duplicate-intent-semantic",
-        family,
-        role,
-        conventions: ["surface-based", "role-based"],
-        tokens,
-        canonicalRecommendation: recommendation,
-        namingBias,
-        decisionQuestion: namingBias.question,
-        linkSafetyWarning,
-        repairTier: "needs-designer-decision",
-        agentAction: "ask-designer",
-        reason: "This family mixes plain semantic names and on-* role names for the same apparent intent, which makes audits and downstream binding choices ambiguous.",
-      });
+
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.kind !== "invalid-name") continue;
+    const entry = byName.get(diagnostic.token);
+    if (!entry || entry.assetRole !== "background") continue;
+    const canonicalName = `color/${entry.group}/${entry.family}`;
+    if (!names.has(canonicalName)) continue;
+    const relatedFill = names.has(`color/fill/${entry.family}`) ? [`color/fill/${entry.family}`] : [];
+    const tokens = {
+      surfaceBased: [canonicalName],
+      roleBased: [diagnostic.token],
+      invalidOnBackground: [diagnostic.token],
+    };
+    if (relatedFill.length) tokens.relatedFill = relatedFill;
+    conflicts.push({
+      kind: "semantic-naming-diagnostic",
+      conflictType: "invalid-on-background",
+      family: entry.family,
+      role: "background",
+      conventions: ["plain-background", "invalid-on-background"],
+      tokens,
+      canonicalRecommendation: {
+        convention: "plain-background",
+        keep: [canonicalName],
+        review: [diagnostic.token],
+        reason: "Background roles should not use on-* leaves; keep the matching plain background token and review the invalid background name.",
+      },
+      namingBias,
+      decisionQuestion: namingBias.question,
+      linkSafetyWarning,
+      repairTier: "needs-designer-decision",
+      agentAction: "ask-designer",
+      severity: "medium",
+      reason: diagnostic.reason,
+    });
+  }
+
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.kind !== "true-duplicate") continue;
+    const tokens = Array.isArray(diagnostic.tokens) ? diagnostic.tokens.slice().sort() : [];
+    if (tokens.length < 2) continue;
+    conflicts.push({
+      kind: "semantic-naming-diagnostic",
+      conflictType: "true-duplicate",
+      family: diagnostic.family,
+      role: diagnostic.assetRole,
+      context: diagnostic.context,
+      conventions: ["same-role-context-family"],
+      tokens: {
+        duplicates: tokens,
+        canonicalCandidates: tokens,
+      },
+      canonicalRecommendation: {
+        convention: "designer-decision",
+        keep: [],
+        review: tokens,
+        reason: "These tokens appear to share the same role, context, family, and scope. Pick the canonical variable before any compatibility rename.",
+      },
+      namingBias,
+      decisionQuestion: namingBias.question,
+      linkSafetyWarning,
+      repairTier: "needs-designer-decision",
+      agentAction: "ask-designer",
+      severity: "medium",
+      reason: diagnostic.reason,
+    });
+  }
+
+  return conflicts.sort((a, b) => a.family.localeCompare(b.family) || a.role.localeCompare(b.role));
+}
+
+function _semanticNamingAdvisories(grammarReport, conflicts) {
+  const conflictTokens = new Set();
+  for (const conflict of conflicts || []) {
+    const tokens = conflict.tokens || {};
+    for (const key of Object.keys(tokens)) {
+      const value = tokens[key];
+      if (Array.isArray(value)) value.forEach(token => conflictTokens.add(token));
     }
   }
-  return conflicts.sort((a, b) => a.family.localeCompare(b.family) || a.role.localeCompare(b.role));
+  return (grammarReport.diagnostics || [])
+    .filter(item => item.kind !== "true-duplicate")
+    .filter(item => !item.token || !conflictTokens.has(item.token))
+    .map(item => ({
+      kind: item.kind,
+      token: item.token,
+      tokens: item.tokens,
+      family: item.family,
+      role: item.assetRole,
+      context: item.context,
+      severity: item.severity || "low",
+      reason: item.reason,
+      repairTier: item.kind === "invalid-name" ? "needs-designer-decision" : "advisory",
+      agentAction: "ask-designer",
+    }));
 }
 
 function _roleEvidence(cluster) {
@@ -1404,7 +1275,9 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   const allColorNames = colorVars.map(v => v.name);
   const algorithm = options.algorithm === "apca" ? "apca" : "wcag";
   const semanticFamilies = _clusterSemanticFamilies(semanticVars);
-  const semanticNamingConflicts = _detectSemanticNamingConflicts(semanticVars);
+  const semanticColorGrammar = classifySemanticColorGrammar(semanticVars);
+  const semanticNamingConflicts = _detectSemanticNamingConflicts(semanticVars, semanticColorGrammar);
+  const semanticNamingAdvisories = _semanticNamingAdvisories(semanticColorGrammar, semanticNamingConflicts);
   const semanticContext = _semanticContextFromConfig(options.existingDs);
   const foundationRoleFindings = _foundationRoleFindings(allColorNames, semanticContext);
 
@@ -1908,7 +1781,6 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     .filter(adv => adv.missing.length);
 
   const highConfidenceIssues = []
-    .concat(semanticNamingConflicts.map(item => Object.assign({ priority: "high" }, item)))
     .concat(iconContrastFailures.map(item => Object.assign({ priority: "high" }, item)))
     .concat(missingSemanticRoles.filter(gap => gap.confidence === "high").map(item => Object.assign({ priority: "high" }, item)))
     .concat(contrastFailures.filter(f => !f.nearMiss).map(item => Object.assign({ priority: "high" }, item)))
@@ -1923,7 +1795,9 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     incompleteModes,
     contrastFailures,
     iconContrastFailures,
+    semanticColorGrammar,
     semanticNamingConflicts,
+    semanticNamingAdvisories,
     brokenAliases,
     foundationRoleFindings,
     optionalSemanticRoleFindings,
@@ -1939,6 +1813,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       highConfidenceIssues,
       iconContrastFailures: iconContrastFailures.slice(0, 8),
       semanticNamingConflicts: semanticNamingConflicts.slice(0, 8),
+      semanticNamingAdvisories: semanticNamingAdvisories.slice(0, 8),
       highConfidenceMissingRoles: missingSemanticRoles.filter(gap => gap.confidence === "high").slice(0, 8),
       optionalRoleRepairs: optionalSemanticRoleFindings.filter(gap => gap.plannedRoleRepair).slice(0, 8),
     },
@@ -1955,6 +1830,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       iconContrastFailureCount: iconContrastFailures.length,
       iconContrastNearMissCount: iconContrastFailures.filter(f => f.nearMiss).length,
       semanticNamingConflictCount: semanticNamingConflicts.length,
+      semanticNamingAdvisoryCount: semanticNamingAdvisories.length,
       brokenAliasCount: brokenAliases.length,
       foundationRoleFindingCount: foundationRoleFindings.length,
       companionAdvisoryCount: companionAdvisories.length,
@@ -2255,15 +2131,30 @@ function _buildRepairPlan(result) {
   for (const item of result.iconContrastFailures || []) collectBlockedReAlias(item, "icon");
   for (const conflict of result.semanticNamingConflicts || []) {
     missingCapabilityNotes.push({
-      kind: "naming-system-mismatch",
+      kind: "semantic-naming-review",
       family: conflict.family,
       role: conflict.role,
+      context: conflict.context,
+      conflictType: conflict.conflictType,
       tokens: conflict.tokens,
       canonicalRecommendation: conflict.canonicalRecommendation,
       namingBias: conflict.namingBias,
       decisionQuestion: conflict.decisionQuestion,
       linkSafetyWarning: conflict.linkSafetyWarning,
-      reason: "Figlets found mixed semantic naming conventions for the same apparent intent. Consolidation needs a designer-approved migration/deprecation decision.",
+      reason: conflict.reason || "Figlets found semantic color names that need a designer-approved naming decision before any migration.",
+      agentAction: "ask-designer",
+    });
+  }
+  for (const advisory of result.semanticNamingAdvisories || []) {
+    missingCapabilityNotes.push({
+      kind: "semantic-naming-advisory",
+      family: advisory.family,
+      role: advisory.role,
+      context: advisory.context,
+      token: advisory.token,
+      tokens: advisory.tokens,
+      diagnosticKind: advisory.kind,
+      reason: advisory.reason,
       agentAction: "ask-designer",
     });
   }
@@ -2404,20 +2295,34 @@ function _buildProposedSetupChanges(context) {
           : `${note.family || "semantic family"} needs a background role decision.`,
       });
     }
-    if (note.kind === "naming-system-mismatch") {
+    if (note.kind === "semantic-naming-review") {
       const tokens = note.tokens || {};
       const surfaceBased = Array.isArray(tokens.surfaceBased) ? tokens.surfaceBased : [];
       const roleBased = Array.isArray(tokens.roleBased) ? tokens.roleBased : [];
+      const duplicates = Array.isArray(tokens.duplicates) ? tokens.duplicates : [];
       const recommendation = note.canonicalRecommendation || {};
       const canonical = recommendation.convention || "designer-decision";
       const question = note.decisionQuestion ? ` ${note.decisionQuestion}` : "";
       const warning = note.linkSafetyWarning ? ` Warning: ${note.linkSafetyWarning}` : "";
+      const tokenText = duplicates.length
+        ? duplicates.join(", ")
+        : `${surfaceBased.join(", ")}${surfaceBased.length && roleBased.length ? " conflicts with " : ""}${roleBased.join(", ")}`;
       needsDesignerDecision.push({
         tier: "needs designer decision",
         token: `${note.family}/${note.role}`,
-        action: "choose canonical naming",
-        reason: "mixed semantic naming",
-        summaryLine: `Choose canonical naming for ${note.family} ${note.role}: ${surfaceBased.join(", ")} conflicts with ${roleBased.join(", ")} (${canonical}).${question}${warning}`,
+        action: "review semantic naming",
+        reason: "semantic naming review",
+        summaryLine: `Review semantic naming for ${note.family} ${note.role}: ${tokenText} (${canonical}).${question}${warning}`,
+      });
+    }
+    if (note.kind === "semantic-naming-advisory") {
+      const tokenText = note.token || (Array.isArray(note.tokens) ? note.tokens.join(", ") : `${note.family}/${note.role}`);
+      needsDesignerDecision.push({
+        tier: "advisory",
+        token: tokenText,
+        action: "review naming advisory",
+        reason: "semantic naming advisory",
+        summaryLine: `Naming advisory for ${tokenText}: ${note.reason}`,
       });
     }
     if (note.kind === "shared-token-contrast-repair-blocked") {
@@ -2472,14 +2377,19 @@ function _buildDesignerPresentation(context) {
   if (proposedChanges.needsDesignerDecision.length) {
     const missingBg = proposedChanges.needsDesignerDecision;
     const missingBgCount = missingBg.filter(change => change.reason === "missing background").length;
-    const namingCount = missingBg.filter(change => change.reason === "mixed semantic naming").length;
+    const namingCount = missingBg.filter(change => change.reason === "semantic naming review").length;
+    const namingAdvisoryCount = missingBg.filter(change => change.reason === "semantic naming advisory").length;
     if (missingBgCount && !namingCount) {
       lines.push(
         `${missingBgCount} background role${missingBgCount === 1 ? " needs" : "s need"} your design decision before Figlets can create anything.`
       );
-    } else if (namingCount && !missingBgCount) {
+    } else if (namingCount && !missingBgCount && !namingAdvisoryCount) {
       lines.push(
-        `${namingCount} semantic naming conflict${namingCount === 1 ? " needs" : "s need"} your design decision before Figlets can migrate or deprecate anything.`
+        `${namingCount} semantic naming item${namingCount === 1 ? " needs" : "s need"} your design decision before Figlets can migrate or deprecate anything.`
+      );
+    } else if (namingAdvisoryCount && !missingBgCount && !namingCount) {
+      lines.push(
+        `${namingAdvisoryCount} semantic naming advisor${namingAdvisoryCount === 1 ? "y" : "ies"} should be reviewed separately. These are not ready-to-apply repairs.`
       );
     } else {
       lines.push(
@@ -2544,6 +2454,7 @@ function _composeMessage(s) {
   if (s.contrastFailureCount) parts.push(`${s.contrastFailureCount} contrast failure${s.contrastFailureCount === 1 ? "" : "s"}`);
   if (s.iconContrastFailureCount) parts.push(`${s.iconContrastFailureCount} icon contrast failure${s.iconContrastFailureCount === 1 ? "" : "s"}`);
   if (s.semanticNamingConflictCount) parts.push(`${s.semanticNamingConflictCount} semantic naming conflict${s.semanticNamingConflictCount === 1 ? "" : "s"}`);
+  if (s.semanticNamingAdvisoryCount) parts.push(`${s.semanticNamingAdvisoryCount} semantic naming advisor${s.semanticNamingAdvisoryCount === 1 ? "y" : "ies"}`);
   if (s.brokenAliasCount) parts.push(`${s.brokenAliasCount} broken alias${s.brokenAliasCount === 1 ? "" : "es"}`);
   if (s.foundationRoleFindingCount) parts.push(`${s.foundationRoleFindingCount} foundation role gap${s.foundationRoleFindingCount === 1 ? "" : "s"}`);
   if (s.companionAdvisoryCount) parts.push(`${s.companionAdvisoryCount} pair${s.companionAdvisoryCount === 1 ? "" : "s"} missing border/icon (advisory)`);

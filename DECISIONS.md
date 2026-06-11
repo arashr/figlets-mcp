@@ -14,6 +14,8 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Implementation plan:** See `docs/semantic-color-naming-flow-plan.md`. The next implementation should add a pure semantic grammar classifier, rework health-check naming diagnostics into invalid/ambiguous/true-duplicate/distinct-context/unknown categories, redesign semantic naming consolidation around grammar/context decisions, and add unit coverage across Material-like paired contexts, Carbon-like element-first roles, Primer-like intent/emphasis roles, component-scoped overlays, and unknown custom systems.
 
+**Implemented slice:** `inspect_ds_setup_gaps` now exposes `semanticColorGrammar`, separates low-priority `semanticNamingAdvisories` from apply-relevant `semanticNamingConflicts`, and no longer treats plain `text/*` plus ambiguous `text/on-*` shorthand as an automatic duplicate. The rename-only semantic naming planner accepts grammar-aware input for the designer-facing path while preserving legacy `canonicalConvention` compatibility; it only emits safe rename payloads for high-confidence invalid/duplicate diagnostics. Agent guidance and setup intake now ask for semantic color grammar instead of a binary surface/role convention.
+
 ---
 
 ## [2026-06-07] Basic Figma variable operations need a shared planner/apply surface

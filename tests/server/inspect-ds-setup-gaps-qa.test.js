@@ -800,29 +800,23 @@ module.exports = (() => {
     const mixedDuplicateIntentResult = inspectDsSetupGapsFromFigmaData(mixedDuplicateIntentSnap);
     assert.strictEqual(
       mixedDuplicateIntentResult.summary.semanticNamingConflictCount,
-      2,
-      "mixed duplicate-intent snapshots should surface text/icon conflicts without treating bg/* and fill/* as competitors"
-    );
-    const dangerTextConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
-      item.family === "danger" && item.role === "foreground"
-    );
-    assert.ok(dangerTextConflict, "text/danger vs text/on-danger should be a dedicated semantic naming conflict");
-    assert.deepStrictEqual(dangerTextConflict.tokens.surfaceBased, ["color/text/danger"]);
-    assert.deepStrictEqual(dangerTextConflict.tokens.roleBased, ["color/text/on-danger"]);
-    assert.strictEqual(dangerTextConflict.canonicalRecommendation.convention, "role-based");
-    assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.keep, ["color/text/on-danger"]);
-    assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.review, ["color/text/danger"]);
-    assert.strictEqual(dangerTextConflict.namingBias.majority, "role-based");
-    assert.ok(
-      dangerTextConflict.decisionQuestion.includes("leans role-based"),
-      "naming conflict should ask whether to follow the file's majority convention"
+      0,
+      "plain text/icon roles and ambiguous on-* shorthand should not be treated as automatic duplicate conflicts"
     );
     assert.ok(
-      dangerTextConflict.linkSafetyWarning.includes("bound"),
-      "naming conflict should warn that deleting extra semantics can break existing variable links"
+      mixedDuplicateIntentResult.semanticNamingAdvisories.some(item =>
+        item.token === "color/text/on-danger" &&
+        item.kind === "ambiguous-name"
+      ),
+      "text/on-danger should be a low-priority ambiguity advisory"
     );
-    assert.strictEqual(dangerTextConflict.repairTier, "needs-designer-decision");
-    assert.strictEqual(dangerTextConflict.agentAction, "ask-designer");
+    assert.ok(
+      mixedDuplicateIntentResult.semanticNamingAdvisories.some(item =>
+        item.token === "color/icon/on-danger" &&
+        item.kind === "ambiguous-name"
+      ),
+      "icon/on-danger should be a low-priority ambiguity advisory"
+    );
     const infoBackgroundConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
       item.family === "info" && item.role === "background"
     );
@@ -832,8 +826,8 @@ module.exports = (() => {
       "bg/info and fill/info are related background roles, not duplicate competitors"
     );
     assert.ok(
-      mixedDuplicateIntentResult.topFindings.highConfidenceIssues.some(item => item.kind === "duplicate-intent-semantic"),
-      "top findings should include semantic naming conflicts"
+      !mixedDuplicateIntentResult.topFindings.highConfidenceIssues.some(item => item.kind === "semantic-naming-diagnostic"),
+      "semantic naming advisories should not appear as high-priority health-check findings"
     );
     const mixedPlan = _buildRepairPlan(mixedDuplicateIntentResult);
     assert.strictEqual(
@@ -843,21 +837,17 @@ module.exports = (() => {
     );
     assert.ok(
       mixedPlan.missingCapabilityNotes.some(note =>
-        note.kind === "naming-system-mismatch" &&
-        note.family === "danger" &&
-        note.role === "foreground"
+        note.kind === "semantic-naming-advisory" &&
+        note.token === "color/text/on-danger"
       ),
-      "repair plan should surface naming conflicts as designer decisions"
+      "repair plan should surface ambiguous shorthand naming as an advisory"
     );
     assert.ok(
       mixedPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
-        change.reason === "mixed semantic naming" &&
-        change.summaryLine.includes("color/text/danger") &&
-        change.summaryLine.includes("color/text/on-danger") &&
-        change.summaryLine.includes("leans role-based") &&
-        change.summaryLine.includes("existing Figma layers may already be bound")
+        change.reason === "semantic naming advisory" &&
+        change.summaryLine.includes("color/text/on-danger")
       ),
-      "designer presentation should list the conflicting tokens, majority prompt, and binding warning"
+      "designer presentation should list ambiguous shorthand as a naming advisory"
     );
   }
   {
@@ -890,7 +880,7 @@ module.exports = (() => {
     assert.deepStrictEqual(dangerBgConflict.tokens.surfaceBased, ["color/bg/danger"]);
     assert.deepStrictEqual(dangerBgConflict.tokens.roleBased, ["color/bg/on-danger"]);
     assert.deepStrictEqual(dangerBgConflict.tokens.invalidOnBackground, ["color/bg/on-danger"]);
-    assert.strictEqual(dangerBgConflict.canonicalRecommendation.convention, "surface-based");
+    assert.strictEqual(dangerBgConflict.canonicalRecommendation.convention, "plain-background");
     assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.keep, ["color/bg/danger"]);
     assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.review, ["color/bg/on-danger"]);
     assert.ok(

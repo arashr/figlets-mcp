@@ -636,7 +636,9 @@ server.tool(
   planSemanticNamingConsolidationTool.name,
   planSemanticNamingConsolidationTool.description,
   {
-    canonicalConvention: z.enum(["surface-based", "role-based"]).describe("The naming convention the designer chose after reviewing semanticNamingConflicts."),
+    grammar: z.enum(["paired-context", "element-first", "intent-emphasis", "component-scoped", "custom"]).optional().describe("The semantic color naming grammar the designer intends to use. Prefer this over the legacy binary canonicalConvention."),
+    decisions: z.array(z.any()).optional().describe("Optional exact context decisions for a future grammar-aware migration slice."),
+    canonicalConvention: z.enum(["surface-based", "role-based"]).optional().describe("Legacy compatibility input. Do not present this binary choice as the default designer flow."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
   },
   async (args) => {
@@ -663,6 +665,7 @@ server.tool(
   applySemanticNamingConsolidationTool.name,
   applySemanticNamingConsolidationTool.description,
   {
+    grammar: z.enum(["paired-context", "element-first", "intent-emphasis", "component-scoped", "custom"]).optional().describe("Optional grammar copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput."),
     canonicalConvention: z.enum(["surface-based", "role-based"]).describe("The naming convention approved by the designer."),
     renameVariables: z.array(z.object({
       id: z.string().describe("Figma variable id copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput."),

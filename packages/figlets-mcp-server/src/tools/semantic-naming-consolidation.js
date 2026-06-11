@@ -5,21 +5,30 @@ const { inspectDsSetupGapsFromFigmaData } = require("./inspect-ds-setup-gaps.js"
 const planSemanticNamingConsolidationTool = {
   name: "plan_ds_semantic_naming_consolidation",
   description:
-    "Read-only planner for designer-approved semantic color naming consolidation after inspect_ds_setup_gaps reports semanticNamingConflicts. Pass the chosen canonicalConvention (`surface-based` or `role-based`). Returns exact canonical and duplicate variables, value/alias equivalence, safe rename-only applyInput, and separate unsafe delete/deprecate notes. Never mutates Figma.",
+    "Read-only planner for designer-approved semantic color naming consolidation after inspect_ds_setup_gaps reports semanticNamingConflicts. Prefer passing the intended semantic color grammar (`paired-context`, `element-first`, `intent-emphasis`, `component-scoped`, or `custom`) plus exact decisions; legacy canonicalConvention is accepted for compatibility but should not be used as the default designer flow. Returns exact canonical and duplicate variables, value/alias equivalence, safe rename-only applyInput, and separate unsafe delete/deprecate notes. Never mutates Figma.",
   inputSchema: {
     type: "object",
     properties: {
+      grammar: {
+        type: "string",
+        enum: ["paired-context", "element-first", "intent-emphasis", "component-scoped", "custom"],
+        description: "The semantic color naming grammar the designer intends to use. Prefer this over the legacy binary canonicalConvention."
+      },
+      decisions: {
+        type: "array",
+        description: "Optional exact context decisions for a future grammar-aware migration slice. Current rename-only apply supports high-confidence invalid/duplicate diagnostics from the planner.",
+        items: { type: "object" }
+      },
       canonicalConvention: {
         type: "string",
         enum: ["surface-based", "role-based"],
-        description: "The naming convention the designer chose after reviewing semanticNamingConflicts."
+        description: "Legacy compatibility input. Do not present this binary choice as the default designer flow."
       },
       figmaDataPath: {
         type: "string",
         description: "Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."
       }
     },
-    required: ["canonicalConvention"],
     additionalProperties: false
   }
 };
@@ -31,6 +40,10 @@ const applySemanticNamingConsolidationTool = {
   inputSchema: {
     type: "object",
     properties: {
+      grammar: {
+        type: "string",
+        enum: ["paired-context", "element-first", "intent-emphasis", "component-scoped", "custom"]
+      },
       canonicalConvention: {
         type: "string",
         enum: ["surface-based", "role-based"]
@@ -158,6 +171,7 @@ function _deprecatedName(name) {
 
 function _canonicalNamesForConflict(conflict, canonicalConvention) {
   const tokens = conflict.tokens || {};
+  if (conflict.conflictType === "true-duplicate") return [];
   if (canonicalConvention === "surface-based") return Array.isArray(tokens.surfaceBased) ? tokens.surfaceBased.slice() : [];
   if (conflict.conflictType === "invalid-on-background") {
     return Array.isArray(tokens.relatedFill) ? tokens.relatedFill.slice() : [];
@@ -167,6 +181,7 @@ function _canonicalNamesForConflict(conflict, canonicalConvention) {
 
 function _duplicateNamesForConflict(conflict, canonicalConvention) {
   const tokens = conflict.tokens || {};
+  if (conflict.conflictType === "true-duplicate") return [];
   if (canonicalConvention === "surface-based") return Array.isArray(tokens.roleBased) ? tokens.roleBased.slice() : [];
   if (conflict.conflictType === "invalid-on-background") {
     return []
@@ -177,9 +192,10 @@ function _duplicateNamesForConflict(conflict, canonicalConvention) {
 }
 
 function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}) {
-  const canonicalConvention = input.canonicalConvention;
+  const grammar = input.grammar || null;
+  const canonicalConvention = input.canonicalConvention || (grammar === "paired-context" ? "role-based" : "surface-based");
   if (canonicalConvention !== "surface-based" && canonicalConvention !== "role-based") {
-    return { error: "canonicalConvention must be either surface-based or role-based." };
+    return { error: "Provide grammar or canonicalConvention. canonicalConvention must be either surface-based or role-based when used." };
   }
   const variables = Array.isArray(figmaData.variables) ? figmaData.variables : [];
   const collections = Array.isArray(figmaData.collections) ? figmaData.collections : [];
@@ -283,6 +299,7 @@ function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}
   }
 
   const applyInput = { canonicalConvention, renameVariables };
+  if (grammar) applyInput.grammar = grammar;
   const designerLines = [];
   if (renameVariables.length) {
     designerLines.push(`Figlets can safely rename ${renameVariables.length} duplicate semantic variable${renameVariables.length === 1 ? "" : "s"} into a compatibility namespace after you approve.`);
@@ -295,10 +312,13 @@ function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}
 
   return {
     message: conflicts.length
-      ? `Semantic naming consolidation dry-run for ${canonicalConvention}: ${renameVariables.length} safe rename${renameVariables.length === 1 ? "" : "s"}, ${unsafeActions.length} manual review item${unsafeActions.length === 1 ? "" : "s"}.`
+      ? `Semantic naming consolidation dry-run for ${grammar || canonicalConvention}: ${renameVariables.length} safe rename${renameVariables.length === 1 ? "" : "s"}, ${unsafeActions.length} manual review item${unsafeActions.length === 1 ? "" : "s"}.`
       : "No semantic naming conflicts found in the synced snapshot.",
     canonicalConvention,
+    grammar,
     dryRun: true,
+    semanticColorGrammar: setupResult.semanticColorGrammar,
+    semanticNamingAdvisories: setupResult.semanticNamingAdvisories || [],
     conflicts: items,
     repairPlan: {
       tool: "apply_ds_semantic_naming_consolidation",
@@ -317,9 +337,10 @@ function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}
           action: "rename for compatibility",
           to: rename.newName,
           canonicalToken: rename.canonicalName,
-          summaryLine: `Rename ${rename.expectedCurrentName} to ${rename.newName}; keep ${rename.canonicalName} as the canonical ${canonicalConvention} token.`,
+          summaryLine: `Rename ${rename.expectedCurrentName} to ${rename.newName}; keep ${rename.canonicalName} as the canonical token for this grammar-aware cleanup.`,
         })),
         manualReview: unsafeActions,
+        advisories: setupResult.semanticNamingAdvisories || [],
         approvalPrompt: renameVariables.length
           ? "Review the exact rename list above. Some entries may keep different mapped values; Figlets will only rename those variables into _deprecated/... and preserve their variable IDs."
           : null,

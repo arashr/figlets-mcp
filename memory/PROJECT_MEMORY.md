@@ -18,6 +18,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-11 — BNN-53 implementation; semantic grammar classifier wired into health-check]
+
+**Status:** Implemented the first runtime slice of the semantic naming redesign after the documentation checkpoint commit `edd8744`.
+
+**Shipped behavior:** Added a pure `semantic-color-grammar` classifier that recognizes paired-context, element-first, intent/emphasis, component-scoped, and unknown semantic color grammars. `inspect_ds_setup_gaps` now returns `semanticColorGrammar`, separates apply-relevant `semanticNamingConflicts` from low-priority `semanticNamingAdvisories`, and removes naming diagnostics from the high-priority health-check list. Ambiguous shorthand such as `color/text/on-danger` is now an advisory unless the system proves a matching context; `color/text/danger` plus `color/text/on-fill-danger` remains clean because those are distinct contexts. Invalid backgrounds such as `color/bg/on-danger` remain review/planner candidates when a clear plain background exists.
+
+**Planner/guidance:** `plan_ds_semantic_naming_consolidation` now prefers grammar-aware input and keeps the old `canonicalConvention` parameter only as compatibility. The planner emits rename-only payloads for high-confidence invalid/duplicate diagnostics, not for ambiguous shorthand. Root, adapter, plugin, Agent Interface, setup intake, and CLI wording no longer present the default naming flow as "choose surface-based or role-based."
+
+**Tests:** Added `tests/server/semantic-color-grammar.test.js` and updated setup-gap, CLI, planner, agent-interface, adapter, and plugin guidance coverage. Full `npm test` passed **102/102**.
+
+**Remaining follow-up:** The grammar-aware planner still has a compatibility-shaped apply payload because the bridge apply path is rename-only. A later slice can add richer explicit context-decision payloads for true duplicate migration, alias rewires, and binding-aware cleanup.
+
+---
+
 ### [2026-06-07 — BNN-53 checkpoint; on-fill roles are distinct from plain surface roles]
 
 **Status:** Manual smoke showed Figlets reporting `color/text/on-fill-danger` and `color/icon/on-fill-danger` as semantic naming conflicts against `color/text/danger` and `color/icon/danger`, then planning `_deprecated/...` renames when the designer chose surface-based consolidation. That was a Figlets diagnosis bug, not a bad designer decision.

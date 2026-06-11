@@ -337,7 +337,7 @@ try {
     assert.strictEqual(categoryScope.status, "fail");
     assert.ok(categoryScope.message.includes("category-level payload"));
     assert.ok(categoryScope.nextAction.includes("token-level repairPlan entries"));
-    assert.ok(categoryScope.nextAction.includes("product/tool gap"));
+    assert.ok(categoryScope.nextAction.includes("plan_ds_figma_operations"));
   }
 
   // --- Unsafe pattern 3d: continuing after foundation/apply unlocks new work ---
@@ -418,7 +418,7 @@ try {
     const decision = findCheck(designerDecisionBinding, "binding_designer_decision_boundary");
     assert.strictEqual(decision.status, "fail");
     assert.ok(decision.message.includes("fixableNow"));
-    assert.ok(decision.nextAction.includes("product/tool gap"));
+    assert.ok(decision.nextAction.includes("plan_ds_figma_operations"));
 
     const naturalFixShape = handleFigletsHealthCheck({
       context: { mode: "designer", workflowId: "qa-binding-audit" },
@@ -472,12 +472,12 @@ try {
     assert.strictEqual(staleHost.nextAction.type, "restart_or_refresh_host");
   }
 
-  // --- Unsafe pattern 5: missing planner/apply support as a dead end ---
+  // --- Unsafe pattern 5: missing specialized planner/apply support is not a dead end ---
   {
     assertDocsInclude(
       DESIGNER_DOC_PATHS,
-      ["product/tool gap"],
-      "product gap docs"
+      ["plan_ds_figma_operations"],
+      "high-level operations fallback docs"
     );
     assertDocsInclude(
       ["docs/developer-guide.md"],
@@ -491,16 +491,16 @@ try {
     );
 
     assert.ok(
-      DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("product/tool gap"),
-      "hard rules should define missingCapabilityResponse as product/tool gap"
+      DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("plan_ds_figma_operations"),
+      "hard rules should route exact high-level edits through figma operations"
     );
     assert.ok(
-      DESIGNER_FLOW_HARD_RULES.bulkRepairRouting.some(item => item.includes("product/tool gap")),
-      "bulkRepairRouting should steer agents away from dead-end gap reporting"
+      DESIGNER_FLOW_HARD_RULES.bulkRepairRouting.some(item => item.includes("plan_ds_figma_operations")),
+      "bulkRepairRouting should steer agents toward high-level operations before gap reporting"
     );
 
     const start = getStartGuide();
-    assert.ok(start.responseContract.bulkUpdateRule.includes("product/tool gap"));
+    assert.ok(start.responseContract.bulkUpdateRule.includes("plan_ds_figma_operations"));
 
     const productGap = handleFigletsHealthCheck({
       context: { mode: "designer" },
@@ -516,9 +516,9 @@ try {
     assert.strictEqual(productGap.status, "warning");
     const gapCheck = findCheck(productGap, "product_gap_response");
     assert.strictEqual(gapCheck.status, "warn");
-    assert.ok(gapCheck.nextAction.includes("product/tool gap"));
+    assert.ok(gapCheck.nextAction.includes("plan_ds_figma_operations"));
     assert.ok(!/gaps cannot be fixed|dead end/i.test(gapCheck.nextAction));
-    assert.ok(/invent raw Figma scripts/i.test(gapCheck.nextAction));
+    assert.ok(/inventing raw Figma scripts/i.test(gapCheck.nextAction));
     assert.strictEqual(productGap.nextAction.type, "report_product_gap");
   }
 
@@ -630,6 +630,7 @@ try {
       "approval_boundary",
       "repair_payload_source",
       "write_scope_boundary",
+      "post_apply_health_check_verification",
       "post_apply_stop_boundary",
       "product_gap_response",
       "binding_fixability_boundary",
@@ -645,6 +646,13 @@ try {
       baseline.checks.map(check => check.id),
       expectedCheckIds,
       "health check should expose the first structured check set in stable order"
+    );
+    assert.ok(
+      DESIGNER_FLOW_HARD_RULES.bulkRepairRouting.some(rule =>
+        rule.includes("do not repeat a stale missing Tablet/Desktop modes item") &&
+        rule.includes("not by a drifting menu number")
+      ),
+      "health-check hard rules should prevent stale post-apply remaining-items summaries"
     );
 
     const readyDesigner = handleFigletsHealthCheck({

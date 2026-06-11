@@ -68,6 +68,30 @@ const figmaData = {
 
 module.exports = (async () => {
   {
+    const surfaceAndOnFillSemantics = [
+      sem("bg-danger", "color/bg/danger", alias("r700"), alias("r200")),
+      sem("text-danger", "color/text/danger", alias("n950"), alias("n50")),
+      sem("icon-danger", "color/icon/danger", alias("n950"), alias("n50")),
+      sem("fill-danger", "color/fill/danger", alias("r700"), alias("r200")),
+      sem("text-on-fill-danger", "color/text/on-fill-danger", alias("n50"), alias("n950")),
+      sem("icon-on-fill-danger", "color/icon/on-fill-danger", alias("n50"), alias("n950")),
+    ];
+    const surfaceAndOnFillData = {
+      variables: primitives.concat(surfaceAndOnFillSemantics),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: surfaceAndOnFillSemantics.map(v => v.id) },
+      ],
+    };
+    const plan = planSemanticNamingConsolidationFromFigmaData(surfaceAndOnFillData, { canonicalConvention: "surface-based" });
+    assert.deepStrictEqual(
+      plan.repairPlan.applyInput.renameVariables,
+      [],
+      "surface-based consolidation should not deprecate distinct on-fill roles"
+    );
+  }
+
+  {
     const plan = planSemanticNamingConsolidationFromFigmaData(figmaData, { canonicalConvention: "surface-based" });
     assert.strictEqual(plan.dryRun, true);
     assert.strictEqual(plan.repairPlan.tool, "apply_ds_semantic_naming_consolidation");

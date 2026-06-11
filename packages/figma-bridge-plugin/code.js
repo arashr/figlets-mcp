@@ -218,13 +218,19 @@ figma.ui.onmessage = async (msg) => {
         id: c.id,
         name: c.name,
         variableIds: c.variableIds,
-        modes: c.modes
+        modes: c.modes,
+        hiddenFromPublishing: c.hiddenFromPublishing || false,
+        description: c.description || ""
       })),
       variables: variables.map(v => ({
         id: v.id,
         name: v.name,
         resolvedType: v.resolvedType,
-        valuesByMode: v.valuesByMode
+        valuesByMode: v.valuesByMode,
+        description: v.description || "",
+        hiddenFromPublishing: v.hiddenFromPublishing || false,
+        scopes: Array.isArray(v.scopes) ? v.scopes.slice() : [],
+        codeSyntax: v.codeSyntax || {}
       })),
       textStyles: textStyles.map(s => ({
         id: s.id,
@@ -232,12 +238,14 @@ figma.ui.onmessage = async (msg) => {
         fontName: s.fontName,
         fontSize: s.fontSize,
         lineHeight: s.lineHeight,
-        letterSpacing: s.letterSpacing
+        letterSpacing: s.letterSpacing,
+        description: s.description || ""
       })),
       effectStyles: effectStyles.map(s => ({
         id: s.id,
         name: s.name,
-        effects: s.effects
+        effects: s.effects,
+        description: s.description || ""
       })),
       components: componentNodes.map(n => ({
         id: n.id,
@@ -481,6 +489,23 @@ figma.ui.onmessage = async (msg) => {
     } catch (err) {
       _appendSessionLog('apply_ds_semantic_naming_consolidation failed: ' + err.message);
       figma.ui.postMessage({ type: 'semantic-naming-consolidation-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
+    }
+  }
+
+  if (msg.type === 'apply-figma-operations') {
+    try {
+      _appendSessionLog('Executing apply_ds_figma_operations.');
+      const result = await _applyFigmaOperations(msg.data || {});
+      figma.ui.postMessage({ type: 'figma-operations-done', fileKey: _getFigletsFileKey(), data: result });
+      if (result && result.error) {
+        _appendSessionLog('apply_ds_figma_operations failed: ' + result.error);
+      } else {
+        _appendSessionLog('Completed apply_ds_figma_operations.');
+        figma.notify('Figma operations applied.');
+      }
+    } catch (err) {
+      _appendSessionLog('apply_ds_figma_operations failed: ' + err.message);
+      figma.ui.postMessage({ type: 'figma-operations-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
     }
   }
 
@@ -8333,6 +8358,689 @@ async function _applySemanticNamingConsolidation(payload) {
     skipped: skipped,
     unresolved: unresolved,
     message: renamed.length + ' renamed, ' + skipped.length + ' skipped, ' + unresolved.length + ' unresolved.',
+  };
+}
+
+async function _applyFigmaOperations(payload) {
+  var operations = (payload && Array.isArray(payload.operations)) ? payload.operations : [];
+  if (!operations.length) return { error: 'No approved Figma operations provided.' };
+
+  var allColls = await figma.variables.getLocalVariableCollectionsAsync();
+  var allVars = await figma.variables.getLocalVariablesAsync();
+  var allTextStyles = await figma.getLocalTextStylesAsync();
+  var allEffectStyles = await figma.getLocalEffectStylesAsync();
+  var collectionsById = {};
+  var collectionsByName = {};
+  var varsById = {};
+  var varsByName = {};
+  var textStylesById = {};
+  var textStylesByName = {};
+  var effectStylesById = {};
+  var effectStylesByName = {};
+
+  function _reindex() {
+    collectionsById = {};
+    collectionsByName = {};
+    varsById = {};
+    varsByName = {};
+    for (var ci = 0; ci < allColls.length; ci++) {
+      if (allColls[ci]) {
+        collectionsById[allColls[ci].id] = allColls[ci];
+        collectionsByName[allColls[ci].name] = allColls[ci];
+      }
+    }
+    for (var vi = 0; vi < allVars.length; vi++) {
+      if (!allVars[vi]) continue;
+      varsById[allVars[vi].id] = allVars[vi];
+      varsByName[allVars[vi].name] = allVars[vi];
+    }
+    for (var tsi = 0; tsi < allTextStyles.length; tsi++) {
+      if (!allTextStyles[tsi]) continue;
+      textStylesById[allTextStyles[tsi].id] = allTextStyles[tsi];
+      textStylesByName[allTextStyles[tsi].name] = allTextStyles[tsi];
+    }
+    for (var esi = 0; esi < allEffectStyles.length; esi++) {
+      if (!allEffectStyles[esi]) continue;
+      effectStylesById[allEffectStyles[esi].id] = allEffectStyles[esi];
+      effectStylesByName[allEffectStyles[esi].name] = allEffectStyles[esi];
+    }
+  }
+
+  function _modeName(mode) {
+    return mode ? (mode.name || mode.modeId) : '';
+  }
+
+  function _modeById(collection, modeId) {
+    var modes = collection && collection.modes ? collection.modes : [];
+    for (var mi = 0; mi < modes.length; mi++) {
+      if (modes[mi].modeId === modeId) return modes[mi];
+    }
+    return null;
+  }
+
+  function _valueSignature(value) {
+    if (value == null) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value);
+    if (value.type === 'VARIABLE_ALIAS') return 'alias:' + value.id;
+    var keys = Object.keys(value).sort();
+    var out = {};
+    for (var ki = 0; ki < keys.length; ki++) out[keys[ki]] = value[keys[ki]];
+    return JSON.stringify(out);
+  }
+
+  function _collectionForVariable(variable) {
+    if (!variable) return null;
+    for (var ci = 0; ci < allColls.length; ci++) {
+      var c = allColls[ci];
+      if (!c) continue;
+      if (c.id === variable.variableCollectionId) return c;
+      if ((c.variableIds || []).indexOf(variable.id) !== -1) return c;
+    }
+    return null;
+  }
+
+  function _setModeValues(variable, collection, modeValues, expectedType, checkCurrent) {
+    var report = [];
+    for (var mvi = 0; mvi < modeValues.length; mvi++) {
+      var modeValue = modeValues[mvi] || {};
+      var mode = _modeById(collection, modeValue.modeId);
+      if (!mode || _modeName(mode) !== modeValue.mode) return { error: 'Mode "' + (modeValue.mode || modeValue.modeId || '') + '" not found.' };
+      if (checkCurrent && _valueSignature(variable.valuesByMode ? variable.valuesByMode[mode.modeId] : null) !== modeValue.expectedCurrentSignature) {
+        return { error: 'Current value for "' + modeValue.mode + '" changed since approval.' };
+      }
+      var value;
+      var detail;
+      if (modeValue.kind === 'alias') {
+        var target = varsById[modeValue.targetId];
+        if (!target || (modeValue.targetName && target.name !== modeValue.targetName) || target.resolvedType !== expectedType) {
+          return { error: 'Alias target "' + (modeValue.targetName || modeValue.targetId || '') + '" not found or wrong type.' };
+        }
+        value = { type: 'VARIABLE_ALIAS', id: target.id };
+        detail = { mode: modeValue.mode, kind: 'alias', targetName: target.name };
+      } else if (modeValue.kind === 'literal') {
+        value = modeValue.value;
+        detail = { mode: modeValue.mode, kind: 'literal', value: modeValue.value };
+      } else {
+        return { error: 'Mode value kind must be alias or literal.' };
+      }
+      variable.setValueForMode(mode.modeId, value);
+      report.push(detail);
+    }
+    return { modeValues: report };
+  }
+
+  function _styleSignature(style) {
+    if (!style) return 'missing';
+    function stable(value) {
+      if (value == null) return 'null';
+      if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+      if (typeof value !== 'object') return JSON.stringify(value);
+      var keys = Object.keys(value).sort();
+      var parts = [];
+      for (var si = 0; si < keys.length; si++) parts.push(JSON.stringify(keys[si]) + ':' + stable(value[keys[si]]));
+      return '{' + parts.join(',') + '}';
+    }
+    var copy = {};
+    var keys = ['id', 'name', 'fontName', 'fontSize', 'lineHeight', 'letterSpacing', 'effects', 'description'];
+    for (var ski = 0; ski < keys.length; ski++) {
+      if (Object.prototype.hasOwnProperty.call(style, keys[ski])) copy[keys[ski]] = style[keys[ski]];
+    }
+    return stable(copy);
+  }
+
+  async function _loadFontForOperation(fontName) {
+    if (!fontName || !fontName.family || !fontName.style) return null;
+    try {
+      await figma.loadFontAsync(fontName);
+      return null;
+    } catch (err) {
+      return err && err.message ? err.message : 'Font load failed.';
+    }
+  }
+
+  async function _applyTextStyleProperties(style, properties) {
+    var props = properties || {};
+    var fontName = props.fontName || null;
+    if (fontName) {
+      var fontErr = await _loadFontForOperation(fontName);
+      if (fontErr) return { error: fontErr };
+      style.fontName = fontName;
+    } else if (style.fontName && style.fontName.family && style.fontName.style) {
+      await _loadFontForOperation(style.fontName);
+    }
+    if (Object.prototype.hasOwnProperty.call(props, 'fontSize')) style.fontSize = props.fontSize;
+    if (Object.prototype.hasOwnProperty.call(props, 'lineHeight')) style.lineHeight = props.lineHeight;
+    if (Object.prototype.hasOwnProperty.call(props, 'letterSpacing')) style.letterSpacing = props.letterSpacing;
+    if (Object.prototype.hasOwnProperty.call(props, 'description')) {
+      try { style.description = props.description || ''; } catch (_) {}
+    }
+    return { ok: true };
+  }
+
+  function _applyEffectStyleProperties(style, properties) {
+    var props = properties || {};
+    if (Object.prototype.hasOwnProperty.call(props, 'effects')) style.effects = props.effects || [];
+    if (Object.prototype.hasOwnProperty.call(props, 'description')) {
+      try { style.description = props.description || ''; } catch (_) {}
+    }
+    return { ok: true };
+  }
+
+  function _applyMetadata(target, metadata) {
+    var changed = [];
+    var unsupported = [];
+    var meta = metadata || {};
+    if (Object.prototype.hasOwnProperty.call(meta, 'description')) {
+      try {
+        if ('description' in target) {
+          target.description = meta.description || '';
+          changed.push('description');
+        } else unsupported.push('description');
+      } catch (_) { unsupported.push('description'); }
+    }
+    if (Object.prototype.hasOwnProperty.call(meta, 'hiddenFromPublishing')) {
+      try {
+        if ('hiddenFromPublishing' in target) {
+          target.hiddenFromPublishing = !!meta.hiddenFromPublishing;
+          changed.push('hiddenFromPublishing');
+        } else unsupported.push('hiddenFromPublishing');
+      } catch (_) { unsupported.push('hiddenFromPublishing'); }
+    }
+    if (Object.prototype.hasOwnProperty.call(meta, 'scopes')) {
+      try {
+        if ('scopes' in target && Array.isArray(meta.scopes)) {
+          target.scopes = meta.scopes.slice();
+          changed.push('scopes');
+        } else unsupported.push('scopes');
+      } catch (_) { unsupported.push('scopes'); }
+    }
+    if (Object.prototype.hasOwnProperty.call(meta, 'codeSyntax')) {
+      var codeSyntax = meta.codeSyntax || {};
+      var codeChanged = false;
+      try {
+        if (typeof target.setVariableCodeSyntax === 'function') {
+          var platforms = Object.keys(codeSyntax);
+          for (var csi = 0; csi < platforms.length; csi++) {
+            target.setVariableCodeSyntax(platforms[csi], String(codeSyntax[platforms[csi]] || ''));
+          }
+          codeChanged = true;
+        } else if ('codeSyntax' in target) {
+          target.codeSyntax = codeSyntax;
+          codeChanged = true;
+        }
+      } catch (_) {}
+      if (codeChanged) changed.push('codeSyntax');
+      else unsupported.push('codeSyntax');
+    }
+    return { changed: changed, unsupported: unsupported };
+  }
+
+  function _nodeById(nodeId) {
+    try { return figma.getNodeById(nodeId); } catch (_) { return null; }
+  }
+
+  function _setNodePaintVariable(node, paintProperty, paintIndex, variableOrNull) {
+    if (!node || (paintProperty !== 'fills' && paintProperty !== 'strokes')) return { error: 'Invalid paint binding target.' };
+    var paints = node[paintProperty];
+    if (!Array.isArray(paints)) return { error: 'Node does not expose ' + paintProperty + '.' };
+    if (paintIndex < 0 || paintIndex >= paints.length) return { error: paintProperty + '[' + paintIndex + '] was not found.' };
+    var copy = paints.slice();
+    try {
+      copy[paintIndex] = figma.variables.setBoundVariableForPaint(copy[paintIndex], 'color', variableOrNull || null);
+      node[paintProperty] = copy;
+      return { ok: true };
+    } catch (err) {
+      return { error: err && err.message ? err.message : 'Paint binding failed.' };
+    }
+  }
+
+  _reindex();
+
+  var applied = [];
+  var skipped = [];
+  var unresolved = [];
+
+  for (var oi = 0; oi < operations.length; oi++) {
+    var op = operations[oi] || {};
+    var kind = op.kind || '';
+    try {
+      if (kind === 'create_collection') {
+        if (!op.name || collectionsByName[op.name]) {
+          unresolved.push({ kind: kind, name: op.name, reason: 'Collection name is invalid.' });
+          continue;
+        }
+        var modes = Array.isArray(op.modes) ? op.modes : [];
+        if (!modes.length) {
+          unresolved.push({ kind: kind, name: op.name, reason: 'Modes are required.' });
+          continue;
+        }
+        var createdCollection = figma.variables.createVariableCollection(op.name);
+        allColls.push(createdCollection);
+        if (createdCollection.modes && createdCollection.modes.length && modes[0]) {
+          createdCollection.renameMode(createdCollection.modes[0].modeId, modes[0]);
+        }
+        for (var cm = 1; cm < modes.length; cm++) createdCollection.addMode(modes[cm]);
+        _reindex();
+        applied.push({ kind: kind, name: op.name, id: createdCollection.id, modes: modes });
+        continue;
+      }
+
+      var collection = op.collectionId ? collectionsById[op.collectionId] : null;
+      if (kind === 'rename_collection') {
+        if (!collection || collection.name !== op.expectedName) {
+          unresolved.push({ kind: kind, expectedName: op.expectedName, reason: 'Collection changed since approval.' });
+          continue;
+        }
+        collection.name = op.newName;
+        _reindex();
+        applied.push({ kind: kind, from: op.expectedName, to: op.newName, id: collection.id });
+        continue;
+      }
+      if (kind === 'delete_collection') {
+        if (!collection || collection.name !== op.expectedName) {
+          unresolved.push({ kind: kind, expectedName: op.expectedName, reason: 'Collection changed since approval.' });
+          continue;
+        }
+        collection.remove();
+        allColls = allColls.filter(function (c) { return c && c.id !== op.collectionId; });
+        allVars = allVars.filter(function (v) { return !v || (op.expectedVariableIds || []).indexOf(v.id) === -1; });
+        _reindex();
+        applied.push({ kind: kind, name: op.expectedName, id: op.collectionId, destructive: true });
+        continue;
+      }
+      if (kind === 'create_mode') {
+        if (!collection || collection.name !== op.collection) {
+          unresolved.push({ kind: kind, collection: op.collection, reason: 'Collection changed since approval.' });
+          continue;
+        }
+        var newModeId = collection.addMode(op.modeName);
+        applied.push({ kind: kind, collection: collection.name, mode: op.modeName, modeId: newModeId });
+        continue;
+      }
+      if (kind === 'rename_mode') {
+        if (!collection || collection.name !== op.collection) {
+          unresolved.push({ kind: kind, collection: op.collection, reason: 'Collection changed since approval.' });
+          continue;
+        }
+        var mode = _modeById(collection, op.modeId);
+        if (!mode || _modeName(mode) !== op.expectedModeName) {
+          unresolved.push({ kind: kind, collection: collection.name, mode: op.expectedModeName, reason: 'Mode changed since approval.' });
+          continue;
+        }
+        collection.renameMode(op.modeId, op.newName);
+        applied.push({ kind: kind, collection: collection.name, from: op.expectedModeName, to: op.newName, modeId: op.modeId });
+        continue;
+      }
+      if (kind === 'delete_mode') {
+        if (!collection || collection.name !== op.collection || (collection.modes || []).length <= 1) {
+          unresolved.push({ kind: kind, collection: op.collection, reason: 'Collection changed or mode is last mode.' });
+          continue;
+        }
+        var delMode = _modeById(collection, op.modeId);
+        if (!delMode || _modeName(delMode) !== op.expectedModeName) {
+          unresolved.push({ kind: kind, collection: collection.name, mode: op.expectedModeName, reason: 'Mode changed since approval.' });
+          continue;
+        }
+        collection.removeMode(op.modeId);
+        applied.push({ kind: kind, collection: collection.name, mode: op.expectedModeName, modeId: op.modeId, destructive: true });
+        continue;
+      }
+      if (kind === 'create_variable') {
+        if (varsByName[op.name]) {
+          skipped.push({ kind: kind, name: op.name, reason: 'Variable already exists.' });
+          continue;
+        }
+        if (!collection || collection.name !== op.collection) {
+          unresolved.push({ kind: kind, name: op.name, reason: 'Collection changed since approval.' });
+          continue;
+        }
+        var createdVar = figma.variables.createVariable(op.name, collection, op.type);
+        _setVariableScopesForName(createdVar, op.name, op.type);
+        var setCreated = _setModeValues(createdVar, collection, op.modeValues || [], op.type, false);
+        if (setCreated.error) {
+          try { createdVar.remove(); } catch (_) {}
+          unresolved.push({ kind: kind, name: op.name, reason: setCreated.error });
+          continue;
+        }
+        allVars.push(createdVar);
+        _reindex();
+        applied.push({ kind: kind, name: op.name, id: createdVar.id, collection: collection.name, type: op.type, modeValues: setCreated.modeValues });
+        continue;
+      }
+      var variable = op.variableId ? varsById[op.variableId] : null;
+      if (kind === 'update_variable') {
+        if (!variable || variable.name !== op.expectedName || variable.resolvedType !== op.type) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable changed since approval.' });
+          continue;
+        }
+        var variableCollection = _collectionForVariable(variable);
+        if (!variableCollection || variableCollection.id !== op.collectionId || variableCollection.name !== op.collection) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Collection changed since approval.' });
+          continue;
+        }
+        var setUpdated = _setModeValues(variable, variableCollection, op.modeValues || [], op.type, true);
+        if (setUpdated.error) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: setUpdated.error });
+          continue;
+        }
+        applied.push({ kind: kind, name: op.expectedName, id: variable.id, modeValues: setUpdated.modeValues });
+        continue;
+      }
+      if (kind === 'rename_variable') {
+        if (!variable || variable.name !== op.expectedName) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable changed since approval.' });
+          continue;
+        }
+        variable.name = op.newName;
+        _reindex();
+        applied.push({ kind: kind, from: op.expectedName, to: op.newName, id: variable.id });
+        continue;
+      }
+      if (kind === 'delete_variable') {
+        if (!variable || variable.name !== op.expectedName || variable.resolvedType !== op.type) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable changed since approval.' });
+          continue;
+        }
+        variable.remove();
+        allVars = allVars.filter(function (v) { return v && v.id !== op.variableId; });
+        _reindex();
+        applied.push({ kind: kind, name: op.expectedName, id: op.variableId, destructive: true });
+        continue;
+      }
+      if (kind === 'update_variable_metadata') {
+        if (!variable || variable.name !== op.expectedName || variable.resolvedType !== op.type) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable changed since approval.' });
+          continue;
+        }
+        var variableMeta = _applyMetadata(variable, op.metadata || {});
+        applied.push({ kind: kind, name: op.expectedName, id: variable.id, changed: variableMeta.changed, unsupported: variableMeta.unsupported });
+        continue;
+      }
+      if (kind === 'duplicate_variable' || kind === 'move_variable') {
+        if (!variable || variable.name !== op.expectedName || variable.resolvedType !== op.type) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable changed since approval.' });
+          continue;
+        }
+        if (varsByName[op.newName]) {
+          skipped.push({ kind: kind, name: op.newName, reason: 'Target variable already exists.' });
+          continue;
+        }
+        if (!collection || collection.name !== op.collection) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Target collection changed since approval.' });
+          continue;
+        }
+        var copiedVar = figma.variables.createVariable(op.newName, collection, op.type);
+        _setVariableScopesForName(copiedVar, op.newName, op.type);
+        var setCopied = _setModeValues(copiedVar, collection, op.modeValues || [], op.type, false);
+        if (setCopied.error) {
+          try { copiedVar.remove(); } catch (_) {}
+          unresolved.push({ kind: kind, name: op.expectedName, reason: setCopied.error });
+          continue;
+        }
+        allVars.push(copiedVar);
+        var duplicateReport = { kind: kind, from: op.expectedName, to: op.newName, id: copiedVar.id, collection: collection.name, modeValues: setCopied.modeValues };
+        if (op.deleteOriginal) {
+          try {
+            variable.remove();
+            allVars = allVars.filter(function (v) { return v && v.id !== op.variableId; });
+            duplicateReport.deletedOriginal = true;
+            duplicateReport.destructive = true;
+          } catch (errDelOriginal) {
+            duplicateReport.deleteOriginalError = errDelOriginal && errDelOriginal.message ? errDelOriginal.message : 'Delete original failed.';
+          }
+        }
+        _reindex();
+        applied.push(duplicateReport);
+        continue;
+      }
+      if (kind === 'deprecate_variable') {
+        if (!variable || variable.name !== op.expectedName || variable.resolvedType !== op.type) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable changed since approval.' });
+          continue;
+        }
+        var oldDescription = '';
+        try { oldDescription = variable.description || ''; } catch (_) {}
+        var prefix = '@deprecated ' + (op.message || 'Deprecated by Figlets.');
+        if (oldDescription.indexOf(prefix) !== 0) {
+          try { variable.description = oldDescription ? (prefix + '\n' + oldDescription) : prefix; } catch (_) {}
+        }
+        if (op.hideFromPublishing) {
+          try { if ('hiddenFromPublishing' in variable) variable.hiddenFromPublishing = true; } catch (_) {}
+        }
+        applied.push({ kind: kind, name: op.expectedName, id: variable.id, hideFromPublishing: !!op.hideFromPublishing });
+        continue;
+      }
+      if (kind === 'retarget_variable_aliases') {
+        var fromVar = varsById[op.fromVariableId];
+        var toVar = varsById[op.toVariableId];
+        if (!fromVar || fromVar.name !== op.expectedFromName || !toVar || toVar.name !== op.expectedToName || fromVar.resolvedType !== toVar.resolvedType) {
+          unresolved.push({ kind: kind, from: op.expectedFromName, to: op.expectedToName, reason: 'Source or target variable changed since approval.' });
+          continue;
+        }
+        var changedRefs = [];
+        var refFailed = null;
+        var refs = Array.isArray(op.aliasRefs) ? op.aliasRefs : [];
+        for (var ri = 0; ri < refs.length; ri++) {
+          var ref = refs[ri] || {};
+          var refVar = varsById[ref.variableId];
+          if (!refVar || refVar.name !== ref.variableName) {
+            refFailed = 'Alias user changed since approval.';
+            break;
+          }
+          if (_valueSignature(refVar.valuesByMode ? refVar.valuesByMode[ref.modeId] : null) !== ref.expectedCurrentSignature) {
+            refFailed = 'Alias value changed since approval for ' + refVar.name + '.';
+            break;
+          }
+        }
+        if (refFailed) {
+          unresolved.push({ kind: kind, from: op.expectedFromName, to: op.expectedToName, reason: refFailed });
+          continue;
+        }
+        for (var rwi = 0; rwi < refs.length; rwi++) {
+          var writeRef = refs[rwi] || {};
+          var writeVar = varsById[writeRef.variableId];
+          writeVar.setValueForMode(writeRef.modeId, { type: 'VARIABLE_ALIAS', id: toVar.id });
+          changedRefs.push({ variable: writeVar.name, modeId: writeRef.modeId });
+        }
+        var retargetReport = { kind: kind, from: fromVar.name, to: toVar.name, changed: changedRefs.length, refs: changedRefs };
+        if (op.deleteOld) {
+          try {
+            var remainingAliasUsers = [];
+            for (var rav = 0; rav < allVars.length; rav++) {
+              var scanVar = allVars[rav];
+              if (!scanVar || !scanVar.valuesByMode) continue;
+              var scanModeIds = Object.keys(scanVar.valuesByMode || {});
+              for (var ram = 0; ram < scanModeIds.length; ram++) {
+                var scanValue = scanVar.valuesByMode[scanModeIds[ram]];
+                if (scanValue && typeof scanValue === 'object' && scanValue.type === 'VARIABLE_ALIAS' && scanValue.id === fromVar.id) {
+                  remainingAliasUsers.push(scanVar.name);
+                  break;
+                }
+              }
+            }
+            if (remainingAliasUsers.length) {
+              retargetReport.deleteOldSkipped = 'Old variable still has alias users: ' + remainingAliasUsers.join(', ');
+              applied.push(retargetReport);
+              continue;
+            }
+            fromVar.remove();
+            allVars = allVars.filter(function (v) { return v && v.id !== fromVar.id; });
+            retargetReport.deletedOld = true;
+            retargetReport.destructive = true;
+          } catch (errDelOld) {
+            retargetReport.deleteOldError = errDelOld && errDelOld.message ? errDelOld.message : 'Delete old variable failed.';
+          }
+        }
+        _reindex();
+        applied.push(retargetReport);
+        continue;
+      }
+      if (kind === 'create_text_style') {
+        if (!op.name || textStylesByName[op.name]) {
+          unresolved.push({ kind: kind, name: op.name, reason: 'Text style name is invalid.' });
+          continue;
+        }
+        var textStyle = figma.createTextStyle();
+        textStyle.name = op.name;
+        var textProps = await _applyTextStyleProperties(textStyle, op.properties || {});
+        if (textProps.error) {
+          try { textStyle.remove(); } catch (_) {}
+          unresolved.push({ kind: kind, name: op.name, reason: textProps.error });
+          continue;
+        }
+        allTextStyles.push(textStyle);
+        _reindex();
+        applied.push({ kind: kind, name: op.name, id: textStyle.id });
+        continue;
+      }
+      if (kind === 'update_text_style' || kind === 'rename_text_style' || kind === 'delete_text_style') {
+        var existingTextStyle = textStylesById[op.styleId];
+        if (!existingTextStyle || existingTextStyle.name !== op.expectedName) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Text style changed since approval.' });
+          continue;
+        }
+        if ((kind === 'update_text_style' || kind === 'delete_text_style') && op.expectedStyleSignature && _styleSignature(existingTextStyle) !== op.expectedStyleSignature) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Text style properties changed since approval.' });
+          continue;
+        }
+        if (kind === 'update_text_style') {
+          var updateTextProps = await _applyTextStyleProperties(existingTextStyle, op.properties || {});
+          if (updateTextProps.error) {
+            unresolved.push({ kind: kind, name: op.expectedName, reason: updateTextProps.error });
+            continue;
+          }
+          applied.push({ kind: kind, name: existingTextStyle.name, id: existingTextStyle.id });
+          continue;
+        }
+        if (kind === 'rename_text_style') {
+          existingTextStyle.name = op.newName;
+          _reindex();
+          applied.push({ kind: kind, from: op.expectedName, to: op.newName, id: existingTextStyle.id });
+          continue;
+        }
+        existingTextStyle.remove();
+        allTextStyles = allTextStyles.filter(function (s) { return s && s.id !== op.styleId; });
+        _reindex();
+        applied.push({ kind: kind, name: op.expectedName, id: op.styleId, destructive: true });
+        continue;
+      }
+      if (kind === 'create_effect_style') {
+        if (!op.name || effectStylesByName[op.name]) {
+          unresolved.push({ kind: kind, name: op.name, reason: 'Effect style name is invalid.' });
+          continue;
+        }
+        var effectStyle = figma.createEffectStyle();
+        effectStyle.name = op.name;
+        _applyEffectStyleProperties(effectStyle, op.properties || {});
+        allEffectStyles.push(effectStyle);
+        _reindex();
+        applied.push({ kind: kind, name: op.name, id: effectStyle.id });
+        continue;
+      }
+      if (kind === 'update_effect_style' || kind === 'rename_effect_style' || kind === 'delete_effect_style') {
+        var existingEffectStyle = effectStylesById[op.styleId];
+        if (!existingEffectStyle || existingEffectStyle.name !== op.expectedName) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Effect style changed since approval.' });
+          continue;
+        }
+        if ((kind === 'update_effect_style' || kind === 'delete_effect_style') && op.expectedStyleSignature && _styleSignature(existingEffectStyle) !== op.expectedStyleSignature) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Effect style properties changed since approval.' });
+          continue;
+        }
+        if (kind === 'update_effect_style') {
+          _applyEffectStyleProperties(existingEffectStyle, op.properties || {});
+          applied.push({ kind: kind, name: existingEffectStyle.name, id: existingEffectStyle.id });
+          continue;
+        }
+        if (kind === 'rename_effect_style') {
+          existingEffectStyle.name = op.newName;
+          _reindex();
+          applied.push({ kind: kind, from: op.expectedName, to: op.newName, id: existingEffectStyle.id });
+          continue;
+        }
+        existingEffectStyle.remove();
+        allEffectStyles = allEffectStyles.filter(function (s) { return s && s.id !== op.styleId; });
+        _reindex();
+        applied.push({ kind: kind, name: op.expectedName, id: op.styleId, destructive: true });
+        continue;
+      }
+      if (kind === 'bind_node_variable' || kind === 'unbind_node_variable') {
+        var node = _nodeById(op.nodeId);
+        if (!node) {
+          unresolved.push({ kind: kind, nodeId: op.nodeId, reason: 'Node not found.' });
+          continue;
+        }
+        try {
+          node.setBoundVariable(op.property, kind === 'bind_node_variable' ? varsById[op.variableId] : null);
+          applied.push({ kind: kind, nodeId: op.nodeId, property: op.property, variable: op.variableName || null });
+        } catch (errBindVar) {
+          unresolved.push({ kind: kind, nodeId: op.nodeId, reason: errBindVar.message || 'Node variable binding failed.' });
+        }
+        continue;
+      }
+      if (kind === 'bind_node_paint_variable' || kind === 'unbind_node_paint_variable') {
+        var paintNode = _nodeById(op.nodeId);
+        if (!paintNode) {
+          unresolved.push({ kind: kind, nodeId: op.nodeId, reason: 'Node not found.' });
+          continue;
+        }
+        var paintResult = _setNodePaintVariable(paintNode, op.paintProperty, op.paintIndex || 0, kind === 'bind_node_paint_variable' ? varsById[op.variableId] : null);
+        if (paintResult.error) unresolved.push({ kind: kind, nodeId: op.nodeId, reason: paintResult.error });
+        else applied.push({ kind: kind, nodeId: op.nodeId, paintProperty: op.paintProperty, paintIndex: op.paintIndex || 0, variable: op.variableName || null });
+        continue;
+      }
+      if (kind === 'bind_node_text_style' || kind === 'unbind_node_text_style') {
+        var textNode = _nodeById(op.nodeId);
+        if (!textNode) {
+          unresolved.push({ kind: kind, nodeId: op.nodeId, reason: 'Node not found.' });
+          continue;
+        }
+        try {
+          textNode.textStyleId = kind === 'bind_node_text_style' ? op.styleId : '';
+          applied.push({ kind: kind, nodeId: op.nodeId, style: op.styleName || null });
+        } catch (errTextStyle) {
+          unresolved.push({ kind: kind, nodeId: op.nodeId, reason: errTextStyle.message || 'Text style binding failed.' });
+        }
+        continue;
+      }
+      if (kind === 'bind_node_effect_style' || kind === 'unbind_node_effect_style') {
+        var effectNode = _nodeById(op.nodeId);
+        if (!effectNode) {
+          unresolved.push({ kind: kind, nodeId: op.nodeId, reason: 'Node not found.' });
+          continue;
+        }
+        try {
+          effectNode.effectStyleId = kind === 'bind_node_effect_style' ? op.styleId : '';
+          applied.push({ kind: kind, nodeId: op.nodeId, style: op.styleName || null });
+        } catch (errEffectStyle) {
+          unresolved.push({ kind: kind, nodeId: op.nodeId, reason: errEffectStyle.message || 'Effect style binding failed.' });
+        }
+        continue;
+      }
+      if (kind === 'update_collection_metadata') {
+        if (!collection || collection.name !== op.expectedName) {
+          unresolved.push({ kind: kind, collection: op.expectedName, reason: 'Collection changed since approval.' });
+          continue;
+        }
+        var collectionMeta = _applyMetadata(collection, op.metadata || {});
+        applied.push({ kind: kind, collection: collection.name, id: collection.id, changed: collectionMeta.changed, unsupported: collectionMeta.unsupported });
+        continue;
+      }
+      unresolved.push({ kind: kind, reason: 'Unsupported operation kind.' });
+    } catch (err) {
+      unresolved.push({ kind: kind, name: op.name || op.expectedName || op.collection || op.expectedName || '', reason: err.message || 'Operation failed.' });
+    }
+  }
+
+  var msgParts = [];
+  msgParts.push(applied.length + ' operation' + (applied.length === 1 ? '' : 's') + ' applied');
+  if (skipped.length) msgParts.push(skipped.length + ' skipped');
+  if (unresolved.length) msgParts.push(unresolved.length + ' unresolved');
+  return {
+    applied: applied,
+    skipped: skipped,
+    unresolved: unresolved,
+    message: msgParts.join(', ') + '.',
   };
 }
 

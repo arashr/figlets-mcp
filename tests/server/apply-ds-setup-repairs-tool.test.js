@@ -174,7 +174,7 @@ module.exports = (async () => {
     { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500" } },
     { name: "color/icon/success", role: "icon", aliases: { Light: "color/green/800", Dark: "color/green/200" } },
   ]);
-  assert.deepStrictEqual(roleConfigResult, { updated: true, added: 2 });
+  assert.deepStrictEqual(roleConfigResult, { updated: true, added: 2, remappedPairs: 0, conflicts: [] });
   const roleConfigText = fs.readFileSync(roleConfigPath, "utf8");
   assert.ok(roleConfigText.includes("color/border/info"));
   assert.ok(roleConfigText.includes("color/icon/success"));
@@ -259,7 +259,7 @@ module.exports = (async () => {
       { name: "color/border/info", role: "border", aliases: { Light: "color/blue/500", Dark: "color/blue/500" } },
     ]);
     assert.strictEqual(roleResult.roleCreated.length, 1);
-    assert.deepStrictEqual(roleResult.roleConfigUpdate, { updated: true, added: 1 });
+    assert.deepStrictEqual(roleResult.roleConfigUpdate, { updated: true, added: 1, remappedPairs: 0, conflicts: [] });
   } finally {
     uninstallRoleHook();
     if (prevRoleLocal !== undefined) process.env.FIGLETS_LOCAL_DIR = prevRoleLocal;

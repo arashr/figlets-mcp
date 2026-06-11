@@ -4,6 +4,44 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-07 — BNN-53 checkpoint; on-fill roles are distinct from plain surface roles]
+
+**Status:** Manual smoke showed Figlets reporting `color/text/on-fill-danger` and `color/icon/on-fill-danger` as semantic naming conflicts against `color/text/danger` and `color/icon/danger`, then planning `_deprecated/...` renames when the designer chose surface-based consolidation. That was a Figlets diagnosis bug, not a bad designer decision.
+
+**Decision:** `on-fill-*` foreground/icon roles are contextual roles for text/icons on filled surfaces such as `color/fill/danger`. They are allowed to coexist with plain `text/*` and `icon/*` roles that describe normal surface usage. Semantic naming consolidation must not deprecate `color/text/on-fill-*` or `color/icon/on-fill-*` merely because plain surface roles exist.
+
+**Implementation:** `inspect_ds_setup_gaps` now normalizes leaves like `on-fill-danger`, `on-surface-danger`, `on-bg-danger`, and `on-background-danger` to the base family `danger`, labels them as contextual background roles instead of duplicate role-based competitors, and pairs `color/fill/*` backgrounds with `color/text/on-fill-*` / `color/icon/on-fill-*` for contrast diagnosis.
+
+**Verification:** Added regressions in `tests/server/inspect-ds-setup-gaps-qa.test.js` and `tests/server/semantic-naming-consolidation-tool.test.js`. Full `npm test` passed **101/101** and `git diff --check` passed.
+
+---
+
+### [2026-06-07 — BNN-53 checkpoint; high-level operations are now the generic edit path]
+
+**Status:** Follow-up architecture pass after Arash asked to ensure scripts use the new high-level layer. The redundant variable-creation bridge command/capability was removed; `apply_ds_variable_creations` now converts approved variable creations into `create_variable` operations and applies them through `apply_ds_figma_operations`.
+
+**Structure:** The bridge now has one generic route for exact basic Figma design-system edits: `/request-figma-operations` with the plugin `figma-operations` capability. The old `/request-variable-creations`, `/sync-variable-creations`, `apply-variable-creations`, and `_applyVariableCreations` path is gone. Product-specific tools such as setup repairs, token completion, primitive updates, QA binding fixes, naming consolidation, showcase, docs, and setup still keep their own flows because their approval/result contracts include domain-specific planning, config derivation, accessibility, or designer-decision logic.
+
+**Agent contract:** Root docs, adapter docs, plugin skills, plugin start commands, and Agent Interface health checks now say exact variable/collection/mode/style/binding/metadata/lifecycle edits should route through `plan_ds_figma_operations` before anything is described as missing planner scope. Product-specific planning or designer-decision gaps remain guarded; agents must not write scripts or edit the repo in Designer Mode.
+
+**Verification:** Focused tests for variable creation delegation, figma operations, bridge policy, Agent Interface, plugin packaging, and docs passed. Full `npm test` passed **101/101** and `git diff --check` passed.
+
+---
+
+### [2026-06-07 — BNN-53 checkpoint; generic Figma operations surface added]
+
+**Status:** BNN-53 manual smoke found a broader capability gap: basic Figma design-system manipulation should not depend on a special-case repair planner. The current branch now adds a shared `plan_ds_figma_operations` -> `apply_ds_figma_operations` surface for exact designer-approved operations.
+
+**Current implementation:** The planner/apply pair covers create, update, rename, and delete variables; create, rename, and delete collections; create, rename, and delete modes; local text/effect style CRUD; exact node binding/unbinding for variables and styles; variable/collection metadata; and token lifecycle helpers such as duplicate, move, deprecate, and retarget aliases. It dry-runs against the synced snapshot, marks destructive operations, returns an exact `repairPlan.applyInput`, revalidates approved payloads before bridge apply, and tells agents to sync/reinspect after mutation.
+
+**Bridge/plugin:** The bridge advertises a new `figma-operations` capability and routes `apply-figma-operations` through the plugin. The plugin executor applies the approved operations sequentially and reports applied, skipped, and unresolved entries.
+
+**Guidance:** Agent Interface and adapter docs now tell agents to use this high-level operations surface for exact make/update/rename/delete variable/collection/mode/style/binding/metadata/lifecycle requests. This is not on-fill-specific and not a raw script escape hatch; specialized repair planners should still own product-specific planning and use this shared layer for the basic Figma mutations when appropriate.
+
+**Verification:** `node tests/server/figma-operations-tool.test.js`, `node tests/server/mcp-tools-list.test.js`, `node tests/server/agent-interface-tool.test.js`, `node tests/adapter/tool-coverage.test.js`, full `npm test` (**101/101**), `node --check` on the new server/bridge files, and `git diff --check` all passed. Linear BNN-53 has a checkpoint comment with the same scope and verification.
+
+---
+
 ### [2026-06-04 — BNN-53 in progress; Agent Interface red-team checks added]
 
 **Status:** BNN-53 is active on branch `codex/bnn-53-approval-boundary-red-team` with [PR #21](https://github.com/arashr/figlets-mcp/pull/21) open. Linear is `In Review`. The implementation adds host-neutral approval-boundary red-team checks to `figlets_health_check`, plus developer-facing manual smoke guidance.

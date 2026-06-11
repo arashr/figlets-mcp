@@ -36,12 +36,12 @@ module.exports = (async () => {
       success: true,
       result: {
         dryRun: false,
-        categories: ["radius"],
+        categories: ["spacing-semantics"],
         unknownCategories: [],
         report: {
-          radius: {
+          "spacing-semantics": {
             entries: 1,
-            createdVariables: [{ name: "space/radius/md" }],
+            createdVariables: [],
             updatedVariables: [],
             wouldCreateVariables: [],
             wouldUpdateVariables: [],
@@ -51,7 +51,7 @@ module.exports = (async () => {
             typeMismatch: [],
           },
         },
-        message: "radius: 1 changed",
+        message: "spacing-semantics: 1 changed",
       },
     },
   });
@@ -62,7 +62,7 @@ module.exports = (async () => {
     {
       cwd: root,
       stdio: ["pipe", "pipe", "pipe"],
-      env: Object.assign({}, process.env, { FIGLETS_BRIDGE_HOOK_FILE: hookPath }),
+      env: Object.assign({}, process.env, { FIGLETS_BRIDGE_HOOK_FILE: hookPath, FIGLETS_SKIP_RECEIVER: "1" }),
     }
   );
 
@@ -114,7 +114,17 @@ module.exports = (async () => {
           name: "update_ds_tokens",
           arguments: {
             config_path: configPath,
-            categories: ["radius"],
+            categories: ["spacing-semantics"],
+            spacing_semantic_repairs: [{
+              name: "space/layout/lg",
+              updates: [{
+                modeId: "mobile",
+                modeName: "Mobile",
+                toAliasId: "space-12",
+                toAliasName: "space/12",
+                configExpected: 48,
+              }],
+            }],
             dry_run: false,
           },
         });
@@ -130,12 +140,22 @@ module.exports = (async () => {
           assert.ok(text, `tools/call should return text content. STDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
           const payload = JSON.parse(text);
           assert.strictEqual(payload.dryRun, false);
-          assert.deepStrictEqual(payload.categories, ["radius"]);
-          assert.strictEqual(payload.message, "radius: 1 changed");
-          assert.ok(payload.report && payload.report.radius, "resolved apply report should be present");
+          assert.deepStrictEqual(payload.categories, ["spacing-semantics"]);
+          assert.strictEqual(payload.message, "spacing-semantics: 1 changed");
+          assert.ok(payload.report && payload.report["spacing-semantics"], "resolved apply report should be present");
           assert.ok(!payload.then, "registered MCP callback must not stringify an unresolved Promise");
           const receivedBody = readBridgeHookCapture(capturePath);
           assert.ok(receivedBody.DS, "MCP call should reach the bridge hook without binding localhost");
+          assert.deepStrictEqual(receivedBody.spacingSemanticRepairs, [{
+            name: "space/layout/lg",
+            updates: [{
+              modeId: "mobile",
+              modeName: "Mobile",
+              toAliasId: "space-12",
+              toAliasName: "space/12",
+              configExpected: 48,
+            }],
+          }]);
           resolve();
         } catch (err) {
           err.message += `\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`;

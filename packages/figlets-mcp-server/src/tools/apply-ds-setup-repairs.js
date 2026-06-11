@@ -11,7 +11,7 @@ const {
 const applyDsSetupRepairsTool = {
   name: "apply_ds_setup_repairs",
   description:
-    "Apply designer-approved setup changes to Figma. Repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode; `roleRepairs` creates approved missing border/icon/focus-border semantic role variables. After inspect_ds_setup_gaps approval, pass repairPlan.applyInput exactly; do not replace aliases with counts or summaries. Updates the file-scoped config only after Figma succeeds.",
+    "Apply designer-approved setup changes to Figma. Repair kinds: `repairs` creates missing semantic foreground variables; `aliasUpdates` re-aliases existing semantic variables in a specific mode; `roleRepairs` creates approved missing border/icon/focus-border/foreground semantic role variables. After inspect_ds_setup_gaps approval, pass repairPlan.applyInput or optionalApplyInput exactly; do not replace aliases with counts or summaries. Updates the file-scoped config only after Figma succeeds.",
   inputSchema: {
     type: "object",
     properties: {
@@ -59,8 +59,11 @@ const applyDsSetupRepairsTool = {
         items: {
           type: "object",
           properties: {
-            name: { type: "string", description: "Semantic role variable to create, e.g. color/border/info, color/icon/success, or color/outline/focus." },
-            role: { type: "string", description: "Role type, usually border, icon, or focus-border." },
+            name: { type: "string", description: "Semantic role variable to create, e.g. color/border/info, color/icon/success, color/outline/focus, or an approved foreground role." },
+            role: { type: "string", description: "Role type, usually border, icon, focus-border, or foreground." },
+            pairedBg: { type: "string", description: "Optional background token from the planner when this role belongs to a specific fill surface, e.g. color/fill/danger." },
+            expectedCurrentPairText: { type: "string", description: "Optional stale-approval guard for on-fill text role creation. If the config pair changed, Figlets will not remap it." },
+            expectedCurrentPairIcon: { type: "string", description: "Optional stale-approval guard for on-fill icon role creation. If the config pair changed, Figlets will not remap it." },
             aliases: {
               type: "object",
               description: "Per-mode primitive variable names approved by the designer from inspect_ds_setup_gaps.repairPlan.applyInput. Preserve this object exactly; never replace it with a count, summary, boolean, or prose-derived value.",
@@ -73,7 +76,7 @@ const applyDsSetupRepairsTool = {
           },
           required: ["name", "role", "aliases"]
         },
-        description: "Designer-approved missing border/icon/focus-border semantic role variables. Does not run unless the designer explicitly approves these role repairs."
+        description: "Designer-approved missing border/icon/focus-border/foreground semantic role variables. Does not run unless the designer explicitly approves these role repairs."
       },
       config_path: {
         type: "string",
@@ -162,11 +165,17 @@ function _normalizeRepairs(repairs) {
 }
 
 function _normalizeRoleRepairs(repairs) {
-  return (Array.isArray(repairs) ? repairs : []).map(repair => ({
-    name: repair && repair.name ? String(repair.name) : "",
-    role: repair && repair.role ? String(repair.role) : "",
-    aliases: _cleanAliases(repair && repair.aliases),
-  })).filter(repair => repair.name && repair.role && Object.keys(repair.aliases).length);
+  return (Array.isArray(repairs) ? repairs : []).map(repair => {
+    const out = {
+      name: repair && repair.name ? String(repair.name) : "",
+      role: repair && repair.role ? String(repair.role) : "",
+      aliases: _cleanAliases(repair && repair.aliases),
+    };
+    if (repair && repair.pairedBg) out.pairedBg = String(repair.pairedBg);
+    if (repair && repair.expectedCurrentPairText) out.expectedCurrentPairText = String(repair.expectedCurrentPairText);
+    if (repair && repair.expectedCurrentPairIcon) out.expectedCurrentPairIcon = String(repair.expectedCurrentPairIcon);
+    return out;
+  }).filter(repair => repair.name && repair.role && Object.keys(repair.aliases).length);
 }
 
 function _normalizeAliasUpdates(updates) {
@@ -252,12 +261,73 @@ function _updateConfigRoles(configPath, roleRepairs) {
 
   if (!ds.color) ds.color = {};
   if (!ds.color.semantics) ds.color.semantics = {};
+  if (!Array.isArray(ds.color.semantics.pairs)) ds.color.semantics.pairs = [];
   if (!Array.isArray(ds.color.semantics.icons)) ds.color.semantics.icons = [];
   if (!Array.isArray(ds.color.semantics.unpaired)) ds.color.semantics.unpaired = [];
 
   let added = 0;
+  let remappedPairs = 0;
+  const conflicts = [];
+  const updatePairModeAliases = (pair, role, aliases) => {
+    for (const modeName of Object.keys(aliases || {})) {
+      if (!pair[modeName] || typeof pair[modeName] !== "object") pair[modeName] = {};
+      pair[modeName][role] = aliases[modeName];
+    }
+  };
   for (const repair of roleRepairs) {
     const row = Object.assign({ token: repair.name }, repair.aliases);
+    if (repair.role === "foreground" && repair.pairedBg) {
+      let pair = ds.color.semantics.pairs.find(item => item && item.bg === repair.pairedBg);
+      if (pair && pair.text === repair.name) continue;
+      if (pair && repair.expectedCurrentPairText && pair.text !== repair.expectedCurrentPairText) {
+        conflicts.push({
+          bg: repair.pairedBg,
+          role: "foreground",
+          expectedText: repair.expectedCurrentPairText,
+          actualText: pair.text || null,
+          proposedText: repair.name,
+        });
+        continue;
+      }
+      if (!pair) {
+        pair = { bg: repair.pairedBg };
+        ds.color.semantics.pairs.push(pair);
+        added += 1;
+      } else {
+        remappedPairs += 1;
+      }
+      pair.text = repair.name;
+      updatePairModeAliases(pair, "text", repair.aliases);
+      continue;
+    }
+    if (repair.role === "icon" && repair.pairedBg) {
+      let pair = ds.color.semantics.pairs.find(item => item && item.bg === repair.pairedBg);
+      if (pair && pair.icon === repair.name) continue;
+      if (pair && repair.expectedCurrentPairIcon && pair.icon && pair.icon !== repair.expectedCurrentPairIcon) {
+        conflicts.push({
+          bg: repair.pairedBg,
+          role: "icon",
+          expectedIcon: repair.expectedCurrentPairIcon,
+          actualIcon: pair.icon || null,
+          proposedIcon: repair.name,
+        });
+        continue;
+      }
+      if (!pair) {
+        pair = { bg: repair.pairedBg };
+        ds.color.semantics.pairs.push(pair);
+        added += 1;
+      } else {
+        remappedPairs += 1;
+      }
+      pair.icon = repair.name;
+      updatePairModeAliases(pair, "icon", repair.aliases);
+      if (!ds.color.semantics.icons.some(item => item && item.token === repair.name)) {
+        ds.color.semantics.icons.push(row);
+        added += 1;
+      }
+      continue;
+    }
     if (repair.role === "icon") {
       if (ds.color.semantics.icons.some(item => item && item.token === repair.name)) continue;
       ds.color.semantics.icons.push(row);
@@ -269,8 +339,8 @@ function _updateConfigRoles(configPath, roleRepairs) {
     added += 1;
   }
 
-  if (added > 0) writeDsConfig(configPath, ds);
-  return { updated: added > 0, added };
+  if (added > 0 || remappedPairs > 0) writeDsConfig(configPath, ds);
+  return { updated: added > 0 || remappedPairs > 0, added, remappedPairs, conflicts };
 }
 
 function handleApplyDsSetupRepairs(args = {}) {

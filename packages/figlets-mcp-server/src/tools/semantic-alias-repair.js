@@ -449,16 +449,6 @@ function planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, options = {
       }
 
       if (currentRaw === null && isAliasVariableValue(currentValue)) {
-        if (currentValue.id !== aliasTarget.id) {
-          updates.push({
-            modeId: mode.modeId,
-            modeName: mode.modeName,
-            from: currentValue,
-            configExpected: intended,
-            toAliasName: aliasTarget.name,
-            toAliasId: aliasTarget.id,
-          });
-        }
         continue;
       }
 

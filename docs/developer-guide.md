@@ -89,6 +89,20 @@ BNN-37 manual smoke prep is intentionally developer-only. It is not an MCP desig
 
 The script resets local variables, local styles, and canvas content in the open file, builds a realistic Figlets-style design system, then intentionally removes a seeded set of semantic foreground companions, token variables, a text style, and extra spacing modes. It also seeds BNN-45 semantic naming conflicts such as `color/bg/danger` + `color/bg/on-danger` and `color/bg/info` + `color/bg/on-info`, and can create raw binding-audit target nodes. After the bridge reports the file key, the script copies the prepared config to `.local/<fileKey>/design-system.config.js` so config-backed smoke checks still know which tokens were intentionally removed.
 
+Daily reset command:
+
+```bash
+npm run figlets:reset-test-file
+```
+
+This defaults to seed `bnn-53-smoke`, requires the open Figma file to be named `Figlets Test`, starts or restarts the local receiver in developer mode, waits for the Bridge plugin to connect, then prepares the broken fixture. For a custom run, use:
+
+```bash
+npm run figlets:reset-test-file -- --seed bnn-37-smoke --expected-file-name "Figlets Test"
+```
+
+The lower-level command remains available for unusual fixture prep:
+
 ```bash
 FIGLETS_DEV_BRIDGE=1 node scripts/prepare-broken-ds-fixture.js \
   --yes-i-understand-this-mutates-figma \
@@ -100,7 +114,7 @@ Reset/re-run steps:
 
 1. Open a fresh or disposable Figma file.
 2. Open the local Figlets Bridge plugin from this checkout.
-3. Run the command above with a seed. Reuse the same seed for repeatable gaps; change the seed for a different gap mix. Pass the disposable file's exact Figma name with `--expected-file-name` when you want the bridge to refuse mutation if a different file is open.
+3. Run `npm run figlets:reset-test-file`. Reuse the same seed for repeatable gaps; change the seed for a different gap mix. Keep the disposable file's exact Figma name in `--expected-file-name` so the bridge refuses mutation if a different file is open.
 4. Run `sync_figma_data`, then manual smoke the designer workflows against the prepared broken file.
 
 The receiver endpoint is gated by `FIGLETS_DEV_BRIDGE=1` and returns 404 outside developer bridge mode. The CLI also refuses to run without `--yes-i-understand-this-mutates-figma`, and the bridge request includes the explicit confirmation phrase `RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE`.

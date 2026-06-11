@@ -433,18 +433,22 @@ function _handleApplyDsTokens(args, configPath, ds) {
     };
   }
 
-  return requestBridgePost("/request-update-tokens", {
+  const bridgePayload = {
     DS: bridgeDs,
     categories: resolved.bridgeCategories,
     createMissing: args.create_missing !== false,
     dryRun: false,
     ensureCollectionModes: args.ensure_collection_modes === true,
-    spacingSemanticRepairs,
     pruneOffConfigVariables: prune.off_config_variables,
     pruneOffConfigTextStyles: prune.off_config_text_styles,
     pruneOffConfigEffectStyles: prune.off_config_effect_styles,
     pruneConfigAuthoritative: prune.config_authoritative,
-  }, {
+  };
+  if (spacingSemanticRepairsProvided) {
+    bridgePayload.spacingSemanticRepairs = spacingSemanticRepairs;
+  }
+
+  return requestBridgePost("/request-update-tokens", bridgePayload, {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
   }).then((response) => {

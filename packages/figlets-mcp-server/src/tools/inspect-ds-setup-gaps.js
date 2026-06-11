@@ -70,6 +70,18 @@ function _stripVariantSuffix(leaf) {
   return value;
 }
 
+function _familyFromOnRoleLeaf(leaf) {
+  const value = _norm(leaf);
+  const fillMatch = /^on-(fill|surface|bg|background)-(.+)$/.exec(value);
+  if (fillMatch) return fillMatch[2];
+  if (/^on-[^/]+$/.test(value)) return value.replace(/^on-/, "");
+  return value;
+}
+
+function _isContextualOnBackgroundLeaf(leaf) {
+  return /^on-(fill|surface|bg|background)-.+$/.test(_norm(leaf));
+}
+
 function _sameCaseSegment(sourceSegment, replacement) {
   if (/^[A-Z0-9_-]+$/.test(sourceSegment)) return replacement.toUpperCase();
   if (/^[A-Z]/.test(sourceSegment)) {
@@ -106,13 +118,13 @@ function _familyKeyForParts(parts, roleIndex) {
   if (afterRole.length && /^(surface|bg|background|fill)$/.test(roleSegment)) {
     const leaf = _norm(afterRole[0]);
     if (/^on-[^/]+$/.test(leaf)) {
-      return [leaf.replace(/^on-/, "")].concat(afterRole.slice(1)).join("/");
+      return [_familyFromOnRoleLeaf(leaf)].concat(afterRole.slice(1)).join("/");
     }
   }
   if (afterRole.length && /^(text|fg|foreground|icon|border|outline|stroke)$/.test(roleSegment)) {
     const leaf = _norm(afterRole[0]);
     if (/^on-[^/]+$/.test(leaf)) {
-      return [leaf.replace(/^on-/, "")].concat(afterRole.slice(1)).join("/");
+      return [_familyFromOnRoleLeaf(leaf)].concat(afterRole.slice(1)).join("/");
     }
   }
   if (afterRole.length) return afterRole.join("/");
@@ -156,7 +168,7 @@ function _candidateNameForRole(exampleName, role, preferredFamilies) {
   if (!replacement) return null;
   const next = _swapSegment(parts, info.roleIndex, replacement);
   if (role === "background" && hasOnLeaf) {
-    next[info.roleIndex + 1] = _sameCaseSegment(roleLeaf, _norm(roleLeaf).replace(/^on-/, ""));
+    next[info.roleIndex + 1] = _sameCaseSegment(roleLeaf, _familyFromOnRoleLeaf(roleLeaf));
   }
   return next.join("/");
 }
@@ -231,7 +243,9 @@ function _roleConventionForName(name) {
     name,
     role: info.role,
     family,
-    convention: roleBased ? "role-based-on-fill" : "surface-based-role",
+    convention: roleBased
+      ? (_isContextualOnBackgroundLeaf(normalizedLeaf) ? "contextual-on-background-role" : "role-based-on-fill")
+      : "surface-based-role",
     familySegment: roleSegment,
     leaf: normalizedLeaf,
     impliedCanonical: roleBased ? "role-based" : "surface-based",
@@ -308,7 +322,7 @@ function _semanticNamingBias(entries) {
       counts.invalid += 1;
       continue;
     }
-    if (entry.convention === "role-based-fill" || entry.convention === "role-based-on-fill") {
+    if (entry.convention === "role-based-fill" || entry.convention === "role-based-on-fill" || entry.convention === "contextual-on-background-role") {
       counts.roleBased += 1;
       continue;
     }
@@ -567,6 +581,9 @@ function _foregroundCandidatesForBackgroundParts(parts, bgIndex, allNames) {
     const leafIndex = roleBased.length - 1;
     roleBased[leafIndex] = _sameCaseSegment(roleBased[leafIndex], `on-${_norm(roleBased[leafIndex])}`);
     candidates.unshift(roleBased.join("/"));
+    const onFillRole = _swapSegment(parts, bgIndex, "text");
+    onFillRole[leafIndex] = _sameCaseSegment(onFillRole[leafIndex], `on-fill-${_norm(onFillRole[leafIndex])}`);
+    candidates.unshift(onFillRole.join("/"));
   }
   return Array.from(new Set(candidates));
 }
@@ -580,6 +597,9 @@ function _iconCandidatesForBackgroundParts(parts, bgIndex) {
     const leafIndex = withOnLeaf.length - 1;
     withOnLeaf[leafIndex] = _sameCaseSegment(withOnLeaf[leafIndex], `on-${_norm(withOnLeaf[leafIndex])}`);
     candidates.unshift(withOnLeaf.join("/"));
+    const withOnFillLeaf = base.slice();
+    withOnFillLeaf[leafIndex] = _sameCaseSegment(withOnFillLeaf[leafIndex], `on-fill-${_norm(withOnFillLeaf[leafIndex])}`);
+    candidates.unshift(withOnFillLeaf.join("/"));
   }
   return Array.from(new Set(candidates));
 }
@@ -790,6 +810,138 @@ function _planIconReAlias(bgTerm, iconTerm, modeName, colorVars, varsById, colle
     || a.name.localeCompare(b.name)
   );
   return candidates[0] ? candidates[0].name : null;
+}
+
+function _passesContrastForRole(role, algorithm, bgRgb, fgRgb) {
+  if (!bgRgb || !fgRgb) return false;
+  if (role === "icon") return _wcagRatio(bgRgb, fgRgb) >= _WCAG_ICON_THRESHOLD;
+  if (algorithm === "apca") return Math.abs(_apcaLc(fgRgb, bgRgb)) >= _APCA_THRESHOLD;
+  return _wcagRatio(bgRgb, fgRgb) >= _WCAG_THRESHOLD;
+}
+
+function _sharedReAliasSafety(update, figmaData, existingDs, algorithm, role) {
+  if (!update || !update.token || !update.mode || !update.newAliasTarget) {
+    return { safe: false, blockingContexts: [], reason: "Planned re-alias update is incomplete." };
+  }
+
+  const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
+  const collections = Array.isArray(figmaData && figmaData.collections) ? figmaData.collections : [];
+  const colorVars = variables.filter(v => v && v.resolvedType === "COLOR" && typeof v.name === "string");
+  const semanticVars = colorVars.filter(v => _isSemanticColorName(v.name));
+  const byName = new Map(colorVars.map(v => [v.name, v]));
+  const varsById = new Map(variables.filter(v => v && v.id).map(v => [v.id, v]));
+  const allColorNames = colorVars.map(v => v.name);
+  const semanticContext = _semanticContextFromConfig(existingDs);
+  const targetVar = byName.get(update.newAliasTarget);
+  const targetTerm = targetVar
+    ? _resolveTerminalByModeName(targetVar, update.mode, varsById, collections)
+    : null;
+  if (!targetTerm || !targetTerm.rgb) {
+    return {
+      safe: false,
+      blockingContexts: [{
+        token: update.token,
+        mode: update.mode,
+        target: update.newAliasTarget,
+        reason: "Target alias does not resolve to a color primitive in this mode.",
+      }],
+      reason: "Target alias could not be resolved for shared-token safety checking.",
+    };
+  }
+
+  const blockingContexts = [];
+  const seenContexts = new Set();
+  const addBlocking = (context) => {
+    const key = [context.role, context.bg, context.token, context.mode].join("|");
+    if (seenContexts.has(key)) return;
+    seenContexts.add(key);
+    blockingContexts.push(context);
+  };
+
+  for (const variable of semanticVars) {
+    const parts = variable.name.split("/");
+    const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+    if (bgIndex < 0 || _isInvalidOnBackgroundParts(parts, bgIndex)) continue;
+
+    if (!role || role === "text") {
+      const configuredText = semanticContext.pairTextByBg.get(variable.name);
+      const fgName = (configuredText && byName.has(configuredText))
+        ? configuredText
+        : _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
+      if (fgName === update.token) {
+        const bgTerm = _resolveTerminalByModeName(variable, update.mode, varsById, collections);
+        if (bgTerm && bgTerm.rgb && !_passesContrastForRole("text", algorithm, bgTerm.rgb, targetTerm.rgb)) {
+          addBlocking({
+            role: "text",
+            bg: variable.name,
+            token: update.token,
+            mode: update.mode,
+            target: update.newAliasTarget,
+            reason: "The proposed alias would not pass text contrast for another known pairing that uses this shared token.",
+          });
+        }
+      }
+    }
+
+    if (!role || role === "icon") {
+      const configuredIcon = semanticContext.pairIconByBg.get(variable.name);
+      let iconName = null;
+      if (configuredIcon && byName.has(configuredIcon)) {
+        iconName = configuredIcon;
+      } else {
+        const iconCandidates = _iconCandidatesForBackgroundParts(parts, bgIndex);
+        iconName = iconCandidates.find(name => byName.has(name)) || null;
+        if (!iconName) iconName = _companionRoleCandidate(variable.name, _ICON_FAMILIES, allColorNames);
+      }
+      if (iconName === update.token) {
+        const bgTerm = _resolveTerminalByModeName(variable, update.mode, varsById, collections);
+        if (bgTerm && bgTerm.rgb && !_passesContrastForRole("icon", algorithm, bgTerm.rgb, targetTerm.rgb)) {
+          addBlocking({
+            role: "icon",
+            bg: variable.name,
+            token: update.token,
+            mode: update.mode,
+            target: update.newAliasTarget,
+            reason: "The proposed alias would not pass icon contrast for another known pairing that uses this shared token.",
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    safe: blockingContexts.length === 0,
+    blockingContexts,
+    reason: blockingContexts.length
+      ? "The proposed re-alias is not globally safe for this shared semantic token."
+      : "The proposed re-alias passes all known pairings for this token and mode.",
+  };
+}
+
+function _markUnsafeSharedReAlias(item, safety) {
+  if (!item || !item.plannedReAlias || !safety || safety.safe) return;
+  item.plannedReAliasBlocked = {
+    token: item.plannedReAlias.token,
+    mode: item.plannedReAlias.mode,
+    from: item.plannedReAlias.from || item.plannedReAlias.expectedCurrentAlias || null,
+    to: item.plannedReAlias.to || item.plannedReAlias.newAliasTarget || null,
+    reason: safety.reason,
+    blockingContexts: safety.blockingContexts || [],
+  };
+  item.plannedReAlias = null;
+}
+
+function _filterUnsafeSharedReAliases(result, figmaData, existingDs, algorithm) {
+  for (const item of result.contrastFailures || []) {
+    if (!item.plannedReAlias) continue;
+    const safety = _sharedReAliasSafety(item.plannedReAlias, figmaData, existingDs, algorithm, "text");
+    _markUnsafeSharedReAlias(item, safety);
+  }
+  for (const item of result.iconContrastFailures || []) {
+    if (!item.plannedReAlias) continue;
+    const safety = _sharedReAliasSafety(item.plannedReAlias, figmaData, existingDs, algorithm, "icon");
+    _markUnsafeSharedReAlias(item, safety);
+  }
 }
 
 function _nearestAccessiblePrimitiveOnRamp(colorVars, ramp, targetStep, bgRgb, varsById, collections, modeName, threshold) {
@@ -1504,6 +1656,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     || a.icon.localeCompare(b.icon)
     || a.mode.localeCompare(b.mode)
   );
+  _filterUnsafeSharedReAliases({ iconContrastFailures }, figmaData, options.existingDs, algorithm);
 
   // ── Broken aliases (semantic layer only) ───────────────────────────────────
   // Any semantic token whose VARIABLE_ALIAS points at a target id that's no
@@ -1916,6 +2069,7 @@ function handleInspectDsSetupGaps(input = {}) {
       };
     }
   }
+  _filterUnsafeSharedReAliases(result, dataSource.figmaData, existingDs, algorithm);
 
   const sourcePath = dataSource.meta && dataSource.meta.path ? dataSource.meta.path : null;
   let syncedAt = null;
@@ -2055,7 +2209,6 @@ function _buildRepairPlan(result) {
       aliases: repair.aliases,
     });
   }
-
   const total = repairs.length + aliasUpdates.length + roleRepairs.length;
   const optionalTotal = optionalRoleRepairs.length;
   const missingCapabilityNotes = [];
@@ -2079,6 +2232,27 @@ function _buildRepairPlan(result) {
       agentAction: "ask-designer",
     });
   }
+  const seenBlockedReAlias = new Set();
+  const collectBlockedReAlias = (item, kind) => {
+    if (!item || !item.plannedReAliasBlocked) return;
+    const blocked = item.plannedReAliasBlocked;
+    const key = [blocked.token, blocked.mode, blocked.to, kind].join("|");
+    if (seenBlockedReAlias.has(key)) return;
+    seenBlockedReAlias.add(key);
+    missingCapabilityNotes.push({
+      kind: "shared-token-contrast-repair-blocked",
+      token: blocked.token,
+      mode: blocked.mode,
+      from: blocked.from,
+      attemptedAlias: blocked.to,
+      contrastKind: kind,
+      blockingContexts: blocked.blockingContexts || [],
+      reason: "Figlets found a local contrast fix, but this semantic token is shared across multiple pairings and the proposed alias would not satisfy every known pairing. This is not safe to offer as a one-click repair because it can oscillate.",
+      agentAction: "ask-designer",
+    });
+  };
+  for (const item of result.contrastFailures || []) collectBlockedReAlias(item, "text");
+  for (const item of result.iconContrastFailures || []) collectBlockedReAlias(item, "icon");
   for (const conflict of result.semanticNamingConflicts || []) {
     missingCapabilityNotes.push({
       kind: "naming-system-mismatch",
@@ -2120,7 +2294,7 @@ function _buildRepairPlan(result) {
       ? `Figlets has ${total} accessibility-checked structured repair suggestion${total === 1 ? "" : "s"} ready for designer approval.`
       : "Figlets has no deterministic repair payload for the current QA findings.",
     optionalDesignerSummary: optionalTotal
-      ? `Figlets also has ${optionalTotal} optional passive border/outline/stroke role creation${optionalTotal === 1 ? "" : "s"} available if the designer wants that convention.`
+      ? `Figlets also has ${optionalTotal} optional convention-level role creation${optionalTotal === 1 ? "" : "s"} available if the designer wants that design model.`
       : "No optional convention-level bulk repairs are available.",
     missingCapabilityNotes,
     designerPresentation,
@@ -2146,6 +2320,7 @@ function _aliasUpdateReason(update) {
 }
 
 function _roleReason(role) {
+  if (role === "foreground") return "foreground role";
   if (role === "border") return "missing passive border role";
   if (role === "icon") return "missing icon role";
   return `missing ${role} role`;
@@ -2210,7 +2385,9 @@ function _buildProposedSetupChanges(context) {
       action: "create role",
       modes: Object.entries(aliases).map(([mode, target]) => ({ mode, target })),
       reason,
-      summaryLine: `Optionally create ${repair.role} role ${repair.name}: ${_formatModeAliasLine(aliases)} (${reason}).`,
+      summaryLine: repair.pairedBg
+        ? `Optionally create ${repair.role} role ${repair.name} for ${repair.pairedBg}: ${_formatModeAliasLine(aliases)} (${reason}).`
+        : `Optionally create ${repair.role} role ${repair.name}: ${_formatModeAliasLine(aliases)} (${reason}).`,
     });
   }
 
@@ -2243,6 +2420,19 @@ function _buildProposedSetupChanges(context) {
         summaryLine: `Choose canonical naming for ${note.family} ${note.role}: ${surfaceBased.join(", ")} conflicts with ${roleBased.join(", ")} (${canonical}).${question}${warning}`,
       });
     }
+    if (note.kind === "shared-token-contrast-repair-blocked") {
+      const contexts = Array.isArray(note.blockingContexts) ? note.blockingContexts : [];
+      const contextText = contexts.length
+        ? ` It would still fail for ${contexts.slice(0, 3).map(context => `${context.bg} in ${context.mode}`).join(", ")}${contexts.length > 3 ? ", and more" : ""}.`
+        : "";
+      needsDesignerDecision.push({
+        tier: "needs designer decision",
+        token: note.token,
+        action: "review shared token contrast",
+        reason: "shared token contrast",
+        summaryLine: `${note.token} in ${note.mode} has no one-click contrast re-alias because ${note.attemptedAlias} is not safe across every known pairing that uses the token.${contextText}`,
+      });
+    }
   }
 
   return { readyToApply, optional, needsDesignerDecision };
@@ -2270,7 +2460,7 @@ function _buildDesignerPresentation(context) {
 
   if (context.optionalTotal > 0) {
     lines.push(
-      `There ${context.optionalTotal === 1 ? "is" : "are"} also ${context.optionalTotal} optional passive border/outline/stroke role${context.optionalTotal === 1 ? "" : "s"} available separately — not required for a healthy check.`
+      `There ${context.optionalTotal === 1 ? "is" : "are"} also ${context.optionalTotal} optional convention-level role${context.optionalTotal === 1 ? "" : "s"} available separately — not required for a healthy check.`
     );
     sections.push({
       title: "Optional convention (separate approval)",

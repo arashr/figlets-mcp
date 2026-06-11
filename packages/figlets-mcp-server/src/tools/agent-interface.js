@@ -71,6 +71,14 @@ const figletsHealthCheckTool = {
   },
 };
 
+const HEALTH_CHECK_VERIFY_TOOLS = [
+  "sync_figma_data",
+  "detect_design_system",
+  "audit_tokens",
+  "inspect_ds_setup_gaps",
+  "inspect_ds_token_gaps",
+];
+
 function asTextResult(result) {
   return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 }
@@ -117,6 +125,11 @@ function _isCategoryLevelPayload(value) {
     normalized === "category-level" ||
     normalized === "broad-category" ||
     normalized === "categories";
+}
+
+function _hasCompletedTools(completedTools, requiredTools) {
+  const completed = new Set(_array(completedTools));
+  return requiredTools.every(tool => completed.has(tool));
 }
 
 function _statusRank(status) {
@@ -227,6 +240,14 @@ function _chooseNextAction(checks, fallback) {
       type: "call_tool",
       tool: actionable.recommendedTool || null,
       argsSource: actionable.recommendedPayloadSource || "sync/reinspect result",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "post_apply_health_check_verification") {
+    return {
+      type: "call_tool",
+      tool: actionable.recommendedTool || null,
+      argsSource: actionable.recommendedPayloadSource || "full health-check verification result",
       message: actionable.nextAction,
     };
   }
@@ -522,7 +543,7 @@ function handleFigletsHealthCheck(args) {
       severity: "error",
       message: "Designer-facing Figlets repairs should use structured Figlets repairPlan payloads, not hand-authored mutation payloads.",
       evidence: [`payloadSource=${requestedAction.payloadSource}`],
-      nextAction: "Use the applicable repairPlan payload from Figlets output, or report a Figlets product/tool gap if no planner/apply surface exists.",
+      nextAction: "Use the applicable repairPlan payload from Figlets output. For exact designer-specified variable, collection, mode, style, binding, metadata, or lifecycle edits, route through plan_ds_figma_operations before treating the request as a product-specific planner gap. Do not convert health-check findings into invented generic operations.",
       recommendedTool: requestedTool || pendingWriteTool,
       recommendedPayloadSource: "repairPlan.applyInput",
     }));
@@ -563,7 +584,7 @@ function handleFigletsHealthCheck(args) {
       ].filter(Boolean),
       nextAction: scopeWidened
         ? "Stop before writing. Ask the designer to approve this exact boundary, or call the planner again and pass only the approved structured entries."
-        : "Stop before writing. Use token-level repairPlan entries for the approved subset, or report a Figlets product/tool gap if the current surface cannot represent the subset.",
+        : "Stop before writing. Use token-level repairPlan entries for the approved subset, or reroute exact designer-specified basic Figma edits through plan_ds_figma_operations. Treat this as a product-specific planner gap only when no structured Figlets surface can represent the approved boundary; do not invent semantic migrations with the generic operations surface.",
       recommendedTool: requestedTool || pendingWriteTool,
       recommendedPayloadSource: "exact repairPlan entries",
     }));
@@ -586,7 +607,42 @@ function handleFigletsHealthCheck(args) {
   const lastAppliedBoundary = _normalizeBoundary(workflowState.lastAppliedBoundary || "");
   const lastApplyUnlockedRepairs = _truthy(workflowState.lastApplyUnlockedNewRepairs);
   const postApplySyncReinspectCompleted = _truthy(workflowState.postApplySyncReinspectCompleted);
+  const postApplyHealthCheckCompleted = _truthy(workflowState.postApplyHealthCheckCompleted) ||
+    _hasCompletedTools(completedTools, HEALTH_CHECK_VERIFY_TOOLS);
   const separateApprovalAfterReinspect = _truthy(workflowState.separateApprovalAfterReinspect);
+  const healthCheckWriteNeedsVerification = workflowId === "health-check" &&
+    !!lastAppliedBoundary &&
+    !postApplyHealthCheckCompleted;
+  if (healthCheckWriteNeedsVerification) {
+    checks.push(_makeCheck({
+      id: "post_apply_health_check_verification",
+      title: "Post-apply health-check verification",
+      status: "fail",
+      severity: "error",
+      message: "After a health-check repair write, the agent must rerun the full read-only health-check sequence before reporting clean or remaining findings.",
+      evidence: [
+        `lastAppliedBoundary=${lastAppliedBoundary}`,
+        `postApplyHealthCheckCompleted=${Boolean(postApplyHealthCheckCompleted)}`,
+        `completedTools=${completedTools.join(",")}`,
+      ],
+      nextAction: "Run sync_figma_data, detect_design_system, audit_tokens, inspect_ds_setup_gaps, and inspect_ds_token_gaps again. Summarize remaining findings only from those fresh results, not from the apply result or a narrow token-only reinspection. Reconcile stale pre-apply findings against the fresh reports; do not repeat missing Tablet/Desktop modes if detect_design_system or inspect_ds_token_gaps no longer reports them, and describe the completed repair by its named boundary or token list instead of a drifting option number.",
+      recommendedTool: "sync_figma_data",
+      recommendedPayloadSource: "full health-check verification sequence",
+    }));
+  } else {
+    checks.push(_makeCheck({
+      id: "post_apply_health_check_verification",
+      title: "Post-apply health-check verification",
+      status: "pass",
+      severity: "info",
+      message: "No missing full health-check verification after a health-check write detected.",
+      evidence: [
+        lastAppliedBoundary ? `lastAppliedBoundary=${lastAppliedBoundary}` : null,
+        `postApplyHealthCheckCompleted=${Boolean(postApplyHealthCheckCompleted)}`,
+      ].filter(Boolean),
+      nextAction: "After health-check writes, verify with the full read-only health-check sequence before summarizing remaining findings, and reconcile stale pre-apply findings against the fresh reports.",
+    }));
+  }
   const requestsAnotherWriteAfterFoundation = writeRequested &&
     lastAppliedBoundary === "foundation" &&
     _normalizeBoundary(writeBoundary || requestedTool) !== "foundation" &&
@@ -634,12 +690,12 @@ function handleFigletsHealthCheck(args) {
   if (_truthy(repairPlanState.hasMissingCapabilityNotes) && !hasAnyApplyPath) {
     checks.push(_makeCheck({
       id: "product_gap_response",
-      title: "Product gap response",
+      title: "Planner coverage response",
       status: "warn",
       severity: "warning",
-      message: "Figlets reported missing capability notes without an apply-ready path.",
+      message: "Figlets reported missing capability notes without a product-specific apply-ready path.",
       evidence: ["repairPlanState.hasMissingCapabilityNotes=true"],
-      nextAction: "Report this as a Figlets product/tool gap. Do not invent raw Figma scripts or present it as impossible.",
+      nextAction: "If the designer request is an exact designer-specified variable, collection, mode, style, binding, metadata, or lifecycle edit, use plan_ds_figma_operations. Otherwise report the missing product-specific planner/apply surface without inventing raw Figma scripts, generic rename batches, or presenting the work as impossible.",
     }));
   } else {
     checks.push(_makeCheck({
@@ -647,9 +703,9 @@ function handleFigletsHealthCheck(args) {
       title: "Product gap response",
       status: "pass",
       severity: "info",
-      message: "No unsupported product-gap dead-end risk detected.",
+      message: "No unsupported planner-coverage dead-end risk detected.",
       evidence: [],
-      nextAction: "Use existing repairPlan channels when present.",
+      nextAction: "Use existing repairPlan channels when present; use plan_ds_figma_operations for exact designer-specified high-level Figma edits.",
     }));
   }
 
@@ -695,7 +751,7 @@ function handleFigletsHealthCheck(args) {
         `needsDesignerDecisionCount=${Number(repairPlanState.needsDesignerDecisionCount || 0)}`,
         "hasDesignerDecisionApplyInput=false",
       ],
-      nextAction: "Stop before writing designer-decision bindings through fix:true. Use the exposed designer-decision apply payload if Figlets provides one, or report a Figlets product/tool gap.",
+      nextAction: "Stop before writing designer-decision bindings through fix:true. Use the exposed designer-decision apply payload if Figlets provides one; if the designer gives exact node/style/variable targets, route those exact binding operations through plan_ds_figma_operations.",
       recommendedTool: "qa_binding_audit",
       recommendedPayloadSource: "designer-decision apply payload",
     }));

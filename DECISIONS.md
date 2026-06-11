@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-07] Basic Figma variable operations need a shared planner/apply surface
+
+**Decision:** Figlets now has a generic high-level design-system operations surface for exact create/update/rename/delete work on variables, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers. Agents should route designer-approved basic operations through `plan_ds_figma_operations` -> `apply_ds_figma_operations` instead of saying Figlets cannot create a few variables or adding ad hoc scripts.
+
+**Why:** BNN-53 manual smoke exposed a broader product issue than any single semantic repair: designers expect Figlets to manipulate basic Figma design-system primitives in bulk when the request is exact and guardrailed. The product promise is "AI is the UI" backed by Figlets scripts, not "AI can only apply whichever special-case repair planner happens to exist today."
+
+**Boundary:** This is still not an arbitrary raw Figma automation API. The planner validates names, types, collections, modes, alias target types, destructive actions, and stale current values from the synced snapshot, then emits an exact `repairPlan.applyInput`. The apply path revalidates that approved payload before bridge mutation and requires sync/reinspect afterward.
+
+**Workflow consequence:** Existing and future repair planners should reuse this operation layer when they need basic variable, style, binding, metadata, or lifecycle manipulation with a distinct approval boundary. Specialized planners still own product-specific thinking, accessibility decisions, config derivation, and designer-facing summaries.
+
+---
+
 ## [2026-06-04] Approval-boundary red-team checks live in the Agent Interface
 
 **Decision:** Figlets' Agent Interface health checker now explicitly red-teams write scope widening, exact-subset requests backed by category-level payloads, continuation after foundation/apply steps, and QA binding designer-decision writes through `fix:true`. These checks are guidance/runtime-readiness checks, not new Figma mutation behavior.
@@ -71,6 +83,8 @@ Running log of non-obvious project decisions and the reasons behind them.
 **Decision guidance:** Naming-conflict findings should include a file-level convention bias instead of pretending every conflict is isolated. Count role-based vs surface-based semantic conventions, ask a plain-language question that leans with the majority convention, and warn that deleting/deprecating extra semantic variables may break Figma layers already bound to those variables. Any cleanup should go through an approved migration/remap plan.
 
 **Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output. `bg/on-*`, `surface/on-*`, and `background/on-*` backgrounds should group with their stripped family and recommend the plain background token as canonical when present. Plain `bg/*` and `fill/*` tokens are not competitors by themselves; `fill/*` is a legitimate related background role and should not be included in the conflict list for invalid `bg/on-*` findings.
+
+**Clarification:** Contextual filled-surface foreground/icon roles such as `color/text/on-fill-danger` and `color/icon/on-fill-danger` are not duplicate naming competitors for plain surface roles such as `color/text/danger` and `color/icon/danger`. They describe different usage contexts: text/icon on `color/fill/danger` versus normal danger text/icon on a regular surface. Semantic naming consolidation must not propose deprecating `on-fill-*` roles merely because the file also has plain `text/*` or `icon/*` roles. Setup-gap QA should pair `fill/*` backgrounds with `text/on-fill-*` and `icon/on-fill-*` roles for contrast diagnosis.
 
 ---
 

@@ -114,12 +114,12 @@ module.exports = (async () => {
     assert.ok(bgRename.reason.includes("preserve"), "rename reason should explain ID preservation");
 
     assert.ok(
-      plan.semanticNamingAdvisories.some(item => item.token === "color/text/on-danger" && item.kind === "ambiguous-name"),
-      "ambiguous text/on-danger should remain a review advisory instead of an automatic rename"
+      !plan.semanticNamingAdvisories.some(item => item.token === "color/text/on-danger"),
+      "text/on-danger should be clean when color/fill/danger provides the matching context"
     );
     assert.ok(
-      plan.semanticNamingAdvisories.some(item => item.token === "color/icon/on-danger" && item.kind === "ambiguous-name"),
-      "ambiguous icon/on-danger should remain a review advisory instead of an automatic rename"
+      !plan.semanticNamingAdvisories.some(item => item.token === "color/icon/on-danger"),
+      "icon/on-danger should be clean when color/fill/danger provides the matching context"
     );
 
     assert.ok(
@@ -129,6 +129,30 @@ module.exports = (async () => {
     assert.ok(
       plan.repairPlan.designerPresentation.proposedChanges.some(item => item.summaryLine.includes("color/bg/on-danger")),
       "designer presentation should list exact invalid variable names"
+    );
+  }
+
+  {
+    const noContextSemantics = [
+      sem("text-on-danger", "color/text/on-danger", alias("n950"), alias("n50")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("n950"), alias("n50")),
+    ];
+    const noContextData = {
+      variables: primitives.concat(noContextSemantics),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: noContextSemantics.map(v => v.id) },
+      ],
+    };
+    const plan = planSemanticNamingConsolidationFromFigmaData(noContextData, { grammar: "element-first" });
+    assert.deepStrictEqual(
+      plan.repairPlan.applyInput.renameVariables,
+      [],
+      "ambiguous shorthand without a matching background context should not become a rename payload"
+    );
+    assert.ok(
+      plan.semanticNamingAdvisories.some(item => item.token === "color/text/on-danger" && item.kind === "ambiguous-name"),
+      "ambiguous shorthand without context should remain visible for review"
     );
   }
 

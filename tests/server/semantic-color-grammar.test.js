@@ -101,6 +101,22 @@ module.exports = (() => {
 
   {
     const result = classifySemanticColorGrammar([
+      sem("fill-danger", "color/fill/danger"),
+      sem("text-on-danger", "color/text/on-danger"),
+      sem("icon-on-danger", "color/icon/on-danger"),
+    ]);
+    assert.strictEqual(
+      result.diagnostics.some(item => item.kind === "ambiguous-name"),
+      false,
+      "shorthand on-danger should be clean when a matching fill/danger context exists"
+    );
+    const text = result.tokenClassifications.find(item => item.name === "color/text/on-danger");
+    assert.strictEqual(text.context, "on-fill");
+    assert.strictEqual(text.resolvedContextToken, "color/fill/danger");
+  }
+
+  {
+    const result = classifySemanticColorGrammar([
       sem("text-danger", "color/text/danger"),
       sem("text-on-fill-danger", "color/text/on-fill-danger"),
       sem("fill-danger", "color/fill/danger"),

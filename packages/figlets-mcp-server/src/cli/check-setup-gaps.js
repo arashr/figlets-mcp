@@ -222,6 +222,15 @@ function _formatSemanticNamingConflict(item) {
   return lines;
 }
 
+function _formatSemanticNamingAdvisory(item) {
+  const token = item.token || (Array.isArray(item.tokens) ? item.tokens.join(", ") : `${item.family}/${item.role}`);
+  const lines = [`${item.kind || "advisory"}: "${token}"`];
+  if (item.context) lines.push(`    context: ${item.context}`);
+  if (item.reason) lines.push(`    reason: ${item.reason}`);
+  lines.push("    next step: keep low priority unless naming cleanup is requested or this blocks a concrete repair");
+  return lines;
+}
+
 function _renderSection(lines, items, header, formatter, max) {
   if (!Array.isArray(items) || !items.length) return;
   lines.push("");
@@ -318,9 +327,10 @@ function formatCheckReport(state) {
       + (summary.missingBackgroundCount || 0)
       + (summary.incompleteModeCount || 0)
       + (summary.contrastFailureCount || 0)
-      + (summary.iconContrastFailureCount || 0)
-      + (summary.semanticNamingConflictCount || 0)
-      + (summary.brokenAliasCount || 0)
+	      + (summary.iconContrastFailureCount || 0)
+	      + (summary.semanticNamingConflictCount || 0)
+	      + (summary.semanticNamingAdvisoryCount || 0)
+	      + (summary.brokenAliasCount || 0)
       + (summary.foundationRoleFindingCount || 0)
       + (summary.companionAdvisoryCount || 0);
 
@@ -372,6 +382,13 @@ function formatCheckReport(state) {
       gaps.semanticNamingConflicts || [],
       `Semantic naming review items: ${summary.semanticNamingConflictCount || 0}`,
       _formatSemanticNamingConflict
+    );
+
+    _renderSection(
+      lines,
+      gaps.semanticNamingAdvisories || [],
+      `Semantic naming advisories: ${summary.semanticNamingAdvisoryCount || 0}`,
+      _formatSemanticNamingAdvisory
     );
 
     // 5. Likely family-level setup gaps
@@ -443,6 +460,7 @@ function formatCheckReport(state) {
     + (summary.contrastFailureCount || 0)
     + (summary.iconContrastFailureCount || 0)
     + (summary.semanticNamingConflictCount || 0)
+    + (summary.semanticNamingAdvisoryCount || 0)
     + (summary.brokenAliasCount || 0)
     + (summary.foundationRoleFindingCount || 0)
     + (summary.companionAdvisoryCount || 0);

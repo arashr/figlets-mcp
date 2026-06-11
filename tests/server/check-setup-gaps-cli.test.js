@@ -360,6 +360,35 @@ module.exports = (async () => {
     assert.ok(!out.includes("color/fill/danger"), "related fill token should not be rendered as a competitor");
   }
 
+  // Advisory-only naming output should not be reported as clean.
+  {
+    const out = formatCheckReport({
+      receiverUrl: "http://127.0.0.1:17337",
+      receiverRunning: true,
+      pluginConnected: true,
+      activeFileKey: "abc123",
+      sync: { ok: true },
+      refresh: { dryRun: true, changes: [], skipped: [], summary: { changedCount: 0, skippedCount: 0 } },
+      gaps: {
+        semanticGaps: [], missingBackgrounds: [], incompleteModes: [], contrastFailures: [], iconContrastFailures: [], brokenAliases: [], foundationRoleFindings: [], companionAdvisories: [], semanticNamingConflicts: [],
+        semanticNamingAdvisories: [{
+          kind: "ambiguous-name",
+          token: "color/text/on-danger",
+          role: "text",
+          context: "ambiguous-on",
+          family: "danger",
+          reason: "The on-* suffix does not name an explicit context.",
+        }],
+        contrastAlgorithm: "wcag",
+        summary: emptySummary({ semanticNamingAdvisoryCount: 1 }),
+      },
+    });
+    assert.ok(out.includes("Step 3/3 Semantic-layer QA: 1 finding"));
+    assert.ok(out.includes("Semantic naming advisories: 1"));
+    assert.ok(out.includes('ambiguous-name: "color/text/on-danger"'));
+    assert.ok(!out.includes("semantic color layer looks clean"));
+  }
+
   // APCA-mode label propagates + near-miss tag + hex render + snapshot
   {
     const out = formatCheckReport({

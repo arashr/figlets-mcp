@@ -192,13 +192,39 @@ function roleKey(item) {
   return [item.assetRole, item.context, item.family, item.scope].join("|");
 }
 
+function resolveAmbiguousOnContexts(items) {
+  const backgroundByFamily = new Map();
+  const preference = ["fill", "surface", "bg", "background"];
+  for (const item of items) {
+    if (!item || item.assetRole !== "background" || item.diagnostic !== "clean") continue;
+    if (!backgroundByFamily.has(item.family)) backgroundByFamily.set(item.family, []);
+    backgroundByFamily.get(item.family).push(item);
+  }
+  return items.map((item) => {
+    if (!item || item.diagnostic !== "ambiguous-name") return item;
+    const backgrounds = backgroundByFamily.get(item.family) || [];
+    if (!backgrounds.length) return item;
+    const background = backgrounds.slice().sort((left, right) =>
+      preference.indexOf(left.group) - preference.indexOf(right.group)
+    )[0];
+    if (!background) return item;
+    return Object.assign({}, item, {
+      context: `on-${background.group}`,
+      targetContext: background.group,
+      diagnostic: "clean",
+      diagnosticReason: null,
+      resolvedContextToken: background.name,
+    });
+  });
+}
+
 function classifySemanticColorGrammar(variables = []) {
   const colorNames = variables
     .filter(variable => variable && variable.resolvedType === "COLOR" && isSemanticColorName(variable.name))
     .map(variable => variable.name);
-  const tokenClassifications = colorNames
+  const tokenClassifications = resolveAmbiguousOnContexts(colorNames
     .map(classifyName)
-    .filter(Boolean)
+    .filter(Boolean))
     .sort((a, b) => a.name.localeCompare(b.name));
   const grammar = scoreGrammars(tokenClassifications);
   const diagnostics = [];

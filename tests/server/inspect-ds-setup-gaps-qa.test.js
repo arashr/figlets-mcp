@@ -320,6 +320,11 @@ module.exports = (() => {
       assert.strictEqual(dangerLight.plannedReAlias.expectedCurrentAlias, "color/neutral/300");
       assert.strictEqual(dangerLight.plannedReAlias.newAliasTarget, "color/neutral/950");
       assert.ok(handlerResult.repairPlan, "handler should expose an agent-ready repair plan");
+      assert.ok(handlerResult.semanticColorGrammar, "handler result should expose semantic color grammar to agents");
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(handlerResult, "semanticNamingAdvisories"),
+        "handler result should expose low-priority semantic naming advisories"
+      );
       const topKeys = Object.keys(handlerResult).slice(0, 4);
       assert.deepStrictEqual(
         topKeys,
@@ -721,6 +726,11 @@ module.exports = (() => {
       0,
       "role-based-only fill/text-on/icon-on naming should not be treated as duplicate intent"
     );
+    assert.strictEqual(
+      roleBasedWithFillResult.semanticNamingAdvisories.some(item => item.token === "color/text/on-danger"),
+      false,
+      "role-based-only fill/text-on/icon-on naming should not produce ambiguous shorthand advisories"
+    );
   }
   {
     const surfaceBasedOnlyVars = [
@@ -803,19 +813,13 @@ module.exports = (() => {
       0,
       "plain text/icon roles and ambiguous on-* shorthand should not be treated as automatic duplicate conflicts"
     );
-    assert.ok(
+    assert.strictEqual(
       mixedDuplicateIntentResult.semanticNamingAdvisories.some(item =>
-        item.token === "color/text/on-danger" &&
-        item.kind === "ambiguous-name"
+        item.token === "color/text/on-danger" ||
+        item.token === "color/icon/on-danger"
       ),
-      "text/on-danger should be a low-priority ambiguity advisory"
-    );
-    assert.ok(
-      mixedDuplicateIntentResult.semanticNamingAdvisories.some(item =>
-        item.token === "color/icon/on-danger" &&
-        item.kind === "ambiguous-name"
-      ),
-      "icon/on-danger should be a low-priority ambiguity advisory"
+      false,
+      "text/icon on-danger should be clean when color/fill/danger is the matching context"
     );
     const infoBackgroundConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
       item.family === "info" && item.role === "background"
@@ -835,15 +839,42 @@ module.exports = (() => {
       false,
       "naming conflicts should not be exposed as auto-migration payloads"
     );
+    assert.strictEqual(
+      mixedPlan.missingCapabilityNotes.some(note => note.kind === "semantic-naming-advisory"),
+      false,
+      "clean role-based fill/on-* naming should not surface advisory notes"
+    );
+  }
+  {
+    const ambiguousNoContextVars = [
+      sem("text-on-danger", "color/text/on-danger", alias("n50"), alias("n950")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("n50"), alias("n950")),
+    ];
+    const ambiguousNoContextSnap = {
+      variables: primitives.concat(ambiguousNoContextVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: ambiguousNoContextVars.map(v => v.id) },
+      ],
+    };
+    const ambiguousNoContextResult = inspectDsSetupGapsFromFigmaData(ambiguousNoContextSnap);
     assert.ok(
-      mixedPlan.missingCapabilityNotes.some(note =>
+      ambiguousNoContextResult.semanticNamingAdvisories.some(item =>
+        item.token === "color/text/on-danger" &&
+        item.kind === "ambiguous-name"
+      ),
+      "text/on-danger should be an advisory when no matching background context exists"
+    );
+    const ambiguousPlan = _buildRepairPlan(ambiguousNoContextResult);
+    assert.ok(
+      ambiguousPlan.missingCapabilityNotes.some(note =>
         note.kind === "semantic-naming-advisory" &&
         note.token === "color/text/on-danger"
       ),
       "repair plan should surface ambiguous shorthand naming as an advisory"
     );
     assert.ok(
-      mixedPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
+      ambiguousPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
         change.reason === "semantic naming advisory" &&
         change.summaryLine.includes("color/text/on-danger")
       ),

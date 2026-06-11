@@ -17,6 +17,7 @@
     "verify:release": "node scripts/verify-release-package.js",
     "smoke:plugins": "node scripts/smoke-plugin-hosts.js",
     "check:pr-protocol": "node scripts/check-pr-protocol.js",
+    "figlets:reset-test-file": "node scripts/reset-test-figma-file.js",
     "figlets:export-design-md": "node packages/figlets-mcp-server/src/cli/export-design-md.js",
     "figlets:lint-design-md": "node packages/figlets-mcp-server/src/cli/lint-design-md.js",
     "figlets:check-setup-gaps": "node packages/figlets-mcp-server/src/cli/check-setup-gaps.js"

@@ -244,7 +244,7 @@ function _deriveIntakeNeeds(ds, context) {
   needs.push('platform');
   if (!ds.grid || !ds.grid.base) needs.push('grid base (4px/8px)');
   needs.push('breakpoints (3-tier/4-tier)');
-  if (!ds.color || !ds.color.convention) needs.push('naming convention (role-based/surface-based)');
+  if (!ds.color || !ds.color.convention) needs.push('semantic color naming grammar (paired context / element-first / intent and emphasis / component-scoped / custom)');
   if (!ds.color || !ds.color.contrastAlgorithm) needs.push('contrast standard (APCA default / WCAG 2.2)');
   if (!ds.color || !Array.isArray(ds.color.brand) || !ds.color.brand.length) {
     needs.push('color scale and brand colors (name + hex)');

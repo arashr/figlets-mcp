@@ -4,6 +4,44 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-11] Semantic color naming needs grammar detection, not a binary surface/role choice
+
+**Decision:** Figlets should stop treating semantic color naming cleanup as a global `surface-based` versus `role-based` choice. The product model should classify the design system's semantic color grammar first, then surface only invalid, ambiguous, or true-duplicate names. Valid grammars include paired context roles (`surface` / `on-surface`), element-first roles (`text/danger`, `text/on-fill-danger`), intent/emphasis matrices, and component-scoped overlays.
+
+**Why:** BNN-53 manual smoke showed that the current binary naming flow can propose bad deprecations or confusing canonicals. In particular, `color/text/on-fill-danger` is a contextual foreground role for text on `color/fill/danger`; it is not a duplicate of `color/text/danger`. Conversely, `color/text/on-danger` is only clear when `danger` is a known background/context role. If `danger` normally means danger-colored text, `on-danger` is ambiguous, not automatically canonical.
+
+**Product consequence:** New design-system setup should offer viable naming structures with examples and tradeoffs. Existing-system health-checks should infer and respect the current grammar, keep naming advisories low priority unless they block real repairs, and avoid emitting rename/deprecation apply payloads when the grammar is unknown.
+
+**Implementation plan:** See `docs/semantic-color-naming-flow-plan.md`. The next implementation should add a pure semantic grammar classifier, rework health-check naming diagnostics into invalid/ambiguous/true-duplicate/distinct-context/unknown categories, redesign semantic naming consolidation around grammar/context decisions, and add unit coverage across Material-like paired contexts, Carbon-like element-first roles, Primer-like intent/emphasis roles, component-scoped overlays, and unknown custom systems.
+
+**Implemented slice:** `inspect_ds_setup_gaps` now exposes `semanticColorGrammar`, separates low-priority `semanticNamingAdvisories` from apply-relevant `semanticNamingConflicts`, and no longer treats plain `text/*` plus ambiguous `text/on-*` shorthand as an automatic duplicate. The rename-only semantic naming planner accepts grammar-aware input for the designer-facing path while preserving legacy `canonicalConvention` compatibility; it only emits safe rename payloads for high-confidence invalid/duplicate diagnostics. Agent guidance and setup intake now ask for semantic color grammar instead of a binary surface/role convention.
+
+---
+
+## [2026-06-07] Basic Figma variable operations need a shared planner/apply surface
+
+**Decision:** Figlets now has a generic high-level design-system operations surface for exact create/update/rename/delete work on variables, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers. Agents should route designer-approved basic operations through `plan_ds_figma_operations` -> `apply_ds_figma_operations` instead of saying Figlets cannot create a few variables or adding ad hoc scripts.
+
+**Why:** BNN-53 manual smoke exposed a broader product issue than any single semantic repair: designers expect Figlets to manipulate basic Figma design-system primitives in bulk when the request is exact and guardrailed. The product promise is "AI is the UI" backed by Figlets scripts, not "AI can only apply whichever special-case repair planner happens to exist today."
+
+**Boundary:** This is still not an arbitrary raw Figma automation API. The planner validates names, types, collections, modes, alias target types, destructive actions, and stale current values from the synced snapshot, then emits an exact `repairPlan.applyInput`. The apply path revalidates that approved payload before bridge mutation and requires sync/reinspect afterward.
+
+**Workflow consequence:** Existing and future repair planners should reuse this operation layer when they need basic variable, style, binding, metadata, or lifecycle manipulation with a distinct approval boundary. Specialized planners still own product-specific thinking, accessibility decisions, config derivation, and designer-facing summaries.
+
+---
+
+## [2026-06-04] Approval-boundary red-team checks live in the Agent Interface
+
+**Decision:** Figlets' Agent Interface health checker now explicitly red-teams write scope widening, exact-subset requests backed by category-level payloads, continuation after foundation/apply steps, and QA binding designer-decision writes through `fix:true`. These checks are guidance/runtime-readiness checks, not new Figma mutation behavior.
+
+**Why:** BNN-53 exists because recent manual smoke kept exposing the same class of issue in different clothes: a designer approves one narrow thing, then the agent or tool path either writes a broader category, creates foundation modes as a side effect, continues into newly unlocked work, or tries to apply medium-confidence/designer-decision suggestions through the wrong surface.
+
+**Boundary:** Actual repair tools still own deterministic apply safety. The Agent Interface checker is an early stop sign for agents before they call mutating tools. It should say "use exact repairPlan entries" or "product/tool gap" instead of letting an agent invent payloads or silently widen approval.
+
+**Manual smoke:** Developer smoke for BNN-53 should use a disposable fixture and test hostile prompts around health-check, exact Mobile spacing aliases, foundation modes only, newly unlocked repairs, naming consolidation, QA binding designer decisions, and other write flows. The expected invariant remains: inspect, show exact structured repair plan, apply only approved entries, sync/reinspect, and stop if new work appears.
+
+---
+
 ## [2026-06-04] Health-check includes token-gap suggestions in the main DS audit
 
 **Decision:** “Check my design system” (`health-check`) now includes a read-only `inspect_ds_token_gaps` suggestion step after semantic setup QA. Health-check should surface config-backed token-gap findings, including missing Spacing Tablet/Desktop modes, in the first design-system audit response instead of requiring designers to discover a separate token-gap workflow.
@@ -59,6 +97,8 @@ Running log of non-obvious project decisions and the reasons behind them.
 **Decision guidance:** Naming-conflict findings should include a file-level convention bias instead of pretending every conflict is isolated. Count role-based vs surface-based semantic conventions, ask a plain-language question that leans with the majority convention, and warn that deleting/deprecating extra semantic variables may break Figma layers already bound to those variables. Any cleanup should go through an approved migration/remap plan.
 
 **Regression:** Role-based-only systems (`fill/*` with `text/on-*` / `icon/on-*`) and surface-based-only systems (`bg/*` with `text/*` / `icon/*`) should not be flagged. Mixed duplicate-intent snapshots should appear in top findings and CLI output. `bg/on-*`, `surface/on-*`, and `background/on-*` backgrounds should group with their stripped family and recommend the plain background token as canonical when present. Plain `bg/*` and `fill/*` tokens are not competitors by themselves; `fill/*` is a legitimate related background role and should not be included in the conflict list for invalid `bg/on-*` findings.
+
+**Clarification:** Contextual filled-surface foreground/icon roles such as `color/text/on-fill-danger` and `color/icon/on-fill-danger` are not duplicate naming competitors for plain surface roles such as `color/text/danger` and `color/icon/danger`. They describe different usage contexts: text/icon on `color/fill/danger` versus normal danger text/icon on a regular surface. Semantic naming consolidation must not propose deprecating `on-fill-*` roles merely because the file also has plain `text/*` or `icon/*` roles. Setup-gap QA should pair `fill/*` backgrounds with `text/on-fill-*` and `icon/on-fill-*` roles for contrast diagnosis.
 
 ---
 

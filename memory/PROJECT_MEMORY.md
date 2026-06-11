@@ -4,6 +4,108 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-11 — BNN-53 todo; duplicated responsive spacing modes are not validated]
+
+**Status:** Manual testing found a product gap after adding Tablet/Desktop modes to `4. Spacing`: Figlets can report spacing mode values as acceptable because Tablet/Desktop match Mobile, match config, and alias to primitives. That is not enough.
+
+**Finding:** For responsive semantic spacing, identical Mobile/Tablet/Desktop values should not be treated as automatically acceptable. Newly added modes often duplicate existing Mobile values as a foundation step; those values are unvalidated until the designer or config explicitly confirms same-value behavior for that token/category.
+
+**Todo:** Added future gap `G-026` in `docs/future-figlets-gap-register.md`. Future work should add responsive spacing mode validation/advisories and designer-facing language such as "unvalidated duplicated mode values" instead of "acceptable" when modes share values without an explicit allowance.
+
+---
+
+### [2026-06-11 — BNN-53 checkpoint; semantic color naming needs grammar detection]
+
+**Status:** Arash challenged the semantic naming flow after choosing "role-based" produced a plan that treated names such as `color/text/on-danger` as canonical. The concern is valid: the current product framing collapses multiple naming grammars into a binary `surface-based` / `role-based` choice and can make confusing or incorrect recommendations.
+
+**Finding:** `on-*` only makes sense when the suffix names a background/context role the foreground sits on. `color/text/on-surface` is clear if `surface` is a known background role. `color/text/on-fill-danger` is clear if `color/fill/danger` exists. `color/text/on-danger` is ambiguous unless this file has a background/context role named `danger` and consistently uses `danger` that way.
+
+**Direction:** Figlets needs a semantic color grammar classifier, not just majority counts. New setup should offer viable structures: paired-context, element-first, intent/emphasis, and optional component-scoped layers. Existing health-check should infer the current grammar, respect it, and surface only invalid, ambiguous, or true-duplicate names as low-priority advisories unless they block a concrete repair.
+
+**Documentation:** Added `docs/semantic-color-naming-flow-plan.md` with findings from Material-style paired contexts, Carbon-style element-first roles, Primer-style intent/emphasis roles, the two required product flows, odd-name detection rules, unknown-grammar fallback behavior, and a unit-test plan. Updated `DECISIONS.md` with the same product decision.
+
+**Implementation not yet done:** Runtime still needs the classifier, health-check wording changes, semantic naming planner redesign, agent guidance updates, fixture updates, and tests. This checkpoint is intentionally a plan/log pass before patching behavior.
+
+---
+
+### [2026-06-11 — BNN-53 implementation; semantic grammar classifier wired into health-check]
+
+**Status:** Implemented the first runtime slice of the semantic naming redesign after the documentation checkpoint commit `edd8744`.
+
+**Shipped behavior:** Added a pure `semantic-color-grammar` classifier that recognizes paired-context, element-first, intent/emphasis, component-scoped, and unknown semantic color grammars. `inspect_ds_setup_gaps` now returns `semanticColorGrammar`, separates apply-relevant `semanticNamingConflicts` from low-priority `semanticNamingAdvisories`, and removes naming diagnostics from the high-priority health-check list. Ambiguous shorthand such as `color/text/on-danger` is now an advisory unless the system proves a matching context; `color/text/danger` plus `color/text/on-fill-danger` remains clean because those are distinct contexts. Invalid backgrounds such as `color/bg/on-danger` remain review/planner candidates when a clear plain background exists.
+
+**Planner/guidance:** `plan_ds_semantic_naming_consolidation` now prefers grammar-aware input and keeps the old `canonicalConvention` parameter only as compatibility. The planner emits rename-only payloads for high-confidence invalid/duplicate diagnostics, not for ambiguous shorthand. Root, adapter, plugin, Agent Interface, setup intake, and CLI wording no longer present the default naming flow as "choose surface-based or role-based."
+
+**Tests:** Added `tests/server/semantic-color-grammar.test.js` and updated setup-gap, CLI, planner, agent-interface, adapter, and plugin guidance coverage. Full `npm test` passed **102/102**.
+
+**Remaining follow-up:** The grammar-aware planner still has a compatibility-shaped apply payload because the bridge apply path is rename-only. A later slice can add richer explicit context-decision payloads for true duplicate migration, alias rewires, and binding-aware cleanup.
+
+---
+
+### [2026-06-07 — BNN-53 checkpoint; on-fill roles are distinct from plain surface roles]
+
+**Status:** Manual smoke showed Figlets reporting `color/text/on-fill-danger` and `color/icon/on-fill-danger` as semantic naming conflicts against `color/text/danger` and `color/icon/danger`, then planning `_deprecated/...` renames when the designer chose surface-based consolidation. That was a Figlets diagnosis bug, not a bad designer decision.
+
+**Decision:** `on-fill-*` foreground/icon roles are contextual roles for text/icons on filled surfaces such as `color/fill/danger`. They are allowed to coexist with plain `text/*` and `icon/*` roles that describe normal surface usage. Semantic naming consolidation must not deprecate `color/text/on-fill-*` or `color/icon/on-fill-*` merely because plain surface roles exist.
+
+**Implementation:** `inspect_ds_setup_gaps` now normalizes leaves like `on-fill-danger`, `on-surface-danger`, `on-bg-danger`, and `on-background-danger` to the base family `danger`, labels them as contextual background roles instead of duplicate role-based competitors, and pairs `color/fill/*` backgrounds with `color/text/on-fill-*` / `color/icon/on-fill-*` for contrast diagnosis.
+
+**Verification:** Added regressions in `tests/server/inspect-ds-setup-gaps-qa.test.js` and `tests/server/semantic-naming-consolidation-tool.test.js`. Full `npm test` passed **101/101** and `git diff --check` passed.
+
+---
+
+### [2026-06-07 — BNN-53 checkpoint; high-level operations are now the generic edit path]
+
+**Status:** Follow-up architecture pass after Arash asked to ensure scripts use the new high-level layer. The redundant variable-creation bridge command/capability was removed; `apply_ds_variable_creations` now converts approved variable creations into `create_variable` operations and applies them through `apply_ds_figma_operations`.
+
+**Structure:** The bridge now has one generic route for exact basic Figma design-system edits: `/request-figma-operations` with the plugin `figma-operations` capability. The old `/request-variable-creations`, `/sync-variable-creations`, `apply-variable-creations`, and `_applyVariableCreations` path is gone. Product-specific tools such as setup repairs, token completion, primitive updates, QA binding fixes, naming consolidation, showcase, docs, and setup still keep their own flows because their approval/result contracts include domain-specific planning, config derivation, accessibility, or designer-decision logic.
+
+**Agent contract:** Root docs, adapter docs, plugin skills, plugin start commands, and Agent Interface health checks now say exact variable/collection/mode/style/binding/metadata/lifecycle edits should route through `plan_ds_figma_operations` before anything is described as missing planner scope. Product-specific planning or designer-decision gaps remain guarded; agents must not write scripts or edit the repo in Designer Mode.
+
+**Verification:** Focused tests for variable creation delegation, figma operations, bridge policy, Agent Interface, plugin packaging, and docs passed. Full `npm test` passed **101/101** and `git diff --check` passed.
+
+---
+
+### [2026-06-07 — BNN-53 checkpoint; generic Figma operations surface added]
+
+**Status:** BNN-53 manual smoke found a broader capability gap: basic Figma design-system manipulation should not depend on a special-case repair planner. The current branch now adds a shared `plan_ds_figma_operations` -> `apply_ds_figma_operations` surface for exact designer-approved operations.
+
+**Current implementation:** The planner/apply pair covers create, update, rename, and delete variables; create, rename, and delete collections; create, rename, and delete modes; local text/effect style CRUD; exact node binding/unbinding for variables and styles; variable/collection metadata; and token lifecycle helpers such as duplicate, move, deprecate, and retarget aliases. It dry-runs against the synced snapshot, marks destructive operations, returns an exact `repairPlan.applyInput`, revalidates approved payloads before bridge apply, and tells agents to sync/reinspect after mutation.
+
+**Bridge/plugin:** The bridge advertises a new `figma-operations` capability and routes `apply-figma-operations` through the plugin. The plugin executor applies the approved operations sequentially and reports applied, skipped, and unresolved entries.
+
+**Guidance:** Agent Interface and adapter docs now tell agents to use this high-level operations surface for exact make/update/rename/delete variable/collection/mode/style/binding/metadata/lifecycle requests. This is not on-fill-specific and not a raw script escape hatch; specialized repair planners should still own product-specific planning and use this shared layer for the basic Figma mutations when appropriate.
+
+**Verification:** `node tests/server/figma-operations-tool.test.js`, `node tests/server/mcp-tools-list.test.js`, `node tests/server/agent-interface-tool.test.js`, `node tests/adapter/tool-coverage.test.js`, full `npm test` (**101/101**), `node --check` on the new server/bridge files, and `git diff --check` all passed. Linear BNN-53 has a checkpoint comment with the same scope and verification.
+
+---
+
+### [2026-06-04 — BNN-53 in progress; Agent Interface red-team checks added]
+
+**Status:** BNN-53 is active on branch `codex/bnn-53-approval-boundary-red-team` with [PR #21](https://github.com/arashr/figlets-mcp/pull/21) open. Linear is `In Review`. The implementation adds host-neutral approval-boundary red-team checks to `figlets_health_check`, plus developer-facing manual smoke guidance.
+
+**Why it exists:** BNN-51 and BNN-52 fixed concrete health-check/token-gap bugs, but manual testing kept revealing approval-scope bugs only after realistic narrow requests. BNN-53 is the broader product-safety pass to catch the next one before a designer finds it.
+
+**Current implementation:** `figlets_health_check` now reports:
+
+- `write_scope_boundary`: blocks a write when the requested write boundary differs from the designer-approved boundary, or when an exact-subset request is backed only by a category-level payload.
+- `post_apply_stop_boundary`: blocks continued writes after a foundation repair or newly unlocked repairs until the agent syncs/reinspects, reports the fresh plan, and gets separate approval.
+- `binding_designer_decision_boundary`: blocks applying QA binding `needsDesignerDecision` suggestions through `qa_binding_audit({ fix: true })` unless Figlets exposes a separate designer-decision apply payload.
+
+**Manual smoke checklist:** `docs/developer-guide.md` now includes an approval-boundary red-team smoke checklist for disposable fixtures: health-check first answer, exact Mobile spacing alias subset, foundation modes only, newly unlocked repairs, naming consolidation, QA binding designer-decision suggestions, and other write flows.
+
+**Review checkpoint:** Arendt reviewed PR #21 and requested one must-fix: `qa_binding_audit({ fix: true })` in the natural MCP call shape must be classified as a write and run the designer-decision binding guard, not only synthetic `qa_binding_audit:fix` or explicit `kind: "write"` shapes.
+
+**Manual smoke checkpoint:** Arash tested the health-check flow and it stayed good until approving the Mobile-only spacing alias fixes. The weaker agent reported that Figlets refused broad fallback, which is good safety behavior, but also claimed the exact Mobile repair was blocked and suggested adding Tablet/Desktop modes as the clean next move. That is not the desired BNN-52/BNN-53 behavior. In a current build, `inspect_ds_token_gaps.repairPlan.applyInput.spacing_semantic_repairs` should contain the exact four Mobile repairs and `update_ds_tokens` should consume that array. PR #21 now tightens Agent Interface guidance to tell agents to copy `spacing_semantic_repairs` unchanged, preserve each `updates` object, rerun `inspect_ds_token_gaps` on schema rejection, and never redirect a Mobile-only approval into foundation mode creation.
+
+**Second smoke checkpoint:** A later test reached the bridge-side error `spacingSemanticRepairs was provided but no exact token/mode alias repair entries were usable`. In the current server this malformed payload should normally be rejected before the bridge, so seeing the bridge-side message points to a stale/mismatched MCP server path or malformed handoff. PR #21 now also updates the bridge error text to explicitly tell agents to rerun `inspect_ds_token_gaps` and pass `repairPlan.applyInput.spacing_semantic_repairs` unchanged instead of calling it a vague product gap.
+
+**Verification:** Focused `tests/docs/agent-workflow-regression.test.js` and `tests/server/agent-interface-tool.test.js` pass. Full supported-runtime suite passed with `zsh -ic 'cd /Users/arash/Projects/figlets-mcp && npm test'` -> **97/97**. `git diff --check` passed before PR.
+
+**Next:** Patch Arendt's must-fix, rerun focused/full verification, commit/push, then request re-review. If clean, give Arash the manual-test expectations for weaker-agent smoke.
+
+---
+
 ### [2026-06-04 — BNN-51 shipped; health-check includes token-gap suggestions]
 
 **Status:** BNN-51 is ready to merge via [PR #20](https://github.com/arashr/figlets-mcp/pull/20) on branch `codex/bnn-51-health-check-token-gap-suggestions`. Linear is in review pending merge/cleanup. The implementation updates the health-check Agent Interface contract so `inspect_ds_token_gaps` runs as a read-only suggestion step in the main “check my design system” flow.

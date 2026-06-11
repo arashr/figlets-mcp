@@ -68,6 +68,30 @@ const figmaData = {
 
 module.exports = (async () => {
   {
+    const surfaceAndOnFillSemantics = [
+      sem("bg-danger", "color/bg/danger", alias("r700"), alias("r200")),
+      sem("text-danger", "color/text/danger", alias("n950"), alias("n50")),
+      sem("icon-danger", "color/icon/danger", alias("n950"), alias("n50")),
+      sem("fill-danger", "color/fill/danger", alias("r700"), alias("r200")),
+      sem("text-on-fill-danger", "color/text/on-fill-danger", alias("n50"), alias("n950")),
+      sem("icon-on-fill-danger", "color/icon/on-fill-danger", alias("n50"), alias("n950")),
+    ];
+    const surfaceAndOnFillData = {
+      variables: primitives.concat(surfaceAndOnFillSemantics),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: surfaceAndOnFillSemantics.map(v => v.id) },
+      ],
+    };
+    const plan = planSemanticNamingConsolidationFromFigmaData(surfaceAndOnFillData, { canonicalConvention: "surface-based" });
+    assert.deepStrictEqual(
+      plan.repairPlan.applyInput.renameVariables,
+      [],
+      "surface-based consolidation should not deprecate distinct on-fill roles"
+    );
+  }
+
+  {
     const plan = planSemanticNamingConsolidationFromFigmaData(figmaData, { canonicalConvention: "surface-based" });
     assert.strictEqual(plan.dryRun, true);
     assert.strictEqual(plan.repairPlan.tool, "apply_ds_semantic_naming_consolidation");
@@ -80,8 +104,6 @@ module.exports = (async () => {
     const renameNames = plan.repairPlan.applyInput.renameVariables.map(item => item.expectedCurrentName).sort();
     assert.deepStrictEqual(renameNames, [
       "color/bg/on-danger",
-      "color/icon/on-danger",
-      "color/text/on-danger",
     ]);
     const bgRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/bg/on-danger");
     assert.strictEqual(bgRename.canonicalName, "color/bg/danger");
@@ -91,25 +113,46 @@ module.exports = (async () => {
     assert.ok(bgRename.expectedEquivalence.modes.every(mode => mode.canonicalSignature === mode.duplicateSignature));
     assert.ok(bgRename.reason.includes("preserve"), "rename reason should explain ID preservation");
 
-    const iconConflict = plan.conflicts.find(item => item.duplicateToken && item.duplicateToken.name === "color/icon/on-danger");
-    assert.ok(iconConflict, "different duplicate icon should still be listed");
-    assert.strictEqual(iconConflict.equivalence.status, "different");
-    assert.strictEqual(iconConflict.safeOperations.length, 1, "different values should still get a name-only compatibility rename");
-    const iconRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/icon/on-danger");
-    assert.strictEqual(iconRename.newName, "_deprecated/color/icon/on-danger");
-    assert.ok(iconRename.reason.includes("will not merge aliases or change values"));
+    assert.ok(
+      !plan.semanticNamingAdvisories.some(item => item.token === "color/text/on-danger"),
+      "text/on-danger should be clean when color/fill/danger provides the matching context"
+    );
+    assert.ok(
+      !plan.semanticNamingAdvisories.some(item => item.token === "color/icon/on-danger"),
+      "icon/on-danger should be clean when color/fill/danger provides the matching context"
+    );
 
     assert.ok(
       !renameNames.includes("color/fill/info"),
       "color/fill/* should not be treated as an equal competitor to color/bg/*"
     );
     assert.ok(
-      plan.repairPlan.designerPresentation.proposedChanges.some(item => item.summaryLine.includes("color/text/on-danger")),
-      "designer presentation should list exact duplicate variable names"
+      plan.repairPlan.designerPresentation.proposedChanges.some(item => item.summaryLine.includes("color/bg/on-danger")),
+      "designer presentation should list exact invalid variable names"
+    );
+  }
+
+  {
+    const noContextSemantics = [
+      sem("text-on-danger", "color/text/on-danger", alias("n950"), alias("n50")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("n950"), alias("n50")),
+    ];
+    const noContextData = {
+      variables: primitives.concat(noContextSemantics),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: noContextSemantics.map(v => v.id) },
+      ],
+    };
+    const plan = planSemanticNamingConsolidationFromFigmaData(noContextData, { grammar: "element-first" });
+    assert.deepStrictEqual(
+      plan.repairPlan.applyInput.renameVariables,
+      [],
+      "ambiguous shorthand without a matching background context should not become a rename payload"
     );
     assert.ok(
-      plan.repairPlan.agentInstruction.includes("value-different proposedChanges are name-only compatibility renames"),
-      "agent guidance should explain value-different _deprecated renames"
+      plan.semanticNamingAdvisories.some(item => item.token === "color/text/on-danger" && item.kind === "ambiguous-name"),
+      "ambiguous shorthand without context should remain visible for review"
     );
   }
 
@@ -119,8 +162,6 @@ module.exports = (async () => {
     assert.deepStrictEqual(renameNames, [
       "color/bg/danger",
       "color/bg/on-danger",
-      "color/icon/danger",
-      "color/text/danger",
     ]);
     const bgRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/bg/danger");
     assert.strictEqual(bgRename.canonicalName, "color/fill/danger", "role-based background consolidation should prefer existing fill/*, not invalid bg/on-*");
@@ -130,7 +171,7 @@ module.exports = (async () => {
 
   {
     const plan = planSemanticNamingConsolidationFromFigmaData(figmaData, { canonicalConvention: "surface-based" });
-    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/text/on-danger");
+    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/bg/on-danger");
     assert.deepStrictEqual(
       _normalizeRenameVariables([Object.assign({}, validRename, { extra: true })]),
       [Object.assign({}, validRename)]
@@ -148,7 +189,7 @@ module.exports = (async () => {
 
   {
     const plan = planSemanticNamingConsolidationFromFigmaData(figmaData, { canonicalConvention: "surface-based" });
-    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/text/on-danger");
+    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/bg/on-danger");
     const arbitrary = await handleApplySemanticNamingConsolidation({
       canonicalConvention: "surface-based",
       renameVariables: [{
@@ -165,7 +206,7 @@ module.exports = (async () => {
 
   {
     const plan = planSemanticNamingConsolidationFromFigmaData(figmaData, { canonicalConvention: "surface-based" });
-    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/text/on-danger");
+    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/bg/on-danger");
     const tmpData = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-semantic-naming-data-"));
     const figmaDataPath = path.join(tmpData, "figma-data.json");
     fs.writeFileSync(figmaDataPath, JSON.stringify(figmaData), "utf8");
@@ -189,7 +230,7 @@ module.exports = (async () => {
 
   {
     const plan = planSemanticNamingConsolidationFromFigmaData(figmaData, { canonicalConvention: "surface-based" });
-    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/text/on-danger");
+    const validRename = plan.repairPlan.applyInput.renameVariables.find(item => item.expectedCurrentName === "color/bg/on-danger");
     const tmpData = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-semantic-naming-data-"));
     const figmaDataPath = path.join(tmpData, "figma-data.json");
     fs.writeFileSync(figmaDataPath, JSON.stringify(figmaData), "utf8");
@@ -202,7 +243,7 @@ module.exports = (async () => {
       json: {
         success: true,
         result: {
-          renamed: [{ id: "text-on-danger", from: "color/text/on-danger", to: "_deprecated/color/text/on-danger", canonicalName: "color/text/danger", preservesVariableId: true }],
+          renamed: [{ id: "bg-on-danger", from: "color/bg/on-danger", to: "_deprecated/color/bg/on-danger", canonicalName: "color/bg/danger", preservesVariableId: true }],
           skipped: [],
           unresolved: [],
           message: "1 renamed, 0 skipped, 0 unresolved.",
@@ -229,9 +270,9 @@ module.exports = (async () => {
       "apply result should tell agents to separate naming verification from remaining health-check findings"
     );
     const captured = readBridgeHookCapture(capturePath);
-    assert.strictEqual(captured.renameVariables[0].expectedCurrentName, "color/text/on-danger");
-    assert.strictEqual(captured.renameVariables[0].newName, "_deprecated/color/text/on-danger");
-    assert.strictEqual(captured.renameVariables[0].canonicalId, "text-danger");
+    assert.strictEqual(captured.renameVariables[0].expectedCurrentName, "color/bg/on-danger");
+    assert.strictEqual(captured.renameVariables[0].newName, "_deprecated/color/bg/on-danger");
+    assert.strictEqual(captured.renameVariables[0].canonicalId, "bg-danger");
     assert.strictEqual(captured.renameVariables[0].expectedEquivalence.status, "equivalent");
   }
 })();

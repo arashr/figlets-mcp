@@ -351,6 +351,45 @@ module.exports = (() => {
     "bootstrap file with only aliased semantics should not report missing primitives"
   );
 
+  const wrongAliasSnapshot = {
+    collections: [
+      {
+        id: "primitives",
+        name: "1. Primitives",
+        variableIds: ["p4", "p16"],
+        modes: [{ modeId: "default", name: "Default" }],
+      },
+      {
+        id: "spacing",
+        name: "4. Spacing",
+        variableIds: ["layout-xs"],
+        modes: [{ modeId: "mobile", name: "Mobile" }],
+      },
+    ],
+    variables: [
+      { id: "p4", name: "space/4", resolvedType: "FLOAT", valuesByMode: { default: 16 } },
+      { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+      {
+        id: "layout-xs",
+        name: "space/layout/xs",
+        resolvedType: "FLOAT",
+        valuesByMode: {
+          mobile: { type: "VARIABLE_ALIAS", id: "p16" },
+        },
+      },
+    ],
+  };
+  const wrongAliasPlan = planSpacingSemanticAliasRepairs(
+    Object.assign({}, DS, { spacing: { semantic: { "layout/xs": [16, 24, 32] } } }),
+    wrongAliasSnapshot,
+    new Map(wrongAliasSnapshot.variables.map(item => [item.name, item]))
+  );
+  assert.strictEqual(
+    wrongAliasPlan.repairs.length,
+    0,
+    "semantic spacing alias repair should not retarget existing aliases; this flow only converts raw numeric values"
+  );
+
   const driftSnapshot = Object.assign({}, snapshot, {
     variables: snapshot.variables.map(item => {
       if (item.name !== "space/layout/lg") return item;

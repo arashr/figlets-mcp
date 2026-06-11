@@ -429,6 +429,7 @@
     'foundation-repairs',
     'setup-repairs',
     'semantic-naming-consolidation',
+    'figma-operations',
     'reset-figlets-file'
   ];
 
@@ -723,6 +724,13 @@
           document.getElementById('substatus').innerText = 'Renaming approved duplicate variables.';
           _appendLog('Received command: apply_ds_semantic_naming_consolidation.');
           parent.postMessage({ pluginMessage: { type: 'apply-semantic-naming-consolidation', data: data.data } }, '*');
+        } else if (data.command === 'apply-figma-operations') {
+          isExtracting = true;
+          _armWatchdog('Figma operations', 60000);
+          document.getElementById('status').innerText = 'Applying operations...';
+          document.getElementById('substatus').innerText = 'Applying approved high-level operations.';
+          _appendLog('Received command: apply_ds_figma_operations.');
+          parent.postMessage({ pluginMessage: { type: 'apply-figma-operations', data: data.data } }, '*');
         } else if (data.command === 'reset-figlets-file') {
           isExtracting = true;
           _armWatchdog('Reset', 60000);
@@ -969,6 +977,28 @@
         document.getElementById('status').innerText = 'Connection failed';
         document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
         _appendLog('Failed to send setup repair result to receiver.');
+      }
+      isExtracting = false;
+      poll();
+      return;
+    }
+
+    if (msg.type === 'figma-operations-done') {
+      _disarmWatchdog();
+      document.getElementById('status').innerText = 'Sending result...';
+      try {
+        await fetch(RECEIVER_URL + '/sync-figma-operations?fileKey=' + encodeURIComponent(_currentFileKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Figlets-Session': _sessionId },
+          body: JSON.stringify(msg.data)
+        });
+        document.getElementById('status').innerText = 'Listening for Agent';
+        document.getElementById('substatus').innerText = msg.data.error ? 'Operations failed.' : 'Operations applied.';
+        _appendLog(msg.data.error ? 'Figma operations failed in plugin.' : 'Figma operations result sent to receiver.');
+      } catch (err) {
+        document.getElementById('status').innerText = 'Connection failed';
+        document.getElementById('substatus').innerText = 'Could not reach ' + RECEIVER_LABEL;
+        _appendLog('Failed to send Figma operations result to receiver.');
       }
       isExtracting = false;
       poll();

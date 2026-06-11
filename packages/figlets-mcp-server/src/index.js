@@ -22,6 +22,18 @@ const {
   handlePlanSemanticNamingConsolidation,
   handleApplySemanticNamingConsolidation,
 } = require("./tools/semantic-naming-consolidation.js");
+const {
+  planDsVariableCreationsTool,
+  applyDsVariableCreationsTool,
+  handlePlanDsVariableCreations,
+  handleApplyDsVariableCreations,
+} = require("./tools/variable-creations.js");
+const {
+  planDsFigmaOperationsTool,
+  applyDsFigmaOperationsTool,
+  handlePlanDsFigmaOperations,
+  handleApplyDsFigmaOperations,
+} = require("./tools/figma-operations.js");
 const { refreshDsConfigFromFigmaTool, handleRefreshDsConfigFromFigma } = require("./tools/refresh-ds-config-from-figma.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
@@ -125,7 +137,7 @@ server.tool(
       lastToolStatus: z.enum(["success", "error", "unknown"]).optional(),
       pendingWriteTool: z.string().optional(),
       approvalStatus: z.enum(["not_needed", "needed", "granted", "denied", "unknown"]).optional(),
-    }).optional(),
+    }).passthrough().optional(),
     repairPlanState: z.object({
       sourceTool: z.string().optional(),
       hasApplyInput: z.boolean().optional(),
@@ -134,7 +146,7 @@ server.tool(
       hasPrimitiveRepairPlan: z.boolean().optional(),
       hasMissingCapabilityNotes: z.boolean().optional(),
       fixableNowCount: z.number().optional(),
-    }).optional(),
+    }).passthrough().optional(),
     requestedAction: z.object({
       tool: z.string().optional(),
       kind: z.enum(["read", "write", "unknown"]).optional(),
@@ -146,7 +158,7 @@ server.tool(
         "hand_authored",
         "unknown",
       ]).optional(),
-    }).optional(),
+    }).passthrough().optional(),
   },
   async (args) => {
     try {
@@ -497,6 +509,16 @@ server.tool(
     create_missing: z.boolean().optional().describe("When true, missing variables/styles are reported as wouldCreate*. When false, they remain unmatched/missing only."),
     dry_run: z.boolean().optional().describe("When true, preview without mutating Figma. dry_run=false is limited to approved narrow token categories."),
     ensure_collection_modes: z.boolean().optional().describe("When true on apply, add configured breakpoint modes to existing Spacing and Typography collections before responsive token writes."),
+    spacing_semantic_repairs: z.array(z.object({
+      name: z.string(),
+      updates: z.array(z.object({
+        modeId: z.string().optional(),
+        modeName: z.string().optional(),
+        toAliasId: z.string().optional(),
+        toAliasName: z.string().optional(),
+        configExpected: z.number().optional(),
+      }).passthrough()),
+    })).optional().describe("Optional exact semantic spacing alias repairs copied from inspect_ds_token_gaps.repairPlan.applyInput.spacing_semantic_repairs. When provided, update_ds_tokens applies only these token/mode entries instead of the whole spacing-semantics category."),
     prune: z.object({
       off_config_variables: z.boolean().optional(),
       off_config_text_styles: z.boolean().optional(),
@@ -577,10 +599,13 @@ server.tool(
       from: z.string().optional().describe("Legacy alias for expectedCurrentAlias.")
     })).optional().describe("Designer-approved re-alias updates for existing semantic variables, usually copied from contrastFailures[*].plannedReAlias."),
     roleRepairs: z.array(z.object({
-      name: z.string().describe("Semantic role variable to create, e.g. color/border/info, color/icon/success, or color/outline/focus."),
-      role: z.string().describe("Role type, usually border, icon, or focus-border."),
+      name: z.string().describe("Semantic role variable to create, e.g. color/border/info, color/icon/success, color/outline/focus, or an approved foreground role."),
+      role: z.string().describe("Role type, usually border, icon, focus-border, or foreground."),
+      pairedBg: z.string().optional().describe("Optional background token from the planner when this role belongs to a specific surface."),
+      expectedCurrentPairText: z.string().optional().describe("Optional stale-approval guard for pair text remaps."),
+      expectedCurrentPairIcon: z.string().optional().describe("Optional stale-approval guard for pair icon remaps."),
       aliases: z.any().describe("Per-mode primitive variable names approved by the designer from inspect_ds_setup_gaps.repairPlan.applyInput. Preserve the object exactly; never replace it with a count, summary, boolean, or prose-derived value.")
-    })).optional().describe("Designer-approved missing border/icon/focus-border semantic role variables copied or filtered from inspect_ds_setup_gaps.repairPlan.applyInput."),
+    })).optional().describe("Designer-approved missing border/icon/focus-border/foreground semantic role variables copied or filtered from inspect_ds_setup_gaps.repairPlan.applyInput or optionalApplyInput."),
     config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path to update after Figma succeeds. Defaults to the active file config."),
     update_config: z.boolean().optional().describe("When false, do not update design-system.config.js after applying repairs. Defaults to true."),
     answers: z.object({
@@ -611,7 +636,9 @@ server.tool(
   planSemanticNamingConsolidationTool.name,
   planSemanticNamingConsolidationTool.description,
   {
-    canonicalConvention: z.enum(["surface-based", "role-based"]).describe("The naming convention the designer chose after reviewing semanticNamingConflicts."),
+    grammar: z.enum(["paired-context", "element-first", "intent-emphasis", "component-scoped", "custom"]).optional().describe("The semantic color naming grammar the designer intends to use. Prefer this over the legacy binary canonicalConvention."),
+    decisions: z.array(z.any()).optional().describe("Optional exact context decisions for a future grammar-aware migration slice."),
+    canonicalConvention: z.enum(["surface-based", "role-based"]).optional().describe("Legacy compatibility input. Do not present this binary choice as the default designer flow."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
   },
   async (args) => {
@@ -638,6 +665,7 @@ server.tool(
   applySemanticNamingConsolidationTool.name,
   applySemanticNamingConsolidationTool.description,
   {
+    grammar: z.enum(["paired-context", "element-first", "intent-emphasis", "component-scoped", "custom"]).optional().describe("Optional grammar copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput."),
     canonicalConvention: z.enum(["surface-based", "role-based"]).describe("The naming convention approved by the designer."),
     renameVariables: z.array(z.object({
       id: z.string().describe("Figma variable id copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput."),
@@ -663,6 +691,132 @@ server.tool(
   async (args) => {
     try {
       const result = await handleApplySemanticNamingConsolidation(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- plan_ds_variable_creations ---
+server.tool(
+  planDsVariableCreationsTool.name,
+  planDsVariableCreationsTool.description,
+  {
+    variables: z.array(z.object({
+      name: z.string().describe("Exact variable name to create."),
+      collection: z.string().describe("Existing Figma variable collection name."),
+      type: z.enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"]).describe("Figma variable type."),
+      values: z.record(z.string(), z.any()).describe("Mode-name map. Use { alias: variableName }, { value: literal }, a number, boolean, string, or color hex string.")
+    })).describe("Exact designer-requested variables to validate and preview."),
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
+  },
+  async (args) => {
+    try {
+      const result = handlePlanDsVariableCreations(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- apply_ds_variable_creations ---
+server.tool(
+  applyDsVariableCreationsTool.name,
+  applyDsVariableCreationsTool.description,
+  {
+    variableCreations: z.array(z.object({
+      name: z.string(),
+      collection: z.string(),
+      collectionId: z.string(),
+      type: z.enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"]),
+      modeValues: z.array(z.object({
+        mode: z.string(),
+        modeId: z.string(),
+        kind: z.enum(["alias", "literal"]),
+        targetName: z.string().optional(),
+        targetId: z.string().optional(),
+        value: z.any().optional()
+      }))
+    })).describe("Approved variable creations copied or filtered from plan_ds_variable_creations.repairPlan.applyInput.variableCreations."),
+    figmaDataPath: z.string().optional().describe("Optional snapshot path used for stale approval validation before apply.")
+  },
+  async (args) => {
+    try {
+      const result = await handleApplyDsVariableCreations(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- plan_ds_figma_operations ---
+server.tool(
+  planDsFigmaOperationsTool.name,
+  planDsFigmaOperationsTool.description,
+  {
+    operations: z.array(z.record(z.string(), z.any())).describe("Exact high-level Figma operations to validate. Supported kinds: create_collection, rename_collection, delete_collection, create_mode, rename_mode, delete_mode, create_variable, update_variable, rename_variable, delete_variable."),
+    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
+  },
+  async (args) => {
+    try {
+      const result = handlePlanDsFigmaOperations(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- apply_ds_figma_operations ---
+server.tool(
+  applyDsFigmaOperationsTool.name,
+  applyDsFigmaOperationsTool.description,
+  {
+    operations: z.array(z.record(z.string(), z.any())).describe("Approved operations copied or filtered from plan_ds_figma_operations.repairPlan.applyInput.operations."),
+    figmaDataPath: z.string().optional().describe("Optional snapshot path used for stale approval validation before apply.")
+  },
+  async (args) => {
+    try {
+      const result = await handleApplyDsFigmaOperations(args || {});
       if (result && result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

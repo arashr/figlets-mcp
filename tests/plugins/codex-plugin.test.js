@@ -65,7 +65,7 @@ assert.ok(skillBody.includes("selectionPrompt"), "skill body must support struct
 assert.ok(/Only use `figlets_start\.designerResponse` verbatim for generic help\/start requests/i.test(skillBody), "skill body must not show the generic menu for concrete goals");
 assert.ok(/workflow guide is mandatory/i.test(skillBody), "skill body must make the workflow guide mandatory for designer review");
 assert.ok(/do not write custom scripts/i.test(skillBody), "skill body must forbid ad hoc scripts for designer review");
-assert.ok(/product\/tool gap/i.test(skillBody), "skill body must report missing Figlets data as a product/tool gap");
+assert.ok(/plan_ds_figma_operations/i.test(skillBody), "skill body must route exact high-level edits through the Figlets operations planner");
 assert.ok(/bulk design-system updates as Figlets scope/i.test(skillBody), "skill body must keep bulk DS updates in Figlets scope");
 assert.ok(/exact `repairPlan\.applyInput` object/i.test(skillBody), "skill body must require exact setup repair applyInput handoff");
 assert.ok(/Never replace `aliases` with counts/i.test(skillBody), "skill body must forbid replacing aliases with summaries");

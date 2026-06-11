@@ -24,6 +24,7 @@ let pendingUpdatePrimitivesRequest = null;
 let pendingUpdateTokensRequest = null;
 let pendingSetupRepairsRequest = null;
 let pendingSemanticNamingConsolidationRequest = null;
+let pendingFigmaOperationsRequest = null;
 let pendingFoundationRepairsRequest = null;
 let pendingResetRequest = null;
 let pendingRemoveTextStylesRequest = null;
@@ -233,6 +234,7 @@ const server = http.createServer((req, res) => {
       updateTokensLive: pluginCapabilities.indexOf('update-tokens') !== -1,
       setupRepairsLive: pluginCapabilities.indexOf('setup-repairs') !== -1,
       semanticNamingConsolidationLive: pluginCapabilities.indexOf('semantic-naming-consolidation') !== -1,
+      figmaOperationsLive: pluginCapabilities.indexOf('figma-operations') !== -1,
       dataPath: healthPaths.data,
       selectionPath: healthPaths.selection
     }));
@@ -781,6 +783,67 @@ const server = http.createServer((req, res) => {
         pendingSemanticNamingConsolidationRequest.writeHead(200, { 'Content-Type': 'application/json' });
         pendingSemanticNamingConsolidationRequest.end(JSON.stringify({ success: true, result: parsed }));
         pendingSemanticNamingConsolidationRequest = null;
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/request-figma-operations') {
+    if (pendingPollResponse) {
+      if (!_pluginHasCapability('figma-operations')) {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'The Figlets Bridge plugin is connected but does not advertise high-level Figma operations. Reload the plugin in Figma Desktop so it loads the latest local code.',
+          activeSessionId: pendingPollSessionId || null,
+          pluginCapabilities: activePluginCapabilities
+        }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        let payload;
+        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
+
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'apply-figma-operations', data: payload }));
+        _clearPendingPoll();
+
+        pendingFigmaOperationsRequest = res;
+
+        const figmaOperationsTimer = setTimeout(() => {
+          if (pendingFigmaOperationsRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Figma operations timed out.' }));
+            pendingFigmaOperationsRequest = null;
+          }
+        }, 60000);
+        if (figmaOperationsTimer.unref) figmaOperationsTimer.unref();
+      });
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(_notConnectedPayload()));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/sync-figma-operations') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = {}; }
+      _persistSessionFileKey(req, parsed);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+
+      if (pendingFigmaOperationsRequest) {
+        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+        pendingFigmaOperationsRequest.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingFigmaOperationsRequest.end(JSON.stringify({ success: true, result: parsed }));
+        pendingFigmaOperationsRequest = null;
       }
     });
     return;

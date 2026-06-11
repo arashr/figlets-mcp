@@ -177,6 +177,82 @@ function _isAliasValue(value) {
   return Boolean(value && typeof value === "object" && value.type === "VARIABLE_ALIAS" && typeof value.id === "string");
 }
 
+function _spacingRepairSourceKind(update) {
+  if (!update) return "unknown";
+  if (_isAliasValue(update.from)) return "alias-retarget";
+  const numeric = Number(update.from);
+  if (Number.isFinite(numeric)) return "raw-value";
+  return "unknown";
+}
+
+function _spacingRepairBreakdown(spacingRepairs) {
+  const rawValueTokens = new Set();
+  const aliasRetargetTokens = new Set();
+  const unknownTokens = new Set();
+  let rawValueUpdates = 0;
+  let aliasRetargetUpdates = 0;
+  let unknownUpdates = 0;
+  let totalUpdates = 0;
+
+  for (const repair of spacingRepairs || []) {
+    for (const update of repair.updates || []) {
+      totalUpdates += 1;
+      const kind = _spacingRepairSourceKind(update);
+      if (kind === "raw-value") {
+        rawValueUpdates += 1;
+        rawValueTokens.add(repair.name);
+      } else if (kind === "alias-retarget") {
+        aliasRetargetUpdates += 1;
+        aliasRetargetTokens.add(repair.name);
+      } else {
+        unknownUpdates += 1;
+        unknownTokens.add(repair.name);
+      }
+    }
+  }
+
+  return {
+    repairTokens: (spacingRepairs || []).length,
+    repairUpdates: totalUpdates,
+    rawValueTokens: rawValueTokens.size,
+    rawValueUpdates,
+    aliasRetargetTokens: aliasRetargetTokens.size,
+    aliasRetargetUpdates,
+    unknownTokens: unknownTokens.size,
+    unknownUpdates,
+  };
+}
+
+function _plural(noun, count) {
+  if (noun === "alias") return String(count) + " " + (count === 1 ? "alias" : "aliases");
+  return String(count) + " " + noun + (count === 1 ? "" : "s");
+}
+
+function _spacingRepairBreakdownSentence(breakdown) {
+  const parts = [];
+  if (breakdown.rawValueUpdates) {
+    parts.push(_plural("raw value", breakdown.rawValueUpdates) + " to convert to primitive aliases");
+  }
+  if (breakdown.aliasRetargetUpdates) {
+    parts.push(_plural("alias", breakdown.aliasRetargetUpdates).replace(/^(\d+) /, "$1 existing ") + " to retarget to the config-matched primitive");
+  }
+  if (breakdown.unknownUpdates) {
+    parts.push(_plural("repair", breakdown.unknownUpdates) + " with an unknown current value shape");
+  }
+  return parts.join(", ");
+}
+
+function _spacingAliasRepairReason(updates) {
+  const breakdown = _spacingRepairBreakdown([{ name: "semantic-spacing", updates: updates || [] }]);
+  if (breakdown.rawValueUpdates && !breakdown.aliasRetargetUpdates && !breakdown.unknownUpdates) {
+    return "This semantic spacing variable has raw value mode(s) that match config and can alias to existing primitive spacing variables.";
+  }
+  if (breakdown.aliasRetargetUpdates && !breakdown.rawValueUpdates && !breakdown.unknownUpdates) {
+    return "This semantic spacing variable is already aliased, but one or more modes point to a primitive that does not match the config-backed semantic value.";
+  }
+  return "This semantic spacing variable has mode-level alias repairs, including raw value conversion or existing alias retargeting to match config.";
+}
+
 function _styleNameSet(figmaData, key) {
   const styles = Array.isArray(figmaData && figmaData[key]) ? figmaData[key] : [];
   return new Set(styles.filter(s => s && typeof s.name === "string").map(s => s.name));
@@ -684,7 +760,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
             gapType: "spacing-alias-repair",
             kind: "variable",
             updates: plannedAliasRepair.updates,
-            reason: "This semantic spacing variable uses raw values that match config and can alias to existing primitive spacing variables.",
+            reason: _spacingAliasRepairReason(plannedAliasRepair.updates),
           }));
           supportedCategoriesWithGaps.add(category);
         }
@@ -717,7 +793,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         collection: spacingCollection,
         gapType: "spacing-alias-repair",
         updates: repair.updates,
-        reason: "This semantic spacing variable has breakpoint mode(s) still using raw pixel values that can alias to existing primitive spacing variables.",
+        reason: _spacingAliasRepairReason(repair.updates),
       });
       spacingGapNames.add(repair.name);
       supportedCategoriesWithGaps.add("spacing-semantics");
@@ -826,6 +902,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       spacingAlreadyHealthyCount: (spacingAliasPlan.alreadyAliasedHealthy || []).length,
       missingResponsiveModes: (spacingAliasPlan.missingResponsiveModes || []).length,
       spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
+      repairSourceBreakdown: _spacingRepairBreakdown(spacingAliasPlan.repairs),
     },
     spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
     spacingMissingResponsiveModes: spacingAliasPlan.missingResponsiveModes || [],
@@ -950,12 +1027,21 @@ function _buildRepairPlan(context) {
         + " for: " + primitiveApplyCategories.join(", ") + ".",
     }
     : null;
+  const reviewOptions = _buildReviewOptions({
+    context,
+    applyCategories,
+    primitiveRepairPlan,
+    foundationApplyInput,
+    foundationCollections,
+    spacingSemanticRepairs: applyInput.spacing_semantic_repairs || [],
+  });
 
   return {
     tool: "update_ds_tokens",
     approvalRequired: true,
     previewInput,
     applyInput,
+    reviewOptions,
     primitiveRepairPlan,
     optionalPreviewInput: {
       config_path: context.configPath,
@@ -998,9 +1084,169 @@ function _buildRepairPlan(context) {
     missingCapabilityNotes: context.missingCapabilityNotes || [],
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
-      ? "STOP before any Figma write. This inspect pass is read-only. Run dry-run previews (repairPlan.previewInput and primitiveRepairPlan.previewInput when present), summarize repairPlan.designerPresentation in plain language, and wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
+      ? "STOP before any Figma write. This inspect pass is read-only. For designer-facing review, present repairPlan.reviewOptions as separate choices and run only the selected preview. Do not run repairPlan.previewInput and primitiveRepairPlan.previewInput together as one combined token preview. Summarize repairPlan.designerPresentation in plain language, then wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
       : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
+}
+
+function _reviewOption(id, label, boundary, tool, previewInput, applyInput, designerSummary) {
+  const option = {
+    id,
+    label,
+    boundary,
+    tool,
+    designerSummary,
+  };
+  if (previewInput) option.previewInput = previewInput;
+  if (applyInput) option.applyInput = applyInput;
+  return option;
+}
+
+function _buildReviewOptions({
+  context,
+  applyCategories,
+  primitiveRepairPlan,
+  foundationApplyInput,
+  foundationCollections,
+  spacingSemanticRepairs,
+}) {
+  const options = [];
+  const configPath = context.configPath;
+  const applyCategorySet = new Set(applyCategories || []);
+
+  if ((foundationCollections || []).length) {
+    options.push(_reviewOption(
+      "foundation-modes",
+      "Add missing foundation modes only",
+      "foundation",
+      "apply_ds_foundation_repairs",
+      null,
+      foundationApplyInput,
+      "Creates only configured collection modes or shells. After this, sync and reinspect, then stop before any token write."
+    ));
+  }
+
+  if (primitiveRepairPlan) {
+    options.push(_reviewOption(
+      "primitive-typography",
+      "Review primitive typography variables",
+      "primitive-token",
+      "update_ds_primitives",
+      primitiveRepairPlan.previewInput,
+      primitiveRepairPlan.applyInput,
+      "Creates or updates primitive typography variables in the configured Primitives collection only."
+    ));
+  }
+
+  const spacingRepairs = spacingSemanticRepairs || [];
+  if (spacingRepairs.length) {
+    const breakdown = _spacingRepairBreakdown(spacingRepairs);
+    const breakdownSentence = _spacingRepairBreakdownSentence(breakdown);
+    options.push(_reviewOption(
+      "semantic-spacing-aliases",
+      "Review semantic spacing alias repairs",
+      "semantic-token",
+      "update_ds_tokens",
+      {
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: true,
+        spacing_semantic_repairs: spacingRepairs,
+      },
+      {
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: false,
+        spacing_semantic_repairs: spacingRepairs,
+      },
+      "Reviews only the listed semantic spacing token/mode alias repairs"
+        + (breakdownSentence ? ": " + breakdownSentence + "." : ".")
+        + " It does not create missing breakpoint modes, and it does not create unrelated spacing variables."
+    ));
+  }
+
+  const radiusBorderCategories = ["border-width", "radius"].filter(category => applyCategorySet.has(category));
+  if (radiusBorderCategories.length) {
+    options.push(_reviewOption(
+      "radius-border-tokens",
+      "Review radius and border-width tokens",
+      "semantic-token",
+      "update_ds_tokens",
+      {
+        config_path: configPath,
+        categories: radiusBorderCategories,
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: true,
+      },
+      {
+        config_path: configPath,
+        categories: radiusBorderCategories,
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: false,
+      },
+      "Reviews missing radius and border-width variables only."
+    ));
+  }
+
+  if (applyCategorySet.has("typography") || applyCategorySet.has("typography-variables") || applyCategorySet.has("typography-styles")) {
+    const typographyCategories = applyCategorySet.has("typography")
+      ? ["typography"]
+      : ["typography-variables", "typography-styles"].filter(category => applyCategorySet.has(category));
+    options.push(_reviewOption(
+      "typography-tokens-and-styles",
+      "Review typography variables and text styles",
+      "semantic-token",
+      "update_ds_tokens",
+      {
+        config_path: configPath,
+        categories: typographyCategories,
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: true,
+      },
+      {
+        config_path: configPath,
+        categories: typographyCategories,
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: false,
+      },
+      "Reviews configured Typography collection variables and config-derived text styles. Existing text styles may be refreshed in place."
+    ));
+  }
+
+  const hasMissingSemanticSpacingVariable = (context.missingVariables || []).some(gap => gap.category === "spacing-semantics");
+  if (hasMissingSemanticSpacingVariable) {
+    options.push(_reviewOption(
+      "semantic-spacing-token-completion",
+      "Review semantic spacing token completion",
+      "semantic-token",
+      "update_ds_tokens",
+      {
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: true,
+      },
+      {
+        config_path: configPath,
+        categories: ["spacing-semantics"],
+        create_missing: true,
+        include_existing_updates: false,
+        dry_run: false,
+      },
+      "Reviews the full semantic spacing category, including missing semantic spacing variables and alias repairs. Use the semantic spacing alias option for alias-only review."
+    ));
+  }
+
+  return options;
 }
 
 function _buildDesignerPresentation(context, total) {
@@ -1038,12 +1284,22 @@ function _buildDesignerPresentation(context, total) {
       const changes = [];
       for (const repair of spacingAliasRepairs) {
         for (const update of repair.updates || []) {
-          changes.push(repair.name + " [" + update.modeName + "] -> " + update.toAliasName);
+          const sourceKind = _spacingRepairSourceKind(update);
+          const prefix = sourceKind === "raw-value"
+            ? "raw value"
+            : sourceKind === "alias-retarget"
+              ? "existing alias"
+              : "current value";
+          changes.push(repair.name + " [" + update.modeName + "] " + prefix + " -> " + update.toAliasName);
         }
       }
+      const breakdown = _spacingRepairBreakdown(spacingAliasRepairs);
+      const breakdownSentence = _spacingRepairBreakdownSentence(breakdown);
       sections.push({
         title: "Semantic spacing alias repairs",
-        message: "Figlets can replace raw semantic spacing values that match config with existing primitive aliases: "
+        message: "Figlets can preview " + _plural("semantic spacing token/mode repair", breakdown.repairUpdates)
+          + (breakdownSentence ? ": " + breakdownSentence : "")
+          + ". Examples: "
           + changes.slice(0, 6).join(", ")
           + (changes.length > 6 ? ", and more." : "."),
       });
@@ -1107,11 +1363,18 @@ function _buildDesignerPresentation(context, total) {
       optional: 0,
       foundationRepairs: foundationRepairs.length,
       productGaps: notes.filter(note => note.productGap).length,
+      spacingAliasRepairs: spacingAliasRepairs.length,
+      spacingAliasRepairSourceBreakdown: _spacingRepairBreakdown(spacingAliasRepairs),
     },
     proposedChanges: spacingAliasRepairs.flatMap(repair => (repair.updates || []).map(update => ({
       token: repair.name,
       mode: update.modeName,
-      action: "alias-to-existing-primitive",
+      action: _spacingRepairSourceKind(update) === "alias-retarget"
+        ? "retarget-existing-alias-to-primitive"
+        : _spacingRepairSourceKind(update) === "raw-value"
+          ? "convert-raw-value-to-primitive-alias"
+          : "alias-to-existing-primitive",
+      sourceKind: _spacingRepairSourceKind(update),
       toAlias: update.toAliasName,
     }))),
   };

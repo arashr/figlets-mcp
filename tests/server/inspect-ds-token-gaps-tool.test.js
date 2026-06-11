@@ -251,11 +251,34 @@ module.exports = (() => {
       ),
       "exact semantic spacing apply payload should include token/mode alias targets"
     );
+    const spacingAliasReview = spacingAliasPlan.repairPlan.reviewOptions.find(option => option.id === "semantic-spacing-aliases");
+    assert.ok(spacingAliasReview, "repair plan should expose semantic spacing alias review as its own option");
+    assert.deepStrictEqual(
+      spacingAliasReview.previewInput.categories,
+      ["spacing-semantics"],
+      "semantic spacing alias review should preview only the spacing-semantics category"
+    );
+    assert.ok(
+      Array.isArray(spacingAliasReview.previewInput.spacing_semantic_repairs) &&
+        spacingAliasReview.previewInput.spacing_semantic_repairs.length > 0,
+      "semantic spacing alias review should carry exact repair entries"
+    );
+    assert.ok(
+      spacingAliasReview.designerSummary.includes("does not create unrelated spacing variables"),
+      "semantic spacing alias review should explain the narrow boundary"
+    );
+    assert.ok(
+      spacingAliasReview.designerSummary.includes("raw value") &&
+        !spacingAliasReview.designerSummary.includes("existing alias"),
+      "raw-only semantic spacing alias review should not imply alias retargets are present"
+    );
     assert.ok(
       spacingAliasPlan.repairPlan.designerPresentation.proposedChanges.some(change =>
         change.token === "space/component/md"
         && change.mode === "Mobile"
         && change.toAlias === "space/12"
+        && change.sourceKind === "raw-value"
+        && change.action === "convert-raw-value-to-primitive-alias"
       ),
       "designer presentation should include exact token/mode alias mapping"
     );
@@ -909,6 +932,10 @@ module.exports = (() => {
       "agent instruction should not allow one approval to cover modes and spacing aliases"
     );
     assert.ok(
+      mobileOnlySpacing.repairPlan.agentInstruction.includes("reviewOptions"),
+      "agent instruction should route designer token review through split review options"
+    );
+    assert.ok(
       mobileOnlySpacing.repairPlan.agentInstruction.includes("then stop before any primitive or semantic token write"),
       "foundation approval should stop after mode creation and reinspect"
     );
@@ -921,6 +948,33 @@ module.exports = (() => {
       "designer presentation should separate missing modes from Mobile alias repairs"
     );
     const exactRepairs = mobileOnlySpacing.repairPlan.applyInput.spacing_semantic_repairs || [];
+    assert.ok(
+      mobileOnlySpacing.repairPlan.reviewOptions.some(option =>
+        option.id === "foundation-modes" &&
+        option.tool === "apply_ds_foundation_repairs"
+      ),
+      "missing modes should be exposed as a separate review option"
+    );
+    assert.ok(
+      mobileOnlySpacing.repairPlan.reviewOptions.some(option =>
+        option.id === "semantic-spacing-aliases" &&
+        option.previewInput &&
+        Array.isArray(option.previewInput.spacing_semantic_repairs) &&
+        option.designerSummary.includes("4 raw values") &&
+        !option.designerSummary.includes("existing alias")
+      ),
+      "Mobile-only raw alias repairs should be exposed as a separate exact review option without alias-retarget wording"
+    );
+    assert.strictEqual(
+      mobileOnlySpacing.repairPlan.designerPresentation.summaryCounts.spacingAliasRepairSourceBreakdown.rawValueUpdates,
+      4,
+      "Mobile-only fixture should surface the four raw values as the source breakdown"
+    );
+    assert.strictEqual(
+      mobileOnlySpacing.repairPlan.designerPresentation.summaryCounts.spacingAliasRepairSourceBreakdown.aliasRetargetUpdates,
+      0,
+      "Mobile-only fixture should not classify already-aliased tokens as raw repairs"
+    );
     assert.deepStrictEqual(
       exactRepairs.map(repair => repair.name).sort(),
       ["space/layout/lg", "space/layout/xl", "space/touch/comfortable", "space/touch/min"].sort(),

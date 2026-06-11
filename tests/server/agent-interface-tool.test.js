@@ -56,7 +56,7 @@ try {
     assert.strictEqual(start.responseContract.mode, "designer-facing");
     assert.ok(start.responseContract.designSystemReviewRule.includes("Use Figlets workflow tools/scripts only"));
     assert.ok(start.responseContract.bulkUpdateRule.includes("Bulk design-system updates"));
-    assert.ok(start.responseContract.bulkUpdateRule.includes("product/tool gap"));
+    assert.ok(start.responseContract.bulkUpdateRule.includes("plan_ds_figma_operations"));
     assert.ok(start.responseContract.nextAction.includes("For a concrete initial goal, route it before replying"));
     assert.strictEqual(start.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(start.hardRules.bulkDesignSystemUpdatesAreInScope, true);
@@ -78,9 +78,16 @@ try {
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("pass that exact object")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("schema validation rejects")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Do not replace the exact entries with token names")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")));
     assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.source, "inspect_ds_setup_gaps.repairPlan.applyInput");
     assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.preserveAliases, true);
     assert.ok(start.hardRules.setupRepairPayloadHandoff.invalidPayloadRecovery.includes("rerun inspect_ds_setup_gaps"));
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.source, "inspect_ds_token_gaps.repairPlan.applyInput.spacing_semantic_repairs");
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.target, "update_ds_tokens.spacing_semantic_repairs");
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.preserveUpdates, true);
+    assert.ok(start.hardRules.spacingSemanticRepairPayloadHandoff.mobileOnlyRule.includes("must not be redirected"));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("fixableNow")));
     assert.ok(start.responseContract.bulkUpdateRule.includes("inspect_ds_token_gaps"));
     assert.ok(start.hardRules.appliesTo.includes("design-system review"));
@@ -306,7 +313,8 @@ try {
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("includes/excludes")));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("numbered specific/other option")));
     assert.ok(guide.steps.some(step => step.id === "preview-token-repairs" && step.kind === "read" && step.tool === "update_ds_tokens" && step.options && step.options.dry_run === true));
-    assert.ok(guide.steps.some(step => step.id === "preview-token-repairs" && step.designerMessage.includes("before asking for token-write approval")));
+    assert.ok(guide.steps.some(step => step.id === "preview-token-repairs" && step.designerMessage.includes("repairPlan.reviewOptions")));
+    assert.ok(guide.steps.some(step => step.id === "preview-token-repairs" && step.designerMessage.includes("not one combined token preview")));
     assert.ok(guide.steps.some(step => step.id === "preview-token-primitives" && step.kind === "read" && step.tool === "update_ds_primitives" && step.options && step.options.dry_run === true));
     assert.ok(guide.steps.some(step => step.id === "preview-token-primitives" && step.designerMessage.includes("before asking for primitive-write approval")));
     assert.ok(guide.steps.some(step => step.tool === "apply_ds_setup_repairs" && step.requiresApproval === true && step.designerMessage.includes("repairPlan.applyInput")));
@@ -325,12 +333,16 @@ try {
   {
     assert.strictEqual(DESIGNER_FLOW_HARD_RULES.reviewMustUseFigletsWorkflow, true);
     assert.ok(
-      DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("product/tool gap"),
-      "hard rules should tell weaker agents not to invent a script when Figlets output is missing data"
+      DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("plan_ds_figma_operations"),
+      "hard rules should route exact high-level edits through Figlets operations before gap reporting"
     );
     assert.ok(
       DESIGNER_FLOW_HARD_RULES.designerPresentationRule.includes("repairPlan.designerPresentation"),
       "hard rules should keep designer-facing summaries human-readable"
+    );
+    assert.ok(
+      DESIGNER_FLOW_HARD_RULES.bulkRepairRouting.some(item => item.includes("reviewOptions")),
+      "hard rules should route token review through split review options"
     );
     const handled = handleFigletsWorkflowGuide({ workflow_id: "health-check" });
     assert.strictEqual(handled.hardRules.reviewMustUseFigletsWorkflow, true);
@@ -461,6 +473,67 @@ try {
 
   {
     const health = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: ["sync_figma_data", "inspect_ds_token_gaps"],
+        lastAppliedBoundary: "semantic-token",
+        postApplySyncReinspectCompleted: true,
+      },
+      requestedAction: {
+        tool: "summarize_results",
+        kind: "read",
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const verification = health.checks.find(check => check.id === "post_apply_health_check_verification");
+    assert.strictEqual(verification.status, "fail");
+    assert.strictEqual(verification.recommendedTool, "sync_figma_data");
+    assert.ok(verification.message.includes("full read-only health-check sequence"));
+    assert.ok(verification.nextAction.includes("not from the apply result or a narrow token-only reinspection"));
+    assert.ok(
+      verification.nextAction.includes("do not repeat missing Tablet/Desktop modes"),
+      "post-apply health check should force agents to drop stale foundation-mode findings"
+    );
+    assert.ok(
+      verification.nextAction.includes("instead of a drifting option number"),
+      "post-apply health check should tell agents to name the applied repair instead of option numbers"
+    );
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: [
+          "sync_figma_data",
+          "detect_design_system",
+          "audit_tokens",
+          "inspect_ds_setup_gaps",
+          "inspect_ds_token_gaps",
+        ],
+        lastAppliedBoundary: "semantic-token",
+      },
+      requestedAction: {
+        tool: "summarize_results",
+        kind: "read",
+      },
+    });
+    const verification = health.checks.find(check => check.id === "post_apply_health_check_verification");
+    assert.strictEqual(verification.status, "pass");
+    assert.ok(
+      verification.nextAction.includes("reconcile stale pre-apply findings"),
+      "passing post-apply health check should still remind agents to reconcile stale remaining items"
+    );
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
       context: { mode: "designer" },
       workflowState: {
         figletsStartCalled: true,
@@ -474,7 +547,7 @@ try {
     assert.strictEqual(health.status, "warning");
     const productGap = health.checks.find(check => check.id === "product_gap_response");
     assert.strictEqual(productGap.status, "warn");
-    assert.ok(productGap.nextAction.includes("product/tool gap"));
+    assert.ok(productGap.nextAction.includes("plan_ds_figma_operations"));
   }
 
   {

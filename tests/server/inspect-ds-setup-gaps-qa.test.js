@@ -271,7 +271,7 @@ module.exports = (() => {
     "agents must be instructed to ask before applying optional convention-level repairs"
   );
   assert.ok(
-    universalPlan.designerPresentation.sayToDesigner.some(line => line.includes("optional passive border/outline/stroke")),
+    universalPlan.designerPresentation.sayToDesigner.some(line => line.includes("optional convention-level role")),
     "optional convention repairs should have a plain-language designer summary"
   );
   assert.strictEqual(
@@ -320,6 +320,11 @@ module.exports = (() => {
       assert.strictEqual(dangerLight.plannedReAlias.expectedCurrentAlias, "color/neutral/300");
       assert.strictEqual(dangerLight.plannedReAlias.newAliasTarget, "color/neutral/950");
       assert.ok(handlerResult.repairPlan, "handler should expose an agent-ready repair plan");
+      assert.ok(handlerResult.semanticColorGrammar, "handler result should expose semantic color grammar to agents");
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(handlerResult, "semanticNamingAdvisories"),
+        "handler result should expose low-priority semantic naming advisories"
+      );
       const topKeys = Object.keys(handlerResult).slice(0, 4);
       assert.deepStrictEqual(
         topKeys,
@@ -357,6 +362,86 @@ module.exports = (() => {
       else delete process.env.FIGLETS_LOCAL_DIR;
       if (prevFig !== undefined) process.env.FIGLETS_FIGMA_DATA_PATH = prevFig;
       else delete process.env.FIGLETS_FIGMA_DATA_PATH;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  // ── plannedReAlias guard: shared tokens must not receive oscillating fixes ──
+  // A local repair that fixes one pair but breaks another pair using the same
+  // semantic token is not a safe one-click repair. It should remain visible as
+  // a designer/tooling decision and stay out of repairPlan.applyInput.aliasUpdates.
+  {
+    const sharedVars = [
+      sem("shared-bg-light", "color/bg/shared-light", alias("n50"), undefined),
+      sem("shared-bg-dark", "color/bg/shared-dark", alias("n950"), undefined),
+      sem("shared-text-brand", "color/text/brand", alias("n300"), undefined),
+    ];
+    const sharedSnapshot = {
+      variables: primitives.concat(sharedVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }], variableIds: sharedVars.map(v => v.id) },
+      ],
+    };
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-shared-realias-"));
+    const snapPath = path.join(tmp, "figma-data.json");
+    const configPath = path.join(tmp, "design-system.config.js");
+    fs.writeFileSync(snapPath, JSON.stringify(sharedSnapshot), "utf8");
+    fs.writeFileSync(configPath, "const DS = " + JSON.stringify({
+      collections: { color: "Color" },
+      color: {
+        contrastAlgorithm: "wcag",
+        semantics: {
+          pairs: [
+            { bg: "color/bg/shared-light", text: "color/text/brand" },
+            { bg: "color/bg/shared-dark", text: "color/text/brand" },
+          ],
+        },
+      },
+    }, null, 2) + ";\n", "utf8");
+
+    try {
+      const sharedResult = handleInspectDsSetupGaps({ figmaDataPath: snapPath, config_path: configPath });
+      assert.ok(!sharedResult.error, sharedResult.error);
+      const lightFailure = sharedResult.contrastFailures.find(item =>
+        item.bg === "color/bg/shared-light" &&
+        item.fg === "color/text/brand" &&
+        item.mode === "Light"
+      );
+      assert.ok(lightFailure, "shared light background should fail with the current shared foreground");
+      assert.strictEqual(
+        lightFailure.plannedReAlias,
+        null,
+        "shared token candidate that breaks another pairing should not be offered as ready to apply"
+      );
+      assert.ok(
+        lightFailure.plannedReAliasBlocked &&
+          lightFailure.plannedReAliasBlocked.blockingContexts.some(context => context.bg === "color/bg/shared-dark"),
+        "blocked re-alias should explain the other pairing that would fail"
+      );
+      assert.ok(
+        !sharedResult.repairPlan.applyInput.aliasUpdates.some(update =>
+          update.token === "color/text/brand" &&
+          update.mode === "Light"
+        ),
+        "unsafe shared-token re-alias should stay out of the approved apply payload"
+      );
+      assert.ok(
+        sharedResult.repairPlan.missingCapabilityNotes.some(note =>
+          note.kind === "shared-token-contrast-repair-blocked" &&
+          note.token === "color/text/brand" &&
+          note.blockingContexts.some(context => context.bg === "color/bg/shared-dark")
+        ),
+        "repair plan should surface the blocked shared-token repair as a designer/tooling decision"
+      );
+      assert.ok(
+        sharedResult.repairPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
+          change.reason === "shared token contrast" &&
+          change.summaryLine.includes("no one-click contrast re-alias")
+        ),
+        "designer presentation should explain why the contrast repair is not one-click safe"
+      );
+    } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   }
@@ -528,6 +613,55 @@ module.exports = (() => {
     false,
     "repair notes should never synthesize color/bg/on-* from role-based on-* foreground leaves"
   );
+  {
+    const onFillForegroundOnlyVars = [
+      sem("text-on-fill-danger", "color/text/on-fill-danger", alias("n50"), alias("n950")),
+      sem("icon-on-fill-danger", "color/icon/on-fill-danger", alias("n50"), alias("n950")),
+      sem("border-on-fill-danger", "color/border/on-fill-danger", alias("r700"), alias("r700")),
+    ];
+    const onFillForegroundOnlySnap = {
+      variables: primitives.concat(onFillForegroundOnlyVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: onFillForegroundOnlyVars.map(v => v.id) },
+      ],
+    };
+    const onFillForegroundOnlyResult = inspectDsSetupGapsFromFigmaData(onFillForegroundOnlySnap);
+    const missingOnFillDangerBg = onFillForegroundOnlyResult.missingSemanticRoles.find(
+      gap => gap.family === "danger" && gap.missingRole === "background"
+    );
+    assert.ok(missingOnFillDangerBg, "on-fill foreground family should report missing fill background under the base family");
+    assert.strictEqual(
+      missingOnFillDangerBg.suggestedName,
+      "color/fill/danger",
+      "on-fill foreground leaves should not synthesize color/fill/fill-* background names"
+    );
+    assert.strictEqual(
+      onFillForegroundOnlyResult.missingSemanticRoles.some(gap => /color\/fill\/fill-/.test(String(gap.suggestedName || ""))),
+      false,
+      "setup-gap QA should never surface duplicate fill/fill-* background suggestions"
+    );
+  }
+  {
+    const onFillWithExistingBgVars = [
+      sem("fill-danger", "color/fill/danger", alias("r700"), alias("r200")),
+      sem("text-on-fill-danger", "color/text/on-fill-danger", alias("n50"), alias("n950")),
+      sem("icon-on-fill-danger", "color/icon/on-fill-danger", alias("n50"), alias("n950")),
+    ];
+    const onFillWithExistingBgSnap = {
+      variables: primitives.concat(onFillWithExistingBgVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: onFillWithExistingBgVars.map(v => v.id) },
+      ],
+    };
+    const onFillWithExistingBgResult = inspectDsSetupGapsFromFigmaData(onFillWithExistingBgSnap);
+    assert.strictEqual(
+      onFillWithExistingBgResult.missingSemanticRoles.some(gap => gap.family === "danger" && gap.missingRole === "background"),
+      false,
+      "existing color/fill/danger should satisfy on-fill foreground families"
+    );
+  }
 
   const mixedNamingVars = [
     sem("text-on-info", "color/text/on-info", alias("n50"), alias("n950")),
@@ -592,6 +726,11 @@ module.exports = (() => {
       0,
       "role-based-only fill/text-on/icon-on naming should not be treated as duplicate intent"
     );
+    assert.strictEqual(
+      roleBasedWithFillResult.semanticNamingAdvisories.some(item => item.token === "color/text/on-danger"),
+      false,
+      "role-based-only fill/text-on/icon-on naming should not produce ambiguous shorthand advisories"
+    );
   }
   {
     const surfaceBasedOnlyVars = [
@@ -611,6 +750,43 @@ module.exports = (() => {
       surfaceBasedOnlyResult.semanticNamingConflicts.length,
       0,
       "surface-based-only bg/text/icon naming should not be treated as duplicate intent"
+    );
+  }
+  {
+    const surfaceAndOnFillVars = [
+      sem("bg-danger", "color/bg/danger", alias("r700"), alias("r700")),
+      sem("text-danger", "color/text/danger", alias("n950"), alias("n50")),
+      sem("icon-danger", "color/icon/danger", alias("n950"), alias("n50")),
+      sem("fill-danger", "color/fill/danger", alias("r700"), alias("r200")),
+      sem("text-on-fill-danger", "color/text/on-fill-danger", alias("r700"), alias("r200")),
+      sem("icon-on-fill-danger", "color/icon/on-fill-danger", alias("r700"), alias("r200")),
+    ];
+    const surfaceAndOnFillSnap = {
+      variables: primitives.concat(surfaceAndOnFillVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: surfaceAndOnFillVars.map(v => v.id) },
+      ],
+    };
+    const surfaceAndOnFillResult = inspectDsSetupGapsFromFigmaData(surfaceAndOnFillSnap);
+    assert.strictEqual(
+      surfaceAndOnFillResult.semanticNamingConflicts.length,
+      0,
+      "surface text/icon and on-fill text/icon roles should not be treated as duplicate naming intent"
+    );
+    assert.ok(
+      surfaceAndOnFillResult.contrastFailures.some(item =>
+        item.bg === "color/fill/danger" &&
+        item.fg === "color/text/on-fill-danger"
+      ),
+      "fill backgrounds should pair with text/on-fill-* roles for contrast diagnosis"
+    );
+    assert.ok(
+      surfaceAndOnFillResult.iconContrastFailures.some(item =>
+        item.bg === "color/fill/danger" &&
+        item.icon === "color/icon/on-fill-danger"
+      ),
+      "fill backgrounds should pair with icon/on-fill-* roles for icon contrast diagnosis"
     );
   }
   {
@@ -634,29 +810,17 @@ module.exports = (() => {
     const mixedDuplicateIntentResult = inspectDsSetupGapsFromFigmaData(mixedDuplicateIntentSnap);
     assert.strictEqual(
       mixedDuplicateIntentResult.summary.semanticNamingConflictCount,
-      2,
-      "mixed duplicate-intent snapshots should surface text/icon conflicts without treating bg/* and fill/* as competitors"
+      0,
+      "plain text/icon roles and ambiguous on-* shorthand should not be treated as automatic duplicate conflicts"
     );
-    const dangerTextConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
-      item.family === "danger" && item.role === "foreground"
+    assert.strictEqual(
+      mixedDuplicateIntentResult.semanticNamingAdvisories.some(item =>
+        item.token === "color/text/on-danger" ||
+        item.token === "color/icon/on-danger"
+      ),
+      false,
+      "text/icon on-danger should be clean when color/fill/danger is the matching context"
     );
-    assert.ok(dangerTextConflict, "text/danger vs text/on-danger should be a dedicated semantic naming conflict");
-    assert.deepStrictEqual(dangerTextConflict.tokens.surfaceBased, ["color/text/danger"]);
-    assert.deepStrictEqual(dangerTextConflict.tokens.roleBased, ["color/text/on-danger"]);
-    assert.strictEqual(dangerTextConflict.canonicalRecommendation.convention, "role-based");
-    assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.keep, ["color/text/on-danger"]);
-    assert.deepStrictEqual(dangerTextConflict.canonicalRecommendation.review, ["color/text/danger"]);
-    assert.strictEqual(dangerTextConflict.namingBias.majority, "role-based");
-    assert.ok(
-      dangerTextConflict.decisionQuestion.includes("leans role-based"),
-      "naming conflict should ask whether to follow the file's majority convention"
-    );
-    assert.ok(
-      dangerTextConflict.linkSafetyWarning.includes("bound"),
-      "naming conflict should warn that deleting extra semantics can break existing variable links"
-    );
-    assert.strictEqual(dangerTextConflict.repairTier, "needs-designer-decision");
-    assert.strictEqual(dangerTextConflict.agentAction, "ask-designer");
     const infoBackgroundConflict = mixedDuplicateIntentResult.semanticNamingConflicts.find(item =>
       item.family === "info" && item.role === "background"
     );
@@ -666,8 +830,8 @@ module.exports = (() => {
       "bg/info and fill/info are related background roles, not duplicate competitors"
     );
     assert.ok(
-      mixedDuplicateIntentResult.topFindings.highConfidenceIssues.some(item => item.kind === "duplicate-intent-semantic"),
-      "top findings should include semantic naming conflicts"
+      !mixedDuplicateIntentResult.topFindings.highConfidenceIssues.some(item => item.kind === "semantic-naming-diagnostic"),
+      "semantic naming advisories should not appear as high-priority health-check findings"
     );
     const mixedPlan = _buildRepairPlan(mixedDuplicateIntentResult);
     assert.strictEqual(
@@ -675,23 +839,46 @@ module.exports = (() => {
       false,
       "naming conflicts should not be exposed as auto-migration payloads"
     );
+    assert.strictEqual(
+      mixedPlan.missingCapabilityNotes.some(note => note.kind === "semantic-naming-advisory"),
+      false,
+      "clean role-based fill/on-* naming should not surface advisory notes"
+    );
+  }
+  {
+    const ambiguousNoContextVars = [
+      sem("text-on-danger", "color/text/on-danger", alias("n50"), alias("n950")),
+      sem("icon-on-danger", "color/icon/on-danger", alias("n50"), alias("n950")),
+    ];
+    const ambiguousNoContextSnap = {
+      variables: primitives.concat(ambiguousNoContextVars),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: ambiguousNoContextVars.map(v => v.id) },
+      ],
+    };
+    const ambiguousNoContextResult = inspectDsSetupGapsFromFigmaData(ambiguousNoContextSnap);
     assert.ok(
-      mixedPlan.missingCapabilityNotes.some(note =>
-        note.kind === "naming-system-mismatch" &&
-        note.family === "danger" &&
-        note.role === "foreground"
+      ambiguousNoContextResult.semanticNamingAdvisories.some(item =>
+        item.token === "color/text/on-danger" &&
+        item.kind === "ambiguous-name"
       ),
-      "repair plan should surface naming conflicts as designer decisions"
+      "text/on-danger should be an advisory when no matching background context exists"
+    );
+    const ambiguousPlan = _buildRepairPlan(ambiguousNoContextResult);
+    assert.ok(
+      ambiguousPlan.missingCapabilityNotes.some(note =>
+        note.kind === "semantic-naming-advisory" &&
+        note.token === "color/text/on-danger"
+      ),
+      "repair plan should surface ambiguous shorthand naming as an advisory"
     );
     assert.ok(
-      mixedPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
-        change.reason === "mixed semantic naming" &&
-        change.summaryLine.includes("color/text/danger") &&
-        change.summaryLine.includes("color/text/on-danger") &&
-        change.summaryLine.includes("leans role-based") &&
-        change.summaryLine.includes("existing Figma layers may already be bound")
+      ambiguousPlan.designerPresentation.proposedChanges.needsDesignerDecision.some(change =>
+        change.reason === "semantic naming advisory" &&
+        change.summaryLine.includes("color/text/on-danger")
       ),
-      "designer presentation should list the conflicting tokens, majority prompt, and binding warning"
+      "designer presentation should list ambiguous shorthand as a naming advisory"
     );
   }
   {
@@ -724,7 +911,7 @@ module.exports = (() => {
     assert.deepStrictEqual(dangerBgConflict.tokens.surfaceBased, ["color/bg/danger"]);
     assert.deepStrictEqual(dangerBgConflict.tokens.roleBased, ["color/bg/on-danger"]);
     assert.deepStrictEqual(dangerBgConflict.tokens.invalidOnBackground, ["color/bg/on-danger"]);
-    assert.strictEqual(dangerBgConflict.canonicalRecommendation.convention, "surface-based");
+    assert.strictEqual(dangerBgConflict.canonicalRecommendation.convention, "plain-background");
     assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.keep, ["color/bg/danger"]);
     assert.deepStrictEqual(dangerBgConflict.canonicalRecommendation.review, ["color/bg/on-danger"]);
     assert.ok(

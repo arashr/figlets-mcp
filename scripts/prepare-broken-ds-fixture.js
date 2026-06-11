@@ -6,7 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { ensureReceiverRunning } = require('../packages/figlets-mcp-server/src/utils/ensure-receiver.js');
+const { ensureReceiverRunning, waitForPluginConnection } = require('../packages/figlets-mcp-server/src/utils/ensure-receiver.js');
 const { getReceiverUrl } = require('../packages/figlets-mcp-server/src/utils/receiver-url.js');
 const { getFilePaths, LOCAL_DIR } = require('../packages/figlets-mcp-server/src/utils/paths.js');
 const { handlePrepareDsConfig } = require('../packages/figlets-mcp-server/src/tools/prepare-ds-config.js');
@@ -94,6 +94,9 @@ function postJson(url, body, timeoutMs) {
   if (!prepared.readyToBuild) throw new Error('Fixture config is not ready to build: ' + prepared.message);
 
   await ensureReceiverRunning();
+  if (typeof waitForPluginConnection === 'function') {
+    await waitForPluginConnection(120000);
+  }
   const plan = buildBrokenDsFixturePlan({ seed: args.seed });
   plan.ds = require('../packages/figlets-mcp-server/src/figlets-core.js').dsConfig.readDsConfig(written.configPath);
   plan.configPath = written.configPath;
@@ -134,6 +137,7 @@ function postJson(url, body, timeoutMs) {
     bindingAuditTargets: result.bindingAuditTargets || null,
     message: result.message || 'Broken DS fixture prepared.',
   }, null, 2));
+  process.exit(0);
 })().catch((err) => {
   console.error(err.message || err);
   process.exit(1);

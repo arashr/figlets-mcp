@@ -195,15 +195,17 @@ function _formatSemanticNamingConflict(item) {
   const surfaceBased = Array.isArray(tokens.surfaceBased) ? tokens.surfaceBased : [];
   const roleBased = Array.isArray(tokens.roleBased) ? tokens.roleBased : [];
   const invalidOnBackground = Array.isArray(tokens.invalidOnBackground) ? tokens.invalidOnBackground : [];
+  const duplicates = Array.isArray(tokens.duplicates) ? tokens.duplicates : [];
   const recommendation = item.canonicalRecommendation || {};
   const lines = [
     item.conflictType === "invalid-on-background"
       ? `"${item.family}" ${item.role} has invalid on-* background naming`
-      : `"${item.family}" ${item.role} mixes surface-based and role-based names`
+      : `"${item.family}" ${item.role} needs semantic naming review`
   ];
   if (surfaceBased.length) lines.push(`    surface-based: ${surfaceBased.map(name => `"${name}"`).join(", ")}`);
   if (invalidOnBackground.length) lines.push(`    invalid background: ${invalidOnBackground.map(name => `"${name}"`).join(", ")}`);
-  else if (roleBased.length) lines.push(`    role-based: ${roleBased.map(name => `"${name}"`).join(", ")}`);
+  if (duplicates.length) lines.push(`    duplicates: ${duplicates.map(name => `"${name}"`).join(", ")}`);
+  if (!invalidOnBackground.length && !duplicates.length && roleBased.length) lines.push(`    role-based: ${roleBased.map(name => `"${name}"`).join(", ")}`);
   if (recommendation.convention) {
     lines.push(`    recommendation: ${recommendation.convention}`);
   }
@@ -216,7 +218,16 @@ function _formatSemanticNamingConflict(item) {
   if (item.linkSafetyWarning) {
     lines.push(`    warning: ${item.linkSafetyWarning}`);
   }
-  lines.push("    next step: choose one canonical naming path before migration/deprecation");
+  lines.push("    next step: confirm the intended semantic color grammar/context before migration/deprecation");
+  return lines;
+}
+
+function _formatSemanticNamingAdvisory(item) {
+  const token = item.token || (Array.isArray(item.tokens) ? item.tokens.join(", ") : `${item.family}/${item.role}`);
+  const lines = [`${item.kind || "advisory"}: "${token}"`];
+  if (item.context) lines.push(`    context: ${item.context}`);
+  if (item.reason) lines.push(`    reason: ${item.reason}`);
+  lines.push("    next step: keep low priority unless naming cleanup is requested or this blocks a concrete repair");
   return lines;
 }
 
@@ -316,9 +327,10 @@ function formatCheckReport(state) {
       + (summary.missingBackgroundCount || 0)
       + (summary.incompleteModeCount || 0)
       + (summary.contrastFailureCount || 0)
-      + (summary.iconContrastFailureCount || 0)
-      + (summary.semanticNamingConflictCount || 0)
-      + (summary.brokenAliasCount || 0)
+	      + (summary.iconContrastFailureCount || 0)
+	      + (summary.semanticNamingConflictCount || 0)
+	      + (summary.semanticNamingAdvisoryCount || 0)
+	      + (summary.brokenAliasCount || 0)
       + (summary.foundationRoleFindingCount || 0)
       + (summary.companionAdvisoryCount || 0);
 
@@ -364,12 +376,19 @@ function formatCheckReport(state) {
       _formatIconContrastFailure
     );
 
-    // 4. Mixed naming systems that create duplicate intent
+    // 4. Naming diagnostics that need grammar/context review
     _renderSection(
       lines,
       gaps.semanticNamingConflicts || [],
-      `Semantic naming conflicts: ${summary.semanticNamingConflictCount || 0}`,
+      `Semantic naming review items: ${summary.semanticNamingConflictCount || 0}`,
       _formatSemanticNamingConflict
+    );
+
+    _renderSection(
+      lines,
+      gaps.semanticNamingAdvisories || [],
+      `Semantic naming advisories: ${summary.semanticNamingAdvisoryCount || 0}`,
+      _formatSemanticNamingAdvisory
     );
 
     // 5. Likely family-level setup gaps
@@ -441,6 +460,7 @@ function formatCheckReport(state) {
     + (summary.contrastFailureCount || 0)
     + (summary.iconContrastFailureCount || 0)
     + (summary.semanticNamingConflictCount || 0)
+    + (summary.semanticNamingAdvisoryCount || 0)
     + (summary.brokenAliasCount || 0)
     + (summary.foundationRoleFindingCount || 0)
     + (summary.companionAdvisoryCount || 0);
@@ -466,7 +486,10 @@ function formatCheckReport(state) {
       lines.push(`- A11Y: ${summary.iconContrastFailureCount} icon role${summary.iconContrastFailureCount === 1 ? "" : "s"} ${verb} WCAG non-text contrast (3:1).`);
     }
     if (summary.semanticNamingConflictCount) {
-      lines.push(`- ${summary.semanticNamingConflictCount} semantic naming conflict${summary.semanticNamingConflictCount === 1 ? "" : "s"} could represent duplicate intent. Choose a canonical path before migration/deprecation.`);
+      lines.push(`- ${summary.semanticNamingConflictCount} semantic naming item${summary.semanticNamingConflictCount === 1 ? "" : "s"} need grammar/context review before migration/deprecation.`);
+    }
+    if (summary.semanticNamingAdvisoryCount) {
+      lines.push(`- ${summary.semanticNamingAdvisoryCount} semantic naming advisor${summary.semanticNamingAdvisoryCount === 1 ? "y" : "ies"} found; keep these low priority unless they block a concrete repair.`);
     }
     if (summary.missingSemanticRoleCount) {
       const high = summary.highConfidenceSemanticRoleGapCount || 0;

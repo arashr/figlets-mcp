@@ -268,7 +268,17 @@ try {
       start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")),
       "Agent Interface should forbid alias counts/summaries"
     );
+    assert.ok(
+      start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")),
+      "Agent Interface should name the exact semantic spacing repair payload"
+    );
+    assert.ok(
+      start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")),
+      "Agent Interface should forbid pivoting Mobile-only spacing approval into foundation mode creation"
+    );
     assert.strictEqual(start.hardRules.setupRepairPayloadHandoff.preserveAliases, true);
+    assert.strictEqual(start.hardRules.spacingSemanticRepairPayloadHandoff.preserveUpdates, true);
+    assert.ok(start.hardRules.spacingSemanticRepairPayloadHandoff.invalidPayloadRecovery.includes("rerun inspect_ds_token_gaps"));
 
     const guide = getWorkflowGuide("health-check");
     const applyStep = guide.steps.find(step => step.tool === "apply_ds_setup_repairs");
@@ -278,6 +288,163 @@ try {
     const handled = handleFigletsWorkflowGuide({ workflow_id: "health-check" });
     assert.ok(handled.bulkRepairRouting.some(item => item.includes("retrying invented arguments")));
     assert.strictEqual(handled.hardRules.setupRepairPayloadHandoff.target, "repairPlan.tool / apply_ds_setup_repairs");
+  }
+
+  // --- Unsafe pattern 3c: widening a narrow approval into a broader category write ---
+  {
+    const widenedBoundary = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "token-gap-completion" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+        approvedBoundary: "spacing-mobile-aliases",
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        writeBoundary: "spacing-semantics-all-modes",
+      },
+    });
+    assert.strictEqual(widenedBoundary.status, "blocked");
+    const scope = findCheck(widenedBoundary, "write_scope_boundary");
+    assert.strictEqual(scope.status, "fail");
+    assert.ok(scope.message.includes("designer-approved boundary"));
+    assert.ok(scope.nextAction.includes("approve this exact boundary"));
+    assert.strictEqual(widenedBoundary.nextAction.type, "ask_user");
+
+    const exactSubsetWithCategoryPayload = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "token-gap-completion" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        approvalScope: "exact-subset",
+        exactSubsetRequested: true,
+        payloadGranularity: "category-level",
+      },
+    });
+    assert.strictEqual(exactSubsetWithCategoryPayload.status, "blocked");
+    const categoryScope = findCheck(exactSubsetWithCategoryPayload, "write_scope_boundary");
+    assert.strictEqual(categoryScope.status, "fail");
+    assert.ok(categoryScope.message.includes("category-level payload"));
+    assert.ok(categoryScope.nextAction.includes("token-level repairPlan entries"));
+    assert.ok(categoryScope.nextAction.includes("plan_ds_figma_operations"));
+  }
+
+  // --- Unsafe pattern 3d: continuing after foundation/apply unlocks new work ---
+  {
+    const foundationThenTokens = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "token-gap-completion" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+        lastAppliedBoundary: "foundation",
+        postApplySyncReinspectCompleted: false,
+        separateApprovalAfterReinspect: false,
+      },
+      requestedAction: {
+        tool: "update_ds_tokens",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        writeBoundary: "semantic-token",
+      },
+    });
+    assert.strictEqual(foundationThenTokens.status, "blocked");
+    const stop = findCheck(foundationThenTokens, "post_apply_stop_boundary");
+    assert.strictEqual(stop.status, "fail");
+    assert.ok(stop.message.includes("sync, reinspect"));
+    assert.ok(stop.nextAction.includes("separate approval"));
+    assert.strictEqual(foundationThenTokens.nextAction.type, "call_tool");
+
+    const unlockedNewRepairs = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+        lastAppliedBoundary: "semantic-setup",
+        lastApplyUnlockedNewRepairs: true,
+        postApplySyncReinspectCompleted: true,
+        separateApprovalAfterReinspect: false,
+      },
+      requestedAction: {
+        tool: "apply_ds_setup_repairs",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        writeBoundary: "newly-unlocked-setup-repairs",
+      },
+    });
+    assert.strictEqual(unlockedNewRepairs.status, "blocked");
+    const unlockedStop = findCheck(unlockedNewRepairs, "post_apply_stop_boundary");
+    assert.strictEqual(unlockedStop.status, "fail");
+    assert.ok(unlockedStop.nextAction.includes("fresh approval boundary"));
+  }
+
+  // --- Unsafe pattern 3e: applying QA designer-decision suggestions through fix:true ---
+  {
+    const designerDecisionBinding = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "qa-binding-audit" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+      },
+      repairPlanState: {
+        fixableNowCount: 1,
+        needsDesignerDecisionCount: 1,
+        hasDesignerDecisionApplyInput: false,
+      },
+      requestedAction: {
+        tool: "qa_binding_audit",
+        kind: "write",
+        payloadSource: "repairPlan.applyInput",
+        includesDesignerDecision: true,
+      },
+    });
+    assert.strictEqual(designerDecisionBinding.status, "blocked");
+    const decision = findCheck(designerDecisionBinding, "binding_designer_decision_boundary");
+    assert.strictEqual(decision.status, "fail");
+    assert.ok(decision.message.includes("fixableNow"));
+    assert.ok(decision.nextAction.includes("plan_ds_figma_operations"));
+
+    const naturalFixShape = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "qa-binding-audit" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        approvalStatus: "granted",
+      },
+      repairPlanState: {
+        fixableNowCount: 1,
+        needsDesignerDecisionCount: 1,
+        hasDesignerDecisionApplyInput: false,
+      },
+      requestedAction: {
+        tool: "qa_binding_audit",
+        args: { fix: true },
+        payloadSource: "repairPlan.applyInput",
+        includesDesignerDecision: true,
+      },
+    });
+    assert.strictEqual(naturalFixShape.status, "blocked");
+    assert.strictEqual(findCheck(naturalFixShape, "binding_fixability_boundary").status, "pass");
+    const naturalDecision = findCheck(naturalFixShape, "binding_designer_decision_boundary");
+    assert.strictEqual(naturalDecision.status, "fail");
+    assert.ok(naturalDecision.message.includes("fixableNow"));
   }
 
   // --- Unsafe pattern 4: treating stale MCP host output as repo regression ---
@@ -305,12 +472,17 @@ try {
     assert.strictEqual(staleHost.nextAction.type, "restart_or_refresh_host");
   }
 
-  // --- Unsafe pattern 5: missing planner/apply support as a dead end ---
+  // --- Unsafe pattern 5: missing specialized planner/apply support is not a dead end ---
   {
     assertDocsInclude(
       DESIGNER_DOC_PATHS,
-      ["product/tool gap"],
-      "product gap docs"
+      ["plan_ds_figma_operations"],
+      "high-level operations fallback docs"
+    );
+    assertDocsInclude(
+      ["docs/developer-guide.md"],
+      ["update_ds_tokens.spacing_semantic_repairs", "MCP tool schema"],
+      "stale MCP schema manual smoke note"
     );
     assertDocsInclude(
       ["AGENTS.md", "CLAUDE.md"],
@@ -319,16 +491,16 @@ try {
     );
 
     assert.ok(
-      DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("product/tool gap"),
-      "hard rules should define missingCapabilityResponse as product/tool gap"
+      DESIGNER_FLOW_HARD_RULES.missingCapabilityResponse.includes("plan_ds_figma_operations"),
+      "hard rules should route exact high-level edits through figma operations"
     );
     assert.ok(
-      DESIGNER_FLOW_HARD_RULES.bulkRepairRouting.some(item => item.includes("product/tool gap")),
-      "bulkRepairRouting should steer agents away from dead-end gap reporting"
+      DESIGNER_FLOW_HARD_RULES.bulkRepairRouting.some(item => item.includes("plan_ds_figma_operations")),
+      "bulkRepairRouting should steer agents toward high-level operations before gap reporting"
     );
 
     const start = getStartGuide();
-    assert.ok(start.responseContract.bulkUpdateRule.includes("product/tool gap"));
+    assert.ok(start.responseContract.bulkUpdateRule.includes("plan_ds_figma_operations"));
 
     const productGap = handleFigletsHealthCheck({
       context: { mode: "designer" },
@@ -344,9 +516,9 @@ try {
     assert.strictEqual(productGap.status, "warning");
     const gapCheck = findCheck(productGap, "product_gap_response");
     assert.strictEqual(gapCheck.status, "warn");
-    assert.ok(gapCheck.nextAction.includes("product/tool gap"));
+    assert.ok(gapCheck.nextAction.includes("plan_ds_figma_operations"));
     assert.ok(!/gaps cannot be fixed|dead end/i.test(gapCheck.nextAction));
-    assert.ok(/invent raw Figma scripts/i.test(gapCheck.nextAction));
+    assert.ok(/inventing raw Figma scripts/i.test(gapCheck.nextAction));
     assert.strictEqual(productGap.nextAction.type, "report_product_gap");
   }
 
@@ -457,8 +629,12 @@ try {
       "setup_proposal_boundary",
       "approval_boundary",
       "repair_payload_source",
+      "write_scope_boundary",
+      "post_apply_health_check_verification",
+      "post_apply_stop_boundary",
       "product_gap_response",
       "binding_fixability_boundary",
+      "binding_designer_decision_boundary",
       "stale_host_suspicion",
       "bridge_readiness",
       "release_docs_readiness",
@@ -470,6 +646,13 @@ try {
       baseline.checks.map(check => check.id),
       expectedCheckIds,
       "health check should expose the first structured check set in stable order"
+    );
+    assert.ok(
+      DESIGNER_FLOW_HARD_RULES.bulkRepairRouting.some(rule =>
+        rule.includes("do not repeat a stale missing Tablet/Desktop modes item") &&
+        rule.includes("not by a drifting menu number")
+      ),
+      "health-check hard rules should prevent stale post-apply remaining-items summaries"
     );
 
     const readyDesigner = handleFigletsHealthCheck({

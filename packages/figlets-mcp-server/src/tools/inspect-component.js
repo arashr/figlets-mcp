@@ -1,8 +1,6 @@
 const fs = require("fs");
-const path = require("path");
-const http = require("http");
 const { inspectComponentData } = require("../figlets-core.js");
-const { getReceiverUrl } = require("../utils/receiver-url.js");
+const { requestBridgePost } = require("../bridges/bridge-request.js");
 
 const inspectComponentTool = {
   name: "inspect_component",
@@ -14,46 +12,36 @@ const inspectComponentTool = {
   }
 };
 
-function _attemptInspect(receiverUrl) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      receiverUrl + "/request-selection",
-      { method: "POST", headers: { "Content-Type": "application/json" } },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk) => { body += chunk; });
-        res.on("end", () => {
-          if (res.statusCode === 200) {
-            try {
-              const responseData = JSON.parse(body);
-              const selectionPath = responseData.path;
-              if (!fs.existsSync(selectionPath)) throw new Error("Selection data file was not created.");
-              const parsedData = JSON.parse(fs.readFileSync(selectionPath, "utf-8"));
-              const result = inspectComponentData({ target: "figma-selection", selection: parsedData.selection || [] });
-              resolve({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
-            } catch (err) {
-              reject(new Error(`Failed to parse selection data: ${err.message}`));
-            }
-          } else {
-            const err = new Error(`Selection sync failed with status ${res.statusCode}: ${body}`);
-            err.statusCode = res.statusCode;
-            reject(err);
-          }
-        });
-      }
-    );
-    req.on("error", (err) => reject(new Error(`Failed to contact local receiver: ${err.message}`)));
-    req.end();
+function _attemptInspect() {
+  return requestBridgePost("/request-selection", {}, { timeoutMs: 16000 }).then((response) => {
+    if (response.connectionError) {
+      throw new Error(response.connectionError);
+    }
+    if (response.statusCode !== 200) {
+      const err = new Error(`Selection sync failed with status ${response.statusCode}: ${response.raw}`);
+      err.statusCode = response.statusCode;
+      throw err;
+    }
+
+    try {
+      const responseData = response.data || {};
+      const selectionPath = responseData.path;
+      if (!fs.existsSync(selectionPath)) throw new Error("Selection data file was not created.");
+      const parsedData = JSON.parse(fs.readFileSync(selectionPath, "utf-8"));
+      const result = inspectComponentData({ target: "figma-selection", selection: parsedData.selection || [] });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      throw new Error(`Failed to parse selection data: ${err.message}`);
+    }
   });
 }
 
 function handleInspectComponent() {
-  const receiverUrl = getReceiverUrl();
   const MAX_RETRIES = 3;
   const RETRY_DELAY_MS = 1500;
 
   function attempt(n) {
-    return _attemptInspect(receiverUrl).catch((err) => {
+    return _attemptInspect().catch((err) => {
       const retryable = err.statusCode === 503 || err.statusCode === 504;
       if (retryable && n < MAX_RETRIES) {
         return new Promise((res) => setTimeout(res, RETRY_DELAY_MS)).then(() => attempt(n + 1));

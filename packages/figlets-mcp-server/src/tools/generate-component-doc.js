@@ -11,9 +11,8 @@
  * write it via the Write tool.
  */
 
-const http = require('http');
 const fs = require('fs');
-const { getReceiverUrl } = require('../utils/receiver-url.js');
+const { requestBridgePost } = require('../bridges/bridge-request.js');
 
 const generateComponentDocTool = {
   name: 'generate_component_doc',
@@ -52,10 +51,9 @@ const generateComponentDocTool = {
 };
 
 function handleGenerateComponentDoc(args) {
-  const receiverUrl = getReceiverUrl();
   const fallbackComponentName = args && args.component_name ? String(args.component_name) : '';
 
-  return _resolveSelectedComponent(receiverUrl).then((selectionInfo) => {
+  return _resolveSelectedComponent().then((selectionInfo) => {
     if (selectionInfo && selectionInfo.bridgeError) {
       return {
         content: [{ type: 'text', text: _formatPluginConnectionError(selectionInfo.bridgeError) }],
@@ -119,8 +117,6 @@ function handleGenerateComponentDoc(args) {
         ? args.variant_descriptions
         : {}
     };
-    const body = JSON.stringify(payload);
-
     return new Promise((resolve) => {
       let attempts = 0;
       const maxAttempts = 8;
@@ -128,19 +124,9 @@ function handleGenerateComponentDoc(args) {
 
       function sendDocBuildRequest() {
         attempts += 1;
-      const req = http.request(`${receiverUrl}/request-doc-build`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk.toString(); });
-        res.on('end', () => {
-          if (res.statusCode === 200) {
-            let parsed;
-            try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
+        requestBridgePost('/request-doc-build', payload, { timeoutMs: 125000 }).then((response) => {
+          if (response.statusCode === 200) {
+            const parsed = response.data || {};
             const result = parsed.result || parsed;
             if (result.error) {
               resolve({
@@ -167,9 +153,8 @@ function handleGenerateComponentDoc(args) {
                 }, null, 2)
               }]
             });
-          } else if (res.statusCode === 503) {
-            let parsed;
-            try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
+          } else if (response.statusCode === 503) {
+            const parsed = response.data || {};
             if (attempts < maxAttempts) {
               setTimeout(sendDocBuildRequest, retryDelayMs);
               return;
@@ -178,44 +163,28 @@ function handleGenerateComponentDoc(args) {
               content: [{ type: 'text', text: _formatPluginConnectionError(parsed) }],
               isError: true
             });
-          } else if (res.statusCode === 504) {
+          } else if (response.statusCode === 504) {
             resolve({
               content: [{ type: 'text', text: 'Error: Doc build timed out. The component may be very large or the plugin may have crashed.' }],
               isError: true
             });
+          } else if (response.connectionError) {
+            resolve({
+              content: [{ type: 'text', text: _formatReceiverConnectionError(response.connectionError) }],
+              isError: true
+            });
           } else {
             resolve({
-              content: [{ type: 'text', text: `Error: Unexpected status ${res.statusCode}: ${data}` }],
+              content: [{ type: 'text', text: `Error: Unexpected status ${response.statusCode}: ${response.raw}` }],
               isError: true
             });
           }
-        });
-      });
-
-      req.setTimeout(125000, () => {
-        req.destroy();
-        resolve({
-          content: [{ type: 'text', text: 'Error: Request to bridge receiver timed out.' }],
-          isError: true
-        });
-      });
-
-      req.on('error', (err) => {
-        if (err.code === 'ECONNREFUSED') {
-          resolve({
-            content: [{ type: 'text', text: 'Error: Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP server.' }],
-            isError: true
-          });
-        } else {
+        }).catch((err) => {
           resolve({
             content: [{ type: 'text', text: `Error: ${err.message}` }],
             isError: true
           });
-        }
-      });
-
-      req.write(body);
-      req.end();
+        });
       }
 
       sendDocBuildRequest();
@@ -223,12 +192,12 @@ function handleGenerateComponentDoc(args) {
   });
 }
 
-function _resolveSelectedComponent(receiverUrl) {
+function _resolveSelectedComponent() {
   const maxAttempts = 3;
   const retryDelayMs = 750;
 
   function attempt(attemptNumber) {
-    return _requestSelectedComponent(receiverUrl).then((result) => {
+    return _requestSelectedComponent().then((result) => {
       if (
         result &&
         result.bridgeError &&
@@ -245,73 +214,57 @@ function _resolveSelectedComponent(receiverUrl) {
   return attempt(1);
 }
 
-function _requestSelectedComponent(receiverUrl) {
-  return new Promise((resolve) => {
-    const req = http.request(`${receiverUrl}/request-selection`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk.toString(); });
-      res.on('end', () => {
-        if (res.statusCode !== 200) {
-          let parsed;
-          try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
-          parsed.statusCode = res.statusCode;
-          resolve({ bridgeError: parsed });
-          return;
-        }
+function _requestSelectedComponent() {
+  return requestBridgePost('/request-selection', {}, { timeoutMs: 16000 }).then((response) => {
+    if (response.connectionError) return null;
+    if (response.statusCode !== 200) {
+      const parsed = response.data || {};
+      parsed.statusCode = response.statusCode;
+      if (response.statusCode === 504 && !parsed.error) {
+        parsed.error = 'Selection sync timed out before the component doc could be generated.';
+      }
+      return { bridgeError: parsed };
+    }
 
-        let parsed;
-        try { parsed = JSON.parse(data); } catch (e) { parsed = {}; }
-        let selection = [];
-        if (parsed && parsed.path && fs.existsSync(parsed.path)) {
-          try {
-            const selectionData = JSON.parse(fs.readFileSync(parsed.path, 'utf-8'));
-            selection = Array.isArray(selectionData.selection) ? selectionData.selection : [];
-            parsed.meta = selectionData.meta || parsed.meta || {};
-          } catch (e) {
-            selection = [];
-          }
-        }
+    const parsed = response.data || {};
+    let selection = [];
+    if (parsed && parsed.path && fs.existsSync(parsed.path)) {
+      try {
+        const selectionData = JSON.parse(fs.readFileSync(parsed.path, 'utf-8'));
+        selection = Array.isArray(selectionData.selection) ? selectionData.selection : [];
+        parsed.meta = selectionData.meta || parsed.meta || {};
+      } catch (e) {
+        selection = [];
+      }
+    }
 
-        const context = {
-          fileName: parsed && parsed.meta && parsed.meta.fileName ? String(parsed.meta.fileName) : '',
-          pageName: parsed && parsed.meta && parsed.meta.pageName ? String(parsed.meta.pageName) : '',
-          pageId: parsed && parsed.meta && parsed.meta.pageId ? String(parsed.meta.pageId) : '',
-          usedFallback: !!(parsed && parsed.meta && parsed.meta.usedFallback),
-          chosenSource: parsed && parsed.meta && parsed.meta.chosenSource ? String(parsed.meta.chosenSource) : '',
-          liveSelectionCount: parsed && parsed.meta && typeof parsed.meta.liveSelectionCount === 'number' ? parsed.meta.liveSelectionCount : 0
-        };
+    const context = {
+      fileName: parsed && parsed.meta && parsed.meta.fileName ? String(parsed.meta.fileName) : '',
+      pageName: parsed && parsed.meta && parsed.meta.pageName ? String(parsed.meta.pageName) : '',
+      pageId: parsed && parsed.meta && parsed.meta.pageId ? String(parsed.meta.pageId) : '',
+      usedFallback: !!(parsed && parsed.meta && parsed.meta.usedFallback),
+      chosenSource: parsed && parsed.meta && parsed.meta.chosenSource ? String(parsed.meta.chosenSource) : '',
+      liveSelectionCount: parsed && parsed.meta && typeof parsed.meta.liveSelectionCount === 'number' ? parsed.meta.liveSelectionCount : 0
+    };
 
-        if (!selection.length) {
-          resolve({ component: null, context: context });
-          return;
-        }
+    if (!selection.length) {
+      return { component: null, context: context };
+    }
 
-        const node = selection[0];
-        if (node && (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET')) {
-          resolve({ component: { id: node.id, name: node.name, type: node.type }, context: context });
-          return;
-        }
+    const node = selection[0];
+    if (node && (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET')) {
+      return { component: { id: node.id, name: node.name, type: node.type }, context: context };
+    }
 
-        resolve({ component: null, context: context });
-      });
-    });
+    return { component: null, context: context };
+  }).catch(() => null);
+}
 
-    req.setTimeout(16000, () => {
-      req.destroy();
-      resolve({
-        bridgeError: {
-          statusCode: 504,
-          error: 'Selection sync timed out before the component doc could be generated.'
-        }
-      });
-    });
-
-    req.on('error', () => resolve(null));
-    req.end();
-  });
+function _formatReceiverConnectionError(connectionError) {
+  if (String(connectionError || '').includes('Bridge receiver')) {
+    return `Error: ${connectionError}`;
+  }
+  return `Error: Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP server. ${connectionError}`;
 }
 
 function _formatPluginConnectionError(parsed) {

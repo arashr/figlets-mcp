@@ -11,10 +11,9 @@
  * Precondition: prepare_ds_config must have been called first (failCount === 0).
  */
 
-const http = require('http');
 const path = require('path');
 const { getConfigPathGuardError } = require('../utils/paths.js');
-const { getReceiverUrl } = require('../utils/receiver-url.js');
+const { requestBridgePost } = require('../bridges/bridge-request.js');
 
 function _writeDesignMdExport(configPath) {
   try {
@@ -33,7 +32,6 @@ function _writeDesignMdExport(configPath) {
 
 function handleApplyDsSetup({ config_path }) {
   const resolvedPath = path.resolve(config_path);
-  const receiverUrl = getReceiverUrl();
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return Promise.resolve(guardError);
 
@@ -66,56 +64,29 @@ function handleApplyDsSetup({ config_path }) {
     });
   }
 
-  const body = JSON.stringify(ds);
-
-  return new Promise((resolve) => {
-    const req = http.request(`${receiverUrl}/request-ds-setup`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode === 200) {
-          let parsed = {};
-          try { parsed = JSON.parse(data); } catch {}
-          const result = parsed.result || {};
-          const designMdPath = _writeDesignMdExport(resolvedPath);
-          resolve({
-            collections: result.collections || [],
-            skipped:     result.skipped || [],
-            message:     result.message || 'DS setup complete.',
-            designMdExport: designMdPath ? { path: designMdPath } : null,
-            configPath:  resolvedPath,
-          });
-        } else if (res.statusCode === 503) {
-          resolve({ error: 'Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop and try again.' });
-        } else if (res.statusCode === 504) {
-          resolve({ error: 'DS setup timed out. For large systems this can take 3+ minutes — try again with the plugin open.' });
-        } else {
-          resolve({ error: `Unexpected status ${res.statusCode}` });
-        }
-      });
-    });
-
-    req.setTimeout(185000, () => {
-      req.destroy();
-      resolve({ error: 'Request timed out. The plugin may still be building — check Figma.' });
-    });
-
-    req.on('error', (err) => {
-      if (err.code === 'ECONNREFUSED') {
-        resolve({ error: 'Bridge receiver is not running. The MCP server should start it automatically — try restarting Claude Desktop.' });
-      } else {
-        resolve({ error: err.message });
-      }
-    });
-
-    req.write(body);
-    req.end();
+  return requestBridgePost('/request-ds-setup', ds, { timeoutMs: 185000 }).then((response) => {
+    if (response.statusCode === 200) {
+      const parsed = response.data || {};
+      const result = parsed.result || {};
+      const designMdPath = _writeDesignMdExport(resolvedPath);
+      return {
+        collections: result.collections || [],
+        skipped:     result.skipped || [],
+        message:     result.message || 'DS setup complete.',
+        designMdExport: designMdPath ? { path: designMdPath } : null,
+        configPath:  resolvedPath,
+      };
+    }
+    if (response.connectionError) {
+      return { error: response.connectionError };
+    }
+    if (response.statusCode === 503) {
+      return { error: 'Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop and try again.' };
+    }
+    if (response.statusCode === 504) {
+      return { error: 'DS setup timed out. For large systems this can take 3+ minutes — try again with the plugin open.' };
+    }
+    return { error: `Unexpected status ${response.statusCode}` };
   });
 }
 

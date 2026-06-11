@@ -119,6 +119,30 @@ async function runTests() {
       await new Promise(resolve => mockServer.close(resolve));
     }
   })();
+
+  // --- shared bridge helper failure mapping is surfaced ---
+  await (async () => {
+    const missingHookPath = path.join(TEMP_DIR, "missing-bridge-hook.json");
+    process.env.FIGLETS_BRIDGE_HOOK_FILE = missingHookPath;
+
+    try {
+      delete require.cache[require.resolve(toolModule)];
+      const { handleInspectComponent } = require(toolModule);
+      let threw = false;
+      try {
+        await handleInspectComponent();
+      } catch (err) {
+        threw = true;
+        assert.ok(
+          err.message.includes("FIGLETS_BRIDGE_HOOK_FILE is set but the hook file does not exist"),
+          `error should come from shared bridge request helper, got: ${err.message}`
+        );
+      }
+      assert.ok(threw, "should throw shared helper bridge-hook error");
+    } finally {
+      delete process.env.FIGLETS_BRIDGE_HOOK_FILE;
+    }
+  })();
 }
 
 module.exports = runTests().finally(() => {

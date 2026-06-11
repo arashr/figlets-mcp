@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-11] Semantic color naming needs grammar detection, not a binary surface/role choice
+
+**Decision:** Figlets should stop treating semantic color naming cleanup as a global `surface-based` versus `role-based` choice. The product model should classify the design system's semantic color grammar first, then surface only invalid, ambiguous, or true-duplicate names. Valid grammars include paired context roles (`surface` / `on-surface`), element-first roles (`text/danger`, `text/on-fill-danger`), intent/emphasis matrices, and component-scoped overlays.
+
+**Why:** BNN-53 manual smoke showed that the current binary naming flow can propose bad deprecations or confusing canonicals. In particular, `color/text/on-fill-danger` is a contextual foreground role for text on `color/fill/danger`; it is not a duplicate of `color/text/danger`. Conversely, `color/text/on-danger` is only clear when `danger` is a known background/context role. If `danger` normally means danger-colored text, `on-danger` is ambiguous, not automatically canonical.
+
+**Product consequence:** New design-system setup should offer viable naming structures with examples and tradeoffs. Existing-system health-checks should infer and respect the current grammar, keep naming advisories low priority unless they block real repairs, and avoid emitting rename/deprecation apply payloads when the grammar is unknown.
+
+**Implementation plan:** See `docs/semantic-color-naming-flow-plan.md`. The next implementation should add a pure semantic grammar classifier, rework health-check naming diagnostics into invalid/ambiguous/true-duplicate/distinct-context/unknown categories, redesign semantic naming consolidation around grammar/context decisions, and add unit coverage across Material-like paired contexts, Carbon-like element-first roles, Primer-like intent/emphasis roles, component-scoped overlays, and unknown custom systems.
+
+---
+
 ## [2026-06-07] Basic Figma variable operations need a shared planner/apply surface
 
 **Decision:** Figlets now has a generic high-level design-system operations surface for exact create/update/rename/delete work on variables, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers. Agents should route designer-approved basic operations through `plan_ds_figma_operations` -> `apply_ds_figma_operations` instead of saying Figlets cannot create a few variables or adding ad hoc scripts.

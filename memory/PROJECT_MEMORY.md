@@ -4,6 +4,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-11 — BNN-53 checkpoint; semantic color naming needs grammar detection]
+
+**Status:** Arash challenged the semantic naming flow after choosing "role-based" produced a plan that treated names such as `color/text/on-danger` as canonical. The concern is valid: the current product framing collapses multiple naming grammars into a binary `surface-based` / `role-based` choice and can make confusing or incorrect recommendations.
+
+**Finding:** `on-*` only makes sense when the suffix names a background/context role the foreground sits on. `color/text/on-surface` is clear if `surface` is a known background role. `color/text/on-fill-danger` is clear if `color/fill/danger` exists. `color/text/on-danger` is ambiguous unless this file has a background/context role named `danger` and consistently uses `danger` that way.
+
+**Direction:** Figlets needs a semantic color grammar classifier, not just majority counts. New setup should offer viable structures: paired-context, element-first, intent/emphasis, and optional component-scoped layers. Existing health-check should infer the current grammar, respect it, and surface only invalid, ambiguous, or true-duplicate names as low-priority advisories unless they block a concrete repair.
+
+**Documentation:** Added `docs/semantic-color-naming-flow-plan.md` with findings from Material-style paired contexts, Carbon-style element-first roles, Primer-style intent/emphasis roles, the two required product flows, odd-name detection rules, unknown-grammar fallback behavior, and a unit-test plan. Updated `DECISIONS.md` with the same product decision.
+
+**Implementation not yet done:** Runtime still needs the classifier, health-check wording changes, semantic naming planner redesign, agent guidance updates, fixture updates, and tests. This checkpoint is intentionally a plan/log pass before patching behavior.
+
+---
+
 ### [2026-06-07 — BNN-53 checkpoint; on-fill roles are distinct from plain surface roles]
 
 **Status:** Manual smoke showed Figlets reporting `color/text/on-fill-danger` and `color/icon/on-fill-danger` as semantic naming conflicts against `color/text/danger` and `color/icon/danger`, then planning `_deprecated/...` renames when the designer chose surface-based consolidation. That was a Figlets diagnosis bug, not a bad designer decision.

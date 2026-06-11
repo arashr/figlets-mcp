@@ -32,6 +32,7 @@ This document captures project gaps that are related to the bulk-repair API work
 | G-022 | No product-level audit of agent instruction drift | Root docs, adapter docs, plugin skills, and Agent Interface can diverge | Less capable agents follow whichever instruction they see first | Add tests that compare key hard-rule phrases and supported workflow names across all entrypoints. |
 | G-023 | No standard "what changed" summary after bulk applies | Apply tools return raw created/updated arrays, but designer summaries vary by agent | Designers need confirmation that exact approved changes were made | Add normalized post-apply summary fields and recommended verification next step to every mutation tool. |
 | G-024 | Accessibility rules beyond color contrast are not planned | Typography size, touch target, focus visibility, and motion are outside current QA | Designers may interpret "healthy" as broader accessibility compliance | Define the explicit accessibility scope of each health check and add future checks one at a time. |
+| G-025 | Semantic color naming grammar is modeled as a binary choice | Health-check can ask designers to choose surface-based vs role-based and then propose confusing deprecations such as treating `on-fill-*` contextual roles as duplicates | Real systems use multiple valid grammars: paired context, element-first, intent/emphasis, and component-scoped overlays | Implement `docs/semantic-color-naming-flow-plan.md`: add a grammar classifier, classify odd names by invalid/ambiguous/true-duplicate/distinct-context/unknown, keep naming low priority in existing-system checks, and update setup intake to offer viable naming structures. |
 
 ## Recommended Future Priority
 
@@ -56,6 +57,7 @@ Include these work packets:
 4. Result pagination/detail tools for long findings.
 5. Config review report for imported-file bootstrap confidence.
 6. Elevation/effect audit beyond config-backed completion.
+7. Semantic color grammar classifier and context-aware naming consolidation.
 
 ## Boundary Statement For Future Agents
 

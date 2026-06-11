@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-11 — BNN-53 todo; duplicated responsive spacing modes are not validated]
+
+**Status:** Manual testing found a product gap after adding Tablet/Desktop modes to `4. Spacing`: Figlets can report spacing mode values as acceptable because Tablet/Desktop match Mobile, match config, and alias to primitives. That is not enough.
+
+**Finding:** For responsive semantic spacing, identical Mobile/Tablet/Desktop values should not be treated as automatically acceptable. Newly added modes often duplicate existing Mobile values as a foundation step; those values are unvalidated until the designer or config explicitly confirms same-value behavior for that token/category.
+
+**Todo:** Added future gap `G-026` in `docs/future-figlets-gap-register.md`. Future work should add responsive spacing mode validation/advisories and designer-facing language such as "unvalidated duplicated mode values" instead of "acceptable" when modes share values without an explicit allowance.
+
+---
+
 ### [2026-06-11 — BNN-53 checkpoint; semantic color naming needs grammar detection]
 
 **Status:** Arash challenged the semantic naming flow after choosing "role-based" produced a plan that treated names such as `color/text/on-danger` as canonical. The concern is valid: the current product framing collapses multiple naming grammars into a binary `surface-based` / `role-based` choice and can make confusing or incorrect recommendations.

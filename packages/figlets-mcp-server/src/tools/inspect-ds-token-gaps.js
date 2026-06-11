@@ -829,8 +829,22 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         category: "spacing-semantics",
         tokenCount: spacingAliasPlan.alreadyAliasedHealthy.length,
         tokens: spacingAliasPlan.alreadyAliasedHealthy.slice(0, 12).map(item => item.name),
-        reason: spacingAliasPlan.alreadyAliasedHealthy.length + " semantic spacing token(s) already alias to primitives with the correct pixel values for each breakpoint mode. They are not alias-repair gaps and should not be reported as missing primitives. Optional step-scale naming (space/12 vs space/48) is a design decision, not a blocking hygiene issue.",
+        reason: spacingAliasPlan.alreadyAliasedHealthy.length + " semantic spacing token(s) already alias to primitives with the correct pixel values for each breakpoint mode. They are not alias-repair gaps and should not be reported as missing primitives. Alias health does not, by itself, validate responsive spacing decisions.",
         productGap: false,
+      });
+    }
+    if (Array.isArray(spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues)
+      && spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues.length) {
+      missingCapabilityNotes.push({
+        kind: "spacing-semantics-unvalidated-duplicated-mode-values",
+        category: "spacing-semantics",
+        severity: "advisory",
+        tokenCount: spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues.length,
+        tokens: spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues.slice(0, 12).map(item => item.name),
+        examples: spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues.slice(0, 4),
+        repairReady: false,
+        productGap: false,
+        reason: "Aliases are healthy, but one or more responsive spacing modes duplicate the Mobile value. Treat these as unvalidated responsive spacing decisions unless config explicitly allows same-value modes for the token/category.",
       });
     }
     if (Array.isArray(spacingAliasPlan.missingResponsiveModes) && spacingAliasPlan.missingResponsiveModes.length) {
@@ -900,12 +914,14 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       configDriftTokens: spacingAliasPlan.configDrift.length,
       missingPrimitiveTokens: spacingAliasPlan.missingPrimitives.length,
       spacingAlreadyHealthyCount: (spacingAliasPlan.alreadyAliasedHealthy || []).length,
+      unvalidatedDuplicatedResponsiveModeValueTokens: (spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || []).length,
       missingResponsiveModes: (spacingAliasPlan.missingResponsiveModes || []).length,
       spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
       repairSourceBreakdown: _spacingRepairBreakdown(spacingAliasPlan.repairs),
     },
     spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
     spacingMissingResponsiveModes: spacingAliasPlan.missingResponsiveModes || [],
+    spacingResponsiveModeAdvisories: spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || [],
   });
   const summary = {
     missingVariableCount: missingVariables.length,
@@ -917,6 +933,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     unsupportedCategoryCount: unsupportedCategories.length,
     inspectedCategoryCount: supportedCategories.length,
     plannedCategoryCount: categoriesWithGaps.length,
+    responsiveSpacingAdvisoryCount: (spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || []).length,
   };
 
   const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount;
@@ -933,6 +950,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       typeMismatches: typeMismatches.slice(0, 10),
       spacingAliasRepairs: spacingAliasRepairGaps.slice(0, 10),
       spacingAliasConfigDrift: spacingAliasConfigDriftGaps.slice(0, 10),
+      spacingResponsiveModeAdvisories: (spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || []).slice(0, 10),
       unsupportedCategories,
     },
     tokenGaps,
@@ -973,6 +991,8 @@ function _buildRepairPlan(context) {
     + (context.missingStyles || []).length
     + (context.typeMismatches || []).length
     + (context.spacingAliasRepairs || []).length;
+  const advisoryTotal = (context.spacingResponsiveModeAdvisories || []).length;
+  const hasProductGapNotes = (context.missingCapabilityNotes || []).some(note => note && note.productGap);
   const previewInput = {
     config_path: context.configPath,
     categories,
@@ -1085,7 +1105,11 @@ function _buildRepairPlan(context) {
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
       ? "STOP before any Figma write. This inspect pass is read-only. For designer-facing review, present repairPlan.reviewOptions as separate choices and run only the selected preview. Do not run repairPlan.previewInput and primitiveRepairPlan.previewInput together as one combined token preview. Summarize repairPlan.designerPresentation in plain language, then wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
-      : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
+        + (advisoryTotal ? " Report responsive spacing mode advisories as low-priority designer validation items, not token gaps and not apply-ready repairs." : "")
+      : advisoryTotal
+        ? "No update_ds_tokens payload is ready from this read-only pass. Report responsive spacing mode advisories as low-priority designer validation items, not token gaps, not product/tool gaps, and not apply-ready repairs. Do not write custom Figma scripts or invent token updates."
+          + (hasProductGapNotes ? " Separately report any productGap missingCapabilityNotes as Figlets product/tool gaps." : "")
+        : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
 }
 
@@ -1254,6 +1278,7 @@ function _buildDesignerPresentation(context, total) {
   const missingStyles = context.missingStyles || [];
   const spacingAliasRepairs = context.spacingAliasRepairs || [];
   const spacingAliasConfigDrift = context.spacingAliasConfigDrift || [];
+  const spacingResponsiveModeAdvisories = context.spacingResponsiveModeAdvisories || [];
   const notes = context.missingCapabilityNotes || [];
   const foundationRepairs = context.foundationRepairs || [];
   const lines = [];
@@ -1310,6 +1335,9 @@ function _buildDesignerPresentation(context, total) {
         message: "Semantic spacing alias repair needs Mobile, Tablet, and Desktop modes on the Spacing collection. Present missing mode creation as a separate option. If approved, Figlets should add only the missing modes as a foundation repair, then sync and reinspect, then stop before any spacing alias apply.",
       });
     }
+    if (spacingResponsiveModeAdvisories.length) {
+      sections.push(_spacingResponsiveModeAdvisorySection(spacingResponsiveModeAdvisories));
+    }
     if (spacingAliasConfigDrift.length) {
       const driftLines = [];
       for (const drift of spacingAliasConfigDrift) {
@@ -1328,6 +1356,10 @@ function _buildDesignerPresentation(context, total) {
     }
   } else {
     lines.push("I do not see missing non-color config-backed tokens in the inspected categories.");
+    if (spacingResponsiveModeAdvisories.length) {
+      lines.push("Semantic spacing aliases are healthy, but some responsive spacing mode values still need designer validation.");
+      sections.push(_spacingResponsiveModeAdvisorySection(spacingResponsiveModeAdvisories));
+    }
   }
 
   if (notes.length) {
@@ -1364,6 +1396,7 @@ function _buildDesignerPresentation(context, total) {
       foundationRepairs: foundationRepairs.length,
       productGaps: notes.filter(note => note.productGap).length,
       spacingAliasRepairs: spacingAliasRepairs.length,
+      spacingResponsiveModeAdvisories: spacingResponsiveModeAdvisories.length,
       spacingAliasRepairSourceBreakdown: _spacingRepairBreakdown(spacingAliasRepairs),
     },
     proposedChanges: spacingAliasRepairs.flatMap(repair => (repair.updates || []).map(update => ({
@@ -1377,6 +1410,23 @@ function _buildDesignerPresentation(context, total) {
       sourceKind: _spacingRepairSourceKind(update),
       toAlias: update.toAliasName,
     }))),
+  };
+}
+
+function _spacingResponsiveModeAdvisorySection(advisories) {
+  const rows = [];
+  for (const advisory of advisories || []) {
+    const duplicatedModes = (advisory.duplicatedModes || []).map(mode => mode.modeName).join("/");
+    rows.push(
+      advisory.name + ": " + (duplicatedModes || "responsive modes") + " duplicate "
+      + (advisory.baselineMode || "Mobile") + " value " + advisory.baselineValue
+    );
+  }
+  return {
+    title: "Responsive spacing mode values need validation",
+    message: "These semantic spacing aliases resolve correctly, but repeated values across responsive modes are unvalidated design decisions, not proof that the modes are acceptable. "
+      + rows.slice(0, 5).join("; ")
+      + (rows.length > 5 ? "; and more." : "."),
   };
 }
 
@@ -1394,7 +1444,7 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 function _composeMessage(summary) {
   const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount
     + (summary.staleVariableCount || 0) + (summary.configDriftCount || 0);
-  if (!total && !summary.unsupportedCategoryCount) {
+  if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
     return "No config-backed non-color token gaps found in the inspected categories.";
   }
   const parts = [];
@@ -1403,10 +1453,11 @@ function _composeMessage(summary) {
   if (summary.typeMismatchCount) parts.push(`${summary.typeMismatchCount} type mismatch${summary.typeMismatchCount === 1 ? "" : "es"}`);
   if (summary.staleVariableCount) parts.push(`${summary.staleVariableCount} alias repair${summary.staleVariableCount === 1 ? "" : "s"}`);
   if (summary.configDriftCount) parts.push(`${summary.configDriftCount} config drift mode${summary.configDriftCount === 1 ? "" : "s"}`);
+  if (summary.responsiveSpacingAdvisoryCount) parts.push(`${summary.responsiveSpacingAdvisoryCount} responsive spacing advisory${summary.responsiveSpacingAdvisoryCount === 1 ? "" : "ies"}`);
   if (summary.unsupportedCategoryCount) parts.push(`${summary.unsupportedCategoryCount} unsupported categor${summary.unsupportedCategoryCount === 1 ? "y" : "ies"}`);
   const gapSummary = `Figlets found ${parts.join(", ")} in the config-backed token planner.`;
   if (!total) {
-    return `${gapSummary} Read-only inspection only.`;
+    return `${gapSummary} Read-only inspection only; no token write is implied.`;
   }
   return [
     "Read-only inspection. Do not call apply_ds_foundation_repairs, update_ds_primitives, or update_ds_tokens with dry_run:false until the designer explicitly approves after dry-run previews.",

@@ -408,6 +408,96 @@ module.exports = (() => {
   }
 
   {
+    const duplicatedResponsiveSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
+      {
+        collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+        spacing: {
+          semantic: {
+            "layout/lg": [48, 48, 48],
+          },
+        },
+      },
+      {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["p12"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-lg"],
+            modes: [
+              { modeId: "mobile", name: "Mobile" },
+              { modeId: "tablet", name: "Tablet" },
+              { modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          {
+            id: "layout-lg",
+            name: "space/layout/lg",
+            resolvedType: "FLOAT",
+            valuesByMode: {
+              mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+              tablet: { type: "VARIABLE_ALIAS", id: "p12" },
+              desktop: { type: "VARIABLE_ALIAS", id: "p12" },
+            },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      },
+      {
+        configPath: "/tmp/design-system.config.js",
+        categories: ["spacing-semantics"],
+      }
+    );
+    assert.strictEqual(
+      duplicatedResponsiveSpacing.summary.responsiveSpacingAdvisoryCount,
+      1,
+      "duplicated responsive spacing values should count as advisory findings"
+    );
+    assert.strictEqual(
+      duplicatedResponsiveSpacing.repairPlan.applyInput.categories.includes("spacing-semantics"),
+      false,
+      "same-value responsive advisories must not create an apply-ready semantic spacing repair"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.repairPlan.missingCapabilityNotes.some(note =>
+        note.kind === "spacing-semantics-unvalidated-duplicated-mode-values" &&
+        note.severity === "advisory" &&
+        note.productGap === false &&
+        note.repairReady === false &&
+        note.reason.includes("unvalidated responsive spacing decisions")
+      ),
+      "duplicated responsive values should be surfaced as low-priority designer validation, not a product gap"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.repairPlan.designerPresentation.sections.some(section =>
+        section.title === "Responsive spacing mode values need validation" &&
+        section.message.includes("unvalidated design decisions") &&
+        section.message.includes("space/layout/lg")
+      ),
+      "designer presentation should avoid saying duplicated responsive values are acceptable"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.message.includes("responsive spacing advisory") &&
+      duplicatedResponsiveSpacing.message.includes("no token write is implied"),
+      "zero-gap response should still mention responsive spacing advisories"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("not token gaps") &&
+      duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("not apply-ready repairs"),
+      "agent instruction should keep responsive advisories out of repair flows"
+    );
+  }
+
+  {
     const representativeSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
       Object.assign({}, DS, {
         spacing: {

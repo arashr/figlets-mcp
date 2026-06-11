@@ -4,13 +4,25 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-11 — BNN-54 implementation; duplicated responsive spacing values are advisories]
+
+**Status:** BNN-54 was opened from `G-026` after manual testing showed Figlets could call duplicated Mobile/Tablet/Desktop spacing values acceptable once aliases were healthy.
+
+**Shipped behavior:** `planSpacingSemanticAliasRepairs` now detects semantic spacing tokens whose responsive modes resolve to the same value as Mobile after aliases are otherwise healthy. `inspect_ds_token_gaps` surfaces those as `spacing-semantics-unvalidated-duplicated-mode-values` advisory notes, includes them in top findings and designer presentation, and keeps them out of `update_ds_tokens` apply payloads. The no-gap response now says there are responsive spacing advisories instead of reporting a fully clean token-gap planner.
+
+**Boundary:** This is read-only diagnosis only. It does not mark equal responsive values as wrong, create a write path, or change approval behavior. Config can explicitly suppress the advisory with `spacing.responsiveModeValidation.allowSameValueModes` for all tokens, token names, prefixes, or categories when same-value responsive modes are intentional.
+
+**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js` and `tests/server/inspect-ds-token-gaps-tool.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, and designer-facing advisory language.
+
+---
+
 ### [2026-06-11 — BNN-53 todo; duplicated responsive spacing modes are not validated]
 
 **Status:** Manual testing found a product gap after adding Tablet/Desktop modes to `4. Spacing`: Figlets can report spacing mode values as acceptable because Tablet/Desktop match Mobile, match config, and alias to primitives. That is not enough.
 
 **Finding:** For responsive semantic spacing, identical Mobile/Tablet/Desktop values should not be treated as automatically acceptable. Newly added modes often duplicate existing Mobile values as a foundation step; those values are unvalidated until the designer or config explicitly confirms same-value behavior for that token/category.
 
-**Todo:** Added future gap `G-026` in `docs/future-figlets-gap-register.md`. Future work should add responsive spacing mode validation/advisories and designer-facing language such as "unvalidated duplicated mode values" instead of "acceptable" when modes share values without an explicit allowance.
+**Follow-up:** This became BNN-54. The diagnostic slice is now implemented; future work can add richer designer workflows for resolving the advisory.
 
 ---
 

@@ -24,6 +24,7 @@ const SEMANTIC_ALIAS_REPAIR_MODEL = {
   matchRule: "snapshot-raw-must-equal-intended-value-per-mode",
   onConfigDrift: "report-needs-designer-decision",
   onMissingPrimitive: "report-missing-prerequisite",
+  onDuplicatedResponsiveModeValues: "report-low-priority-unvalidated-decision",
 };
 
 const SPACING_SEMANTIC_CATEGORY = "spacing-semantics";
@@ -311,6 +312,85 @@ function intendedValuesForSpacingToken(key, semantic, variable, modeOrder, varia
   return filled;
 }
 
+function _arrayIncludesTokenPattern(items, key, tokenName) {
+  const names = [key, tokenName, "space/" + key];
+  for (const item of items || []) {
+    const value = String(item || "").trim();
+    if (!value) continue;
+    if (names.includes(value)) return true;
+    if (value.endsWith("/*")) {
+      const prefix = value.slice(0, -1);
+      if (key.indexOf(prefix) === 0 || tokenName.indexOf(prefix) === 0 || ("space/" + key).indexOf(prefix) === 0) return true;
+    }
+  }
+  return false;
+}
+
+function _asPattern(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.endsWith("/*")) return text;
+  return text.replace(/\/?$/, "/*");
+}
+
+function spacingTokenAllowsSameResponsiveModeValues(ds, key, tokenName) {
+  const validation = ds && ds.spacing && ds.spacing.responsiveModeValidation;
+  const allow = validation && validation.allowSameValueModes;
+  if (allow === true || allow === "all") return true;
+  if (Array.isArray(allow)) return _arrayIncludesTokenPattern(allow, key, tokenName);
+  if (allow && typeof allow === "object") {
+    if (allow.all === true) return true;
+    if (Array.isArray(allow.tokens) && _arrayIncludesTokenPattern(allow.tokens, key, tokenName)) return true;
+    if (Array.isArray(allow.prefixes) && _arrayIncludesTokenPattern(allow.prefixes.map(_asPattern), key, tokenName)) return true;
+    if (Array.isArray(allow.categories)) {
+      const category = String(key || "").split("/")[0];
+      if (allow.categories.map(item => String(item || "")).includes(category)) return true;
+    }
+  }
+  return false;
+}
+
+function duplicatedResponsiveModeValueAdvisory({ ds, key, tokenName, modeOrder, variable, variableById, aliasTargetsByMode }) {
+  if (!modeOrder || modeOrder.length < 2) return null;
+  if (spacingTokenAllowsSameResponsiveModeValues(ds, key, tokenName)) return null;
+  const baselineMode = modeOrder[0];
+  if (!baselineMode || !variable || !variable.valuesByMode) return null;
+  const baselineValue = resolveNumericFromVariableValue(variable.valuesByMode[baselineMode.modeId], variableById);
+  if (baselineValue === null) return null;
+  const duplicatedModes = [];
+  const modes = [];
+  for (const mode of modeOrder) {
+    const current = resolveNumericFromVariableValue(variable.valuesByMode[mode.modeId], variableById);
+    if (current === null) continue;
+    const aliasTarget = aliasTargetsByMode && aliasTargetsByMode.get(mode.modeId);
+    modes.push({
+      modeId: mode.modeId,
+      modeName: mode.modeName,
+      value: current,
+      aliasName: aliasTarget && aliasTarget.name || undefined,
+    });
+    if (mode.modeId !== baselineMode.modeId && floatsEqual(current, baselineValue)) {
+      duplicatedModes.push({
+        modeId: mode.modeId,
+        modeName: mode.modeName,
+        value: current,
+        matchesMode: baselineMode.modeName,
+        aliasName: aliasTarget && aliasTarget.name || undefined,
+      });
+    }
+  }
+  if (!duplicatedModes.length) return null;
+  return {
+    name: tokenName,
+    baselineMode: baselineMode.modeName,
+    baselineValue,
+    duplicatedModes,
+    modes,
+    allModesSame: modes.length === modeOrder.length && modes.every(mode => floatsEqual(mode.value, baselineValue)),
+    reason: "Aliases resolve correctly, but one or more responsive spacing modes duplicate the " + baselineMode.modeName + " value. Treat this as an unvalidated responsive spacing decision unless config explicitly allows same-value modes for this token.",
+  };
+}
+
 function mergedSpacingSemantic(ds, figmaData, variableMap) {
   const configSemantic = ds && ds.spacing && ds.spacing.semantic && typeof ds.spacing.semantic === "object"
     ? ds.spacing.semantic
@@ -369,6 +449,7 @@ function planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, options = {
     configDrift: [],
     missingPrimitives: [],
     alreadyAliasedHealthy: [],
+    unvalidatedDuplicatedResponsiveModeValues: [],
   };
   const spacingCollectionName = effective && effective.collections && effective.collections.spacing || "4. Spacing";
   const primitiveCollectionName = effective && effective.collections && effective.collections.primitives || "1. Primitives";
@@ -399,6 +480,7 @@ function planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, options = {
     const updates = [];
     const driftModes = [];
     const missingModes = [];
+    const aliasTargetsByMode = new Map();
     let modesNeedingWork = 0;
     let modesHealthyViaAlias = 0;
 
@@ -410,6 +492,7 @@ function planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, options = {
       const aliasTarget = resolvePrimitiveAliasTarget(primitiveLookup, intended);
       const currentValue = variable.valuesByMode[mode.modeId];
       const currentRaw = floatRawValue(currentValue);
+      if (aliasTarget) aliasTargetsByMode.set(mode.modeId, aliasTarget);
 
       if (isAliasVariableValue(currentValue) && aliasTarget && currentValue.id === aliasTarget.id) {
         modesHealthyViaAlias += 1;
@@ -477,11 +560,24 @@ function planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, options = {
       result.missingPrimitives.push({ name: tokenName, modes: missingModes });
     }
     if (!modesNeedingWork && modesHealthyViaAlias > 0 && modeOrder.length) {
+      const duplicatedModeValues = modeAnalysis.responsiveReady
+        ? duplicatedResponsiveModeValueAdvisory({
+          ds: effective,
+          key,
+          tokenName,
+          modeOrder,
+          variable,
+          variableById,
+          aliasTargetsByMode,
+        })
+        : null;
       result.alreadyAliasedHealthy.push({
         name: tokenName,
         modesHealthy: modesHealthyViaAlias,
+        duplicatedModeValues,
         note: "All breakpoint modes already alias to primitives that resolve to the intended pixel values. No spacing-semantics alias repair is required; optional step-scale normalization is a separate design decision.",
       });
+      if (duplicatedModeValues) result.unvalidatedDuplicatedResponsiveModeValues.push(duplicatedModeValues);
     }
   }
 
@@ -580,5 +676,6 @@ module.exports = {
   mergedSpacingSemantic,
   withEffectiveSpacingSemantic,
   planSpacingSemanticAliasRepairs,
+  spacingTokenAllowsSameResponsiveModeValues,
   enrichAuditTokensWithSpacingAliasRepairs,
 };

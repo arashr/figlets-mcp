@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-11] Healthy spacing aliases do not validate responsive mode decisions
+
+**Decision:** Figlets should distinguish semantic spacing alias health from responsive spacing decision validation. If Mobile, Tablet, Desktop, or other configured spacing modes resolve to repeated values, the token can be alias-healthy while still needing designer validation.
+
+**Why:** Newly created Figma modes often duplicate the existing mode values. BNN-52 already separated mode creation from alias repair because duplicated mode values can look intentional when they are just setup defaults. BNN-54 extends that boundary into read-only health checks: matching config and primitive aliases is not enough to say responsive spacing values are acceptable.
+
+**Product consequence:** `inspect_ds_token_gaps` should surface duplicated responsive semantic spacing values as low-priority advisories, not token gaps, not product/tool gaps, and not apply-ready repairs. Designer-facing output should say the values are unvalidated responsive spacing decisions unless config explicitly allows same-value modes for that token/category.
+
+**Implementation:** `planSpacingSemanticAliasRepairs` emits `unvalidatedDuplicatedResponsiveModeValues` when aliases are healthy but later modes duplicate the baseline mode value. `inspect_ds_token_gaps` exposes this through `spacing-semantics-unvalidated-duplicated-mode-values`, top findings, summary counts, and designer presentation while leaving `update_ds_tokens` apply payloads unchanged. Explicit config allowances live under `spacing.responsiveModeValidation.allowSameValueModes`.
+
+---
+
 ## [2026-06-11] Semantic color naming needs grammar detection, not a binary surface/role choice
 
 **Decision:** Figlets should stop treating semantic color naming cleanup as a global `surface-based` versus `role-based` choice. The product model should classify the design system's semantic color grammar first, then surface only invalid, ambiguous, or true-duplicate names. Valid grammars include paired context roles (`surface` / `on-surface`), element-first roles (`text/danger`, `text/on-fill-danger`), intent/emphasis matrices, and component-scoped overlays.

@@ -6,11 +6,11 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ## [2026-06-11] Healthy spacing aliases do not validate responsive mode decisions
 
-**Decision:** Figlets should distinguish semantic spacing alias health from responsive spacing decision validation. If Mobile, Tablet, Desktop, or other configured spacing modes resolve to repeated values, the token can be alias-healthy while still needing designer validation.
+**Decision:** Figlets should distinguish semantic spacing alias health from responsive spacing decision validation. If Mobile, Tablet, Desktop, or other configured spacing modes resolve to repeated values, the token can be alias-healthy while still needing responsive validation. If Figlets just created the missing modes, repeated values are setup validation work; if the modes already existed, repeated values may be an intentional designer choice but still should not be called proven responsive behavior unless config allows it.
 
 **Why:** Newly created Figma modes often duplicate the existing mode values. BNN-52 already separated mode creation from alias repair because duplicated mode values can look intentional when they are just setup defaults. BNN-54 extends that boundary into read-only health checks: matching config and primitive aliases is not enough to say responsive spacing values are acceptable.
 
-**Product consequence:** `inspect_ds_token_gaps` should surface duplicated responsive semantic spacing values as low-priority advisories, not token gaps, not product/tool gaps, and not apply-ready repairs. Designer-facing output should say the values are unvalidated responsive spacing decisions unless config explicitly allows same-value modes for that token/category.
+**Product consequence:** `inspect_ds_token_gaps` should surface duplicated responsive semantic spacing values as advisories, not token gaps, not product/tool gaps, and not apply-ready repairs. Designer-facing output should say the values are unvalidated responsive spacing decisions unless config explicitly allows same-value modes for that token/category. After `apply_ds_foundation_repairs` creates spacing modes, agents should treat duplicated Tablet/Desktop values as responsive setup validation before calling spacing complete.
 
 **Implementation:** `planSpacingSemanticAliasRepairs` emits `unvalidatedDuplicatedResponsiveModeValues` when aliases are healthy but later modes duplicate the baseline mode value. `inspect_ds_token_gaps` exposes this through `spacing-semantics-unvalidated-duplicated-mode-values`, top findings, summary counts, and designer presentation while leaving `update_ds_tokens` apply payloads unchanged. Explicit config allowances live under `spacing.responsiveModeValidation.allowSameValueModes`.
 

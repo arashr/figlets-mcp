@@ -473,14 +473,16 @@ module.exports = (() => {
         note.severity === "advisory" &&
         note.productGap === false &&
         note.repairReady === false &&
-        note.reason.includes("unvalidated responsive spacing decisions")
+        note.validationScope === "responsive-spacing-setup" &&
+        note.reason.includes("responsive spacing setup validation work")
       ),
-      "duplicated responsive values should be surfaced as low-priority designer validation, not a product gap"
+      "duplicated responsive values should be surfaced as responsive setup validation, not a product gap"
     );
     assert.ok(
       duplicatedResponsiveSpacing.repairPlan.designerPresentation.sections.some(section =>
-        section.title === "Responsive spacing mode values need validation" &&
-        section.message.includes("unvalidated design decisions") &&
+        section.title === "Responsive spacing setup validation needed" &&
+        section.message.includes("unvalidated responsive setup decisions") &&
+        section.message.includes("Tablet/Desktop modes were just created") &&
         section.message.includes("space/layout/lg")
       ),
       "designer presentation should avoid saying duplicated responsive values are acceptable"
@@ -491,6 +493,7 @@ module.exports = (() => {
       "zero-gap response should still mention responsive spacing advisories"
     );
     assert.ok(
+      duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("responsive setup validation work") &&
       duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("not token gaps") &&
       duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("not apply-ready repairs"),
       "agent instruction should keep responsive advisories out of repair flows"

@@ -844,7 +844,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         examples: spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues.slice(0, 4),
         repairReady: false,
         productGap: false,
-        reason: "Aliases are healthy, but one or more responsive spacing modes duplicate the Mobile value. Treat these as unvalidated responsive spacing decisions unless config explicitly allows same-value modes for the token/category.",
+        validationScope: "responsive-spacing-setup",
+        reason: "Aliases are healthy, but one or more responsive spacing modes duplicate the Mobile value. If these modes were just created by a foundation repair, treat this as responsive spacing setup validation work before calling spacing complete. If the modes already existed, treat it as a designer validation item unless config explicitly allows same-value modes for the token/category.",
       });
     }
     if (Array.isArray(spacingAliasPlan.missingResponsiveModes) && spacingAliasPlan.missingResponsiveModes.length) {
@@ -1105,9 +1106,9 @@ function _buildRepairPlan(context) {
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
       ? "STOP before any Figma write. This inspect pass is read-only. For designer-facing review, present repairPlan.reviewOptions as separate choices and run only the selected preview. Do not run repairPlan.previewInput and primitiveRepairPlan.previewInput together as one combined token preview. Summarize repairPlan.designerPresentation in plain language, then wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
-        + (advisoryTotal ? " Report responsive spacing mode advisories as low-priority designer validation items, not token gaps and not apply-ready repairs." : "")
+        + (advisoryTotal ? " Report responsive spacing mode advisories as responsive setup validation work when modes were just created, or designer validation items when modes already existed. They are not token gaps and not apply-ready repairs." : "")
       : advisoryTotal
-        ? "No update_ds_tokens payload is ready from this read-only pass. Report responsive spacing mode advisories as low-priority designer validation items, not token gaps, not product/tool gaps, and not apply-ready repairs. Do not write custom Figma scripts or invent token updates."
+        ? "No update_ds_tokens payload is ready from this read-only pass. Report responsive spacing mode advisories as responsive setup validation work when modes were just created, or designer validation items when modes already existed. They are not token gaps, not product/tool gaps, and not apply-ready repairs. Do not write custom Figma scripts or invent token updates."
           + (hasProductGapNotes ? " Separately report any productGap missingCapabilityNotes as Figlets product/tool gaps." : "")
         : "No update_ds_tokens payload is ready from this read-only pass. Report missingCapabilityNotes as Figlets product/tool gaps where present; do not infer tokens from arbitrary page usage or write custom Figma scripts.",
   };
@@ -1357,7 +1358,7 @@ function _buildDesignerPresentation(context, total) {
   } else {
     lines.push("I do not see missing non-color config-backed tokens in the inspected categories.");
     if (spacingResponsiveModeAdvisories.length) {
-      lines.push("Semantic spacing aliases are healthy, but some responsive spacing mode values still need designer validation.");
+      lines.push("Semantic spacing aliases are healthy, but repeated responsive mode values still need responsive setup validation before spacing is complete.");
       sections.push(_spacingResponsiveModeAdvisorySection(spacingResponsiveModeAdvisories));
     }
   }
@@ -1423,8 +1424,8 @@ function _spacingResponsiveModeAdvisorySection(advisories) {
     );
   }
   return {
-    title: "Responsive spacing mode values need validation",
-    message: "These semantic spacing aliases resolve correctly, but repeated values across responsive modes are unvalidated design decisions, not proof that the modes are acceptable. "
+    title: "Responsive spacing setup validation needed",
+    message: "These semantic spacing aliases resolve correctly, but repeated values across responsive modes are unvalidated responsive setup decisions, not proof that the modes are acceptable. If Tablet/Desktop modes were just created, ask the designer to validate or adjust the responsive spacing scale before calling spacing complete. "
       + rows.slice(0, 5).join("; ")
       + (rows.length > 5 ? "; and more." : "."),
   };

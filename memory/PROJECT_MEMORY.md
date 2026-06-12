@@ -12,7 +12,9 @@ Active context for the project so future sessions can recover quickly without re
 
 **Boundary:** This is read-only diagnosis only. It does not mark equal responsive values as wrong, create a write path, or change approval behavior. Config can explicitly suppress the advisory with `spacing.responsiveModeValidation.allowSameValueModes` for all tokens, token names, prefixes, or categories when same-value responsive modes are intentional. After Figlets creates missing spacing modes, duplicated Tablet/Desktop values should be framed as responsive setup validation work before spacing is called complete; pre-existing duplicates can be framed as designer validation items.
 
-**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js` and `tests/server/inspect-ds-token-gaps-tool.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, and designer-facing advisory language.
+**Review flow:** `inspect_ds_token_gaps.repairPlan.reviewOptions` now includes a responsive spacing value review option when advisories exist. It can suggest a layout-only +16px-per-breakpoint tightening plan and editable value template, but it must also surface any raw semantic spacing alias repairs still pending so the designer does not miss raw spacing values while reviewing responsive spacing.
+
+**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js` and `tests/server/inspect-ds-token-gaps-tool.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, designer-facing advisory language, responsive review options, and the mixed raw-plus-responsive review case.
 
 ---
 

@@ -14,6 +14,8 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Implementation:** `planSpacingSemanticAliasRepairs` emits `unvalidatedDuplicatedResponsiveModeValues` when aliases are healthy but later modes duplicate the baseline mode value. `inspect_ds_token_gaps` exposes this through `spacing-semantics-unvalidated-duplicated-mode-values`, top findings, summary counts, and designer presentation while leaving `update_ds_tokens` apply payloads unchanged. Explicit config allowances live under `spacing.responsiveModeValidation.allowSameValueModes`.
 
+**Review flow:** Responsive spacing validation should appear as a first-menu review option when advisories exist. That review must also mention any semantic spacing alias repairs still pending, so agents do not discuss duplicated mode values as if raw spacing values do not exist. Figlets may suggest an alias-backed layout-only tightening plan plus an editable template; exact writes still go through `plan_ds_figma_operations` / `apply_ds_figma_operations` after approval.
+
 ---
 
 ## [2026-06-11] Semantic color naming needs grammar detection, not a binary surface/role choice

@@ -6,7 +6,9 @@ const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/f
 const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/paths.js");
 const {
   SEMANTIC_ALIAS_REPAIR_MODEL,
+  buildPrimitiveSpacingLookup,
   planSpacingSemanticAliasRepairs,
+  resolvePrimitiveAliasTarget,
   withEffectiveSpacingSemantic,
 } = require("./semantic-alias-repair.js");
 
@@ -923,6 +925,12 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
     spacingMissingResponsiveModes: spacingAliasPlan.missingResponsiveModes || [],
     spacingResponsiveModeAdvisories: spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || [],
+    responsiveSpacingReview: _suggestResponsiveSpacingReviews(
+      ds,
+      figmaData,
+      spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || [],
+      spacingAliasRepairGaps
+    ),
   });
   const summary = {
     missingVariableCount: missingVariables.length,
@@ -1138,6 +1146,7 @@ function _buildReviewOptions({
   const options = [];
   const configPath = context.configPath;
   const applyCategorySet = new Set(applyCategories || []);
+  const responsiveSpacingReview = context.responsiveSpacingReview || null;
 
   if ((foundationCollections || []).length) {
     options.push(_reviewOption(
@@ -1149,6 +1158,24 @@ function _buildReviewOptions({
       foundationApplyInput,
       "Creates only configured collection modes or shells. After this, sync and reinspect, then stop before any token write."
     ));
+  }
+
+  if (responsiveSpacingReview && responsiveSpacingReview.advisoryCount) {
+    const option = {
+      id: "responsive-spacing-values",
+      label: "Review responsive spacing value suggestions",
+      boundary: "responsive-spacing-decision",
+      tool: "plan_ds_figma_operations",
+      designerSummary: responsiveSpacingReview.designerSummary,
+      aliasRepairSummary: responsiveSpacingReview.aliasRepairSummary,
+      suggestedValues: responsiveSpacingReview.suggestedValues,
+      editableTemplate: responsiveSpacingReview.editableTemplate,
+      missingPrimitiveValues: responsiveSpacingReview.missingPrimitiveValues,
+    };
+    if ((responsiveSpacingReview.operations || []).length) {
+      option.previewInput = { operations: responsiveSpacingReview.operations };
+    }
+    options.push(option);
   }
 
   if (primitiveRepairPlan) {
@@ -1274,12 +1301,131 @@ function _buildReviewOptions({
   return options;
 }
 
+function _isLayoutSpacingToken(name) {
+  return /^space\/layout\//.test(String(name || ""));
+}
+
+function _responsiveSpacingTokenKey(name) {
+  return String(name || "").replace(/^space\//, "");
+}
+
+function _spacingAliasRepairSummary(spacingAliasRepairs) {
+  const repairs = Array.isArray(spacingAliasRepairs) ? spacingAliasRepairs : [];
+  const updateCount = repairs.reduce((count, repair) => count + ((repair.updates || []).length), 0);
+  const tokens = repairs.map(repair => repair && repair.name).filter(Boolean);
+  const layoutTokens = tokens.filter(_isLayoutSpacingToken);
+  return {
+    tokenCount: tokens.length,
+    updateCount,
+    tokens,
+    layoutTokens,
+  };
+}
+
+function _suggestResponsiveSpacingReviews(ds, figmaData, advisories, spacingAliasRepairs) {
+  const all = Array.isArray(advisories) ? advisories : [];
+  if (!all.length) return null;
+  const spacingCollectionName = ds && ds.collections && ds.collections.spacing || "4. Spacing";
+  const primitiveCollectionName = ds && ds.collections && ds.collections.primitives || "1. Primitives";
+  const primitiveLookup = buildPrimitiveSpacingLookup(figmaData, primitiveCollectionName);
+  const layout = all.filter(item => _isLayoutSpacingToken(item && item.name));
+  const other = all.filter(item => !_isLayoutSpacingToken(item && item.name));
+  const operations = [];
+  const suggestedValues = [];
+  const templateRows = [];
+  const missingPrimitiveValues = [];
+  const aliasRepairSummary = _spacingAliasRepairSummary(spacingAliasRepairs);
+
+  for (const advisory of layout) {
+    const modes = Array.isArray(advisory.modes) ? advisory.modes : [];
+    const baselineMode = advisory.baselineMode || (modes[0] && modes[0].modeName) || "Mobile";
+    const baselineValue = Number(advisory.baselineValue);
+    if (!Number.isFinite(baselineValue) || modes.length < 2) continue;
+    const values = {};
+    const display = [];
+    let allAliasesReady = true;
+    for (let i = 1; i < modes.length; i += 1) {
+      const mode = modes[i];
+      const modeName = mode && mode.modeName;
+      if (!modeName) continue;
+      const suggestedValue = baselineValue + (16 * i);
+      const primitive = resolvePrimitiveAliasTarget(primitiveLookup, suggestedValue);
+      display.push(`${modeName} ${suggestedValue}`);
+      if (primitive) {
+        values[modeName] = { alias: primitive.name };
+      } else {
+        allAliasesReady = false;
+        missingPrimitiveValues.push({
+          token: advisory.name,
+          mode: modeName,
+          value: suggestedValue,
+          primitiveCollection: primitiveCollectionName,
+        });
+      }
+    }
+    if (!Object.keys(values).length) continue;
+    suggestedValues.push({
+      token: advisory.name,
+      baseline: { mode: baselineMode, value: baselineValue },
+      suggestion: display,
+      rationale: "Layout spacing usually benefits most from wider breakpoints; this uses a steady +16px step per breakpoint.",
+    });
+    templateRows.push(`${_responsiveSpacingTokenKey(advisory.name)}: ${display.join(", ")}`);
+    if (allAliasesReady) {
+      operations.push({
+        kind: "update_variable",
+        name: advisory.name,
+        values,
+      });
+    }
+  }
+
+  for (const advisory of other.slice(0, 8)) {
+    const modes = Array.isArray(advisory.modes) ? advisory.modes : [];
+    const baselineMode = advisory.baselineMode || (modes[0] && modes[0].modeName) || "Mobile";
+    const baselineValue = Number(advisory.baselineValue);
+    if (!Number.isFinite(baselineValue) || modes.length < 2) continue;
+    const display = [];
+    for (let i = 1; i < modes.length; i += 1) {
+      const modeName = modes[i] && modes[i].modeName;
+      if (modeName) display.push(`${modeName} ${baselineValue}`);
+    }
+    if (display.length) templateRows.push(`${_responsiveSpacingTokenKey(advisory.name)}: ${display.join(", ")}`);
+  }
+
+  const suggestedSummary = suggestedValues.length
+    ? `Suggestion: grow layout spacing only by +16px per breakpoint (${suggestedValues.map(item => item.token).join(", ")}), and keep component/inset/stack/touch spacing unchanged unless real screens need more density changes.`
+    : "No alias-backed automatic suggestion is ready yet. Review the repeated responsive spacing values and provide exact Tablet/Desktop values if they should differ.";
+  const rawValueSummary = aliasRepairSummary.updateCount
+    ? `Also, do not miss the spacing alias cleanup: ${aliasRepairSummary.tokenCount} semantic spacing token${aliasRepairSummary.tokenCount === 1 ? "" : "s"} still have ${aliasRepairSummary.updateCount} raw mode value${aliasRepairSummary.updateCount === 1 ? "" : "s"} that should be converted to primitive aliases through the semantic spacing alias repair option before treating spacing as complete${aliasRepairSummary.layoutTokens.length ? `, including layout token${aliasRepairSummary.layoutTokens.length === 1 ? "" : "s"} ${aliasRepairSummary.layoutTokens.join(", ")}` : ""}.`
+    : "No raw semantic spacing alias repairs are currently blocking this responsive-value review.";
+  const applySummary = operations.length
+    ? `If the designer agrees, run plan_ds_figma_operations with the suggested update_variable operations, show the exact plan, then apply only that approved plan through apply_ds_figma_operations. Sync/reinspect afterward and refresh or update config so future config-backed checks expect the new responsive values.`
+    : "The suggested values need matching primitive spacing variables before Figlets should write them as aliases. Do not write raw semantic spacing values; create/choose primitives or ask the designer for alias-backed values first.";
+
+  return {
+    advisoryCount: all.length,
+    aliasRepairSummary,
+    suggestedValues,
+    operations,
+    missingPrimitiveValues,
+    editableTemplate: templateRows.join("\n"),
+    designerSummary: `${rawValueSummary} ${suggestedSummary} ${applySummary}`,
+    categories: {
+      layout: layout.length,
+      other: other.length,
+    },
+    collection: spacingCollectionName,
+  };
+}
+
 function _buildDesignerPresentation(context, total) {
   const missingVariables = context.missingVariables || [];
   const missingStyles = context.missingStyles || [];
   const spacingAliasRepairs = context.spacingAliasRepairs || [];
   const spacingAliasConfigDrift = context.spacingAliasConfigDrift || [];
   const spacingResponsiveModeAdvisories = context.spacingResponsiveModeAdvisories || [];
+  const responsiveSpacingReview = context.responsiveSpacingReview || null;
   const notes = context.missingCapabilityNotes || [];
   const foundationRepairs = context.foundationRepairs || [];
   const lines = [];
@@ -1337,7 +1483,7 @@ function _buildDesignerPresentation(context, total) {
       });
     }
     if (spacingResponsiveModeAdvisories.length) {
-      sections.push(_spacingResponsiveModeAdvisorySection(spacingResponsiveModeAdvisories));
+      sections.push(_spacingResponsiveModeAdvisorySection(spacingResponsiveModeAdvisories, responsiveSpacingReview));
     }
     if (spacingAliasConfigDrift.length) {
       const driftLines = [];
@@ -1359,7 +1505,7 @@ function _buildDesignerPresentation(context, total) {
     lines.push("I do not see missing non-color config-backed tokens in the inspected categories.");
     if (spacingResponsiveModeAdvisories.length) {
       lines.push("Semantic spacing aliases are healthy, but repeated responsive mode values still need responsive setup validation before spacing is complete.");
-      sections.push(_spacingResponsiveModeAdvisorySection(spacingResponsiveModeAdvisories));
+      sections.push(_spacingResponsiveModeAdvisorySection(spacingResponsiveModeAdvisories, responsiveSpacingReview));
     }
   }
 
@@ -1398,6 +1544,9 @@ function _buildDesignerPresentation(context, total) {
       productGaps: notes.filter(note => note.productGap).length,
       spacingAliasRepairs: spacingAliasRepairs.length,
       spacingResponsiveModeAdvisories: spacingResponsiveModeAdvisories.length,
+      responsiveSpacingSuggestionOperations: responsiveSpacingReview && responsiveSpacingReview.operations
+        ? responsiveSpacingReview.operations.length
+        : 0,
       spacingAliasRepairSourceBreakdown: _spacingRepairBreakdown(spacingAliasRepairs),
     },
     proposedChanges: spacingAliasRepairs.flatMap(repair => (repair.updates || []).map(update => ({
@@ -1414,7 +1563,7 @@ function _buildDesignerPresentation(context, total) {
   };
 }
 
-function _spacingResponsiveModeAdvisorySection(advisories) {
+function _spacingResponsiveModeAdvisorySection(advisories, review) {
   const rows = [];
   for (const advisory of advisories || []) {
     const duplicatedModes = (advisory.duplicatedModes || []).map(mode => mode.modeName).join("/");
@@ -1423,11 +1572,15 @@ function _spacingResponsiveModeAdvisorySection(advisories) {
       + (advisory.baselineMode || "Mobile") + " value " + advisory.baselineValue
     );
   }
+  const suggestion = review && review.designerSummary
+    ? " " + review.designerSummary
+    : "";
   return {
     title: "Responsive spacing setup validation needed",
     message: "These semantic spacing aliases resolve correctly, but repeated values across responsive modes are unvalidated responsive setup decisions, not proof that the modes are acceptable. If Tablet/Desktop modes were just created, ask the designer to validate or adjust the responsive spacing scale before calling spacing complete. "
       + rows.slice(0, 5).join("; ")
-      + (rows.length > 5 ? "; and more." : "."),
+      + (rows.length > 5 ? "; and more." : ".")
+      + suggestion,
   };
 }
 

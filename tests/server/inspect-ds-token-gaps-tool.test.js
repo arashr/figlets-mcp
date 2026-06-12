@@ -498,6 +498,101 @@ module.exports = (() => {
       duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("not apply-ready repairs"),
       "agent instruction should keep responsive advisories out of repair flows"
     );
+    const responsiveReview = duplicatedResponsiveSpacing.repairPlan.reviewOptions.find(
+      option => option.id === "responsive-spacing-values"
+    );
+    assert.ok(responsiveReview, "responsive spacing advisories should create a first-menu review option");
+    assert.strictEqual(responsiveReview.tool, "plan_ds_figma_operations");
+    assert.ok(
+      responsiveReview.designerSummary.includes("No raw semantic spacing alias repairs"),
+      "responsive review should explicitly say when raw spacing cleanup is not also present"
+    );
+  }
+
+  {
+    const mixedResponsiveAndRawSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
+      {
+        collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+        spacing: {
+          semantic: {
+            "layout/xs": [48, 48, 48],
+            "layout/lg": [48, 64, 96],
+          },
+        },
+      },
+      {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["p12", "p16", "p20", "p24"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-xs", "layout-lg"],
+            modes: [
+              { modeId: "mobile", name: "Mobile" },
+              { modeId: "tablet", name: "Tablet" },
+              { modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+          { id: "p20", name: "space/20", resolvedType: "FLOAT", valuesByMode: { default: 80 } },
+          { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
+          {
+            id: "layout-xs",
+            name: "space/layout/xs",
+            resolvedType: "FLOAT",
+            valuesByMode: {
+              mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+              tablet: { type: "VARIABLE_ALIAS", id: "p12" },
+              desktop: { type: "VARIABLE_ALIAS", id: "p12" },
+            },
+          },
+          {
+            id: "layout-lg",
+            name: "space/layout/lg",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 48, tablet: 64, desktop: 96 },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      },
+      {
+        configPath: "/tmp/design-system.config.js",
+        categories: ["spacing-semantics"],
+      }
+    );
+    const responsiveReview = mixedResponsiveAndRawSpacing.repairPlan.reviewOptions.find(
+      option => option.id === "responsive-spacing-values"
+    );
+    assert.ok(responsiveReview, "mixed responsive/raw spacing review should still offer responsive review");
+    assert.strictEqual(responsiveReview.aliasRepairSummary.tokenCount, 1);
+    assert.strictEqual(responsiveReview.aliasRepairSummary.updateCount, 3);
+    assert.ok(
+      responsiveReview.designerSummary.includes("raw mode values") &&
+      responsiveReview.designerSummary.includes("space/layout/lg"),
+      "responsive review must not hide raw semantic spacing values"
+    );
+    assert.ok(
+      mixedResponsiveAndRawSpacing.repairPlan.reviewOptions.some(option => option.id === "semantic-spacing-aliases"),
+      "raw spacing values should remain visible as a separate alias repair option"
+    );
+    assert.ok(
+      responsiveReview.previewInput.operations.some(operation =>
+        operation.kind === "update_variable" &&
+        operation.name === "space/layout/xs" &&
+        operation.values.Tablet.alias === "space/16" &&
+        operation.values.Desktop.alias === "space/20"
+      ),
+      "responsive review should provide a guarded alias-backed suggested operation when primitives exist"
+    );
   }
 
   {

@@ -1,8 +1,7 @@
-const http = require("http");
 const fs = require("fs");
 const { getActiveFileConfigPath } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
-const { getReceiverUrl } = require("../utils/receiver-url.js");
+const { requestBridgePost } = require("../bridges/bridge-request.js");
 
 const buildShowcaseTool = {
   name: "build_ds_showcase",
@@ -28,7 +27,6 @@ const buildShowcaseTool = {
 };
 
 function handleBuildShowcase(args = {}) {
-  const receiverUrl = getReceiverUrl();
   let dsPayload = null;
   const configStatus = ensureActiveDsConfig({ reason: "build-showcase", refreshGenerated: true });
   try {
@@ -51,89 +49,59 @@ function handleBuildShowcase(args = {}) {
     }
   } catch (_) {}
 
-  const payload = JSON.stringify({
+  const payload = {
     numericFallback: args.numericFallback || null,
     DS: dsPayload || undefined
-  });
+  };
 
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      `${receiverUrl}/request-showcase`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(payload)
-        }
-      },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk) => { body += chunk.toString(); });
-        res.on("end", () => {
-          if (res.statusCode === 200) {
-            let parsed;
-            try { parsed = JSON.parse(body); } catch { parsed = {}; }
-            const result = parsed.result || parsed;
-            if (result.error) {
-              resolve({
-                content: [{ type: "text", text: `Plugin error: ${result.error}` }],
-                isError: true
-              });
-              return;
-            }
-            resolve({
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  sections: result.sections || [],
-                  layout: result.layout || "horizontal",
-                  bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
-                  config: {
-                    path: configStatus.configPath || null,
-                    created: Boolean(configStatus.created),
-                    refreshed: Boolean(configStatus.refreshed),
-                    sourceMode: dsPayload ? "config-backed" : "inferred-from-figma",
-                    message: configStatus.message || null,
-                  },
-                  message: `Showcase built — ${(result.sections || []).length} section(s) rendered on page '00 · Tokens'.`,
-                }, null, 2)
-              }]
-            });
-          } else if (res.statusCode === 503) {
-            resolve({
-              content: [{ type: "text", text: "Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry." }],
-              isError: true
-            });
-          } else if (res.statusCode === 504) {
-            resolve({
-              content: [{ type: "text", text: "Error: Showcase build timed out. The Figma file may be too large or the plugin may have crashed." }],
-              isError: true
-            });
-          } else {
-            resolve({
-              content: [{ type: "text", text: `Error: Unexpected status ${res.statusCode}: ${body}` }],
-              isError: true
-            });
-          }
-        });
+  return requestBridgePost("/request-showcase", payload, { timeoutMs: 115000 }).then((response) => {
+    if (response.connectionError) {
+      throw new Error(response.connectionError);
+    }
+    if (response.statusCode === 200) {
+      const parsed = response.data || {};
+      const result = parsed.result || parsed;
+      if (result.error) {
+        return {
+          content: [{ type: "text", text: `Plugin error: ${result.error}` }],
+          isError: true
+        };
       }
-    );
-
-    req.on("error", (err) => {
-      if (err.code === "ECONNREFUSED") {
-        reject(new Error("Bridge receiver is not running. MCP server should start it automatically — try restarting the MCP server."));
-      } else {
-        reject(err);
-      }
-    });
-
-    req.setTimeout(115000, () => {
-      req.destroy();
-      reject(new Error("Request to bridge receiver timed out"));
-    });
-
-    req.write(payload);
-    req.end();
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            sections: result.sections || [],
+            layout: result.layout || "horizontal",
+            bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
+            config: {
+              path: configStatus.configPath || null,
+              created: Boolean(configStatus.created),
+              refreshed: Boolean(configStatus.refreshed),
+              sourceMode: dsPayload ? "config-backed" : "inferred-from-figma",
+              message: configStatus.message || null,
+            },
+            message: `Showcase built — ${(result.sections || []).length} section(s) rendered on page '00 · Tokens'.`,
+          }, null, 2)
+        }]
+      };
+    }
+    if (response.statusCode === 503) {
+      return {
+        content: [{ type: "text", text: "Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry." }],
+        isError: true
+      };
+    }
+    if (response.statusCode === 504) {
+      return {
+        content: [{ type: "text", text: "Error: Showcase build timed out. The Figma file may be too large or the plugin may have crashed." }],
+        isError: true
+      };
+    }
+    return {
+      content: [{ type: "text", text: `Error: Unexpected status ${response.statusCode}: ${response.raw}` }],
+      isError: true
+    };
   });
 }
 

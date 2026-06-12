@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-11 — BNN-33 implementation; remaining bridge-backed tools use shared request helper]
+
+**Status:** BNN-33 moved the remaining candidate direct receiver callers onto `requestBridgePost`.
+
+**Shipped behavior:** `apply_ds_setup`, `build_ds_showcase`, `generate_component_doc`, and `inspect_component` now use the shared bridge request helper instead of constructing local `http.request` calls directly. This gives them the same bridge-hook test path, configured receiver URL handling, timeout response shape, ECONNREFUSED self-heal behavior, and plugin-offline mapping used by `sync_figma_data` and newer write tools.
+
+**Boundary:** Existing designer-facing response shapes and approval boundaries stay unchanged. This is reliability plumbing only; no new mutation surface was added.
+
+**Tests:** Focused server tests for setup, showcase, component docs, and component inspection passed. Added coverage that `inspect_component` surfaces the shared bridge-hook failure mapping. Full `npm test` passed **102/102**.
+
+---
+
 ### [2026-06-11 — BNN-53 todo; duplicated responsive spacing modes are not validated]
 
 **Status:** Manual testing found a product gap after adding Tablet/Desktop modes to `4. Spacing`: Figlets can report spacing mode values as acceptable because Tablet/Desktop match Mobile, match config, and alias to primitives. That is not enough.

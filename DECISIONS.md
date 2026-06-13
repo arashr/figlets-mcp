@@ -18,6 +18,8 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Raw layout correction:** When a newly responsive layout token is raw in every mode and the config/snapshot would alias Tablet/Desktop to the same primitive as Mobile, Figlets should not present that as the best safe repair. Move that token into the responsive-spacing review suggestion instead, with differentiated alias-backed Tablet/Desktop values when matching primitives exist. Non-layout tokens such as touch targets can still stay in the semantic spacing alias repair path when same values are plausible.
 
+**Alias retargeting:** If a semantic spacing mode is already aliased but points at the wrong primitive, or if a raw value differs from config but the expected value has a matching primitive, Figlets should plan a direct primitive-alias retarget. Do not make designers first approve raw numeric drift writes and then approve a second alias cleanup.
+
 ---
 
 ## [2026-06-11] Semantic color naming needs grammar detection, not a binary surface/role choice

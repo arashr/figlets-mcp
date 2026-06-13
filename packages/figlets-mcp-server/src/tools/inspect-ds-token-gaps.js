@@ -772,7 +772,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
             gapType: "spacing-alias-config-drift",
             kind: "variable",
             driftModes: plannedDrift.modes,
-            reason: "Figma raw values differ from config for one or more modes. Resolve drift before Figlets can propose primitive aliases.",
+            reason: "Figma values differ from config for one or more modes, and Figlets could not resolve a safe primitive alias target for those expected values.",
           }));
           supportedCategoriesWithGaps.add(category);
         }
@@ -810,7 +810,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         collection: spacingCollection,
         gapType: "spacing-alias-config-drift",
         driftModes: drift.modes,
-        reason: "Figma raw values differ from config for one or more modes. Resolve drift before Figlets can propose primitive aliases.",
+        reason: "Figma values differ from config for one or more modes, and Figlets could not resolve a safe primitive alias target for those expected values.",
       });
       spacingGapNames.add(drift.name);
       supportedCategoriesWithGaps.add("spacing-semantics");

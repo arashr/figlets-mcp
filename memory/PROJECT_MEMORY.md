@@ -16,7 +16,9 @@ Active context for the project so future sessions can recover quickly without re
 
 **Raw layout correction:** Duplicate raw `space/layout/*` repairs are no longer offered as same-value `update_ds_tokens` semantic alias repairs when responsive modes exist. They move into the responsive spacing suggestion path with differentiated alias-backed values when primitives exist. Non-layout tokens such as `space/touch/*` can remain in the normal alias repair path when same values are plausible.
 
-**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js` and `tests/server/inspect-ds-token-gaps-tool.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, designer-facing advisory language, responsive review options, the mixed raw-plus-responsive review case, and duplicate raw layout repairs being excluded from same-value alias apply.
+**Alias retargeting:** Wrong existing aliases and raw drift values with matching expected primitives now become exact semantic spacing alias repairs. This prevents the bad two-step flow where Figlets writes the correct raw values first, then asks for a second approval to alias them.
+
+**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js`, `tests/server/inspect-ds-token-gaps-tool.test.js`, and `tests/server/designer-interface-contract.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, designer-facing advisory language, responsive review options, the mixed raw-plus-responsive review case, duplicate raw layout repairs being excluded from same-value alias apply, and wrong-alias/drift retargets becoming direct primitive-alias repairs.
 
 ---
 

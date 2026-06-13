@@ -727,20 +727,74 @@ module.exports = (() => {
       configPath: "/tmp/design-system.config.js",
       categories: ["spacing-semantics"],
     });
-    assert.ok(
-      configDrift.tokenGaps.some(gap => gap.gapType === "spacing-alias-config-drift" && gap.name === "space/component/md"),
-      "config drift should surface as a separate gap type"
-    );
     const driftRepair = configDrift.tokenGaps.find(gap => gap.gapType === "spacing-alias-repair" && gap.name === "space/component/md");
-    if (driftRepair) {
-      assert.ok(
-        !driftRepair.updates.some(update => update.modeName === "Tablet"),
-        "drifted modes must not be included in alias repair proposals"
-      );
-    }
+    assert.ok(driftRepair, "config drift with matching primitives should surface as exact alias repair");
     assert.ok(
-      configDrift.repairPlan.designerPresentation.sections.some(section => section.title === "Semantic spacing config drift"),
-      "designer presentation should call out config drift explicitly"
+      driftRepair.updates.some(update => update.modeName === "Tablet" && update.toAliasName === "space/16"),
+      "drifted modes should be repaired directly to primitive aliases"
+    );
+    assert.ok(
+      !configDrift.tokenGaps.some(gap => gap.gapType === "spacing-alias-config-drift" && gap.name === "space/component/md"),
+      "repairable drift should not be left as a separate raw-value drift"
+    );
+    assert.ok(
+      configDrift.repairPlan.designerPresentation.proposedChanges.some(change =>
+        change.token === "space/component/md" && change.mode === "Tablet" && change.toAlias === "space/16"
+      ),
+      "designer presentation should show the alias target for drift repair"
+    );
+  }
+
+  {
+    const wrongAlias = inspectDsTokenGapsFromConfigAndFigmaData({
+      collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+      spacing: { semantic: { "layout/lg": [48, 64, 96] } },
+    }, {
+      collections: [
+        {
+          id: "primitives",
+          name: "1. Primitives",
+          variableIds: ["p12", "p16", "p24"],
+          modes: [{ modeId: "default", name: "Default" }],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          variableIds: ["layout-lg"],
+          modes: [
+            { modeId: "mobile", name: "Mobile" },
+            { modeId: "tablet", name: "Tablet" },
+            { modeId: "desktop", name: "Desktop" },
+          ],
+        },
+      ],
+      variables: [
+        { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+        { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+        { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
+        {
+          id: "layout-lg",
+          name: "space/layout/lg",
+          resolvedType: "FLOAT",
+          valuesByMode: {
+            mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+            tablet: { type: "VARIABLE_ALIAS", id: "p12" },
+            desktop: { type: "VARIABLE_ALIAS", id: "p12" },
+          },
+        },
+      ],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["spacing-semantics"],
+    });
+    const wrongAliasRepair = wrongAlias.tokenGaps.find(gap => gap.gapType === "spacing-alias-repair" && gap.name === "space/layout/lg");
+    assert.ok(wrongAliasRepair, "wrong existing aliases should be retargetable");
+    assert.deepStrictEqual(
+      wrongAliasRepair.updates.map(update => [update.modeName, update.toAliasName]),
+      [["Tablet", "space/16"], ["Desktop", "space/24"]],
+      "already aliased responsive modes should retarget to the expected primitive aliases"
     );
   }
 

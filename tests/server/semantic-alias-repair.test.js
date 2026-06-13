@@ -448,11 +448,12 @@ module.exports = (() => {
     wrongAliasSnapshot,
     new Map(wrongAliasSnapshot.variables.map(item => [item.name, item]))
   );
-  assert.strictEqual(
-    wrongAliasPlan.repairs.length,
-    0,
-    "semantic spacing alias repair should not retarget existing aliases; this flow only converts raw numeric values"
-  );
+  const wrongAliasRepair = wrongAliasPlan.repairs.find(item => item.name === "space/layout/xs");
+  assert.ok(wrongAliasRepair, "semantic spacing alias repair should retarget wrong primitive aliases");
+  assert.strictEqual(wrongAliasRepair.updates.length, 1);
+  assert.strictEqual(wrongAliasRepair.updates[0].modeName, "Mobile");
+  assert.strictEqual(wrongAliasRepair.updates[0].toAliasName, "space/4");
+  assert.strictEqual(wrongAliasRepair.updates[0].currentResolved, 64);
 
   const driftSnapshot = Object.assign({}, snapshot, {
     variables: snapshot.variables.map(item => {
@@ -467,9 +468,14 @@ module.exports = (() => {
     driftSnapshot,
     new Map(driftSnapshot.variables.map(item => [item.name, item]))
   );
-  assert.ok(driftPlan.configDrift.some(item => item.name === "space/layout/lg"));
+  assert.ok(
+    !driftPlan.configDrift.some(item => item.name === "space/layout/lg"),
+    "raw drift with a matching primitive should become an exact alias repair"
+  );
   const driftRepair = driftPlan.repairs.find(item => item.name === "space/layout/lg");
-  if (driftRepair) {
-    assert.ok(!driftRepair.updates.some(update => update.modeName === "Tablet"));
-  }
+  assert.ok(driftRepair, "drifted raw spacing should be repairable when the expected primitive exists");
+  assert.ok(
+    driftRepair.updates.some(update => update.modeName === "Tablet" && update.toAliasName === "space/16"),
+    "drifted Tablet value should be repaired directly to the expected primitive alias"
+  );
 })();

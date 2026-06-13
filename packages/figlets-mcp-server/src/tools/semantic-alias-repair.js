@@ -509,18 +509,17 @@ function planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, options = {
         continue;
       }
 
-      if (configValues && currentRaw !== null && !floatsEqual(currentRaw, configExpected)) {
-        driftModes.push({
-          modeId: mode.modeId,
-          modeName: mode.modeName,
-          configExpected,
-          currentValue: currentRaw,
-          reason: "Figma raw value does not match config for this mode; resolve drift before aliasing to a primitive.",
-        });
-        continue;
-      }
-
       if (!aliasTarget) {
+        if (configValues && currentRaw !== null && !floatsEqual(currentRaw, configExpected)) {
+          driftModes.push({
+            modeId: mode.modeId,
+            modeName: mode.modeName,
+            configExpected,
+            currentValue: currentRaw,
+            reason: "Figma raw value does not match config for this mode, and no primitive alias target exists for the expected value.",
+          });
+          continue;
+        }
         missingModes.push({
           modeId: mode.modeId,
           modeName: mode.modeName,
@@ -531,11 +530,20 @@ function planSpacingSemanticAliasRepairs(ds, figmaData, variableMap, options = {
         continue;
       }
 
-      if (currentRaw === null && isAliasVariableValue(currentValue)) {
+      if (isAliasVariableValue(currentValue) && currentValue.id !== aliasTarget.id) {
+        updates.push({
+          modeId: mode.modeId,
+          modeName: mode.modeName,
+          from: currentValue,
+          currentResolved: aliasResolved,
+          configExpected: intended,
+          toAliasName: aliasTarget.name,
+          toAliasId: aliasTarget.id,
+        });
         continue;
       }
 
-      if (currentRaw !== null && floatsEqual(currentRaw, intended)) {
+      if (currentRaw !== null) {
         updates.push({
           modeId: mode.modeId,
           modeName: mode.modeName,

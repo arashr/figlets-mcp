@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-13] Setup-created spacing semantics resolve primitive aliases by value
+
+**Decision:** New design-system setup must resolve spacing primitive aliases by numeric primitive value, not by token-name coincidence. A semantic value of `48px` should alias to the primitive whose value is `48`, such as `space/12` in an 8px step scale. It must not require a primitive literally named `space/48`, and it must not alias `1px` to `space/1` when `space/1` resolves to `4px`.
+
+**Why:** Manual v1 testing showed new design-system creation could leave semantic spacing variables raw even though matching primitives existed. The setup path used a weaker name-based resolver than the token-gap repair path, so creation and repair produced different alias quality.
+
+**Product consequence:** `apply_ds_setup` and `update_ds_tokens` should preserve the primitive-to-semantic alias model wherever the approved primitive set contains an exact numeric match. When no exact primitive exists, raw fallback is allowed and should be surfaced by health/token audits as appropriate rather than disguised as a misleading alias.
+
+**Implementation:** The bridge setup path now builds a primitive spacing alias resolver from actual primitive variable values and uses it for semantic spacing, radius, and border variables. Radius/border token completion also opts into value-based primitive alias resolution. Unsafe name fallback for spacing values is removed.
+
+---
+
 ## [2026-06-11] Healthy spacing aliases do not validate responsive mode decisions
 
 **Decision:** Figlets should distinguish semantic spacing alias health from responsive spacing decision validation. If Mobile, Tablet, Desktop, or other configured spacing modes resolve to repeated values, the token can be alias-healthy while still needing responsive validation. If Figlets just created the missing modes, repeated values are setup validation work; if the modes already existed, repeated values may be an intentional designer choice but still should not be called proven responsive behavior unless config allows it.

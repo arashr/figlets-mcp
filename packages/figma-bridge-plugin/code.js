@@ -5237,6 +5237,25 @@ async function _applyDsSetup(DS) {
     return map;
   }
 
+  async function buildPrimitiveSpacingAliasResolver(collectionId, modeId) {
+    var allVars = await figma.variables.getLocalVariablesAsync();
+    var byValue = {};
+    for (var psi = 0; psi < allVars.length; psi++) {
+      var variable = allVars[psi];
+      if (!variable || variable.variableCollectionId !== collectionId) continue;
+      if (!/^space\/[\d]+(?:[-_][\d]+)*$/.test(String(variable.name || ''))) continue;
+      var raw = variable.valuesByMode && modeId ? variable.valuesByMode[modeId] : null;
+      if (raw && typeof raw === 'object' && raw.type === 'VARIABLE_ALIAS') continue;
+      var num = Number(raw);
+      if (isFinite(num) && !byValue[num]) byValue[num] = variable.id;
+    }
+    return function(step) {
+      var num = Number(step);
+      if (isFinite(num) && byValue[num]) return { type: 'VARIABLE_ALIAS', id: byValue[num] };
+      return null;
+    };
+  }
+
   var setupVariableCache = null;
 
   async function buildSetupVariableCache() {
@@ -5886,13 +5905,7 @@ async function _applyDsSetup(DS) {
     // Merge mode: skip vars that already exist.
     var spaceModeMap = buildModeMap(spacingColl, modes3);
 
-    var primVarMapForSpacing = await buildVarMap(primColl.id);
-
-    function spaceAlias(step) {
-      var name = 'space/' + sanitize(step);
-      var id = primVarMapForSpacing[name];
-      return id ? { type: 'VARIABLE_ALIAS', id: id } : null;
-    }
+    var spaceAlias = await buildPrimitiveSpacingAliasResolver(primColl.id, primModeId);
 
     if (DS.spacing) {
       // Semantic spacing tokens (responsive)
@@ -5922,7 +5935,8 @@ async function _applyDsSetup(DS) {
         var radVar = await createSetupVariable(radVarName, spacingColl, 'FLOAT');
         _setVariableScopesForName(radVar, radVarName, 'FLOAT');
         for (var rmi = 0; rmi < modes3.length; rmi++) {
-          radVar.setValueForMode(spaceModeMap[modes3[rmi]], radius[radKey]);
+          var radAlias = spaceAlias(radius[radKey]);
+          radVar.setValueForMode(spaceModeMap[modes3[rmi]], radAlias || radius[radKey]);
         }
       }
 
@@ -5935,7 +5949,8 @@ async function _applyDsSetup(DS) {
         var bVar = await createSetupVariable(bVarName, spacingColl, 'FLOAT');
         _setVariableScopesForName(bVar, bVarName, 'FLOAT');
         for (var bmi = 0; bmi < modes3.length; bmi++) {
-          bVar.setValueForMode(spaceModeMap[modes3[bmi]], border[bKey]);
+          var borderAlias = spaceAlias(border[bKey]);
+          bVar.setValueForMode(spaceModeMap[modes3[bmi]], borderAlias || border[bKey]);
         }
       }
     }
@@ -6841,14 +6856,14 @@ function _tokenUpdateEntriesForCategory(DS, category) {
     var radiusKeys = Object.keys(radius);
     for (var ri = 0; ri < radiusKeys.length; ri++) {
       var rKey = radiusKeys[ri];
-      entries.push({ name: 'space/radius/' + rKey, type: 'FLOAT', value: radius[rKey] });
+      entries.push({ name: 'space/radius/' + rKey, type: 'FLOAT', value: radius[rKey], resolveSpaceAlias: true });
     }
   } else if (category === 'border-width') {
     var border = spacing.border || {};
     var borderKeys = Object.keys(border);
     for (var bi = 0; bi < borderKeys.length; bi++) {
       var bKey = borderKeys[bi];
-      entries.push({ name: 'space/border/' + bKey, type: 'FLOAT', value: border[bKey] });
+      entries.push({ name: 'space/border/' + bKey, type: 'FLOAT', value: border[bKey], resolveSpaceAlias: true });
     }
   } else if (category === 'spacing-semantics') {
     var semantic = spacing.semantic || {};
@@ -7292,8 +7307,6 @@ async function _updateDsTokens(payload) {
     if (isFinite(num) && primByFloat[num]) {
       return { type: 'VARIABLE_ALIAS', id: primByFloat[num].id };
     }
-    var aliasName = 'space/' + _sanitizeSpaceStep(rawVal);
-    if (primByName[aliasName]) return { type: 'VARIABLE_ALIAS', id: primByName[aliasName] };
     return isFinite(num) ? num : rawVal;
   }
 

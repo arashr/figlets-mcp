@@ -192,8 +192,8 @@ module.exports = (async () => {
     naming: { textStyle: "type/{role}/{size}", typePrefix: "type", fontFamily: "font/{variant}" },
     spacing: {
       semantic: { "component/md": [12, 16, 16] },
-      radius: {},
-      border: {},
+      radius: { md: 12 },
+      border: { thick: 16, default: 1 },
     },
     typography: {
       scale: {
@@ -205,13 +205,15 @@ module.exports = (async () => {
 
   const result = await context.module.exports._updateDsTokens({
     DS,
-    categories: ["spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"],
+    categories: ["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"],
     createMissing: true,
     dryRun: false,
   });
 
   assert.ok(!result.error, result.error);
-  assertJsonEqual(result.categories, ["spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
+  assertJsonEqual(result.categories, ["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
+  assert.strictEqual(result.report.radius.createdVariables.length, 1);
+  assert.strictEqual(result.report["border-width"].createdVariables.length, 2);
   assert.strictEqual(result.report["spacing-semantics"].createdVariables.length, 1);
   assert.strictEqual(result.report["typography-variables"].createdVariables.length, 9);
   assert.strictEqual(result.report["typography-variables"].updatedVariables.length, 1);
@@ -248,6 +250,23 @@ module.exports = (async () => {
   assertJsonEqual(semanticSpacing.valuesByMode.tablet, { type: "VARIABLE_ALIAS", id: "space-16" });
   assertJsonEqual(semanticSpacing.valuesByMode.desktop, { type: "VARIABLE_ALIAS", id: "space-16" });
   assertJsonEqual(semanticSpacing.scopes, ["GAP"]);
+
+  const radius = byName.get("space/radius/md");
+  assert.ok(radius, "radius variable should be created");
+  assertJsonEqual(radius.valuesByMode.mobile, { type: "VARIABLE_ALIAS", id: "space-12" });
+  assertJsonEqual(radius.valuesByMode.tablet, { type: "VARIABLE_ALIAS", id: "space-12" });
+  assertJsonEqual(radius.valuesByMode.desktop, { type: "VARIABLE_ALIAS", id: "space-12" });
+  assertJsonEqual(radius.scopes, ["CORNER_RADIUS"]);
+
+  const thickBorder = byName.get("space/border/thick");
+  assert.ok(thickBorder, "border variable with matching primitive should be created");
+  assertJsonEqual(thickBorder.valuesByMode.mobile, { type: "VARIABLE_ALIAS", id: "space-16" });
+  assertJsonEqual(thickBorder.scopes, ["STROKE_FLOAT"]);
+
+  const defaultBorder = byName.get("space/border/default");
+  assert.ok(defaultBorder, "border variable without matching primitive should still be created");
+  assert.strictEqual(defaultBorder.valuesByMode.mobile, 1);
+  assertJsonEqual(defaultBorder.scopes, ["STROKE_FLOAT"]);
 
   const existingSize = byName.get("type/body/md/size");
   assert.strictEqual(existingSize.id, "existing-size", "existing typography variable ID should be preserved");

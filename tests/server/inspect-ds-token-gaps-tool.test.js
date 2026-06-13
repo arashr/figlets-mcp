@@ -516,7 +516,8 @@ module.exports = (() => {
         spacing: {
           semantic: {
             "layout/xs": [48, 48, 48],
-            "layout/lg": [48, 64, 96],
+            "layout/lg": [48, 48, 48],
+            "touch/min": [44, 44, 44],
           },
         },
       },
@@ -525,13 +526,13 @@ module.exports = (() => {
           {
             id: "primitives",
             name: "1. Primitives",
-            variableIds: ["p12", "p16", "p20", "p24"],
+            variableIds: ["p11", "p12", "p16", "p20", "p24"],
             modes: [{ modeId: "default", name: "Default" }],
           },
           {
             id: "spacing",
             name: "4. Spacing",
-            variableIds: ["layout-xs", "layout-lg"],
+            variableIds: ["layout-xs", "layout-lg", "touch-min"],
             modes: [
               { modeId: "mobile", name: "Mobile" },
               { modeId: "tablet", name: "Tablet" },
@@ -540,6 +541,7 @@ module.exports = (() => {
           },
         ],
         variables: [
+          { id: "p11", name: "space/11", resolvedType: "FLOAT", valuesByMode: { default: 44 } },
           { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
           { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
           { id: "p20", name: "space/20", resolvedType: "FLOAT", valuesByMode: { default: 80 } },
@@ -558,7 +560,13 @@ module.exports = (() => {
             id: "layout-lg",
             name: "space/layout/lg",
             resolvedType: "FLOAT",
-            valuesByMode: { mobile: 48, tablet: 64, desktop: 96 },
+            valuesByMode: { mobile: 48, tablet: 48, desktop: 48 },
+          },
+          {
+            id: "touch-min",
+            name: "space/touch/min",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 44, tablet: 44, desktop: 44 },
           },
         ],
         textStyles: [],
@@ -573,16 +581,26 @@ module.exports = (() => {
       option => option.id === "responsive-spacing-values"
     );
     assert.ok(responsiveReview, "mixed responsive/raw spacing review should still offer responsive review");
-    assert.strictEqual(responsiveReview.aliasRepairSummary.tokenCount, 1);
-    assert.strictEqual(responsiveReview.aliasRepairSummary.updateCount, 3);
+    assert.strictEqual(responsiveReview.aliasRepairSummary.tokenCount, 2);
+    assert.strictEqual(responsiveReview.aliasRepairSummary.updateCount, 6);
+    assert.deepStrictEqual(responsiveReview.excludedAliasRepairTokens, ["space/layout/lg"]);
     assert.ok(
       responsiveReview.designerSummary.includes("raw mode values") &&
-      responsiveReview.designerSummary.includes("space/layout/lg"),
+      responsiveReview.designerSummary.includes("space/layout/lg") &&
+      responsiveReview.designerSummary.includes("space/touch/min"),
       "responsive review must not hide raw semantic spacing values"
     );
+    const semanticAliasOption = mixedResponsiveAndRawSpacing.repairPlan.reviewOptions.find(
+      option => option.id === "semantic-spacing-aliases"
+    );
     assert.ok(
-      mixedResponsiveAndRawSpacing.repairPlan.reviewOptions.some(option => option.id === "semantic-spacing-aliases"),
-      "raw spacing values should remain visible as a separate alias repair option"
+      semanticAliasOption,
+      "remaining non-layout raw spacing values should remain visible as a separate alias repair option"
+    );
+    assert.deepStrictEqual(
+      semanticAliasOption.previewInput.spacing_semantic_repairs.map(repair => repair.name),
+      ["space/touch/min"],
+      "duplicate raw layout repairs should move out of same-value semantic alias apply"
     );
     assert.ok(
       responsiveReview.previewInput.operations.some(operation =>
@@ -592,6 +610,16 @@ module.exports = (() => {
         operation.values.Desktop.alias === "space/20"
       ),
       "responsive review should provide a guarded alias-backed suggested operation when primitives exist"
+    );
+    assert.ok(
+      responsiveReview.previewInput.operations.some(operation =>
+        operation.kind === "update_variable" &&
+        operation.name === "space/layout/lg" &&
+        operation.values.Mobile.alias === "space/12" &&
+        operation.values.Tablet.alias === "space/16" &&
+        operation.values.Desktop.alias === "space/20"
+      ),
+      "duplicate raw layout repairs should get differentiated responsive alias suggestions on the first review"
     );
   }
 

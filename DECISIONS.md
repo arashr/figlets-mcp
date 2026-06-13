@@ -16,6 +16,8 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 **Review flow:** Responsive spacing validation should appear as a first-menu review option when advisories exist. That review must also mention any semantic spacing alias repairs still pending, so agents do not discuss duplicated mode values as if raw spacing values do not exist. Figlets may suggest an alias-backed layout-only tightening plan plus an editable template; exact writes still go through `plan_ds_figma_operations` / `apply_ds_figma_operations` after approval.
 
+**Raw layout correction:** When a newly responsive layout token is raw in every mode and the config/snapshot would alias Tablet/Desktop to the same primitive as Mobile, Figlets should not present that as the best safe repair. Move that token into the responsive-spacing review suggestion instead, with differentiated alias-backed Tablet/Desktop values when matching primitives exist. Non-layout tokens such as touch targets can still stay in the semantic spacing alias repair path when same values are plausible.
+
 ---
 
 ## [2026-06-11] Semantic color naming needs grammar detection, not a binary surface/role choice

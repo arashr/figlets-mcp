@@ -14,7 +14,9 @@ Active context for the project so future sessions can recover quickly without re
 
 **Review flow:** `inspect_ds_token_gaps.repairPlan.reviewOptions` now includes a responsive spacing value review option when advisories exist. It can suggest a layout-only +16px-per-breakpoint tightening plan and editable value template, but it must also surface any raw semantic spacing alias repairs still pending so the designer does not miss raw spacing values while reviewing responsive spacing.
 
-**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js` and `tests/server/inspect-ds-token-gaps-tool.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, designer-facing advisory language, responsive review options, and the mixed raw-plus-responsive review case.
+**Raw layout correction:** Duplicate raw `space/layout/*` repairs are no longer offered as same-value `update_ds_tokens` semantic alias repairs when responsive modes exist. They move into the responsive spacing suggestion path with differentiated alias-backed values when primitives exist. Non-layout tokens such as `space/touch/*` can remain in the normal alias repair path when same values are plausible.
+
+**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js` and `tests/server/inspect-ds-token-gaps-tool.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, designer-facing advisory language, responsive review options, the mixed raw-plus-responsive review case, and duplicate raw layout repairs being excluded from same-value alias apply.
 
 ---
 

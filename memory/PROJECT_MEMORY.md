@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-13 — BNN-57 implementation; new setup spacing semantics alias by primitive value]
+
+**Status:** BNN-57 was opened from manual v1 testing after new design-system creation could leave semantic spacing tokens with raw values.
+
+**Finding:** `apply_ds_setup` used a name-only spacing primitive lookup. In step-scale systems, values such as `48px` should alias to `space/12` when that primitive's value is `48`; the old setup path looked for `space/48` and fell back to raw. The same name fallback could incorrectly alias values such as `1px` to `space/1` even when `space/1` means `4px`.
+
+**Shipped behavior:** The bridge setup path now builds a primitive spacing resolver from actual primitive values and writes semantic spacing, radius, and border variables as aliases only when a primitive with the same numeric value exists. Otherwise it falls back to the raw value. `update_ds_tokens` now uses the same value-only rule for radius and border-width token completion; semantic spacing already used value-first lookup and now avoids unsafe name fallback.
+
+**Tests:** Added `tests/bridge/apply-ds-setup-spacing-aliases.test.js` to execute `_applyDsSetup` in a fake new Figma file and assert setup-created `space/layout/lg`, `space/radius/md`, and `space/border/thick` alias to value-matched primitives, while `space/border/default` stays raw when no `1px` primitive exists. Extended `tests/bridge/update-tokens-runtime-flow.test.js` for radius/border token-completion aliases.
+
+---
+
 ### [2026-06-11 — BNN-54 implementation; duplicated responsive spacing values are advisories]
 
 **Status:** BNN-54 was opened from `G-026` after manual testing showed Figlets could call duplicated Mobile/Tablet/Desktop spacing values acceptable once aliases were healthy.

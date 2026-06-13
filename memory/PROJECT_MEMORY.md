@@ -4,6 +4,24 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-11 — BNN-54 implementation; duplicated responsive spacing values are advisories]
+
+**Status:** BNN-54 was opened from `G-026` after manual testing showed Figlets could call duplicated Mobile/Tablet/Desktop spacing values acceptable once aliases were healthy.
+
+**Shipped behavior:** `planSpacingSemanticAliasRepairs` now detects semantic spacing tokens whose responsive modes resolve to the same value as Mobile after aliases are otherwise healthy. `inspect_ds_token_gaps` surfaces those as `spacing-semantics-unvalidated-duplicated-mode-values` advisory notes, includes them in top findings and designer presentation, and keeps them out of `update_ds_tokens` apply payloads. The no-gap response now says there are responsive spacing advisories instead of reporting a fully clean token-gap planner.
+
+**Boundary:** This is read-only diagnosis only. It does not mark equal responsive values as wrong, create a write path, or change approval behavior. Config can explicitly suppress the advisory with `spacing.responsiveModeValidation.allowSameValueModes` for all tokens, token names, prefixes, or categories when same-value responsive modes are intentional. After Figlets creates missing spacing modes, duplicated Tablet/Desktop values should be framed as responsive setup validation work before spacing is called complete; pre-existing duplicates can be framed as designer validation items.
+
+**Review flow:** `inspect_ds_token_gaps.repairPlan.reviewOptions` now includes a responsive spacing value review option when advisories exist. It can suggest a layout-only +16px-per-breakpoint tightening plan and editable value template, but it must also surface any raw semantic spacing alias repairs still pending so the designer does not miss raw spacing values while reviewing responsive spacing.
+
+**Raw layout correction:** Duplicate raw `space/layout/*` repairs are no longer offered as same-value `update_ds_tokens` semantic alias repairs when responsive modes exist. They move into the responsive spacing suggestion path with differentiated alias-backed values when primitives exist. Non-layout tokens such as `space/touch/*` can remain in the normal alias repair path when same values are plausible.
+
+**Alias retargeting:** Wrong existing aliases and raw drift values with matching expected primitives now become exact semantic spacing alias repairs. This prevents the bad two-step flow where Figlets writes the correct raw values first, then asks for a second approval to alias them.
+
+**Tests:** Added focused coverage in `tests/server/semantic-alias-repair.test.js`, `tests/server/inspect-ds-token-gaps-tool.test.js`, and `tests/server/designer-interface-contract.test.js` for duplicated aliased modes, config allowance, no apply-ready repair, designer-facing advisory language, responsive review options, the mixed raw-plus-responsive review case, duplicate raw layout repairs being excluded from same-value alias apply, and wrong-alias/drift retargets becoming direct primitive-alias repairs.
+
+---
+
 ### [2026-06-11 — BNN-33 implementation; remaining bridge-backed tools use shared request helper]
 
 **Status:** BNN-33 moved the remaining candidate direct receiver callers onto `requestBridgePost`.
@@ -22,7 +40,7 @@ Active context for the project so future sessions can recover quickly without re
 
 **Finding:** For responsive semantic spacing, identical Mobile/Tablet/Desktop values should not be treated as automatically acceptable. Newly added modes often duplicate existing Mobile values as a foundation step; those values are unvalidated until the designer or config explicitly confirms same-value behavior for that token/category.
 
-**Todo:** Added future gap `G-026` in `docs/future-figlets-gap-register.md`. Future work should add responsive spacing mode validation/advisories and designer-facing language such as "unvalidated duplicated mode values" instead of "acceptable" when modes share values without an explicit allowance.
+**Follow-up:** This became BNN-54. The diagnostic slice is now implemented; future work can add richer designer workflows for resolving the advisory.
 
 ---
 

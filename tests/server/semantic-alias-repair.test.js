@@ -351,6 +351,70 @@ module.exports = (() => {
     "bootstrap file with only aliased semantics should not report missing primitives"
   );
 
+  const duplicatedResponsiveSnapshot = {
+    collections: [
+      {
+        id: "primitives",
+        name: "1. Primitives",
+        variableIds: ["p12"],
+        modes: [{ modeId: "default", name: "Default" }],
+      },
+      {
+        id: "spacing",
+        name: "4. Spacing",
+        variableIds: ["layout-lg"],
+        modes: [
+          { modeId: "mobile", name: "Mobile" },
+          { modeId: "tablet", name: "Tablet" },
+          { modeId: "desktop", name: "Desktop" },
+        ],
+      },
+    ],
+    variables: [
+      { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+      {
+        id: "layout-lg",
+        name: "space/layout/lg",
+        resolvedType: "FLOAT",
+        valuesByMode: {
+          mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+          tablet: { type: "VARIABLE_ALIAS", id: "p12" },
+          desktop: { type: "VARIABLE_ALIAS", id: "p12" },
+        },
+      },
+    ],
+  };
+  const duplicatedPlan = planSpacingSemanticAliasRepairs(
+    Object.assign({}, bootstrapDs, { spacing: { semantic: { "layout/lg": [48, 48, 48] } } }),
+    duplicatedResponsiveSnapshot,
+    new Map(duplicatedResponsiveSnapshot.variables.map(item => [item.name, item]))
+  );
+  assert.strictEqual(duplicatedPlan.repairs.length, 0);
+  assert.strictEqual(duplicatedPlan.unvalidatedDuplicatedResponsiveModeValues.length, 1);
+  assert.strictEqual(duplicatedPlan.unvalidatedDuplicatedResponsiveModeValues[0].name, "space/layout/lg");
+  assert.strictEqual(duplicatedPlan.unvalidatedDuplicatedResponsiveModeValues[0].allModesSame, true);
+  assert.deepStrictEqual(
+    duplicatedPlan.unvalidatedDuplicatedResponsiveModeValues[0].duplicatedModes.map(mode => mode.modeName),
+    ["Tablet", "Desktop"],
+    "duplicated responsive values should be reported as designer-validation advisories"
+  );
+
+  const explicitlyAllowedDuplicatedPlan = planSpacingSemanticAliasRepairs(
+    Object.assign({}, bootstrapDs, {
+      spacing: {
+        semantic: { "layout/lg": [48, 48, 48] },
+        responsiveModeValidation: { allowSameValueModes: ["space/layout/lg"] },
+      },
+    }),
+    duplicatedResponsiveSnapshot,
+    new Map(duplicatedResponsiveSnapshot.variables.map(item => [item.name, item]))
+  );
+  assert.strictEqual(
+    explicitlyAllowedDuplicatedPlan.unvalidatedDuplicatedResponsiveModeValues.length,
+    0,
+    "explicit config allowance should suppress same-value responsive mode advisories"
+  );
+
   const wrongAliasSnapshot = {
     collections: [
       {
@@ -384,11 +448,12 @@ module.exports = (() => {
     wrongAliasSnapshot,
     new Map(wrongAliasSnapshot.variables.map(item => [item.name, item]))
   );
-  assert.strictEqual(
-    wrongAliasPlan.repairs.length,
-    0,
-    "semantic spacing alias repair should not retarget existing aliases; this flow only converts raw numeric values"
-  );
+  const wrongAliasRepair = wrongAliasPlan.repairs.find(item => item.name === "space/layout/xs");
+  assert.ok(wrongAliasRepair, "semantic spacing alias repair should retarget wrong primitive aliases");
+  assert.strictEqual(wrongAliasRepair.updates.length, 1);
+  assert.strictEqual(wrongAliasRepair.updates[0].modeName, "Mobile");
+  assert.strictEqual(wrongAliasRepair.updates[0].toAliasName, "space/4");
+  assert.strictEqual(wrongAliasRepair.updates[0].currentResolved, 64);
 
   const driftSnapshot = Object.assign({}, snapshot, {
     variables: snapshot.variables.map(item => {
@@ -403,9 +468,14 @@ module.exports = (() => {
     driftSnapshot,
     new Map(driftSnapshot.variables.map(item => [item.name, item]))
   );
-  assert.ok(driftPlan.configDrift.some(item => item.name === "space/layout/lg"));
+  assert.ok(
+    !driftPlan.configDrift.some(item => item.name === "space/layout/lg"),
+    "raw drift with a matching primitive should become an exact alias repair"
+  );
   const driftRepair = driftPlan.repairs.find(item => item.name === "space/layout/lg");
-  if (driftRepair) {
-    assert.ok(!driftRepair.updates.some(update => update.modeName === "Tablet"));
-  }
+  assert.ok(driftRepair, "drifted raw spacing should be repairable when the expected primitive exists");
+  assert.ok(
+    driftRepair.updates.some(update => update.modeName === "Tablet" && update.toAliasName === "space/16"),
+    "drifted Tablet value should be repaired directly to the expected primitive alias"
+  );
 })();

@@ -408,6 +408,222 @@ module.exports = (() => {
   }
 
   {
+    const duplicatedResponsiveSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
+      {
+        collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+        spacing: {
+          semantic: {
+            "layout/lg": [48, 48, 48],
+          },
+        },
+      },
+      {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["p12"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-lg"],
+            modes: [
+              { modeId: "mobile", name: "Mobile" },
+              { modeId: "tablet", name: "Tablet" },
+              { modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          {
+            id: "layout-lg",
+            name: "space/layout/lg",
+            resolvedType: "FLOAT",
+            valuesByMode: {
+              mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+              tablet: { type: "VARIABLE_ALIAS", id: "p12" },
+              desktop: { type: "VARIABLE_ALIAS", id: "p12" },
+            },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      },
+      {
+        configPath: "/tmp/design-system.config.js",
+        categories: ["spacing-semantics"],
+      }
+    );
+    assert.strictEqual(
+      duplicatedResponsiveSpacing.summary.responsiveSpacingAdvisoryCount,
+      1,
+      "duplicated responsive spacing values should count as advisory findings"
+    );
+    assert.strictEqual(
+      duplicatedResponsiveSpacing.repairPlan.applyInput.categories.includes("spacing-semantics"),
+      false,
+      "same-value responsive advisories must not create an apply-ready semantic spacing repair"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.repairPlan.missingCapabilityNotes.some(note =>
+        note.kind === "spacing-semantics-unvalidated-duplicated-mode-values" &&
+        note.severity === "advisory" &&
+        note.productGap === false &&
+        note.repairReady === false &&
+        note.validationScope === "responsive-spacing-setup" &&
+        note.reason.includes("responsive spacing setup validation work")
+      ),
+      "duplicated responsive values should be surfaced as responsive setup validation, not a product gap"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.repairPlan.designerPresentation.sections.some(section =>
+        section.title === "Responsive spacing setup validation needed" &&
+        section.message.includes("unvalidated responsive setup decisions") &&
+        section.message.includes("Tablet/Desktop modes were just created") &&
+        section.message.includes("space/layout/lg")
+      ),
+      "designer presentation should avoid saying duplicated responsive values are acceptable"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.message.includes("responsive spacing advisory") &&
+      duplicatedResponsiveSpacing.message.includes("no token write is implied"),
+      "zero-gap response should still mention responsive spacing advisories"
+    );
+    assert.ok(
+      duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("responsive setup validation work") &&
+      duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("not token gaps") &&
+      duplicatedResponsiveSpacing.repairPlan.agentInstruction.includes("not apply-ready repairs"),
+      "agent instruction should keep responsive advisories out of repair flows"
+    );
+    const responsiveReview = duplicatedResponsiveSpacing.repairPlan.reviewOptions.find(
+      option => option.id === "responsive-spacing-values"
+    );
+    assert.ok(responsiveReview, "responsive spacing advisories should create a first-menu review option");
+    assert.strictEqual(responsiveReview.tool, "plan_ds_figma_operations");
+    assert.ok(
+      responsiveReview.designerSummary.includes("No raw semantic spacing alias repairs"),
+      "responsive review should explicitly say when raw spacing cleanup is not also present"
+    );
+  }
+
+  {
+    const mixedResponsiveAndRawSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
+      {
+        collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+        spacing: {
+          semantic: {
+            "layout/xs": [48, 48, 48],
+            "layout/lg": [48, 48, 48],
+            "touch/min": [44, 44, 44],
+          },
+        },
+      },
+      {
+        collections: [
+          {
+            id: "primitives",
+            name: "1. Primitives",
+            variableIds: ["p11", "p12", "p16", "p20", "p24"],
+            modes: [{ modeId: "default", name: "Default" }],
+          },
+          {
+            id: "spacing",
+            name: "4. Spacing",
+            variableIds: ["layout-xs", "layout-lg", "touch-min"],
+            modes: [
+              { modeId: "mobile", name: "Mobile" },
+              { modeId: "tablet", name: "Tablet" },
+              { modeId: "desktop", name: "Desktop" },
+            ],
+          },
+        ],
+        variables: [
+          { id: "p11", name: "space/11", resolvedType: "FLOAT", valuesByMode: { default: 44 } },
+          { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+          { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+          { id: "p20", name: "space/20", resolvedType: "FLOAT", valuesByMode: { default: 80 } },
+          { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
+          {
+            id: "layout-xs",
+            name: "space/layout/xs",
+            resolvedType: "FLOAT",
+            valuesByMode: {
+              mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+              tablet: { type: "VARIABLE_ALIAS", id: "p12" },
+              desktop: { type: "VARIABLE_ALIAS", id: "p12" },
+            },
+          },
+          {
+            id: "layout-lg",
+            name: "space/layout/lg",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 48, tablet: 48, desktop: 48 },
+          },
+          {
+            id: "touch-min",
+            name: "space/touch/min",
+            resolvedType: "FLOAT",
+            valuesByMode: { mobile: 44, tablet: 44, desktop: 44 },
+          },
+        ],
+        textStyles: [],
+        effectStyles: [],
+      },
+      {
+        configPath: "/tmp/design-system.config.js",
+        categories: ["spacing-semantics"],
+      }
+    );
+    const responsiveReview = mixedResponsiveAndRawSpacing.repairPlan.reviewOptions.find(
+      option => option.id === "responsive-spacing-values"
+    );
+    assert.ok(responsiveReview, "mixed responsive/raw spacing review should still offer responsive review");
+    assert.strictEqual(responsiveReview.aliasRepairSummary.tokenCount, 2);
+    assert.strictEqual(responsiveReview.aliasRepairSummary.updateCount, 6);
+    assert.deepStrictEqual(responsiveReview.excludedAliasRepairTokens, ["space/layout/lg"]);
+    assert.ok(
+      responsiveReview.designerSummary.includes("raw mode values") &&
+      responsiveReview.designerSummary.includes("space/layout/lg") &&
+      responsiveReview.designerSummary.includes("space/touch/min"),
+      "responsive review must not hide raw semantic spacing values"
+    );
+    const semanticAliasOption = mixedResponsiveAndRawSpacing.repairPlan.reviewOptions.find(
+      option => option.id === "semantic-spacing-aliases"
+    );
+    assert.ok(
+      semanticAliasOption,
+      "remaining non-layout raw spacing values should remain visible as a separate alias repair option"
+    );
+    assert.deepStrictEqual(
+      semanticAliasOption.previewInput.spacing_semantic_repairs.map(repair => repair.name),
+      ["space/touch/min"],
+      "duplicate raw layout repairs should move out of same-value semantic alias apply"
+    );
+    assert.ok(
+      responsiveReview.previewInput.operations.some(operation =>
+        operation.kind === "update_variable" &&
+        operation.name === "space/layout/xs" &&
+        operation.values.Tablet.alias === "space/16" &&
+        operation.values.Desktop.alias === "space/20"
+      ),
+      "responsive review should provide a guarded alias-backed suggested operation when primitives exist"
+    );
+    assert.ok(
+      responsiveReview.previewInput.operations.some(operation =>
+        operation.kind === "update_variable" &&
+        operation.name === "space/layout/lg" &&
+        operation.values.Mobile.alias === "space/12" &&
+        operation.values.Tablet.alias === "space/16" &&
+        operation.values.Desktop.alias === "space/20"
+      ),
+      "duplicate raw layout repairs should get differentiated responsive alias suggestions on the first review"
+    );
+  }
+
+  {
     const representativeSpacing = inspectDsTokenGapsFromConfigAndFigmaData(
       Object.assign({}, DS, {
         spacing: {
@@ -511,20 +727,74 @@ module.exports = (() => {
       configPath: "/tmp/design-system.config.js",
       categories: ["spacing-semantics"],
     });
-    assert.ok(
-      configDrift.tokenGaps.some(gap => gap.gapType === "spacing-alias-config-drift" && gap.name === "space/component/md"),
-      "config drift should surface as a separate gap type"
-    );
     const driftRepair = configDrift.tokenGaps.find(gap => gap.gapType === "spacing-alias-repair" && gap.name === "space/component/md");
-    if (driftRepair) {
-      assert.ok(
-        !driftRepair.updates.some(update => update.modeName === "Tablet"),
-        "drifted modes must not be included in alias repair proposals"
-      );
-    }
+    assert.ok(driftRepair, "config drift with matching primitives should surface as exact alias repair");
     assert.ok(
-      configDrift.repairPlan.designerPresentation.sections.some(section => section.title === "Semantic spacing config drift"),
-      "designer presentation should call out config drift explicitly"
+      driftRepair.updates.some(update => update.modeName === "Tablet" && update.toAliasName === "space/16"),
+      "drifted modes should be repaired directly to primitive aliases"
+    );
+    assert.ok(
+      !configDrift.tokenGaps.some(gap => gap.gapType === "spacing-alias-config-drift" && gap.name === "space/component/md"),
+      "repairable drift should not be left as a separate raw-value drift"
+    );
+    assert.ok(
+      configDrift.repairPlan.designerPresentation.proposedChanges.some(change =>
+        change.token === "space/component/md" && change.mode === "Tablet" && change.toAlias === "space/16"
+      ),
+      "designer presentation should show the alias target for drift repair"
+    );
+  }
+
+  {
+    const wrongAlias = inspectDsTokenGapsFromConfigAndFigmaData({
+      collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+      spacing: { semantic: { "layout/lg": [48, 64, 96] } },
+    }, {
+      collections: [
+        {
+          id: "primitives",
+          name: "1. Primitives",
+          variableIds: ["p12", "p16", "p24"],
+          modes: [{ modeId: "default", name: "Default" }],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          variableIds: ["layout-lg"],
+          modes: [
+            { modeId: "mobile", name: "Mobile" },
+            { modeId: "tablet", name: "Tablet" },
+            { modeId: "desktop", name: "Desktop" },
+          ],
+        },
+      ],
+      variables: [
+        { id: "p12", name: "space/12", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+        { id: "p16", name: "space/16", resolvedType: "FLOAT", valuesByMode: { default: 64 } },
+        { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
+        {
+          id: "layout-lg",
+          name: "space/layout/lg",
+          resolvedType: "FLOAT",
+          valuesByMode: {
+            mobile: { type: "VARIABLE_ALIAS", id: "p12" },
+            tablet: { type: "VARIABLE_ALIAS", id: "p12" },
+            desktop: { type: "VARIABLE_ALIAS", id: "p12" },
+          },
+        },
+      ],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["spacing-semantics"],
+    });
+    const wrongAliasRepair = wrongAlias.tokenGaps.find(gap => gap.gapType === "spacing-alias-repair" && gap.name === "space/layout/lg");
+    assert.ok(wrongAliasRepair, "wrong existing aliases should be retargetable");
+    assert.deepStrictEqual(
+      wrongAliasRepair.updates.map(update => [update.modeName, update.toAliasName]),
+      [["Tablet", "space/16"], ["Desktop", "space/24"]],
+      "already aliased responsive modes should retarget to the expected primitive aliases"
     );
   }
 

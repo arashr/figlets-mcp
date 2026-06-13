@@ -4,6 +4,24 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-11] Healthy spacing aliases do not validate responsive mode decisions
+
+**Decision:** Figlets should distinguish semantic spacing alias health from responsive spacing decision validation. If Mobile, Tablet, Desktop, or other configured spacing modes resolve to repeated values, the token can be alias-healthy while still needing responsive validation. If Figlets just created the missing modes, repeated values are setup validation work; if the modes already existed, repeated values may be an intentional designer choice but still should not be called proven responsive behavior unless config allows it.
+
+**Why:** Newly created Figma modes often duplicate the existing mode values. BNN-52 already separated mode creation from alias repair because duplicated mode values can look intentional when they are just setup defaults. BNN-54 extends that boundary into read-only health checks: matching config and primitive aliases is not enough to say responsive spacing values are acceptable.
+
+**Product consequence:** `inspect_ds_token_gaps` should surface duplicated responsive semantic spacing values as advisories, not token gaps, not product/tool gaps, and not apply-ready repairs. Designer-facing output should say the values are unvalidated responsive spacing decisions unless config explicitly allows same-value modes for that token/category. After `apply_ds_foundation_repairs` creates spacing modes, agents should treat duplicated Tablet/Desktop values as responsive setup validation before calling spacing complete.
+
+**Implementation:** `planSpacingSemanticAliasRepairs` emits `unvalidatedDuplicatedResponsiveModeValues` when aliases are healthy but later modes duplicate the baseline mode value. `inspect_ds_token_gaps` exposes this through `spacing-semantics-unvalidated-duplicated-mode-values`, top findings, summary counts, and designer presentation while leaving `update_ds_tokens` apply payloads unchanged. Explicit config allowances live under `spacing.responsiveModeValidation.allowSameValueModes`.
+
+**Review flow:** Responsive spacing validation should appear as a first-menu review option when advisories exist. That review must also mention any semantic spacing alias repairs still pending, so agents do not discuss duplicated mode values as if raw spacing values do not exist. Figlets may suggest an alias-backed layout-only tightening plan plus an editable template; exact writes still go through `plan_ds_figma_operations` / `apply_ds_figma_operations` after approval.
+
+**Raw layout correction:** When a newly responsive layout token is raw in every mode and the config/snapshot would alias Tablet/Desktop to the same primitive as Mobile, Figlets should not present that as the best safe repair. Move that token into the responsive-spacing review suggestion instead, with differentiated alias-backed Tablet/Desktop values when matching primitives exist. Non-layout tokens such as touch targets can still stay in the semantic spacing alias repair path when same values are plausible.
+
+**Alias retargeting:** If a semantic spacing mode is already aliased but points at the wrong primitive, or if a raw value differs from config but the expected value has a matching primitive, Figlets should plan a direct primitive-alias retarget. Do not make designers first approve raw numeric drift writes and then approve a second alias cleanup.
+
+---
+
 ## [2026-06-11] Semantic color naming needs grammar detection, not a binary surface/role choice
 
 **Decision:** Figlets should stop treating semantic color naming cleanup as a global `surface-based` versus `role-based` choice. The product model should classify the design system's semantic color grammar first, then surface only invalid, ambiguous, or true-duplicate names. Valid grammars include paired context roles (`surface` / `on-surface`), element-first roles (`text/danger`, `text/on-fill-danger`), intent/emphasis matrices, and component-scoped overlays.

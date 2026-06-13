@@ -144,15 +144,17 @@ module.exports = (() => {
   );
   assert.ok(
     spacingAliases.designerSummary.includes("1 raw value") &&
-      !spacingAliases.designerSummary.includes("existing alias"),
-    "semantic spacing alias option should stay scoped to raw values, not already-aliased retargets"
+      spacingAliases.designerSummary.includes("1 existing alias"),
+    "semantic spacing alias option should include raw conversions and wrong-alias retargets"
   );
   const spacingBreakdown = plan.repairPlan.designerPresentation.summaryCounts.spacingAliasRepairSourceBreakdown;
   assert.strictEqual(spacingBreakdown.rawValueUpdates, 1);
-  assert.strictEqual(spacingBreakdown.aliasRetargetUpdates, 0);
+  assert.strictEqual(spacingBreakdown.aliasRetargetUpdates, 1);
   assert.ok(
-    !plan.repairPlan.designerPresentation.proposedChanges.some(change => change.token === "space/stack/md"),
-    "designer presentation should not include already-aliased spacing tokens in the ready alias repair payload"
+    plan.repairPlan.designerPresentation.proposedChanges.some(change =>
+      change.token === "space/stack/md" && change.action === "retarget-existing-alias-to-primitive"
+    ),
+    "designer presentation should include already-aliased spacing tokens when the alias target is wrong"
   );
 
   const radiusBorder = plan.repairPlan.reviewOptions.find(option => option.id === "radius-border-tokens");

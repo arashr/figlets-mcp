@@ -51,7 +51,7 @@ module.exports = (async () => {
       json: {
         success: true,
         result: {
-          createdCollections: [{ kind: "spacing", name: "4. Spacing", id: "coll1" }],
+          createdCollections: [{ kind: "spacing", name: "4. Spacing", id: "coll1", createdModes: ["Desktop"] }],
           existingCollections: [],
           skippedCollections: [],
           message: "Foundation repairs applied.",
@@ -64,7 +64,16 @@ module.exports = (async () => {
       collections: [{ kind: "spacing", name: "4. Spacing", modes: ["Made Up"] }],
     });
     assert.ok(!result.error, result.error);
-    assert.deepStrictEqual(result.createdCollections, [{ kind: "spacing", name: "4. Spacing", id: "coll1" }]);
+    assert.deepStrictEqual(result.createdCollections, [{ kind: "spacing", name: "4. Spacing", id: "coll1", createdModes: ["Desktop"] }]);
+    assert.strictEqual(result.requiresResponsiveSpacingValidation, true);
+    assert.ok(
+      result.nextStep.includes("responsive setup validation"),
+      "newly created spacing modes should not be summarized as a clean responsive result"
+    );
+    assert.deepStrictEqual(
+      result.createdModeEntries,
+      [{ kind: "spacing", name: "4. Spacing", createdModes: ["Desktop"] }]
+    );
     const payload = readBridgeHookCapture(capturePath);
     assert.deepStrictEqual(
       payload.collections,

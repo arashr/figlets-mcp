@@ -96,6 +96,42 @@ function _normalizeCollections(ds, collections) {
   return { collections: result };
 }
 
+function _createdModesByKind(collections) {
+  const result = [];
+  for (const item of Array.isArray(collections) ? collections : []) {
+    const createdModes = Array.isArray(item && item.createdModes)
+      ? item.createdModes.map(mode => String(mode || "").trim()).filter(Boolean)
+      : [];
+    if (!createdModes.length) continue;
+    result.push({
+      kind: item.kind || null,
+      name: item.name || null,
+      createdModes,
+    });
+  }
+  return result;
+}
+
+function _foundationPostApplyGuidance(result) {
+  const createdModeEntries = _createdModesByKind([]
+    .concat(result.createdCollections || [])
+    .concat(result.existingCollections || []));
+  const spacingCreatedModes = createdModeEntries.filter(item => item.kind === "spacing");
+  const guidance = [
+    "Sync Figma data, reinspect token gaps, and stop before any primitive or semantic token write unless the designer gives a separate approval.",
+  ];
+  if (spacingCreatedModes.length) {
+    guidance.push(
+      "Newly created Spacing modes usually inherit or duplicate existing values. Treat any repeated Mobile/Tablet/Desktop semantic spacing values as responsive setup validation work, not as a clean spacing result."
+    );
+  }
+  return {
+    createdModeEntries,
+    requiresResponsiveSpacingValidation: spacingCreatedModes.length > 0,
+    nextStep: guidance.join(" "),
+  };
+}
+
 function handleApplyDsFoundationRepairs(args = {}) {
   const configPath = args && args.config_path ? path.resolve(args.config_path) : null;
   if (!configPath) return Promise.resolve({ error: "config_path is required." });
@@ -138,11 +174,15 @@ function handleApplyDsFoundationRepairs(args = {}) {
     const statusCode = response.statusCode;
     if (statusCode === 200) {
       const result = parsed.result || {};
+      const guidance = _foundationPostApplyGuidance(result);
       return {
         createdCollections: result.createdCollections || [],
         existingCollections: result.existingCollections || [],
         skippedCollections: result.skippedCollections || [],
         message: result.message || "Foundation repairs applied.",
+        createdModeEntries: guidance.createdModeEntries,
+        requiresResponsiveSpacingValidation: guidance.requiresResponsiveSpacingValidation,
+        nextStep: guidance.nextStep,
         configPath,
         error: result.error,
       };

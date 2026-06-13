@@ -9,7 +9,7 @@
  *   the synced snapshot for existing semantic spacing variables
  * - Current state: synced Figma snapshot
  * - Alias targets: existing primitives in the Primitives collection only, resolved by
- *   matching primitive float value first (space/12 = 48px), then legacy space/{pixel} name
+ *   matching primitive float value (space/12 = 48px)
  * - Propose alias repair only when a mode's snapshot raw value matches intended value
  * - Config drift (snapshot raw != config expected): needs designer decision, never silent alias
  * - Missing primitive: missing prerequisite note, do not invent primitives in this flow
@@ -20,7 +20,7 @@ const SEMANTIC_ALIAS_REPAIR_MODEL = {
   intendedValuesSourceWhenConfigEmpty: "figma-snapshot-inference",
   currentStateSource: "figma-snapshot",
   aliasTargets: "existing-primitives-only",
-  primitiveLookup: "match-primitive-float-value-then-space-step-name",
+  primitiveLookup: "match-primitive-float-value",
   matchRule: "snapshot-raw-must-equal-intended-value-per-mode",
   onConfigDrift: "report-needs-designer-decision",
   onMissingPrimitive: "report-missing-prerequisite",
@@ -126,10 +126,6 @@ function resolvePrimitiveAliasTarget(lookup, expectedFloat) {
   for (const [floatValue, target] of lookup.byFloat.entries()) {
     if (floatsEqual(floatValue, expectedFloat)) return target;
   }
-
-  const pixelName = "space/" + sanitizeSpaceStep(expectedFloat);
-  const byPixelId = lookup.byName.get(pixelName);
-  if (byPixelId) return { id: byPixelId, name: pixelName };
 
   return null;
 }

@@ -123,6 +123,60 @@ module.exports = (() => {
     "all modes with raw 48 must plan alias to space/12, not space/48"
   );
 
+  const unsafeNameFallbackSnapshot = {
+    collections: [
+      {
+        id: "primitives",
+        name: "1. Primitives",
+        variableIds: ["p1"],
+        modes: [{ modeId: "default", name: "Default" }],
+      },
+      {
+        id: "spacing",
+        name: "4. Spacing",
+        variableIds: ["layout-hairline"],
+        modes: [
+          { modeId: "mobile", name: "Mobile" },
+          { modeId: "tablet", name: "Tablet" },
+          { modeId: "desktop", name: "Desktop" },
+        ],
+      },
+    ],
+    variables: [
+      { id: "p1", name: "space/1", resolvedType: "FLOAT", valuesByMode: { default: 4 } },
+      {
+        id: "layout-hairline",
+        name: "space/layout/hairline",
+        resolvedType: "FLOAT",
+        valuesByMode: { mobile: 1, tablet: 1, desktop: 1 },
+      },
+    ],
+  };
+  const unsafeLookup = buildPrimitiveSpacingLookup(unsafeNameFallbackSnapshot, "1. Primitives");
+  assert.strictEqual(
+    resolvePrimitiveAliasTarget(unsafeLookup, 1),
+    null,
+    "space/1 must not be used for 1px when its primitive value is 4"
+  );
+  const unsafePlan = planSpacingSemanticAliasRepairs(
+    {
+      collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+      spacing: { semantic: { "layout/hairline": [1, 1, 1] } },
+    },
+    unsafeNameFallbackSnapshot,
+    new Map(unsafeNameFallbackSnapshot.variables.map(item => [item.name, item]))
+  );
+  assert.ok(
+    !unsafePlan.repairs.some(item => item.name === "space/layout/hairline"),
+    "missing 1px primitive must not produce a misleading alias repair"
+  );
+  const unsafeMissing = unsafePlan.missingPrimitives.find(item => item.name === "space/layout/hairline");
+  assert.ok(unsafeMissing, "missing 1px primitive should be reported instead of aliasing to space/1");
+  assert.ok(
+    unsafeMissing.modes.every(mode => mode.primitiveName.includes("value 1")),
+    "missing primitive guidance should point at the missing numeric primitive value"
+  );
+
   const legacyPixelNamedSnapshot = {
     collections: [
       {

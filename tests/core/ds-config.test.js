@@ -42,6 +42,18 @@ function makeDs(overrides) {
   assert.ok(ds.typography.scale['display/lg'],           'display/lg must be in scale');
 }
 
+// Common Material type-scale labels normalize to the supported preset
+{
+  for (const preset of ['standard', 'material', 'material scale', 'material type scale', 'm3']) {
+    const input = makeDs();
+    input.typography = Object.assign({}, input.typography, { scalePreset: preset });
+    const { ds, computed, needsDesignerInput } = computeDsConfig(input);
+    assert.ok(computed.includes('DS.typography.scale'), `${preset} should compute a typography scale`);
+    assert.deepStrictEqual(needsDesignerInput, [], `${preset} should not need designer input`);
+    assert.ok(ds.typography.scale['display/lg'], `${preset} should resolve to Material scale roles`);
+  }
+}
+
 // 4-tier breakpoints add Wide
 {
   const ds4 = makeDs();

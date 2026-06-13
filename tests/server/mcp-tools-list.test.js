@@ -70,6 +70,7 @@ module.exports = new Promise((resolve, reject) => {
       assert.ok(toolNames.indexOf("figlets_route_intent") >= 0, "tools/list should expose figlets_route_intent");
       assert.ok(toolNames.indexOf("figlets_workflow_guide") >= 0, "tools/list should expose figlets_workflow_guide");
       assert.ok(toolNames.indexOf("figlets_health_check") >= 0, "tools/list should expose figlets_health_check");
+      assert.ok(toolNames.indexOf("create_ds_config_from_intake") >= 0, "tools/list should expose intake-to-config setup tool");
       assert.ok(toolNames.indexOf("inspect_ds_token_gaps") >= 0, "tools/list should expose inspect_ds_token_gaps");
       assert.ok(toolNames.indexOf("update_ds_tokens") >= 0, "tools/list should expose update_ds_tokens");
       const updateDsTokens = listResponse.result.tools.find(tool => tool.name === "update_ds_tokens");

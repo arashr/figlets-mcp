@@ -4,6 +4,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-13 — BNN-58 implementation; setup approval preview expanded]
+
+**Status:** BNN-58 was opened from manual v1 testing after new design-system creation showed only a high-level preview before asking to create variable collections in Figma.
+
+**Finding:** `prepare_ds_config` produced useful raw pipeline data and an SVG, but the designer-facing agent could collapse the approval prompt to aggregate counts: grid, breakpoint count, ramp count, semantic pair pass count, and primitive totals. That was too little context for approving a broad `apply_ds_setup` write.
+
+**Shipped behavior:** `prepare_ds_config` now returns `setupApprovalPreview`, a structured read-only preview with the no-write approval boundary, planned collections, modes, concrete semantic color alias samples, responsive spacing examples, typography/style examples, primitive token samples, assumptions, warnings, and generated color-system details. The new-DS Agent Interface guidance now tells agents to show `setupApprovalPreview` before asking for build approval.
+
+**Boundary:** This does not add an HTML/demo preview and does not change `apply_ds_setup` behavior. It only makes the existing approval step more informative before any Figma write.
+
+**Tests:** `tests/server/prepare-ds-config-tool.test.js` now asserts detailed preview content and approval-boundary language. `tests/docs/agent-workflow-regression.test.js` pins the new setup workflow guidance.
+
+---
+
 ### [2026-06-13 — BNN-57 implementation; new setup spacing semantics alias by primitive value]
 
 **Status:** BNN-57 was opened from manual v1 testing after new design-system creation could leave semantic spacing tokens with raw values.
@@ -2806,3 +2820,64 @@ Fixes shipped:
 **Remaining next item:**
 
 - Stale app-managed MCP host reconnect/restart check for live tool namespace behavior.
+
+### [2026-06-14 — BNN-58 intake-to-config checkpoint]
+
+**Objective completed:** Added the missing designer-safe bridge from completed new-design-system intake answers to a file-scoped local `design-system.config.js`.
+
+**What changed:**
+
+- New MCP/server tool `create_ds_config_from_intake` writes only `.local/<fileKey>/design-system.config.js` or an explicitly guarded config path.
+- The tool never mutates Figma and returns `needsDesignerInput` instead of inventing missing concrete choices such as brand hex colors or exact typography families.
+- The new-DS setup workflow now explicitly routes `collect-answers` → `create_ds_config_from_intake` → `prepare_ds_config` → approval → `apply_ds_setup`.
+- Root and adapter agent docs now tell agents to use the tool after intake instead of asking to switch to developer/config-editing work.
+
+**Validation:**
+
+- Added server/doc regressions for incomplete screenshot-derived intake, complete intake config creation, workflow guidance, and MCP tool exposure.
+- Full supported-runtime suite passed: `103/103`.
+
+### [2026-06-14 — BNN-58 typography preset intake checkpoint]
+
+**Objective completed:** Fixed the new setup typography loop where designer answers like "standard" or "use material scale" could serialize as an unknown/custom typography preset and leave `prepare_ds_config` blocked on `DS.typography.scale`.
+
+**What changed:**
+
+- `computeDsConfig` now normalizes common Material type-scale labels (`standard`, `material`, `material scale`, `m3`, etc.) to `material3`.
+- `create_ds_config_from_intake` normalizes supported preset labels before writing config, preserves explicit `typography.scale` objects, and blocks `custom` without a scale before it creates a broken config.
+- Agent/adapter guidance now says Material/standard is a supported preset path; only custom scales require an explicit typography scale object.
+
+**Validation:**
+
+- Added regressions for Material preset aliases, explicit custom scale preservation, and custom-without-scale blocking.
+- Full supported-runtime suite passed: `103/103`.
+
+### [2026-06-14 — BNN-58 setup suggestions boundary checkpoint]
+
+**Objective completed:** Rebalanced the setup intake guardrails so agents can help with suggestions without silently writing unapproved config values.
+
+**Decision:**
+
+- "Do not invent" means "do not write unapproved values," not "do not suggest useful starting points."
+- When `create_ds_config_from_intake` blocks on custom typography scale, it now returns structured `suggestions.typography` with supported presets and editable custom templates.
+- Agent guidance now explicitly says suggestions are allowed as proposals and become config only after designer approval.
+
+**Validation:**
+
+- Added regressions for returned typography suggestions and workflow suggestion-boundary guidance.
+- Full supported-runtime suite passed: `103/103`.
+
+### [2026-06-15 — BNN-58 setup contrast suggestion checkpoint]
+
+**Objective completed:** Fixed the new setup contrast-failure presentation so agents do not ask vague palette-revision questions while deterministic contrast suggestions exist.
+
+**What changed:**
+
+- `validateSemanticPairs` already produced nearest passing text-alias suggestions; `runDsPipeline` now passes them through to the server.
+- `prepare_ds_config` now exposes `semanticPairs.contrastRepairOptions` and mirrors them into `setupApprovalPreview.semanticColor.contrast.repairOptions`.
+- The setup failure message now points agents at those structured options, and adapter/workflow guidance tells agents to show exact contrast suggestions before any config change.
+
+**Validation:**
+
+- Added a failing semantic-pair fixture to `tests/server/prepare-ds-config-tool.test.js`.
+- Full supported-runtime suite passed: `103/103`.

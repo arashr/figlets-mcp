@@ -531,16 +531,27 @@ try {
     assert.ok(route.intakeContract);
     assert.ok(route.intakeContract.proposalRule.includes("Do not draft a full proposal before intake"));
     assert.ok(route.message.includes("do not draft a full proposal"));
+    assert.ok(route.message.includes("create_ds_config_from_intake"));
     assert.ok(route.designerResponse.includes("start by asking"));
     assert.ok(route.designerResponse.includes("won't draft"));
+    assert.ok(route.designerResponse.includes("setupApprovalPreview"));
+    assert.ok(route.designerResponse.includes("file-scoped local config"));
+    assert.ok(route.designerResponse.includes("sample aliases"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
 
     const guide = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
     assert.ok(guide.intakeContract);
     assert.ok(guide.intakeContract.requiredTopics.some(topic => topic.includes("brand colors")));
+    assert.strictEqual(guide.intakeContract.configCreationTool, "create_ds_config_from_intake");
+    assert.ok(guide.intakeContract.suggestionBoundary.includes("Do not confuse proposing with inventing"));
     assert.ok(guide.intakePresentationRule.includes("intake questions"));
     assert.ok(guide.message.includes("do not draft a full proposal"));
-    assert.ok(guide.workflow.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "prepare_ds_config"));
+    assert.ok(guide.workflow.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "create_ds_config_from_intake"));
+    assert.ok(guide.workflow.steps.some(step => step.id === "create-config-from-intake" && step.tool === "create_ds_config_from_intake" && step.localConfigWrite === true));
+    const prepareStep = guide.workflow.steps.find(step => step.id === "prepare");
+    assert.ok(prepareStep.designerMessage.includes("setupApprovalPreview"));
+    assert.ok(prepareStep.designerMessage.includes("concrete collection groups"));
+    assert.ok(prepareStep.designerMessage.includes("no-write approval boundary"));
 
     assertDocsIncludeAny(
       DESIGNER_DOC_PATHS,

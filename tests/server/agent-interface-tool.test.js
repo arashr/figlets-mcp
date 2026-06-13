@@ -159,9 +159,11 @@ try {
     assert.ok(route.intakeContract.firstResponseRule.includes("intake questions"));
     assert.ok(route.intakeContract.doNotDraftBeforeIntake.some(item => /palette|proposal/i.test(item)));
     assert.ok(route.message.includes("do not draft a full proposal"));
+    assert.ok(route.message.includes("create_ds_config_from_intake"));
     assert.ok(route.designerResponse.includes("start by asking"));
     assert.ok(route.designerResponse.includes("won't draft"));
     assert.ok(route.designerResponse.includes("not a proposal to approve"));
+    assert.ok(route.designerResponse.includes("file-scoped local config"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
   }
 
@@ -186,9 +188,14 @@ try {
     const guide = getWorkflowGuide("new-ds-setup");
     assert.ok(guide.intakeContract);
     assert.ok(guide.intakeContract.requiredTopics.length >= 8);
-    assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "prepare_ds_config"));
+    assert.ok(guide.intakeContract.configCreationTool === "create_ds_config_from_intake");
+    assert.ok(guide.intakeContract.suggestionBoundary.includes("Do not confuse proposing with inventing"));
+    assert.ok(guide.intakeContract.suggestionBoundary.includes("wait for approval"));
+    assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "create_ds_config_from_intake"));
+    assert.ok(guide.steps.some(step => step.id === "create-config-from-intake" && step.tool === "create_ds_config_from_intake" && step.localConfigWrite === true));
     assert.ok(guide.steps.some(step => step.id === "optional-design-md-intake" && step.optional === true && step.designerMessage.includes("just drop it in")));
     assert.ok(guide.errors.some(item => item.includes("Do not invent missing brand colors")));
+    assert.ok(guide.errors.some(item => item.includes("create_ds_config_from_intake")));
     const handled = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
     assert.ok(handled.intakeContract);
     assert.ok(handled.intakePresentationRule.includes("intake questions"));
@@ -231,13 +238,14 @@ try {
         setupIntakeCompleted: false,
       },
       requestedAction: {
-        tool: "prepare_ds_config",
+        tool: "create_ds_config_from_intake",
         kind: "read",
       },
     });
     assert.strictEqual(health.status, "blocked");
     const intake = health.checks.find(check => check.id === "setup_intake_boundary");
     assert.strictEqual(intake.status, "fail");
+    assert.ok(intake.message.includes("create_ds_config_from_intake"));
     assert.ok(intake.nextAction.includes("Ask targeted setup intake questions"));
     assert.strictEqual(health.nextAction.type, "ask_user");
   }

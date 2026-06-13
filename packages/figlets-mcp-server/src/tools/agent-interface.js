@@ -393,8 +393,10 @@ function handleFigletsHealthCheck(args) {
     }
 
     const setupIntakeCompleted = _truthy(workflowState.setupIntakeCompleted);
-    const setupToolRequested = requestedTool === "prepare_ds_config" ||
+    const setupToolRequested = requestedTool === "create_ds_config_from_intake" ||
+      requestedTool === "prepare_ds_config" ||
       requestedTool === "apply_ds_setup" ||
+      completedTools.indexOf("create_ds_config_from_intake") !== -1 ||
       completedTools.indexOf("prepare_ds_config") !== -1;
     if (workflow.id === "new-ds-setup" && setupToolRequested && !setupIntakeCompleted) {
       checks.push(_makeCheck({
@@ -402,7 +404,7 @@ function handleFigletsHealthCheck(args) {
         title: "Setup intake boundary",
         status: "fail",
         severity: "error",
-        message: "New design-system setup must collect designer intake answers before prepare_ds_config or apply_ds_setup.",
+        message: "New design-system setup must collect designer intake answers before create_ds_config_from_intake, prepare_ds_config, or apply_ds_setup.",
         evidence: [
           "workflowId=new-ds-setup",
           "setupIntakeCompleted is not true",
@@ -421,7 +423,7 @@ function handleFigletsHealthCheck(args) {
           ? "Setup intake is marked complete for this workflow."
           : "Setup intake has not been requested yet.",
         evidence: [`setupIntakeCompleted=${setupIntakeCompleted}`],
-        nextAction: "Collect missing setup choices before calling prepare_ds_config.",
+        nextAction: "Collect missing setup choices before calling create_ds_config_from_intake or prepare_ds_config.",
       }));
     } else {
       checks.push(_makeCheck({
@@ -887,7 +889,7 @@ function handleFigletsWorkflowGuide(args) {
   if (workflow.id === "new-ds-setup" && workflow.intakeContract) {
     response.intakeContract = workflow.intakeContract;
     response.intakePresentationRule = workflow.intakeContract.firstResponseRule;
-    response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Ask intake questions first and do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. Run setup intake before prepare_ds_config. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
+    response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Ask intake questions first and do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. Run setup intake before create_ds_config_from_intake and prepare_ds_config. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
   }
   if (workflow.id === "token-gap-completion" && workflow.approvalContract) {
     response.approvalContract = workflow.approvalContract;

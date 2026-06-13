@@ -37,7 +37,12 @@ const {
 const { refreshDsConfigFromFigmaTool, handleRefreshDsConfigFromFigma } = require("./tools/refresh-ds-config-from-figma.js");
 const { generateComponentDocTool, handleGenerateComponentDoc } = require("./tools/generate-component-doc.js");
 const { qaBindingAuditTool, handleQaBindingAudit } = require("./tools/qa-binding-audit.js");
-const { designMdIntakeTool, handleCreateDsConfigFromDesignMd } = require("./tools/design-md-intake.js");
+const {
+  designMdIntakeTool,
+  intakeConfigTool,
+  handleCreateDsConfigFromDesignMd,
+  handleCreateDsConfigFromIntake,
+} = require("./tools/design-md-intake.js");
 const { exportDesignMdTool, handleExportDesignMd } = require("./tools/export-design-md.js");
 const {
   figletsStartTool,
@@ -271,6 +276,63 @@ server.tool(
   }
 );
 
+// --- create_ds_config_from_intake ---
+server.tool(
+  intakeConfigTool.name,
+  intakeConfigTool.description,
+  {
+    config_path: z.string().optional().describe("Optional absolute path where design-system.config.js should be written. Defaults to the active Figma file-scoped config path."),
+    project_name: z.string().optional().describe("Project or design-system name."),
+    name: z.string().optional().describe("Alias for project_name."),
+    platform: z.string().optional().describe("Target platform, such as Web, iOS, Android, or Multi-platform."),
+    grid_base: z.number().optional().describe("Base grid unit in pixels, such as 4 or 8."),
+    grid: z.number().optional().describe("Alias for grid_base."),
+    breakpoint_tier: z.union([z.string(), z.number()]).optional().describe("Breakpoint count or label, such as 3-tier or 4-tier."),
+    breakpoint_modes: z.array(z.string()).optional().describe("Explicit responsive modes, such as Mobile, Tablet, Desktop."),
+    semantic_color_grammar: z.string().optional().describe("Semantic color grammar, such as paired context, element-first, intent/emphasis, component-scoped, or custom."),
+    semantic_grammar: z.string().optional().describe("Alias for semantic_color_grammar."),
+    color_grammar: z.string().optional().describe("Alias for semantic_color_grammar."),
+    contrast_standard: z.string().optional().describe("Contrast standard, such as APCA or WCAG 2.2."),
+    contrast: z.string().optional().describe("Alias for contrast_standard."),
+    accessibility_standard: z.string().optional().describe("Alias for contrast_standard."),
+    theme_behavior: z.string().optional().describe("Theme behavior, such as light + dark."),
+    color_scale: z.string().optional().describe("Color scale label, such as 50-950."),
+    color_algorithm: z.string().optional().describe("Color ramp algorithm, such as oklch."),
+    ramp_strategy: z.string().optional().describe("Ramp strategy label."),
+    brand_colors: z.array(z.object({
+      name: z.string().optional(),
+      hex: z.string().optional(),
+      role: z.string().optional(),
+      step: z.number().optional(),
+    })).optional().describe("Brand/source colors with concrete #RRGGBB hex values."),
+    color_families: z.array(z.string()).optional().describe("Color families named by the designer when exact hexes still need confirmation."),
+    typography: z.any().optional().describe("Typography intake answers, including families.sans and families.mono when available."),
+    typography_preset: z.string().optional().describe("Typography scale preset."),
+    typography_scale: z.any().optional().describe("Explicit typography scale object for custom type scales."),
+    naming: z.any().optional().describe("Optional naming templates."),
+    collections: z.any().optional().describe("Optional collection names."),
+    visual_direction: z.string().optional().describe("Designer's visual direction notes."),
+    notes: z.string().optional().describe("Additional setup notes.")
+  },
+  async (args) => {
+    try {
+      const result = handleCreateDsConfigFromIntake(args || {});
+      if (result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
 // --- create_ds_config_from_design_md ---
 server.tool(
   designMdIntakeTool.name,
@@ -331,7 +393,7 @@ server.tool(
 // --- prepare_ds_config ---
 server.tool(
   "prepare_ds_config",
-  "Run the DS computation pipeline on an existing design-system.config.js: generates spacing scale, color ramps with WCAG/APCA analysis, validates semantic bg+text pair contrast, and prepares the Collection 1 primitives payload. Must be called after intake and before apply_ds_setup.",
+  "Run the DS computation pipeline on an existing design-system.config.js: generates spacing scale, color ramps with WCAG/APCA analysis, validates semantic bg+text pair contrast, prepares primitives, and returns setupApprovalPreview with concrete collection groups, modes, sample aliases, token examples, assumptions, and the no-write approval boundary. Must be called after intake and before apply_ds_setup.",
   {
     config_path: z.string().describe("Absolute path to design-system.config.js (created during intake).")
   },

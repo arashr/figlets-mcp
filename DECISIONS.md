@@ -4,6 +4,29 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-14] New design-system intake creates local config through a Figlets tool
+
+**Decision:** After targeted setup intake, agents must call `create_ds_config_from_intake` before `prepare_ds_config`. The tool may write the file-scoped local Figlets config, but it never mutates Figma and must return `needsDesignerInput` when concrete setup choices are missing.
+
+**Why:**
+- The setup flow already had `create_ds_config_from_design_md`, `prepare_ds_config`, and `apply_ds_setup`, but there was no first-class surface for the common non-DESIGN.md path where a designer answers intake questions in chat.
+- Leaving config creation implicit caused low agents to claim there was no designer-safe tool and ask to switch to developer/config-editing mode.
+- Screenshot-derived direction can identify candidate color families, but exact brand hexes and font families are designer choices. The tool should ask for those rather than silently invent them.
+
+**Consequence:** New setup is now `intake questions -> create file-scoped local config -> prepare preview -> explicit Figma build approval`. This preserves the Designer Mode guardrails while removing the config-editing dead end.
+
+---
+
+## [2026-06-13] New design-system setup preview must be detailed before Figma writes
+
+**Decision:** `prepare_ds_config` must return a detailed, structured pre-write preview for new design-system creation. Agents should show `setupApprovalPreview` before asking to run `apply_ds_setup`, not compress the result into aggregate counts.
+
+**Why:** Manual testing showed the setup flow asking for Figma write approval after a short summary such as grid, breakpoint count, ramp count, and primitive totals. That is not enough context for a designer to approve creation of multiple Figma collections.
+
+**Product consequence:** The preview remains read-only and approval-gated. It should name the planned collections, modes, semantic color grammar, sample aliases, sample spacing/typography/shadow tokens, generated assumptions, warnings, and the explicit "nothing changed in Figma" boundary. Optional HTML/demo preview remains a follow-up feature; the core fix is a richer approval summary in the existing setup flow.
+
+**Implementation:** `prepare_ds_config` now includes `setupApprovalPreview`, and the new-DS Agent Interface guidance tells agents to show it before build approval.
+
 ## [2026-06-13] Setup-created spacing semantics resolve primitive aliases by value
 
 **Decision:** New design-system setup must resolve spacing primitive aliases by numeric primitive value, not by token-name coincidence. A semantic value of `48px` should alias to the primitive whose value is `48`, such as `space/12` in an 8px step scale. It must not require a primitive literally named `space/48`, and it must not alias `1px` to `space/1` when `space/1` resolves to `4px`.

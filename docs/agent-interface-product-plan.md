@@ -363,7 +363,7 @@ Designer intent examples:
 Tools:
 
 1. Optional: `create_ds_config_from_design_md`
-2. Write or update `design-system.config.js` from designer answers
+2. `create_ds_config_from_intake` from designer answers; if it returns `needsDesignerInput`, ask those exact questions
 3. `prepare_ds_config`
 4. After explicit approval only: `apply_ds_setup`
 5. Optional: `build_ds_showcase`
@@ -372,6 +372,7 @@ Tools:
 Confirmation boundary:
 
 - `prepare_ds_config` is deterministic and read-only with respect to Figma.
+- `create_ds_config_from_intake` may write the file-scoped local config, but it never mutates Figma and must not invent missing concrete values.
 - `apply_ds_setup` creates collections in Figma and requires explicit approval.
 - The agent must show contrast/readiness results before building.
 

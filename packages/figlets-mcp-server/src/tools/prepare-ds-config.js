@@ -47,6 +47,260 @@ function _rgbFromRef(ds, ref) {
   return null;
 }
 
+function _asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function _sample(items, limit) {
+  return _asArray(items).slice(0, limit);
+}
+
+function _groupCountsByPrefix(names) {
+  const counts = {};
+  for (const name of names || []) {
+    const prefix = String(name || '').split('/')[0] || 'other';
+    counts[prefix] = (counts[prefix] || 0) + 1;
+  }
+  return counts;
+}
+
+function _semanticSpacingExamples(ds, limit) {
+  const semantic = ds && ds.spacing && ds.spacing.semantic ? ds.spacing.semantic : {};
+  return Object.keys(semantic).slice(0, limit).map(name => ({
+    token: 'space/' + name,
+    values: _asArray(semantic[name]).slice(),
+  }));
+}
+
+function _semanticPairExample(pair) {
+  return {
+    background: pair.bg,
+    text: pair.text,
+    Light: pair.Light ? { background: pair.Light.bg, text: pair.Light.text } : null,
+    Dark: pair.Dark ? { background: pair.Dark.bg, text: pair.Dark.text } : null,
+  };
+}
+
+function _contrastRepairOptions(pairSuggestions) {
+  const options = [];
+  for (const key of Object.keys(pairSuggestions || {})) {
+    const suggestion = pairSuggestions[key] || {};
+    const parts = key.split('|');
+    const background = parts[0];
+    const text = parts[1];
+    for (const mode of ['Light', 'Dark']) {
+      const suggestedText = suggestion[mode];
+      if (!suggestedText) continue;
+      options.push({
+        id: `${background}|${text}|${mode}`,
+        mode,
+        background,
+        text,
+        suggestedText,
+        action: 'Update the semantic pair text alias for this mode to the suggested passing step, then rerun prepare_ds_config.',
+        approvalLabel: `${mode}: ${text} on ${background} -> ${suggestedText}`,
+      });
+    }
+  }
+  return options;
+}
+
+function _textStyleName(pattern, role) {
+  const stylePattern = pattern || 'type/{role}/{size}';
+  const parts = String(role || '').split('/');
+  const size = parts.length > 1 ? parts[parts.length - 1] : role;
+  const roleName = stylePattern.indexOf('{size}') >= 0 && parts.length > 1
+    ? parts.slice(0, -1).join('/')
+    : role;
+  return stylePattern.replace('{role}', roleName).replace('{size}', size);
+}
+
+function _buildSetupApprovalPreview({ ds, primitivesData, failCount, apcaFailCount, staleSemantics, needsDesignerInput, derivedColors, pairSuggestions }) {
+  const collections = ds && ds.collections ? ds.collections : {};
+  const breakpoints = ds && ds.breakpoints && Array.isArray(ds.breakpoints.modes) && ds.breakpoints.modes.length
+    ? ds.breakpoints.modes.slice()
+    : ['Mobile', 'Tablet', 'Desktop'];
+  const color = ds && ds.color ? ds.color : {};
+  const ramps = _asArray(color.ramps);
+  const rampNames = ramps.map(ramp => String(ramp.folder || '').replace(/^color\//, '')).filter(Boolean);
+  const rampSteps = ramps[0] && Array.isArray(ramps[0].steps) ? ramps[0].steps.map(row => row[0]) : [];
+  const semantics = color.semantics || {};
+  const semanticPairs = _asArray(semantics.pairs);
+  const semanticIcons = _asArray(semantics.icons);
+  const contrastRepairOptions = _contrastRepairOptions(pairSuggestions);
+  const primitiveFloats = _asArray(primitivesData && primitivesData.floats);
+  const spacingPrimitiveExamples = primitiveFloats
+    .filter(item => /^space\//.test(String(item.name || '')))
+    .slice(0, 12)
+    .map(item => ({ token: item.name, value: item.value }));
+  const typePrimitiveExamples = primitiveFloats
+    .filter(item => /^type\//.test(String(item.name || '')))
+    .slice(0, 10)
+    .map(item => ({ token: item.name, value: item.value }));
+  const shadowPrimitives = primitiveFloats
+    .filter(item => /^shadow\//.test(String(item.name || '')));
+  const shadowPrimitiveExamples = shadowPrimitives
+    .slice(0, 8)
+    .map(item => ({ token: item.name, value: item.value }));
+  const typographyScale = ds && ds.typography && ds.typography.scale ? ds.typography.scale : {};
+  const typographyRoles = Object.keys(typographyScale);
+  const typeStylePattern = ds && ds.naming && ds.naming.textStyle ? ds.naming.textStyle : 'type/{role}/{size}';
+  const textStyleExamples = typographyRoles.slice(0, 8).map(role => _textStyleName(typeStylePattern, role));
+  const spacingSemantic = ds && ds.spacing && ds.spacing.semantic ? ds.spacing.semantic : {};
+  const spacingSemanticNames = Object.keys(spacingSemantic);
+  const status = failCount === 0 && (!staleSemantics || staleSemantics.length === 0) && (!needsDesignerInput || needsDesignerInput.length === 0)
+    ? 'ready'
+    : 'needs-review';
+
+  return {
+    title: 'Detailed design-system build preview',
+    status,
+    approvalBoundary: {
+      previewOnly: true,
+      writeTool: 'apply_ds_setup',
+      requiredBeforeWrite: 'Explicit designer approval after reviewing this detailed preview.',
+      message: 'Nothing has been changed in Figma. Do not call apply_ds_setup until the designer approves this build plan.',
+    },
+    collections: [
+      {
+        name: collections.primitives || (primitivesData && primitivesData.collectionName) || '1. Primitives',
+        purpose: 'Primitive color, type, spacing, shadow, font, and scrim values.',
+        willCreate: {
+          colors: _asArray(primitivesData && primitivesData.colors).length,
+          floats: primitiveFloats.length,
+          strings: _asArray(primitivesData && primitivesData.strings).length,
+          scrims: _asArray(primitivesData && primitivesData.scrims).length,
+        },
+        sampleTokens: {
+          colors: _sample(primitivesData && primitivesData.colors, 8).map(item => ({ token: item.name, value: item.hex })),
+          spacing: spacingPrimitiveExamples,
+          typography: typePrimitiveExamples,
+          shadow: shadowPrimitiveExamples,
+          fonts: _sample(primitivesData && primitivesData.strings, 4).map(item => ({ token: item.name, value: item.value })),
+        },
+      },
+      {
+        name: collections.color || '2. Color',
+        purpose: 'Light/Dark semantic color aliases.',
+        modes: ['Light', 'Dark'],
+        willCreate: {
+          semanticPairs: semanticPairs.length,
+          iconTokens: semanticIcons.length,
+        },
+        grammar: semantics.convention || color.convention || 'not specified',
+        sampleAliases: semanticPairs.slice(0, 8).map(_semanticPairExample),
+      },
+      {
+        name: collections.typography || '3. Typography',
+        purpose: 'Responsive typography variables and local text styles.',
+        modes: breakpoints,
+        willCreate: {
+          variableRoles: typographyRoles.length,
+          localTextStyles: typographyRoles.length,
+        },
+        preset: ds && ds.typography && ds.typography.scalePreset || 'material3',
+        families: ds && ds.typography && ds.typography.families || {},
+        sampleStyles: textStyleExamples,
+      },
+      {
+        name: collections.spacing || '4. Spacing',
+        purpose: 'Responsive semantic spacing, radius, and border-width variables.',
+        modes: breakpoints,
+        willCreate: {
+          semanticSpacingTokens: spacingSemanticNames.length,
+          radiusTokens: Object.keys(ds && ds.spacing && ds.spacing.radius || {}).length,
+          borderWidthTokens: Object.keys(ds && ds.spacing && ds.spacing.border || {}).length,
+        },
+        sampleTokens: _semanticSpacingExamples(ds, 10),
+        radius: ds && ds.spacing && ds.spacing.radius || {},
+        borderWidth: ds && ds.spacing && ds.spacing.border || {},
+      },
+      {
+        name: collections.elevation || '5. Elevation',
+        purpose: 'Elevation variables and local effect styles.',
+        modes: ['Default'],
+        willCreate: {
+          shadowPrimitiveVariables: shadowPrimitives.length,
+          effectStyles: 6,
+        },
+        sampleTokens: shadowPrimitiveExamples,
+      },
+    ],
+    colorSystem: {
+      algorithm: color.algorithm || 'oklch',
+      rampStrategy: color.rampStrategy || 'standard',
+      scale: color.scale || '50-950',
+      contrastAlgorithm: color.contrastAlgorithm || 'wcag',
+      rampCount: ramps.length,
+      rampNames,
+      steps: rampSteps,
+      brandInputs: _asArray(color.brand).map(item => ({
+        name: item.name,
+        role: item.role || null,
+        hex: item.hex,
+        step: item.step == null ? 'auto' : item.step,
+      })),
+      generatedAssumptions: _asArray(derivedColors).map(item => ({
+        role: item.role,
+        name: item.name,
+        hex: item.hex,
+        note: item.note,
+      })),
+    },
+    semanticColor: {
+      grammar: semantics.convention || color.convention || 'not specified',
+      pairCount: semanticPairs.length,
+      iconCount: semanticIcons.length,
+      contrast: {
+        algorithm: color.contrastAlgorithm || 'wcag',
+        failedPairs: failCount || 0,
+        apcaFailedPairs: apcaFailCount || 0,
+        repairOptions: contrastRepairOptions,
+        message: contrastRepairOptions.length
+          ? 'Contrast failed for one or more semantic pairs. Review these exact alias suggestions before changing Figma.'
+          : (failCount ? 'Contrast failed, but no nearest passing alias suggestion was found. Ask for a designer color decision.' : 'All semantic pairs pass.'),
+      },
+      samplePairs: semanticPairs.slice(0, 10).map(_semanticPairExample),
+      sampleIcons: semanticIcons.slice(0, 8).map(icon => ({
+        token: icon.token,
+        Light: icon.Light,
+        Dark: icon.Dark,
+      })),
+    },
+    spacingSystem: {
+      base: ds && ds.grid && ds.grid.base || 8,
+      modes: breakpoints,
+      primitiveSteps: spacingPrimitiveExamples,
+      semanticGroups: _groupCountsByPrefix(spacingSemanticNames),
+      sampleSemanticTokens: _semanticSpacingExamples(ds, 12),
+    },
+    typographySystem: {
+      preset: ds && ds.typography && ds.typography.scalePreset || 'material3',
+      modes: breakpoints,
+      families: ds && ds.typography && ds.typography.families || {},
+      roleCount: typographyRoles.length,
+      sampleRoles: typographyRoles.slice(0, 10).map(role => ({
+        role,
+        sizes: _asArray(typographyScale[role] && typographyScale[role].sizes).slice(),
+        lineHeights: _asArray(typographyScale[role] && typographyScale[role].lineHeights).slice(),
+        weight: typographyScale[role] && typographyScale[role].weight,
+      })),
+      textStyleExamples,
+    },
+    assumptions: [
+      `${color.algorithm || 'oklch'} color ramps on ${color.scale || '50-950'} scale.`,
+      `${color.contrastAlgorithm || 'wcag'} contrast validation for semantic color pairs.`,
+      `${ds && ds.grid && ds.grid.base || 8}px spacing base with ${breakpoints.join(', ')} responsive modes.`,
+      `${ds && ds.typography && ds.typography.scalePreset || 'material3'} typography preset unless the designer supplied a custom scale.`,
+    ].concat(
+      _asArray(derivedColors).map(item => `Generated ${item.role} ramp "${item.name}" from the supplied brand colors.`)
+    ),
+    warnings: []
+      .concat(_asArray(staleSemantics).map(item => `Stale semantic reference: ${item.token} -> ${item.ref}`))
+      .concat(_asArray(needsDesignerInput).map(item => `Needs designer input before build: ${item}`)),
+  };
+}
+
 function _writeSetupPreview(configPath, ds) {
   if (!ds || !ds.color || !Array.isArray(ds.color.ramps)) return null;
   const previewPath = path.join(path.dirname(configPath), 'design-system.preview.svg');
@@ -137,12 +391,23 @@ function handlePrepareDsConfig({ config_path }) {
   const {
     spacingPreview, computed, needsDesignerInput,
     colorRampsSummary, colorRampsTable, contrastAnnotations, derivedColors,
-    semanticSummary, semanticPairsTable, iconTable, failCount, apcaFailCount,
+    semanticSummary, semanticPairsTable, iconTable, failCount, apcaFailCount, pairSuggestions,
     staleSemantics,
     primitivesData,
     ds,
   } = result;
   const previewPath = _writeSetupPreview(resolvedPath, ds);
+  const setupApprovalPreview = _buildSetupApprovalPreview({
+    ds,
+    primitivesData,
+    failCount,
+    apcaFailCount,
+    staleSemantics: staleSemantics || [],
+    needsDesignerInput: needsDesignerInput || [],
+    derivedColors,
+    pairSuggestions,
+  });
+  const contrastRepairOptions = _contrastRepairOptions(pairSuggestions);
   let designMdPath = null;
   try {
     if (designMdIntake && designMdIntake.writeDesignMdFromDsConfig) {
@@ -171,6 +436,8 @@ function handlePrepareDsConfig({ config_path }) {
       iconTable,
       failCount,
       apcaFailCount:  apcaFailCount || 0,
+      pairSuggestions: pairSuggestions || {},
+      contrastRepairOptions,
       staleSemantics: staleSemantics || [],
       ready:          failCount === 0 && (!staleSemantics || staleSemantics.length === 0),
     },
@@ -184,6 +451,7 @@ function handlePrepareDsConfig({ config_path }) {
         scrims:  primitivesData.scrims.length,
       },
     },
+    setupApprovalPreview,
     setupPreview: previewPath ? { svgPath: previewPath } : null,
     designMdExport: designMdPath ? { path: designMdPath } : null,
     configPath: resolvedPath,
@@ -191,7 +459,7 @@ function handlePrepareDsConfig({ config_path }) {
     message: staleWarning
       ? staleWarning
       : failCount > 0
-      ? `Config computed but ${failCount} semantic pair(s) fail contrast. Fix before building.`
+      ? `Config computed but ${failCount} semantic pair(s) fail contrast. Review semanticPairs.contrastRepairOptions before building.`
       : needsDesignerInput.length > 0
       ? `Config computed but ${needsDesignerInput.join(', ')} need designer input before building.`
       : 'Config ready. Call apply_ds_setup to build all collections in Figma.',

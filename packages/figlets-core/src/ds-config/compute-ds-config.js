@@ -13,7 +13,9 @@ function computeDsConfig(ds) {
   const base   = DS.grid?.base || 8;
   const modes  = DS.breakpoints?.modes || ['Mobile', 'Tablet', 'Desktop'];
   const tier   = DS.breakpoints?.tier  || 3;
-  const preset = DS.typography?.scalePreset || 'material3';
+  const preset = normalizeTypographyPreset(DS.typography?.scalePreset || 'material3');
+  if (!DS.typography) DS.typography = {};
+  DS.typography.scalePreset = preset;
 
   const computed    = [];
   const needsDesignerInput = [];
@@ -171,7 +173,6 @@ function computeDsConfig(ds) {
       needsDesignerInput.push('DS.typography.scale');
       preview.push(`  DS.typography.scale — ⚠ unknown preset "${preset}", needs designer input`);
     } else {
-      if (!DS.typography) DS.typography = {};
       DS.typography.scale = scale;
       computed.push('DS.typography.scale');
       preview.push(`  DS.typography.scale — ${Object.keys(scale).length} roles (${preset})`);
@@ -191,4 +192,34 @@ function computeDsConfig(ds) {
   };
 }
 
-module.exports = { computeDsConfig };
+function normalizeTypographyPreset(value) {
+  const text = String(value || '').trim().toLowerCase().replace(/[_\s]+/g, '-');
+  if (!text) return 'material3';
+  if ([
+    'material',
+    'material-3',
+    'material3',
+    'material-scale',
+    'material-type-scale',
+    'material-design',
+    'material-design-3',
+    'material-design-type-scale',
+    'm3',
+    'standard',
+    'default',
+  ].includes(text)) {
+    return 'material3';
+  }
+  if (['fluid', 'fluid-scale', 'responsive', 'responsive-scale'].includes(text)) {
+    return 'fluid';
+  }
+  if (['compact', 'compact-scale', 'dense', 'condensed'].includes(text)) {
+    return 'compact';
+  }
+  if (['custom', 'explicit', 'custom-scale'].includes(text)) {
+    return 'custom';
+  }
+  return text;
+}
+
+module.exports = { computeDsConfig, normalizeTypographyPreset };

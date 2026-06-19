@@ -202,6 +202,30 @@ assert.strictEqual(
   "apply_ds_config_contrast_repairs",
   "setup approval preview should name the local config contrast repair tool"
 );
+assert.ok(
+  failingContrast.semanticPairs.contrastRepairOptions.length >= 2,
+  "fixture should expose multiple contrast repairs so mixed valid+stale apply is tested"
+);
+
+const staleContrastInput = JSON.parse(JSON.stringify(failingContrast.semanticPairs.contrastRepairApplyInput));
+staleContrastInput.repairs[0].suggestedText = "color/not-in-current-suggestions/123";
+const beforeStaleAttempt = fs.readFileSync(failingContrastPath, "utf8");
+const staleContrastRepair = handleApplyDsConfigContrastRepairs(staleContrastInput);
+assert.ok(staleContrastRepair.error, "stale contrast repair payload should be rejected");
+assert.strictEqual(
+  staleContrastRepair.appliedCount,
+  0,
+  "mixed valid+stale contrast repair payload should report no applied writes"
+);
+assert.ok(
+  staleContrastRepair.blocked.some(item => item.reason.includes("current prepare_ds_config contrast suggestions") || item.reason.includes("Current prepared suggestion")),
+  "stale contrast repair should explain that the option is not current"
+);
+assert.strictEqual(
+  fs.readFileSync(failingContrastPath, "utf8"),
+  beforeStaleAttempt,
+  "stale or mixed-invalid contrast repair payload must leave the config file unchanged"
+);
 
 const approvedContrastRepair = handleApplyDsConfigContrastRepairs(
   failingContrast.semanticPairs.contrastRepairApplyInput

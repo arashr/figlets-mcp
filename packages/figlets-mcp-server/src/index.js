@@ -16,7 +16,12 @@ const {
 const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
 const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require("./tools/update-ds-primitives.js");
 const { inspectDsSetupGapsTool, handleInspectDsSetupGaps } = require("./tools/inspect-ds-setup-gaps.js");
-const { inspectDsTokenGapsTool, handleInspectDsTokenGaps } = require("./tools/inspect-ds-token-gaps.js");
+const {
+  inspectDsTokenGapsTool,
+  applyDsConfigResponsiveSpacingRepairsTool,
+  handleInspectDsTokenGaps,
+  handleApplyDsConfigResponsiveSpacingRepairs,
+} = require("./tools/inspect-ds-token-gaps.js");
 const { updateDsTokensTool, handleUpdateDsTokens } = require("./tools/update-ds-tokens.js");
 const { applyDsFoundationRepairsTool, handleApplyDsFoundationRepairs } = require("./tools/apply-ds-foundation-repairs.js");
 const { applyDsSetupRepairsTool, handleApplyDsSetupRepairs } = require("./tools/apply-ds-setup-repairs.js");
@@ -597,6 +602,37 @@ server.tool(
   }
 );
 
+// --- apply_ds_config_responsive_spacing_repairs ---
+server.tool(
+  applyDsConfigResponsiveSpacingRepairsTool.name,
+  applyDsConfigResponsiveSpacingRepairsTool.description,
+  {
+    config_path: z.string().describe("Absolute path to the file-scoped design-system.config.js."),
+    updates: z.array(z.object({
+      token: z.string().describe("Semantic spacing token name copied from inspect_ds_token_gaps, e.g. space/layout/lg."),
+      values: z.record(z.string(), z.number()).describe("Approved mode-name map of numeric responsive values."),
+      expectedCurrentValues: z.record(z.string(), z.number()).optional().describe("Optional current mode values copied from inspect_ds_token_gaps for stale-config validation."),
+    })).describe("Approved responsive spacing config updates copied from inspect_ds_token_gaps.repairPlan.reviewOptions[id=responsive-spacing-values].configRepairApplyInput.updates.")
+  },
+  async (args) => {
+    try {
+      const result = handleApplyDsConfigResponsiveSpacingRepairs(args || {});
+      if (result && result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
 // --- update_ds_tokens ---
 server.tool(
   updateDsTokensTool.name,
@@ -765,7 +801,8 @@ server.tool(
   applySemanticNamingConsolidationTool.description,
   {
     grammar: z.enum(["paired-context", "element-first", "intent-emphasis", "component-scoped", "custom"]).optional().describe("Optional grammar copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput."),
-    canonicalConvention: z.enum(["surface-based", "role-based"]).describe("The naming convention approved by the designer."),
+    canonicalConvention: z.enum(["surface-based", "role-based"]).optional().describe("Legacy naming convention approved by the designer, when the planner emitted one."),
+    decisions: z.array(z.any()).optional().describe("Optional exact decisions copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput for grammar-aware true-duplicate plans."),
     renameVariables: z.array(z.object({
       id: z.string().describe("Figma variable id copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput."),
       expectedCurrentName: z.string().describe("Current variable name expected when the designer approved the plan."),

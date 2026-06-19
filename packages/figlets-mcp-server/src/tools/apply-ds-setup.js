@@ -15,6 +15,66 @@ const path = require('path');
 const { getConfigPathGuardError } = require('../utils/paths.js');
 const { requestBridgePost } = require('../bridges/bridge-request.js');
 
+function _loadDsConfigCore() {
+  try {
+    return require("../figlets-core.js").dsConfig;
+  } catch (_) {
+    return require("../figlets-core.js").dsConfig;
+  }
+}
+
+function _contrastRepairOptions(pairSuggestions) {
+  const options = [];
+  for (const key of Object.keys(pairSuggestions || {})) {
+    const suggestion = pairSuggestions[key] || {};
+    const parts = String(key || "").split("|");
+    const background = parts[0] || suggestion.bg || "";
+    const text = parts[1] || suggestion.text || "";
+    for (const mode of Object.keys(suggestion)) {
+      const suggestedText = suggestion[mode];
+      if (!background || !text || !suggestedText) continue;
+      options.push({
+        id: `${background}|${text}|${mode}`,
+        background,
+        text,
+        mode,
+        suggestedText,
+      });
+    }
+  }
+  return options;
+}
+
+function _staleSemanticRefs(ds) {
+  const staleSemantics = [];
+  const utilityRampNames = new Set(['neutral', 'red', 'green', 'yellow', 'blue', 'neutral-variant']);
+  const configuredBrandNames = new Set((((ds || {}).color || {}).brand || []).map(item => item && item.name).filter(Boolean));
+  function check(token, ref) {
+    if (!ref || typeof ref !== 'string') return;
+    const match = ref.match(/^color\/([^/]+)\/\d+$/);
+    if (!match) return;
+    const rampName = match[1];
+    if (!configuredBrandNames.has(rampName) && !utilityRampNames.has(rampName)) {
+      staleSemantics.push({ token, ref, currentName: rampName });
+    }
+  }
+  const semantics = ds && ds.color && ds.color.semantics || {};
+  for (const pair of (semantics.pairs || [])) {
+    const pairLabel = pair.bg || 'pair';
+    if (pair.Light) { check(pairLabel, pair.Light.bg); check(pairLabel, pair.Light.text); }
+    if (pair.Dark) { check(pairLabel, pair.Dark.bg); check(pairLabel, pair.Dark.text); }
+  }
+  for (const icon of (semantics.icons || [])) {
+    check(icon.token, icon.Light);
+    check(icon.token, icon.Dark);
+  }
+  for (const item of (semantics.unpaired || [])) {
+    check(item.token || 'unpaired', item.Light);
+    check(item.token || 'unpaired', item.Dark);
+  }
+  return staleSemantics;
+}
+
 function _writeDesignMdExport(configPath) {
   try {
     let designMdIntake;
@@ -35,12 +95,8 @@ function handleApplyDsSetup({ config_path }) {
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return Promise.resolve(guardError);
 
-  let readDsConfig;
-  try {
-    ({ readDsConfig } = require("../figlets-core.js").dsConfig);
-  } catch (e) {
-    ({ readDsConfig } = require("../figlets-core.js").dsConfig);
-  }
+  const core = _loadDsConfigCore();
+  const readDsConfig = core.readDsConfig;
 
   let ds;
   try {
@@ -61,6 +117,33 @@ function handleApplyDsSetup({ config_path }) {
   if (!ds.spacing || !ds.primitives) {
     return Promise.resolve({
       error: 'Config is missing spacing/primitives data. Run prepare_ds_config first.',
+    });
+  }
+
+  let validation;
+  try {
+    validation = core.validateSemanticPairs(ds);
+  } catch (err) {
+    return Promise.resolve({
+      error: `Config is not ready to build: ${err.message}`,
+      hint: 'Run prepare_ds_config and resolve setup readiness findings before apply_ds_setup.',
+    });
+  }
+  if ((validation.failCount || 0) > 0) {
+    return Promise.resolve({
+      error: `Config is not ready to build: ${validation.failCount} semantic color pair(s) fail contrast.`,
+      failCount: validation.failCount,
+      contrastRepairTool: 'apply_ds_config_contrast_repairs',
+      contrastRepairOptions: _contrastRepairOptions(validation.pairSuggestions || {}),
+      hint: 'Apply approved semanticPairs.contrastRepairOptions to the config, rerun prepare_ds_config, and call apply_ds_setup only when readyToBuild is true.',
+    });
+  }
+  const staleSemantics = _staleSemanticRefs(validation.ds || ds);
+  if (staleSemantics.length) {
+    return Promise.resolve({
+      error: `Config is not ready to build: ${staleSemantics.length} semantic reference(s) point to ramps outside the current brand/utility palette.`,
+      staleSemantics,
+      hint: 'Run prepare_ds_config and resolve stale semantic references before apply_ds_setup.',
     });
   }
 

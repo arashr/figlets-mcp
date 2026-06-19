@@ -48,6 +48,11 @@ const applySemanticNamingConsolidationTool = {
         type: "string",
         enum: ["surface-based", "role-based"]
       },
+      decisions: {
+        type: "array",
+        items: { type: "object" },
+        description: "Optional exact decisions copied from the planner for grammar-aware true-duplicate consolidation."
+      },
       renameVariables: {
         type: "array",
         items: {
@@ -67,7 +72,7 @@ const applySemanticNamingConsolidationTool = {
         }
       }
     },
-    required: ["canonicalConvention", "renameVariables"],
+    required: ["renameVariables"],
     additionalProperties: false
   }
 };
@@ -169,9 +174,73 @@ function _deprecatedName(name) {
   return `_deprecated/${String(name || "").replace(/^\/+/, "")}`;
 }
 
-function _canonicalNamesForConflict(conflict, canonicalConvention) {
+function _normalizeDecisionRole(role) {
+  const value = String(role || "").trim();
+  if (value === "foreground" || value === "fg") return "text";
+  if (value === "background") return "bg";
+  return value;
+}
+
+function _normalizeDecisionContext(context) {
+  const value = String(context || "").trim();
+  if (value.indexOf("on-") === 0) return value.slice(3);
+  return value;
+}
+
+function _decisionMatchesConflict(decision, conflict) {
+  if (!decision || !conflict) return false;
+  if (decision.family && conflict.family && String(decision.family) !== String(conflict.family)) return false;
+  if (decision.role && conflict.role && _normalizeDecisionRole(decision.role) !== _normalizeDecisionRole(conflict.role)) return false;
+  if (decision.assetRole && conflict.role && _normalizeDecisionRole(decision.assetRole) !== _normalizeDecisionRole(conflict.role)) return false;
+  if (decision.context && conflict.context && _normalizeDecisionContext(decision.context) !== _normalizeDecisionContext(conflict.context)) return false;
+  const decisionTokens = []
+    .concat(decision.tokens || [])
+    .concat(decision.duplicateTokens || [])
+    .concat(decision.duplicates || [])
+    .concat(decision.canonicalToken || [])
+    .concat(decision.canonicalName || [])
+    .filter(Boolean)
+    .map(String)
+    .sort();
+  if (!decisionTokens.length) return true;
+  const conflictTokens = conflict.tokens && Array.isArray(conflict.tokens.duplicates)
+    ? conflict.tokens.duplicates.slice().sort()
+    : [];
+  if (!conflictTokens.length) return true;
+  return decisionTokens.every(token => conflictTokens.indexOf(token) !== -1);
+}
+
+function _decisionForConflict(conflict, decisions) {
+  if (conflict && conflict.conflictType !== "true-duplicate") return null;
+  return (Array.isArray(decisions) ? decisions : []).find(decision => _decisionMatchesConflict(decision, conflict)) || null;
+}
+
+function _decisionCanonicalName(decision) {
+  if (!decision) return null;
+  return String(decision.canonicalToken || decision.canonicalName || decision.keep || "").trim() || null;
+}
+
+function _decisionDuplicateNames(decision, conflict) {
+  const canonicalName = _decisionCanonicalName(decision);
+  const explicit = []
+    .concat(decision && (decision.duplicateTokens || decision.duplicates || decision.deprecate || []) || [])
+    .filter(Boolean)
+    .map(item => String(item).trim())
+    .filter(Boolean);
+  if (explicit.length) return explicit.filter(name => name !== canonicalName);
+  const candidates = conflict && conflict.tokens && Array.isArray(conflict.tokens.duplicates)
+    ? conflict.tokens.duplicates
+    : [];
+  return candidates.filter(name => name !== canonicalName);
+}
+
+function _canonicalNamesForConflict(conflict, canonicalConvention, decisions) {
   const tokens = conflict.tokens || {};
-  if (conflict.conflictType === "true-duplicate") return [];
+  if (conflict.conflictType === "true-duplicate") {
+    const decision = _decisionForConflict(conflict, decisions);
+    const canonicalName = _decisionCanonicalName(decision);
+    return canonicalName ? [canonicalName] : [];
+  }
   if (canonicalConvention === "surface-based") return Array.isArray(tokens.surfaceBased) ? tokens.surfaceBased.slice() : [];
   if (conflict.conflictType === "invalid-on-background") {
     return Array.isArray(tokens.relatedFill) ? tokens.relatedFill.slice() : [];
@@ -179,9 +248,12 @@ function _canonicalNamesForConflict(conflict, canonicalConvention) {
   return Array.isArray(tokens.roleBased) ? tokens.roleBased.slice() : [];
 }
 
-function _duplicateNamesForConflict(conflict, canonicalConvention) {
+function _duplicateNamesForConflict(conflict, canonicalConvention, decisions) {
   const tokens = conflict.tokens || {};
-  if (conflict.conflictType === "true-duplicate") return [];
+  if (conflict.conflictType === "true-duplicate") {
+    const decision = _decisionForConflict(conflict, decisions);
+    return decision ? _decisionDuplicateNames(decision, conflict) : [];
+  }
   if (canonicalConvention === "surface-based") return Array.isArray(tokens.roleBased) ? tokens.roleBased.slice() : [];
   if (conflict.conflictType === "invalid-on-background") {
     return []
@@ -193,9 +265,10 @@ function _duplicateNamesForConflict(conflict, canonicalConvention) {
 
 function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}) {
   const grammar = input.grammar || null;
-  const canonicalConvention = input.canonicalConvention || (grammar === "paired-context" ? "role-based" : "surface-based");
-  if (canonicalConvention !== "surface-based" && canonicalConvention !== "role-based") {
-    return { error: "Provide grammar or canonicalConvention. canonicalConvention must be either surface-based or role-based when used." };
+  const decisions = Array.isArray(input.decisions) ? input.decisions : [];
+  const canonicalConvention = input.canonicalConvention || (grammar === "paired-context" ? "role-based" : null);
+  if (canonicalConvention && canonicalConvention !== "surface-based" && canonicalConvention !== "role-based") {
+    return { error: "canonicalConvention must be either surface-based or role-based when used." };
   }
   const variables = Array.isArray(figmaData.variables) ? figmaData.variables : [];
   const collections = Array.isArray(figmaData.collections) ? figmaData.collections : [];
@@ -208,12 +281,38 @@ function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}
   const unsafeActions = [];
 
   for (const conflict of conflicts) {
-    const canonicalNames = _canonicalNamesForConflict(conflict, canonicalConvention);
-    const duplicateNames = _duplicateNamesForConflict(conflict, canonicalConvention);
+    if (!canonicalConvention && conflict.conflictType !== "true-duplicate") {
+      const blocked = {
+        family: conflict.family,
+        role: conflict.role,
+        grammar,
+        canonicalToken: null,
+        duplicateTokens: []
+          .concat((conflict.tokens && conflict.tokens.surfaceBased) || [])
+          .concat((conflict.tokens && conflict.tokens.roleBased) || []),
+        status: "blocked",
+        reason: "This naming conflict needs an explicit grammar/context decision before Figlets can plan compatibility renames. Figlets will not default a non-paired grammar into surface-based or role-based cleanup.",
+      };
+      items.push(blocked);
+      unsafeActions.push({
+        family: conflict.family,
+        role: conflict.role,
+        reason: blocked.reason,
+        tokens: blocked.duplicateTokens,
+      });
+      continue;
+    }
+    const canonicalNames = _canonicalNamesForConflict(conflict, canonicalConvention, decisions);
+    const duplicateNames = _duplicateNamesForConflict(conflict, canonicalConvention, decisions);
     const canonicalName = canonicalNames.find(name => varsByName.has(name)) || canonicalNames[0] || null;
     const canonical = canonicalName ? varsByName.get(canonicalName) : null;
 
     if (!canonical) {
+      const reason = conflict.conflictType === "true-duplicate"
+        ? "True duplicate cleanup needs a designer-approved canonical token. Pass a decision such as { canonicalToken, duplicateTokens } from the conflict's candidate list."
+        : canonicalConvention === "role-based" && conflict.conflictType === "invalid-on-background"
+          ? "Role-based consolidation for an invalid bg/on-* token needs an existing color/fill/* canonical variable. Figlets will not keep invalid bg/on-* as canonical."
+          : "No canonical variable exists in the chosen convention.";
       items.push({
         family: conflict.family,
         role: conflict.role,
@@ -221,9 +320,14 @@ function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}
         canonicalToken: canonicalName,
         duplicateTokens: duplicateNames,
         status: "blocked",
-        reason: canonicalConvention === "role-based" && conflict.conflictType === "invalid-on-background"
-          ? "Role-based consolidation for an invalid bg/on-* token needs an existing color/fill/* canonical variable. Figlets will not keep invalid bg/on-* as canonical."
-          : "No canonical variable exists in the chosen convention.",
+        reason,
+      });
+      unsafeActions.push({
+        family: conflict.family,
+        role: conflict.role,
+        token: canonicalName,
+        duplicateTokens: duplicateNames,
+        reason,
       });
       continue;
     }
@@ -254,6 +358,23 @@ function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}
           reason: "Deleting duplicate semantic variables can break existing Figma bindings and is not part of this safe consolidation surface.",
         }],
       };
+      if (conflict.conflictType === "true-duplicate" && equivalence.status !== "equivalent") {
+        unsafeActions.push({
+          token: duplicate.name,
+          canonicalName: canonical.name,
+          family: conflict.family,
+          role: conflict.role,
+          expectedEquivalence: {
+            status: equivalence.status,
+            modeCount: equivalence.modeCount,
+            mismatchCount: equivalence.mismatchCount,
+          },
+          reason: "True duplicate values differ from the approved canonical token. Figlets will not hide a value difference by deprecating one name; review whether these are actually different roles or update values first.",
+        });
+        item.status = "manual-review";
+        items.push(item);
+        continue;
+      }
       if (renameSafe) {
         const rename = {
           id: duplicate.id,
@@ -298,8 +419,10 @@ function planSemanticNamingConsolidationFromFigmaData(figmaData = {}, input = {}
     }
   }
 
-  const applyInput = { canonicalConvention, renameVariables };
+  const applyInput = { renameVariables };
+  if (canonicalConvention) applyInput.canonicalConvention = canonicalConvention;
   if (grammar) applyInput.grammar = grammar;
+  if (decisions.length) applyInput.decisions = decisions;
   const designerLines = [];
   if (renameVariables.length) {
     designerLines.push(`Figlets can safely rename ${renameVariables.length} duplicate semantic variable${renameVariables.length === 1 ? "" : "s"} into a compatibility namespace after you approve.`);
@@ -438,22 +561,28 @@ function _freshPlanMembershipError(args, renameVariables) {
   }
   const freshPlan = planSemanticNamingConsolidationFromFigmaData(dataSource.figmaData, {
     canonicalConvention: args.canonicalConvention,
+    grammar: args.grammar,
+    decisions: args.decisions,
   });
   if (freshPlan && freshPlan.error) return freshPlan.error;
   const planned = (((freshPlan || {}).repairPlan || {}).applyInput || {}).renameVariables || [];
   const plannedKeys = new Set(planned.map(_renamePlanKey));
   for (const item of renameVariables) {
     if (!plannedKeys.has(_renamePlanKey(item))) {
-      return `Rename ${item.expectedCurrentName} -> ${item.newName} is not present in the fresh semantic naming consolidation plan for ${args.canonicalConvention}. Rerun plan_ds_semantic_naming_consolidation and pass repairPlan.applyInput unchanged or filter entries without editing them.`;
+      return `Rename ${item.expectedCurrentName} -> ${item.newName} is not present in the fresh semantic naming consolidation plan for ${args.canonicalConvention || args.grammar || "the approved decisions"}. Rerun plan_ds_semantic_naming_consolidation and pass repairPlan.applyInput unchanged or filter entries without editing them.`;
     }
   }
   return null;
 }
 
 function handleApplySemanticNamingConsolidation(args = {}) {
-  const canonicalConvention = args.canonicalConvention;
-  if (canonicalConvention !== "surface-based" && canonicalConvention !== "role-based") {
-    return Promise.resolve({ error: "canonicalConvention must be either surface-based or role-based." });
+  const canonicalConvention = args.canonicalConvention || null;
+  const grammar = args.grammar || null;
+  if (canonicalConvention && canonicalConvention !== "surface-based" && canonicalConvention !== "role-based") {
+    return Promise.resolve({ error: "canonicalConvention must be either surface-based or role-based when provided." });
+  }
+  if (!canonicalConvention && !grammar) {
+    return Promise.resolve({ error: "Provide canonicalConvention or grammar copied from plan_ds_semantic_naming_consolidation.repairPlan.applyInput." });
   }
   const renameVariables = _normalizeRenameVariables(args.renameVariables);
   if (!renameVariables.length) {
@@ -473,6 +602,7 @@ function handleApplySemanticNamingConsolidation(args = {}) {
   }
   return requestBridgePost("/request-semantic-naming-consolidation", {
     canonicalConvention,
+    grammar,
     renameVariables,
   }, {
     bridgeHookFile: args.bridgeHookFile,

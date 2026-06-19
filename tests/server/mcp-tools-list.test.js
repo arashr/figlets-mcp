@@ -73,6 +73,7 @@ module.exports = new Promise((resolve, reject) => {
       assert.ok(toolNames.indexOf("create_ds_config_from_intake") >= 0, "tools/list should expose intake-to-config setup tool");
       assert.ok(toolNames.indexOf("apply_ds_config_contrast_repairs") >= 0, "tools/list should expose pre-build config contrast repair tool");
       assert.ok(toolNames.indexOf("inspect_ds_token_gaps") >= 0, "tools/list should expose inspect_ds_token_gaps");
+      assert.ok(toolNames.indexOf("apply_ds_config_responsive_spacing_repairs") >= 0, "tools/list should expose responsive spacing config repair tool");
       assert.ok(toolNames.indexOf("update_ds_tokens") >= 0, "tools/list should expose update_ds_tokens");
       const updateDsTokens = listResponse.result.tools.find(tool => tool.name === "update_ds_tokens");
       assert.ok(

@@ -552,6 +552,13 @@ try {
     assert.ok(prepareStep.designerMessage.includes("setupApprovalPreview"));
     assert.ok(prepareStep.designerMessage.includes("concrete collection groups"));
     assert.ok(prepareStep.designerMessage.includes("no-write approval boundary"));
+    const contrastRepairStep = guide.workflow.steps.find(step => step.id === "repair-setup-contrast-config");
+    assert.strictEqual(contrastRepairStep.tool, "apply_ds_config_contrast_repairs");
+    assert.strictEqual(contrastRepairStep.localConfigWrite, true);
+    assert.strictEqual(contrastRepairStep.requiresApproval, true);
+    assert.ok(contrastRepairStep.designerMessage.includes("rerun prepare_ds_config"));
+    assert.ok(guide.workflow.errors.some(item => item.includes("contrastRepairOptions")));
+    assert.ok(guide.workflow.errors.some(item => item.includes("apply_ds_config_contrast_repairs")));
 
     assertDocsIncludeAny(
       DESIGNER_DOC_PATHS,

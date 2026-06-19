@@ -8,7 +8,11 @@ const { inspectComponentTool, handleInspectComponent } = require("./tools/inspec
 const { syncFigmaDataTool, handleSyncFigmaData } = require("./tools/sync-figma-data.js");
 const { auditTokensTool, handleAuditTokens } = require("./tools/audit-tokens.js");
 const { buildShowcaseTool, handleBuildShowcase } = require("./tools/build-showcase.js");
-const { handlePrepareDsConfig } = require("./tools/prepare-ds-config.js");
+const {
+  applyDsConfigContrastRepairsTool,
+  handlePrepareDsConfig,
+  handleApplyDsConfigContrastRepairs,
+} = require("./tools/prepare-ds-config.js");
 const { handleApplyDsSetup } = require("./tools/apply-ds-setup.js");
 const { updateDsPrimitivesTool, handleUpdateDsPrimitives } = require("./tools/update-ds-primitives.js");
 const { inspectDsSetupGapsTool, handleInspectDsSetupGaps } = require("./tools/inspect-ds-setup-gaps.js");
@@ -393,13 +397,46 @@ server.tool(
 // --- prepare_ds_config ---
 server.tool(
   "prepare_ds_config",
-  "Run the DS computation pipeline on an existing design-system.config.js: generates spacing scale, color ramps with WCAG/APCA analysis, validates semantic bg+text pair contrast, prepares primitives, and returns setupApprovalPreview with concrete collection groups, modes, sample aliases, token examples, assumptions, and the no-write approval boundary. Must be called after intake and before apply_ds_setup.",
+  "Run the DS computation pipeline on an existing design-system.config.js: generates spacing scale, color ramps with WCAG/APCA analysis, validates semantic bg+text pair contrast, prepares primitives, and returns setupApprovalPreview with concrete collection groups, modes, sample aliases, token examples, assumptions, structured contrastRepairOptions, and the no-write approval boundary. Must be called after intake and before apply_ds_setup.",
   {
     config_path: z.string().describe("Absolute path to design-system.config.js (created during intake).")
   },
   async (args) => {
     try {
       const result = handlePrepareDsConfig(args);
+      if (result.error) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${err.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- apply_ds_config_contrast_repairs ---
+server.tool(
+  applyDsConfigContrastRepairsTool.name,
+  applyDsConfigContrastRepairsTool.description,
+  {
+    config_path: z.string().describe("Absolute path to the prepared file-scoped design-system.config.js."),
+    repairs: z.array(z.object({
+      id: z.string().optional(),
+      mode: z.string().describe("Semantic mode to update, usually Light or Dark."),
+      background: z.string().describe("Semantic background token from the approved repair option."),
+      text: z.string().describe("Semantic text token from the approved repair option."),
+      suggestedText: z.string().describe("Approved primitive text alias target from the repair option."),
+    }).passthrough()).describe("Designer-approved repair options copied from prepare_ds_config.semanticPairs.contrastRepairOptions or setupApprovalPreview.semanticColor.contrast.repairOptions."),
+  },
+  async (args) => {
+    try {
+      const result = handleApplyDsConfigContrastRepairs(args);
       if (result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

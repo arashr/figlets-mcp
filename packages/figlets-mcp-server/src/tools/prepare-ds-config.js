@@ -16,6 +16,38 @@ const path = require('path');
 const fs = require('fs');
 const { getConfigPathGuardError } = require('../utils/paths.js');
 
+const applyDsConfigContrastRepairsTool = {
+  name: 'apply_ds_config_contrast_repairs',
+  description: 'Apply designer-approved pre-build semantic contrast alias suggestions to the file-scoped design-system.config.js only. This never mutates Figma. Pass options from prepare_ds_config.semanticPairs.contrastRepairOptions after approval, then rerun prepare_ds_config before apply_ds_setup.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      config_path: {
+        type: 'string',
+        description: 'Absolute path to the prepared file-scoped design-system.config.js.'
+      },
+      repairs: {
+        type: 'array',
+        description: 'Designer-approved repair option objects copied from prepare_ds_config.semanticPairs.contrastRepairOptions or setupApprovalPreview.semanticColor.contrast.repairOptions.',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            mode: { type: 'string', description: 'Semantic mode to update, usually Light or Dark.' },
+            background: { type: 'string', description: 'Semantic background token from the approved repair option.' },
+            text: { type: 'string', description: 'Semantic text token from the approved repair option.' },
+            suggestedText: { type: 'string', description: 'Approved primitive text alias target from the repair option.' }
+          },
+          required: ['mode', 'background', 'text', 'suggestedText'],
+          additionalProperties: true
+        }
+      }
+    },
+    required: ['config_path', 'repairs'],
+    additionalProperties: false
+  }
+};
+
 function _escapeXml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -115,7 +147,7 @@ function _textStyleName(pattern, role) {
   return stylePattern.replace('{role}', roleName).replace('{size}', size);
 }
 
-function _buildSetupApprovalPreview({ ds, primitivesData, failCount, apcaFailCount, staleSemantics, needsDesignerInput, derivedColors, pairSuggestions }) {
+function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount, apcaFailCount, staleSemantics, needsDesignerInput, derivedColors, pairSuggestions }) {
   const collections = ds && ds.collections ? ds.collections : {};
   const breakpoints = ds && ds.breakpoints && Array.isArray(ds.breakpoints.modes) && ds.breakpoints.modes.length
     ? ds.breakpoints.modes.slice()
@@ -255,7 +287,9 @@ function _buildSetupApprovalPreview({ ds, primitivesData, failCount, apcaFailCou
         algorithm: color.contrastAlgorithm || 'wcag',
         failedPairs: failCount || 0,
         apcaFailedPairs: apcaFailCount || 0,
+        repairTool: applyDsConfigContrastRepairsTool.name,
         repairOptions: contrastRepairOptions,
+        repairApplyInput: contrastRepairOptions.length ? { config_path: configPath, repairs: contrastRepairOptions } : null,
         message: contrastRepairOptions.length
           ? 'Contrast failed for one or more semantic pairs. Review these exact alias suggestions before changing Figma.'
           : (failCount ? 'Contrast failed, but no nearest passing alias suggestion was found. Ask for a designer color decision.' : 'All semantic pairs pass.'),
@@ -398,6 +432,7 @@ function handlePrepareDsConfig({ config_path }) {
   } = result;
   const previewPath = _writeSetupPreview(resolvedPath, ds);
   const setupApprovalPreview = _buildSetupApprovalPreview({
+    configPath: resolvedPath,
     ds,
     primitivesData,
     failCount,
@@ -437,7 +472,11 @@ function handlePrepareDsConfig({ config_path }) {
       failCount,
       apcaFailCount:  apcaFailCount || 0,
       pairSuggestions: pairSuggestions || {},
+      contrastRepairTool: applyDsConfigContrastRepairsTool.name,
       contrastRepairOptions,
+      contrastRepairApplyInput: contrastRepairOptions.length
+        ? { config_path: resolvedPath, repairs: contrastRepairOptions }
+        : null,
       staleSemantics: staleSemantics || [],
       ready:          failCount === 0 && (!staleSemantics || staleSemantics.length === 0),
     },
@@ -466,4 +505,174 @@ function handlePrepareDsConfig({ config_path }) {
   };
 }
 
-module.exports = { handlePrepareDsConfig };
+function _loadDsConfigCore() {
+  try {
+    return require("../figlets-core.js").dsConfig;
+  } catch (_) {
+    return require("../figlets-core.js").dsConfig;
+  }
+}
+
+function _normalizeRepair(raw) {
+  const item = raw && typeof raw === 'object' ? raw : {};
+  let background = String(item.background || '').trim();
+  let text = String(item.text || '').trim();
+  let mode = String(item.mode || '').trim();
+  if ((!background || !text || !mode) && item.id) {
+    const parts = String(item.id).split('|');
+    if (!background) background = parts[0] || '';
+    if (!text) text = parts[1] || '';
+    if (!mode) mode = parts[2] || '';
+  }
+  return {
+    id: item.id ? String(item.id) : `${background}|${text}|${mode}`,
+    background,
+    text,
+    mode,
+    suggestedText: String(item.suggestedText || '').trim(),
+  };
+}
+
+function _findSemanticPair(ds, background, text) {
+  const pairs = ds && ds.color && ds.color.semantics && Array.isArray(ds.color.semantics.pairs)
+    ? ds.color.semantics.pairs
+    : [];
+  return pairs.find(pair => pair && pair.bg === background && pair.text === text) || null;
+}
+
+function handleApplyDsConfigContrastRepairs(args) {
+  args = args || {};
+  const resolvedPath = path.resolve(args.config_path || '');
+  const guardError = getConfigPathGuardError(resolvedPath);
+  if (guardError) return guardError;
+
+  const repairs = Array.isArray(args.repairs) ? args.repairs.map(_normalizeRepair) : [];
+  if (!repairs.length) {
+    return {
+      error: 'No contrast repairs were provided.',
+      hint: 'Pass one or more objects from prepare_ds_config.semanticPairs.contrastRepairOptions after designer approval.',
+    };
+  }
+
+  const core = _loadDsConfigCore();
+  let ds;
+  try {
+    ds = core.readDsConfig(resolvedPath);
+  } catch (err) {
+    return {
+      error: err.message,
+      hint: 'Run create_ds_config_from_intake and prepare_ds_config before applying setup contrast repairs.',
+    };
+  }
+
+  if (!ds || !ds.color || !Array.isArray(ds.color.ramps)) {
+    return {
+      error: 'Config is missing DS.color.ramps.',
+      hint: 'Run prepare_ds_config first so Figlets can validate current contrast suggestions.',
+    };
+  }
+  if (!ds.color.semantics || !Array.isArray(ds.color.semantics.pairs)) {
+    return {
+      error: 'Config is missing DS.color.semantics.pairs.',
+      hint: 'Run prepare_ds_config first so Figlets can generate semantic pairs and contrast repair options.',
+    };
+  }
+
+  let validated;
+  try {
+    validated = core.validateSemanticPairs(ds);
+  } catch (err) {
+    return {
+      error: err.message,
+      hint: 'Run prepare_ds_config first and use the fresh contrastRepairOptions payload.',
+    };
+  }
+  const currentSuggestions = validated && validated.pairSuggestions ? validated.pairSuggestions : {};
+  const applied = [];
+  const blocked = [];
+
+  for (const repair of repairs) {
+    if (!repair.background || !repair.text || !repair.mode || !repair.suggestedText) {
+      blocked.push({
+        repair,
+        reason: 'Repair must include background, text, mode, and suggestedText from prepare_ds_config.',
+      });
+      continue;
+    }
+    if (!/^color\/[^/]+\/.+/.test(repair.suggestedText)) {
+      blocked.push({
+        repair,
+        reason: 'suggestedText must be a color variable reference from prepare_ds_config.',
+      });
+      continue;
+    }
+    const key = `${repair.background}|${repair.text}`;
+    const expectedSuggestion = currentSuggestions[key] && currentSuggestions[key][repair.mode];
+    if (expectedSuggestion !== repair.suggestedText) {
+      blocked.push({
+        repair,
+        reason: expectedSuggestion
+          ? `Current prepared suggestion is ${expectedSuggestion}, not ${repair.suggestedText}.`
+          : 'This repair is not in the current prepare_ds_config contrast suggestions.',
+      });
+      continue;
+    }
+    const pair = _findSemanticPair(ds, repair.background, repair.text);
+    if (!pair || !pair[repair.mode]) {
+      blocked.push({
+        repair,
+        reason: 'Semantic pair or mode was not found in DS.color.semantics.pairs.',
+      });
+      continue;
+    }
+    const before = pair[repair.mode].text;
+    if (before === repair.suggestedText) {
+      applied.push({
+        id: repair.id,
+        background: repair.background,
+        text: repair.text,
+        mode: repair.mode,
+        before,
+        after: repair.suggestedText,
+        unchanged: true,
+      });
+      continue;
+    }
+    pair[repair.mode].text = repair.suggestedText;
+    applied.push({
+      id: repair.id,
+      background: repair.background,
+      text: repair.text,
+      mode: repair.mode,
+      before,
+      after: repair.suggestedText,
+    });
+  }
+
+  if (blocked.length) {
+    return {
+      error: 'One or more approved contrast repairs could not be validated against the current prepared config.',
+      configPath: resolvedPath,
+      appliedCount: 0,
+      blocked,
+      hint: 'Rerun prepare_ds_config and pass the fresh semanticPairs.contrastRepairOptions payload.',
+    };
+  }
+
+  core.writeDsConfig(resolvedPath, ds);
+  return {
+    configPath: resolvedPath,
+    configWritten: true,
+    figmaChanged: false,
+    appliedCount: applied.length,
+    applied,
+    nextTool: 'prepare_ds_config',
+    message: 'Applied approved semantic contrast repairs to the local design-system.config.js only. No Figma changes were made. Rerun prepare_ds_config and continue to apply_ds_setup only when readyToBuild is true.',
+  };
+}
+
+module.exports = {
+  applyDsConfigContrastRepairsTool,
+  handlePrepareDsConfig,
+  handleApplyDsConfigContrastRepairs,
+};

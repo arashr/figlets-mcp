@@ -28,7 +28,10 @@ fs.writeFileSync(configPath, `const DS = {
   }
 };\n`, "utf8");
 
-const { handlePrepareDsConfig } = require("../../packages/figlets-mcp-server/src/tools/prepare-ds-config.js");
+const {
+  handleApplyDsConfigContrastRepairs,
+  handlePrepareDsConfig,
+} = require("../../packages/figlets-mcp-server/src/tools/prepare-ds-config.js");
 const result = handlePrepareDsConfig({ config_path: configPath });
 
 assert.ok(!result.error, "prepare_ds_config should succeed");
@@ -184,5 +187,41 @@ assert.deepStrictEqual(
   failingContrast.setupApprovalPreview.semanticColor.contrast.repairOptions,
   "setup approval preview should carry the same contrast repair options"
 );
+assert.deepStrictEqual(
+  failingContrast.semanticPairs.contrastRepairApplyInput.repairs,
+  failingContrast.semanticPairs.contrastRepairOptions,
+  "prepare should expose a copy-ready config contrast repair apply payload"
+);
+assert.deepStrictEqual(
+  failingContrast.setupApprovalPreview.semanticColor.contrast.repairApplyInput,
+  failingContrast.semanticPairs.contrastRepairApplyInput,
+  "setup approval preview should expose the same copy-ready contrast repair apply payload"
+);
+assert.strictEqual(
+  failingContrast.setupApprovalPreview.semanticColor.contrast.repairTool,
+  "apply_ds_config_contrast_repairs",
+  "setup approval preview should name the local config contrast repair tool"
+);
+
+const approvedContrastRepair = handleApplyDsConfigContrastRepairs(
+  failingContrast.semanticPairs.contrastRepairApplyInput
+);
+assert.ok(!approvedContrastRepair.error, "approved contrast repair should apply to local config");
+assert.strictEqual(approvedContrastRepair.figmaChanged, false, "contrast config repair must not mutate Figma");
+assert.strictEqual(approvedContrastRepair.configWritten, true, "contrast config repair should write the local config");
+assert.strictEqual(
+  approvedContrastRepair.appliedCount,
+  failingContrast.semanticPairs.contrastRepairOptions.length,
+  "contrast config repair should apply every approved repair option"
+);
+assert.ok(
+  approvedContrastRepair.message.includes("Rerun prepare_ds_config"),
+  "contrast config repair should send agents back through prepare before build"
+);
+
+const afterContrastRepair = handlePrepareDsConfig({ config_path: failingContrastPath });
+assert.ok(!afterContrastRepair.error, "reprepare after approved contrast repair should succeed");
+assert.strictEqual(afterContrastRepair.semanticPairs.failCount, 0, "approved contrast repair should clear setup contrast failures");
+assert.strictEqual(afterContrastRepair.readyToBuild, true, "reprepared config should be build-ready after contrast repair");
 
 fs.rmSync(tmp, { recursive: true, force: true });

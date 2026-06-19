@@ -9,6 +9,7 @@ const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 
 const MUTATING_TOOLS = new Set([
   "apply_ds_setup",
+  "apply_ds_config_contrast_repairs",
   "apply_ds_foundation_repairs",
   "apply_ds_setup_repairs",
   "apply_ds_semantic_naming_consolidation",
@@ -72,6 +73,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "inspect_ds_setup_gaps.repairPlan.applyInput → apply_ds_setup_repairs for approved setup repairs, alias updates, and missing role creations; preserve each aliases object exactly",
     "inspect_ds_setup_gaps.repairPlan.optionalApplyInput → apply_ds_setup_repairs for separately approved optional convention-level role creation; preserve each aliases object exactly",
     "inspect_ds_setup_gaps.semanticColorGrammar / semanticNamingConflicts + designer's grammar/context decision → plan_ds_semantic_naming_consolidation, then approved repairPlan.applyInput → apply_ds_semantic_naming_consolidation for rename-only compatibility consolidation",
+    "prepare_ds_config.semanticPairs.contrastRepairOptions → apply_ds_config_contrast_repairs for designer-approved pre-build local config contrast alias repairs, then rerun prepare_ds_config before apply_ds_setup",
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
     "inspect_ds_token_gaps.repairPlan.previewInput / repairPlan.applyInput → update_ds_tokens for config-backed non-color token dry-run preview and narrow approved apply",
@@ -88,6 +90,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "If schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh structured repairPlan.applyInput instead of retrying invented arguments.",
     "If repairPlan.optionalApplyInput is non-empty, present it as optional bulk creation that needs separate approval.",
     "If inspect_ds_setup_gaps reports semanticNamingConflicts or semanticNamingAdvisories, report the inferred semanticColorGrammar first. Do not ask for a binary surface-based/role-based choice by default. Ask for a grammar/context decision only when the designer wants naming cleanup, then call plan_ds_semantic_naming_consolidation; show every proposed rename line and every advisory; only after approval pass repairPlan.applyInput unchanged to apply_ds_semantic_naming_consolidation.",
+    "For new design-system setup, if prepare_ds_config reports semantic color contrast failures with contrastRepairOptions, show the exact options, ask approval, call apply_ds_config_contrast_repairs with the approved option objects, then rerun prepare_ds_config. Do not stop at 'the setup surface cannot apply this' and do not run apply_ds_setup until readyToBuild is true.",
     "For health-check, run inspect_ds_token_gaps as a read-only suggestion step before summarizing the design-system audit. Surface token-gap findings by category, including missing foundation collection/mode suggestions, without forcing the designer into a separate token-gap workflow.",
     "When health-check finds both semantic setup repairs and token-gap suggestions, the next-step prompt must offer both boundaries. Do not make semantic color repair or naming consolidation the only clean next step if inspect_ds_token_gaps found foundation modes, primitive gaps, or semantic token repairs.",
     "End health-check repair summaries with a numbered repair choice menu: one numbered option per available repair category, then a numbered all option, then a numbered specific/other option where the designer can name exact fixes. Category choices must use designer goal language such as fix, review, plan, add, or create; do not use implementation terms like dry-run in the menu label. If a selected category needs a dry-run preview before writing, say the designer will review the proposed changes and be asked for confirmation before anything changes. Category choices must preserve separate write boundaries; all must state exactly which ready safe categories it includes and which optional, designer-decision, or separate-boundary items it excludes.",
@@ -524,6 +527,15 @@ const WORKFLOWS = [
         designerMessage: "I'll compute the token plan and show setupApprovalPreview with concrete collection groups, modes, semantic aliases, sample tokens, assumptions, and the no-write approval boundary before touching Figma.",
       },
       {
+        id: "repair-setup-contrast-config",
+        kind: "write",
+        tool: "apply_ds_config_contrast_repairs",
+        localConfigWrite: true,
+        requiresApproval: true,
+        conditional: "Only when prepare_ds_config returns semanticPairs.contrastRepairOptions.",
+        designerMessage: "If the preview finds contrast failures with exact repair options, I'll show those options, ask approval, apply only the approved local config alias repair, then rerun prepare_ds_config before any Figma write.",
+      },
+      {
         id: "approve-build",
         kind: "confirmation",
         designerMessage: "After you review the detailed setupApprovalPreview, I'll ask whether the plan looks right and whether you're ready to build it in Figma.",
@@ -543,7 +555,8 @@ const WORKFLOWS = [
       "Do not invent missing brand colors, typography, spacing, contrast, or light/dark choices and ask for build confirmation.",
       "Do not draft a full setup proposal, palette, or token plan before intake. Ask questions first; only offer lightweight multiple-choice options unless the designer asks for suggestions.",
       "If prepare_ds_config reports failing semantic color contrast, show semanticPairs.contrastRepairOptions or setupApprovalPreview.semanticColor.contrast.repairOptions as exact suggestions instead of asking whether to keep revising the palette broadly.",
-      "If prepare_ds_config reports contrast failures, fix or confirm the config before running apply_ds_setup.",
+      "If the designer approves a prepare_ds_config contrastRepairOptions item, call apply_ds_config_contrast_repairs with the approved option object(s), then rerun prepare_ds_config.",
+      "If prepare_ds_config reports contrast failures, fix the local config through approved contrastRepairOptions or get a different explicit designer alias before running apply_ds_setup.",
     ],
   },
   {

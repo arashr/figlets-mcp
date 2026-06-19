@@ -2881,3 +2881,20 @@ Fixes shipped:
 
 - Added a failing semantic-pair fixture to `tests/server/prepare-ds-config-tool.test.js`.
 - Full supported-runtime suite passed: `103/103`.
+
+### [2026-06-19 — BNN-58 setup contrast apply-path checkpoint]
+
+**Objective completed:** Removed the setup dead end where a designer approved a `prepare_ds_config` contrast suggestion but the agent could not apply it before build.
+
+**What changed:**
+
+- Added `apply_ds_config_contrast_repairs`, a local config-only setup repair tool. It accepts approved objects copied from `prepare_ds_config.semanticPairs.contrastRepairOptions` / `setupApprovalPreview.semanticColor.contrast.repairOptions`, revalidates them against the current prepared config, updates only `DS.color.semantics.pairs[*].Light/Dark.text`, and never mutates Figma.
+- `prepare_ds_config` now includes copy-ready `contrastRepairApplyInput` payloads with `config_path` in both `semanticPairs` and `setupApprovalPreview`.
+- Agent Interface, root docs, and adapter docs now instruct the setup flow to show exact contrast options, call `apply_ds_config_contrast_repairs` after approval, rerun `prepare_ds_config`, and only then allow `apply_ds_setup` when `readyToBuild` is true.
+
+**Boundary:** This is a pre-build local config repair boundary, not a bridge/Figma mutation and not a generic palette-revision tool. Stale or hand-authored suggestions are rejected and require rerunning `prepare_ds_config`.
+
+**Validation:**
+
+- `tests/server/prepare-ds-config-tool.test.js` now covers the full failing-contrast → approved local config repair → reprepare clean path.
+- Full supported-runtime suite passed: `npm test` → `103/103`.

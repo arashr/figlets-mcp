@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-19] Setup contrast suggestions need a local config apply boundary
+
+**Decision:** When `prepare_ds_config` finds semantic color contrast failures and computes exact nearest passing text-alias suggestions, Figlets must expose both the suggestion and a designer-approved local config repair path before any Figma build. The path is `prepare_ds_config.semanticPairs.contrastRepairOptions` / `setupApprovalPreview.semanticColor.contrast.repairOptions` → approved `apply_ds_config_contrast_repairs` → rerun `prepare_ds_config` → `apply_ds_setup` only if `readyToBuild === true`.
+
+**Why:** Manual setup testing showed agents could present an exact suggestion such as changing dark `color/text/on-brand` from `color/neutral/950` to `color/neutral/50`, receive approval, and then dead-end because no setup config repair tool existed. That made a deterministic pre-build fix feel like a product limitation and forced the designer back into config-editing language.
+
+**Boundary:** `apply_ds_config_contrast_repairs` writes only the file-scoped local `design-system.config.js`; it never mutates Figma. It revalidates approved repair objects against the current prepared contrast suggestions before writing, rejects stale or invented aliases, and sends agents back through `prepare_ds_config` rather than directly into `apply_ds_setup`.
+
+**Implementation:** `prepare_ds_config` now returns copy-ready `contrastRepairApplyInput` payloads with `config_path`. The Agent Interface and adapter/root docs now make the repair step explicit in the new design-system setup flow.
+
+---
+
 ## [2026-06-14] New design-system intake creates local config through a Figlets tool
 
 **Decision:** After targeted setup intake, agents must call `create_ds_config_from_intake` before `prepare_ds_config`. The tool may write the file-scoped local Figlets config, but it never mutates Figma and must return `needsDesignerInput` when concrete setup choices are missing.

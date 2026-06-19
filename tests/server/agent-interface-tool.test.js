@@ -61,6 +61,7 @@ try {
     assert.strictEqual(start.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(start.hardRules.bulkDesignSystemUpdatesAreInScope, true);
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_setup_repairs")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("optionalApplyInput")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("missingCapabilityNotes")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_primitives")));
@@ -78,6 +79,8 @@ try {
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("pass that exact object")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("schema validation rejects")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("contrastRepairOptions")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Do not replace the exact entries with token names")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")));
@@ -194,6 +197,8 @@ try {
     assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "create_ds_config_from_intake"));
     assert.ok(guide.steps.some(step => step.id === "create-config-from-intake" && step.tool === "create_ds_config_from_intake" && step.localConfigWrite === true));
     assert.ok(guide.steps.some(step => step.id === "optional-design-md-intake" && step.optional === true && step.designerMessage.includes("just drop it in")));
+    assert.ok(guide.steps.some(step => step.id === "repair-setup-contrast-config" && step.tool === "apply_ds_config_contrast_repairs" && step.localConfigWrite === true && step.requiresApproval === true));
+    assert.ok(guide.errors.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(guide.errors.some(item => item.includes("Do not invent missing brand colors")));
     assert.ok(guide.errors.some(item => item.includes("create_ds_config_from_intake")));
     const handled = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });

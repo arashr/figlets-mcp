@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-19] Generated setup contrast must self-correct before preview
+
+**Decision:** During new design-system setup, Figlets-generated semantic color pairs must converge to passing contrast before `prepare_ds_config` asks the designer to approve a Figma build. If the template/default alias for a generated pair fails and the validator can find a nearest passing alias in the same intended ramp, Figlets applies that alias in the generated config immediately and does not surface a designer repair prompt.
+
+**Why:** Designers are not choosing the raw generated ramp steps or semantic pair aliases during first-pass setup. Showing “Figlets generated a contrast issue; approve this fix” makes the setup flow feel broken and moves internal generation cleanup onto the designer.
+
+**Boundary:** This only applies to generated semantic pairs, where `DS.color.semantics.pairs` was absent before validation. Explicit/manual semantic pairs in an existing config are still preserved and may produce `semanticPairs.contrastRepairOptions` / `apply_ds_config_contrast_repairs`, because changing those values is a designer-owned config repair.
+
+**Implementation:** `validateSemanticPairs` now mirrors the existing icon auto-adjust behavior for generated text pairs: when a generated pair fails the chosen contrast gate and a passing alias exists, it rewrites that generated mode to the passing alias, recomputes contrast, and suppresses the repair suggestion for that pair.
+
 ## [2026-06-19] Setup contrast suggestions need a local config apply boundary
 
 **Decision:** When `prepare_ds_config` finds semantic color contrast failures and computes exact nearest passing text-alias suggestions, Figlets must expose both the suggestion and a designer-approved local config repair path before any Figma build. The path is `prepare_ds_config.semanticPairs.contrastRepairOptions` / `setupApprovalPreview.semanticColor.contrast.repairOptions` → approved `apply_ds_config_contrast_repairs` → rerun `prepare_ds_config` → `apply_ds_setup` only if `readyToBuild === true`.

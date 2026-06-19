@@ -409,6 +409,36 @@ function makeDs(overrides) {
   assert.ok(result.summary.includes('wcag'), 'summary should mention wcag');
 }
 
+// Generated semantic pairs should converge before the setup preview. A medium
+// brand anchor can make the template's dark on-brand foreground fail WCAG; that
+// is Figlets-generated state, so the validator should pick the nearest passing
+// alias instead of asking the designer to approve a repair.
+{
+  let ds = computeDsConfig(makeDs({
+    color: {
+      scale: '50-950',
+      algorithm: 'oklch',
+      convention: 'role-based',
+      contrastAlgorithm: 'wcag',
+      brand: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }],
+    },
+  })).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  const brandPair = result.ds.color.semantics.pairs.find(pair => pair.bg === 'color/bg/brand');
+  assert.strictEqual(result.failCount, 0, 'generated pink brand semantic pairs should self-correct to pass WCAG');
+  assert.strictEqual(
+    brandPair.Dark.text,
+    'color/neutral/50',
+    'generated dark on-brand text should auto-adjust to the nearest passing neutral alias'
+  );
+  assert.deepStrictEqual(
+    result.pairSuggestions['color/bg/brand|color/text/on-brand'],
+    { Light: null, Dark: null },
+    'auto-corrected generated pairs should not surface a designer repair suggestion'
+  );
+}
+
 // Every resolved pair carries both `wcagPass` and `apcaPass` regardless of the
 // chosen algorithm, and `pass` is gated to whichever algorithm was selected.
 {

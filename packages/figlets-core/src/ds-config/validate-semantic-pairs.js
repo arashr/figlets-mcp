@@ -364,7 +364,7 @@ function validateSemanticPairs(ds) {
     for (const [mode, side] of [['Light', tmpl.L], ['Dark', tmpl.D]]) {
       if (!side) { row[mode] = undefined; continue; }
       let bgRes  = resolve(side.bg);
-      const txtRes = resolve(side.text);
+      let txtRes = resolve(side.text);
 
       if (!bgRes || !txtRes) {
         row[mode] = { bg: side.bg, text: side.text, error: 'ramp not found in DS.color.ramps' };
@@ -407,10 +407,24 @@ function validateSemanticPairs(ds) {
       let suggestion = null;
 
       if (pass === false) {
-        failCount++;
         const scorer    = algorithm === 'apca' ? apcaScorer : wcagScorer;
         const threshold = algorithm === 'apca' ? tmpl.minLc : tmpl.min;
         suggestion = suggestStepFor(side.text, bgRes.rgb, scorer, threshold);
+        if (!existingPairs && suggestion) {
+          const adjusted = resolve(suggestion.path.replace(/^color\//, ''));
+          if (adjusted) {
+            txtRes = adjusted;
+            const adjustedTxtLum = luminance(adjusted.rgb);
+            ratio = wcagRatio(bgLum, adjustedTxtLum);
+            lc = apcaLc(adjusted.rgb, bgRes.rgb);
+            const adjustedGate = gatePass(ratio, lc, tmpl);
+            wcagPass = adjustedGate.wcagPass;
+            apcaPass = adjustedGate.apcaPass;
+            pass = adjustedGate.pass;
+            side.text = suggestion.path.replace(/^color\//, '');
+          }
+        }
+        if (pass === false) failCount++;
       }
 
       const wcagLabel = ratio >= 7 ? 'AAA' : ratio >= 4.5 ? 'AA' : ratio >= 3 ? '3:1' : 'fail';
@@ -426,7 +440,7 @@ function validateSemanticPairs(ds) {
         apcaPass,
         pass,
         bgClamped: bgRes.clamped, txtClamped: txtRes.clamped,
-        suggestion: suggestion ? { path: suggestion.path, wcag: Math.round(suggestion.ratio * 10) / 10, score: suggestion.score } : null,
+        suggestion: pass === false && suggestion ? { path: suggestion.path, wcag: Math.round(suggestion.ratio * 10) / 10, score: suggestion.score } : null,
       };
     }
 

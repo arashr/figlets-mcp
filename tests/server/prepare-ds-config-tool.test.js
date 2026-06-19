@@ -134,6 +134,49 @@ assert.ok(
   "preview should not truncate multi-segment roles when pattern omits {size}"
 );
 
+const generatedPinkPath = path.join(tmp, "generated-pink.config.js");
+fs.writeFileSync(generatedPinkPath, `const DS = {
+  project: { name: 'Generated Pink Preview', platform: 'Web app' },
+  grid: { base: 4 },
+  breakpoints: { modes: ['Mobile', 'Tablet', 'Desktop'], tier: 3 },
+  typography: { scalePreset: 'fluid', families: { sans: 'JetBrains Mono', mono: 'JetBrains Mono' } },
+  color: {
+    scale: '50-950',
+    algorithm: 'oklch',
+    contrastAlgorithm: 'wcag',
+    convention: 'role-based',
+    brand: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }]
+  },
+  naming: { textStyle: 'type/{role}/{size}', fontFamily: 'font/{variant}' },
+  collections: {
+    primitives: '1. Primitives',
+    color: '2. Color',
+    typography: '3. Typography',
+    spacing: '4. Spacing',
+    elevation: '5. Elevation'
+  }
+};\n`, "utf8");
+const generatedPink = handlePrepareDsConfig({ config_path: generatedPinkPath });
+assert.ok(!generatedPink.error, "generated pink setup config should prepare");
+assert.strictEqual(generatedPink.semanticPairs.failCount, 0, "generated setup pairs should not surface self-inflicted contrast repairs");
+assert.strictEqual(generatedPink.readyToBuild, true, "generated pink setup should be ready to build after first prepare");
+assert.deepStrictEqual(
+  generatedPink.semanticPairs.contrastRepairOptions,
+  [],
+  "generated setup pairs should not ask the designer to approve Figlets' own contrast correction"
+);
+assert.ok(
+  generatedPink.setupApprovalPreview.collections.some(collection =>
+    collection.name === "2. Color" &&
+    collection.sampleAliases.some(alias =>
+      alias.background === "color/bg/brand" &&
+      alias.text === "color/text/on-brand" &&
+      alias.Dark && alias.Dark.text === "color/neutral/50"
+    )
+  ),
+  "setup preview should show the corrected generated dark on-brand alias"
+);
+
 const failingContrastPath = path.join(tmp, "failing-contrast.config.js");
 fs.writeFileSync(failingContrastPath, `const DS = {
   project: { name: 'Failing Contrast Preview', platform: 'Web app' },

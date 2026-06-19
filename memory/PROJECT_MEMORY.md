@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-19 — BNN-58 follow-up; generated setup contrast self-corrects]
+
+**Status:** Manual setup testing showed `prepare_ds_config` could generate a new design-system preview with a self-inflicted contrast failure, such as dark `color/text/on-brand` on `color/bg/brand`, then ask the designer to approve Figlets' own repair before build.
+
+**Decision:** First-pass generated setup should be smooth. Generated semantic pairs are Figlets-owned defaults, so they should auto-converge to passing contrast before the setup preview. Designer-approved contrast repair remains only for explicit/manual config semantics that Figlets must preserve.
+
+**Shipped behavior:** `validateSemanticPairs` now auto-applies the nearest passing text alias for generated semantic pairs when the template alias fails the chosen contrast gate. The generated pair is recomputed and no repair suggestion is surfaced. Existing/manual `DS.color.semantics.pairs` still preserve values and expose `semanticPairs.contrastRepairOptions` when they fail.
+
+**Tests:** Added core coverage for a pink brand anchor whose generated dark on-brand foreground now becomes `color/neutral/50`, and server coverage that `prepare_ds_config` is `readyToBuild` with no contrast repair options in that setup scenario.
+
+---
+
 ### [2026-06-13 — BNN-58 implementation; setup approval preview expanded]
 
 **Status:** BNN-58 was opened from manual v1 testing after new design-system creation showed only a high-level preview before asking to create variable collections in Figma.

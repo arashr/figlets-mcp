@@ -643,6 +643,7 @@ try {
       "designer_mode_entrypoint",
       "concrete_goal_routing",
       "workflow_tool_sequence",
+      "health_check_summary_boundary",
       "setup_intake_boundary",
       "setup_proposal_boundary",
       "approval_boundary",

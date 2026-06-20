@@ -58,7 +58,7 @@ const figletsWorkflowGuideTool = {
 const figletsHealthCheckTool = {
   name: "figlets_health_check",
   description:
-    "Read-only Agent Interface health check for agent readiness and Figlets workflow safety. Returns structured, host-neutral feedback about entrypoint/routing, workflow sequencing, setup intake and proposal boundaries, approval boundaries, repair payload sources, product-gap handling, stale host risk, and bridge readiness. Does not inspect or mutate Figma.",
+    "Read-only Agent Interface health check for agent readiness and Figlets workflow safety. Returns structured, host-neutral feedback about entrypoint/routing, workflow sequencing, health-check summary completeness, setup intake and proposal boundaries, approval boundaries, repair payload sources, product-gap handling, stale host risk, and bridge readiness. Does not inspect or mutate Figma.",
   inputSchema: {
     type: "object",
     properties: {
@@ -132,6 +132,20 @@ function _hasCompletedTools(completedTools, requiredTools) {
   return requiredTools.every(tool => completed.has(tool));
 }
 
+function _missingCompletedTools(completedTools, requiredTools) {
+  const completed = new Set(_array(completedTools));
+  return requiredTools.filter(tool => !completed.has(tool));
+}
+
+function _isSummaryTool(toolName) {
+  const normalized = _normalizeBoundary(toolName);
+  return normalized === "summarize-results" ||
+    normalized === "report-results" ||
+    normalized === "report-health-check" ||
+    normalized === "final-answer" ||
+    normalized === "answer-user";
+}
+
 function _statusRank(status) {
   if (status === "fail") return 4;
   if (status === "warn") return 3;
@@ -192,6 +206,14 @@ function _chooseNextAction(checks, fallback) {
       type: "call_tool",
       tool: actionable.recommendedTool || "figlets_workflow_guide",
       argsSource: actionable.recommendedTool ? "workflow guide step order" : "context.workflowId",
+      message: actionable.nextAction,
+    };
+  }
+  if (actionable.id === "health_check_summary_boundary") {
+    return {
+      type: "call_tool",
+      tool: actionable.recommendedTool || "inspect_ds_setup_gaps",
+      argsSource: actionable.recommendedPayloadSource || "remaining health-check read steps",
       message: actionable.nextAction,
     };
   }
@@ -305,6 +327,14 @@ function handleFigletsHealthCheck(args) {
   const pendingWriteTool = workflowState.pendingWriteTool || (requestedKind === "write" ? requestedTool : "");
   const approvalStatus = workflowState.approvalStatus || "unknown";
   const writeRequested = requestedKind === "write" || !!pendingWriteTool;
+  const summaryRequested = _isSummaryTool(requestedTool) ||
+    _truthy(workflowState.summaryRequested) ||
+    _truthy(workflowState.readyToSummarize) ||
+    _truthy(requestedAction.claimsClean) ||
+    _truthy(requestedAction.claimsSemanticColorsClean) ||
+    _truthy(requestedAction.claimsTokenGapsClean) ||
+    _truthy(requestedAction.claimsLayerBindingsClean) ||
+    _truthy(workflowState.claimsClean);
 
   if (mode === "designer" && !_truthy(workflowState.figletsStartCalled)) {
     checks.push(_makeCheck({
@@ -367,7 +397,7 @@ function handleFigletsHealthCheck(args) {
 
   if (workflow) {
     const firstMissingReadStep = (workflow.steps || [])
-      .filter(step => step.kind === "read" && step.tool)
+      .filter(step => step.kind === "read" && step.tool && !step.optional)
       .find(step => completedTools.indexOf(step.tool) === -1);
     if (pendingWriteTool && firstMissingReadStep) {
       checks.push(_makeCheck({
@@ -389,6 +419,64 @@ function handleFigletsHealthCheck(args) {
         message: `Workflow metadata found for ${workflow.id}.`,
         evidence: [`completedTools=${completedTools.join(",")}`],
         nextAction: "Follow figlets_workflow_guide step order.",
+      }));
+    }
+
+    if (workflow.id === "health-check") {
+      const missingInitialHealthTools = _missingCompletedTools(completedTools, HEALTH_CHECK_VERIFY_TOOLS);
+      const claimsLayerBindingsClean = _truthy(requestedAction.claimsLayerBindingsClean) ||
+        _truthy(workflowState.claimsLayerBindingsClean);
+      const missingBindingAudit = completedTools.indexOf("qa_binding_audit") === -1;
+      const mustBlockSummary = summaryRequested && (
+        missingInitialHealthTools.length > 0 ||
+        (claimsLayerBindingsClean && missingBindingAudit)
+      );
+      if (mustBlockSummary) {
+        const firstMissing = missingInitialHealthTools[0] ||
+          (claimsLayerBindingsClean && missingBindingAudit ? "qa_binding_audit" : "inspect_ds_setup_gaps");
+        const evidence = [
+          `summaryRequested=${Boolean(summaryRequested)}`,
+          missingInitialHealthTools.length ? `missingHealthTools=${missingInitialHealthTools.join(",")}` : null,
+          claimsLayerBindingsClean && missingBindingAudit ? "claimsLayerBindingsClean=true but qa_binding_audit not completed" : null,
+        ].filter(Boolean);
+        checks.push(_makeCheck({
+          id: "health_check_summary_boundary",
+          title: "Health-check summary boundary",
+          status: "fail",
+          severity: "error",
+          message: "A health-check summary cannot call semantic colors, token gaps, or layer bindings clean before the relevant Figlets read checks have run.",
+          evidence,
+          nextAction: claimsLayerBindingsClean && missingBindingAudit && !missingInitialHealthTools.length
+            ? "Run qa_binding_audit before saying visible/page layer bindings are clean. If binding QA is out of scope, say the health check covers variables and token gaps only."
+            : "Run the remaining read-only health-check steps before summarizing: sync_figma_data, detect_design_system, audit_tokens, inspect_ds_setup_gaps, and inspect_ds_token_gaps. In particular, do not say semantic colors are clean unless inspect_ds_setup_gaps completed and its fresh result has no setup, contrast, icon contrast, broken-alias, or naming findings.",
+          recommendedTool: firstMissing,
+          recommendedPayloadSource: claimsLayerBindingsClean && missingBindingAudit && !missingInitialHealthTools.length
+            ? "qa_binding_audit read-only result"
+            : "full health-check read sequence",
+        }));
+      } else {
+        checks.push(_makeCheck({
+          id: "health_check_summary_boundary",
+          title: "Health-check summary boundary",
+          status: missingInitialHealthTools.length && !summaryRequested ? "info" : "pass",
+          severity: "info",
+          message: missingInitialHealthTools.length && !summaryRequested
+            ? "Health-check read steps are still in progress; do not summarize yet."
+            : "Health-check summary prerequisites are satisfied for the supplied state.",
+          evidence: missingInitialHealthTools.length ? [`missingHealthTools=${missingInitialHealthTools.join(",")}`] : [],
+          nextAction: "Only call the design system clean from the fresh outputs of audit_tokens, inspect_ds_setup_gaps, and inspect_ds_token_gaps. Use qa_binding_audit separately before claiming visible/page layer bindings are clean.",
+          recommendedTool: missingInitialHealthTools[0] || null,
+        }));
+      }
+    } else {
+      checks.push(_makeCheck({
+        id: "health_check_summary_boundary",
+        title: "Health-check summary boundary",
+        status: "info",
+        severity: "info",
+        message: "Health-check summary completeness applies only to the health-check workflow.",
+        evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+        nextAction: "No health-check summary completeness check needed for this workflow.",
       }));
     }
 
@@ -488,6 +576,16 @@ function handleFigletsHealthCheck(args) {
       evidence: _nonEmpty(workflowId) ? [`workflowId=${workflowId}`] : [],
       nextAction: "Call figlets_route_intent and figlets_workflow_guide to establish the workflow.",
       recommendedTool: "figlets_workflow_guide",
+    }));
+
+    checks.push(_makeCheck({
+      id: "health_check_summary_boundary",
+      title: "Health-check summary boundary",
+      status: "info",
+      severity: "info",
+      message: "Health-check summary completeness applies only after the health-check workflow is selected.",
+      evidence: workflowId ? [`workflowId=${workflowId}`] : [],
+      nextAction: "Route the designer goal first; once health-check is selected, do not summarize semantic colors or token gaps as clean until the required read checks complete.",
     }));
 
     checks.push(_makeCheck({

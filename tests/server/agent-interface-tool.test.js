@@ -304,6 +304,7 @@ try {
       "audit_tokens",
       "inspect_ds_setup_gaps",
       "inspect_ds_token_gaps",
+      "qa_binding_audit",
       "apply_ds_setup_repairs",
       "plan_ds_semantic_naming_consolidation",
       "apply_ds_semantic_naming_consolidation",
@@ -319,6 +320,7 @@ try {
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
     assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.kind === "read" && step.tool === "inspect_ds_token_gaps"));
     assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("missing foundation collections or modes")));
+    assert.ok(guide.steps.some(step => step.id === "binding-audit-handoff" && step.kind === "read" && step.tool === "qa_binding_audit" && step.optional === true));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("semantic setup repairs separate from token-gap")));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("summarized by category")));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("include every available boundary")));
@@ -514,6 +516,63 @@ try {
       verification.nextAction.includes("instead of a drifting option number"),
       "post-apply health check should tell agents to name the applied repair instead of option numbers"
     );
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: [
+          "sync_figma_data",
+          "detect_design_system",
+          "audit_tokens",
+          "inspect_ds_token_gaps",
+        ],
+      },
+      requestedAction: {
+        tool: "summarize_results",
+        kind: "read",
+        claimsSemanticColorsClean: true,
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const summary = health.checks.find(check => check.id === "health_check_summary_boundary");
+    assert.strictEqual(summary.status, "fail");
+    assert.strictEqual(summary.recommendedTool, "inspect_ds_setup_gaps");
+    assert.ok(summary.message.includes("semantic colors"));
+    assert.ok(summary.nextAction.includes("inspect_ds_setup_gaps completed"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: [
+          "sync_figma_data",
+          "detect_design_system",
+          "audit_tokens",
+          "inspect_ds_setup_gaps",
+          "inspect_ds_token_gaps",
+        ],
+      },
+      requestedAction: {
+        tool: "summarize_results",
+        kind: "read",
+        claimsLayerBindingsClean: true,
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const summary = health.checks.find(check => check.id === "health_check_summary_boundary");
+    assert.strictEqual(summary.status, "fail");
+    assert.strictEqual(summary.recommendedTool, "qa_binding_audit");
+    assert.ok(summary.nextAction.includes("Run qa_binding_audit"));
+    assert.ok(summary.nextAction.includes("binding QA is out of scope"));
   }
 
   {

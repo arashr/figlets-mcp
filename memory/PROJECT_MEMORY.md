@@ -4,6 +4,28 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-20 — BNN-58 follow-up; generated setup survives snapshot bootstrap]
+
+**Status:** Manual testing found a design system created "using Figlets" could be marked done, then immediately report setup health issues when the active file config was refreshed from the Figma snapshot. Live inspection on `local_mqm9v59r_kcqw2rn3` showed the snapshot itself contained Figlets-generated tokens, but the fallback bootstrap config inferred shallow pairs such as `color/bg/brand -> color/text/brand` and `color/bg/muted -> color/text/muted`, producing self-inflicted contrast failures. It also treated generated `color/scrim/*` / `color/shadow/*` utilities as naming advisories and reported generated component/stack/touch same-value responsive spacing defaults as unvalidated.
+
+**Shipped behavior:** Snapshot bootstrap now tries the Figlets semantic templates first, filters them to variables that actually exist in Figma, and preserves pair metadata such as `min`, `minLc`, `note`, and contextual icon companions. Loose bg/fg name inference remains the fallback for unknown imported systems. Generated spacing config now explicitly allows same-value responsive modes for stable component, stack, and touch categories. Generated scrim/shadow/overlay/state color utilities are classified as known utility roles instead of unknown semantic grammar. Token showcase chrome no longer uses raw `6px` gaps or `16px` table radii that lack exact generated tokens.
+
+**Verification:** Focused tests passed for bootstrap-from-Figma, semantic color grammar, generated setup QA parity, QA binding policy, token-gap inspection, semantic alias repair, prepare setup preview, and setup-gap QA. Replaying local patched bootstrap against the live synced file produced 0 setup contrast failures, 0 icon contrast failures, 0 semantic naming advisories, and 0 responsive spacing advisories for the inspected generated spacing categories.
+
+---
+
+### [2026-06-19 — BNN-58 follow-up; generated setup health-check parity]
+
+**Status:** Manual testing found a new Figlets-generated design system could still show contrast failures after build even though `prepare_ds_config` reported the setup as ready. That was not a designer decision problem; setup generation and post-build health checks were auditing different semantic relationships.
+
+**Finding:** Generated configs can have multiple foreground relationships for one background, such as `color/bg/default` with `text/default`, `text/subtle`, and decorative `text/muted`. The health-check collapsed that to one bg→text mapping and ignored generated per-pair contrast metadata, so it could flag intentionally exempt muted text. Icon QA also inferred icons from the background alone, so `color/bg/brand` + `color/text/on-brand` could be checked against `color/icon/brand` instead of `color/icon/on-brand`.
+
+**Shipped behavior:** Generated semantic pairs now preserve contrast thresholds/exemptions and carry an inferred icon companion when one exists. `inspect_ds_setup_gaps` audits configured semantic pair rows as relationships, honors pair-level threshold/exemption metadata, and uses foreground context when inferring icon companions. Snapshot-only audits still infer pairings for backgrounds not described by config.
+
+**Tests:** Added generated setup QA parity coverage that prepares a new pink WCAG setup, simulates `apply_ds_setup`, then runs setup-gap QA and asserts zero text/icon contrast failures. Added focused setup-gap regressions for multi-pair `bg/default` exemptions and `text/on-brand` → `icon/on-brand` inference. Full `npm test` passed **104/104**.
+
+---
+
 ### [2026-06-19 — BNN-58 follow-up; generated setup contrast self-corrects]
 
 **Status:** Manual setup testing showed `prepare_ds_config` could generate a new design-system preview with a self-inflicted contrast failure, such as dark `color/text/on-brand` on `color/bg/brand`, then ask the designer to approve Figlets' own repair before build.

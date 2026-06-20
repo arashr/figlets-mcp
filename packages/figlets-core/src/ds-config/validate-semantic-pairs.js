@@ -537,6 +537,53 @@ function validateSemanticPairs(ds) {
     };
   }) : [];
 
+  function pairIconFor(row, iconNames) {
+    if (!row || !row.bg || !row.text || !iconNames || !iconNames.size) return null;
+    const candidates = [];
+    const textParts = String(row.text).split('/');
+    for (let i = textParts.length - 1; i >= 0; i--) {
+      const part = textParts[i];
+      if (/^text$/i.test(part) || /^fg$/i.test(part) || /^foreground$/i.test(part)) {
+        const next = textParts.slice();
+        next[i] = 'icon';
+        candidates.push(next.join('/'));
+      }
+      if (/^on-fill$/i.test(part) || /^on-surface$/i.test(part)) {
+        const contextual = textParts.slice();
+        contextual.splice(i, 1, 'icon', part);
+        candidates.push(contextual.join('/'));
+        const plain = textParts.slice();
+        plain[i] = 'icon';
+        candidates.push(plain.join('/'));
+      }
+    }
+
+    const bgParts = String(row.bg).split('/');
+    for (let i = bgParts.length - 1; i >= 0; i--) {
+      if (!/^(?:fill|bg|surface|background)$/i.test(bgParts[i])) continue;
+      const leafIndex = bgParts.length - 1;
+      const leaf = bgParts[leafIndex] || '';
+      if (/^fill$/i.test(bgParts[i])) {
+        const onFill = bgParts.slice();
+        onFill[i] = 'icon';
+        onFill[leafIndex] = `on-fill-${leaf}`;
+        candidates.push(onFill.join('/'));
+        const onRole = bgParts.slice();
+        onRole[i] = 'icon';
+        onRole[leafIndex] = `on-${leaf}`;
+        candidates.push(onRole.join('/'));
+      }
+      const base = bgParts.slice();
+      base[i] = 'icon';
+      candidates.push(base.join('/'));
+    }
+
+    for (const candidate of candidates) {
+      if (iconNames.has(candidate)) return candidate;
+    }
+    return null;
+  }
+
   // ── Format output ────────────────────────────────────────────────────────────
   const r2 = x => x != null ? `${x.toFixed(1)}:1` : '—';
   // Badge text reflects the gated algorithm. Both algorithms surface their own
@@ -581,13 +628,24 @@ function validateSemanticPairs(ds) {
     iconTable += `| \`${ic.token}\` | ${r2(ic.lRatio)} | ${lB} | ${r2(ic.dRatio)} | ${dB} |\n`;
   }
 
+  const iconNames = new Set(resolvedIcons.map(ic => ic.token));
+
   DS.color.semantics = {
     convention,
-    pairs: resolvedPairs.map(row => ({
-      bg: row.bg, text: row.text,
-      Light: row.Light ? { bg: row.Light.bg,  text: row.Light.text  } : undefined,
-      Dark:  row.Dark  ? { bg: row.Dark.bg,   text: row.Dark.text   } : undefined,
-    })),
+    pairs: resolvedPairs.map(row => {
+      const pair = {
+        bg: row.bg,
+        text: row.text,
+        Light: row.Light ? { bg: row.Light.bg,  text: row.Light.text  } : undefined,
+        Dark:  row.Dark  ? { bg: row.Dark.bg,   text: row.Dark.text   } : undefined,
+      };
+      if (row.min === null || typeof row.min === 'number') pair.min = row.min;
+      if (row.minLc === null || typeof row.minLc === 'number') pair.minLc = row.minLc;
+      if (row.note) pair.note = row.note;
+      const icon = pairIconFor(row, iconNames);
+      if (icon) pair.icon = icon;
+      return pair;
+    }),
     icons:    resolvedIcons.map(ic => ({ token: ic.token, Light: ic.Light, Dark: ic.Dark })),
     unpaired: resolvedUnpaired,
   };

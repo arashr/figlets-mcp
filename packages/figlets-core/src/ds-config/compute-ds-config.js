@@ -101,6 +101,11 @@ function computeDsConfig(ds) {
 
   DS.spacing = {
     semantic,
+    responsiveModeValidation: {
+      allowSameValueModes: {
+        categories: ['component', 'stack', 'touch'],
+      },
+    },
     radius: {
       none:  0,
       xs:    r(0.25),

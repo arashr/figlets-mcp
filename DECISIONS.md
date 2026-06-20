@@ -4,6 +4,28 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-20] Generated setup health must survive snapshot bootstrap and refresh
+
+**Decision:** A Figlets-generated Figma file must remain healthy when Figlets later creates or refreshes a file-scoped config from the synced snapshot. Snapshot bootstrap should prefer Figlets' known generated semantic grammar and preserve pair metadata before falling back to loose imported-system name inference.
+
+**Why:** The generated Figma variables can be correct while a later snapshot bootstrap reconstructs the config incorrectly. Pairing `color/bg/brand` with `color/text/brand` or `color/bg/muted` with `color/text/muted` makes Figlets criticize its own generated system even though the intended generated pairs are `text/on-brand`, `text/default`, and an exempt muted row on the default background.
+
+**Implementation:** Snapshot bootstrap runs the generated semantic template validator, filters template pairs/icons/unpaired rows to variables present in the snapshot, and carries `min`, `minLc`, `note`, and contextual icon fields. Generated utility families such as scrims, overlays, states, and shadow colors are known utility roles, not semantic naming advisories. Generated spacing config explicitly allows same-value responsive modes for component, stack, and touch defaults, while layout/inset values remain differentiated and manual systems still surface unvalidated duplicate advisories unless config allows them.
+
+**Boundary:** Unknown imported systems still use the loose name-inference fallback and may surface grammar advisories. This does not hide real manual contrast failures or turn duplicated responsive values into a universal pass.
+
+---
+
+## [2026-06-19] Generated setup health checks must match setup semantics
+
+**Decision:** A Figlets-generated setup that is marked build-ready must not immediately produce semantic color contrast failures when the post-build health check reads the resulting Figma variables with the same config. Setup generation and setup-gap QA must audit the same pair relationships, not separate approximations.
+
+**Why:** Designers do not choose generated semantic aliases one by one during first-pass setup. If Figlets creates a design system, then later says that same generated system has text/icon contrast failures, the product has failed its own generation contract.
+
+**Implementation:** Generated semantic pairs now preserve their contrast thresholds/exemptions and include an inferred icon companion where the generated icon token exists. `inspect_ds_setup_gaps` now treats configured semantic pairs as relationship rows, so one background can validly have multiple foregrounds with different thresholds. The inspector also uses foreground context when inferring icons, so `bg/brand` paired with `text/on-brand` checks `icon/on-brand` rather than `icon/brand`.
+
+**Boundary:** Manual/existing systems are still audited read-only and may surface contrast failures. Snapshot-only audits still infer pairings when no config pair describes a background. Pair-level exemptions apply only when the config explicitly carries them.
+
 ## [2026-06-19] Generated setup contrast must self-correct before preview
 
 **Decision:** During new design-system setup, Figlets-generated semantic color pairs must converge to passing contrast before `prepare_ds_config` asks the designer to approve a Figma build. If the template/default alias for a generated pair fails and the validator can find a nearest passing alias in the same intended ramp, Figlets applies that alias in the generated config immediately and does not surface a designer repair prompt.

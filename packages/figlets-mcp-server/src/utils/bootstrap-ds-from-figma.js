@@ -160,6 +160,92 @@ function _findExisting(candidates, names) {
   return candidates.find(name => names.has(name)) || "";
 }
 
+function _loadValidateSemanticPairs() {
+  try {
+    return require("../figlets-core.js").dsConfig.validateSemanticPairs;
+  } catch (_) {
+    try {
+      return require("../figlets-core.js").dsConfig.validateSemanticPairs;
+    } catch (err) {
+      return null;
+    }
+  }
+}
+
+function _inferSemanticConvention(names) {
+  const list = Array.from(names || []);
+  let roleScore = 0;
+  let surfaceScore = 0;
+  for (const name of list) {
+    if (/^color\/(?:bg|text|icon|border)\//i.test(name)) roleScore += 1;
+    if (/^color\/text\/on-/i.test(name)) roleScore += 1;
+    if (/^color\/(?:surface|on-surface|outline|on-fill)\//i.test(name)) surfaceScore += 1;
+  }
+  return surfaceScore > roleScore ? "surface-based" : "role-based";
+}
+
+function _filterGeneratedSemantics(generated, names) {
+  if (!generated || !names || !names.size) return null;
+  const pairs = [];
+  const seenPairs = new Set();
+  for (const pair of Array.isArray(generated.pairs) ? generated.pairs : []) {
+    if (!pair || !names.has(pair.bg) || !names.has(pair.text)) continue;
+    const next = {
+      bg: pair.bg,
+      text: pair.text,
+    };
+    if (pair.Light) next.Light = pair.Light;
+    if (pair.Dark) next.Dark = pair.Dark;
+    if (pair.min === null || typeof pair.min === "number") next.min = pair.min;
+    if (pair.minLc === null || typeof pair.minLc === "number") next.minLc = pair.minLc;
+    if (pair.note) next.note = pair.note;
+    if (pair.icon && names.has(pair.icon)) next.icon = pair.icon;
+    if (pair.border && names.has(pair.border)) next.border = pair.border;
+    const key = next.bg + "|" + next.text;
+    if (seenPairs.has(key)) continue;
+    seenPairs.add(key);
+    pairs.push(next);
+  }
+
+  const icons = (Array.isArray(generated.icons) ? generated.icons : [])
+    .filter(item => item && names.has(item.token))
+    .map(item => Object.assign({}, item));
+  const unpaired = (Array.isArray(generated.unpaired) ? generated.unpaired : [])
+    .filter(item => item && names.has(item.token))
+    .map(item => Object.assign({}, item));
+
+  return {
+    convention: generated.convention,
+    pairs,
+    icons,
+    unpaired,
+  };
+}
+
+function _templateSemanticsFromSnapshot(figmaData, ramps, brand, opts) {
+  const validateSemanticPairs = _loadValidateSemanticPairs();
+  if (typeof validateSemanticPairs !== "function" || !ramps || !ramps.length || !brand || !brand.length) {
+    return null;
+  }
+  const names = _nameSet(figmaData);
+  const convention = _inferSemanticConvention(names);
+  let validated;
+  try {
+    validated = validateSemanticPairs({
+      color: {
+        ramps,
+        brand,
+        convention,
+        contrastAlgorithm: opts && opts.algorithm === "apca" ? "apca" : "wcag",
+      },
+    });
+  } catch (_) {
+    return null;
+  }
+  const generated = validated && validated.ds && validated.ds.color && validated.ds.color.semantics;
+  return _filterGeneratedSemantics(generated, names);
+}
+
 function inferSemanticsFromSnapshot(figmaData) {
   const names = _nameSet(figmaData);
   const colorNames = Array.from(names).filter(name => /^color\//.test(name) && !/^color\/[^/]+\/\d+$/.test(name));
@@ -256,7 +342,16 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
   const ramps = buildRampsFromSnapshot(figmaData);
   const brand = detectBrand(ramps);
   const breakpoints = inferBreakpointsFromSnapshot(figmaData);
-  const semantics = inferSemanticsFromSnapshot(figmaData);
+  const templateSemantics = _templateSemanticsFromSnapshot(figmaData, ramps, brand, opts);
+  const inferredSemantics = inferSemanticsFromSnapshot(figmaData);
+  const semantics = templateSemantics && templateSemantics.pairs && templateSemantics.pairs.length
+    ? {
+      convention: templateSemantics.convention || inferredSemantics.convention,
+      pairs: templateSemantics.pairs,
+      icons: templateSemantics.icons || [],
+      unpaired: templateSemantics.unpaired || [],
+    }
+    : inferredSemantics;
   return {
     project: {
       name: (figmaData && figmaData.fileName) || "Imported Figma design system",
@@ -264,6 +359,13 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
     collections: inferCollectionsFromSnapshot(figmaData),
     grid: { base: 8 },
     breakpoints,
+    spacing: {
+      responsiveModeValidation: {
+        allowSameValueModes: {
+          categories: ["component", "stack", "touch"],
+        },
+      },
+    },
     typography: { scalePreset: "material3" },
     color: {
       ramps: ramps,

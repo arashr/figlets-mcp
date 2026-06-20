@@ -2827,7 +2827,7 @@ async function _buildShowcase(opts) {
     table.strokes = [_paint(_RC.outlineSubtle,  _V.outlineSubtle)];
     table.strokeWeight = 0.5;
     table.strokeAlign  = 'INSIDE';
-    table.cornerRadius = 16;
+    table.cornerRadius = 8;
     table.clipsContent = true;
 
     if (title) {
@@ -3142,7 +3142,7 @@ async function _buildShowcase(opts) {
     title.layoutSizingHorizontal = 'FILL';
 
     const strip = _f('Swatches', 'HORIZONTAL');
-    strip.itemSpacing = 6;
+    strip.itemSpacing = 8;
     strip.counterAxisAlignItems = 'MIN';
 
     for (const v of vars) {
@@ -3244,7 +3244,7 @@ async function _buildShowcase(opts) {
 
     // ── LEFT: Pair box ──────────────────────────────────────────────────────
     const pairBox = _f('PairBox', 'VERTICAL');
-    pairBox.itemSpacing = 6;
+    pairBox.itemSpacing = 8;
     pairBox.counterAxisAlignItems = 'MIN';
     pairBox.primaryAxisAlignItems = 'CENTER';
 

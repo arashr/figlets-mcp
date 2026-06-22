@@ -6,6 +6,7 @@ const {
   generateColorRamps,
   validateSemanticPairs,
   generatePrimitivesData,
+  semanticContrast,
 } = require('../../packages/figlets-core/src/ds-config/index.js');
 
 function makeDs(overrides) {
@@ -36,10 +37,25 @@ function makeDs(overrides) {
   assert.ok(computed.includes('DS.primitives.spacing'), 'computed should include DS.primitives.spacing');
   assert.ok(computed.includes('DS.spacing'),            'computed should include DS.spacing');
   assert.ok(computed.includes('DS.typography.scale'),   'computed should include DS.typography.scale');
-  assert.ok(ds.primitives.spacing.some(s => s[0] === 11), 'space/11 (touch target) must be present');
+  assert.ok(ds.primitives.spacing.some(s => s[0] === '025' && s[1] === 2), 'space/025 (small spacing) must be present');
+  assert.ok(ds.primitives.spacing.some(s => s[0] === '050' && s[1] === 4), 'space/050 (compact spacing) must be present');
+  assert.ok(ds.primitives.spacing.some(s => s[0] === '100' && s[1] === 8), 'space/100 (8px base) must be present');
+  assert.ok(ds.primitives.spacing.some(s => s[0] === '550' && s[1] === 44), 'space/550 (touch target) must be present');
   assert.ok(ds.spacing.semantic['touch/min'],            'touch/min semantic token must exist');
   assert.strictEqual(ds.spacing.radius.md, 8,            'radius.md should be 8 for 8px base');
   assert.ok(ds.typography.scale['display/lg'],           'display/lg must be in scale');
+}
+
+// Common Material type-scale labels normalize to the supported preset
+{
+  for (const preset of ['standard', 'material', 'material scale', 'material type scale', 'm3']) {
+    const input = makeDs();
+    input.typography = Object.assign({}, input.typography, { scalePreset: preset });
+    const { ds, computed, needsDesignerInput } = computeDsConfig(input);
+    assert.ok(computed.includes('DS.typography.scale'), `${preset} should compute a typography scale`);
+    assert.deepStrictEqual(needsDesignerInput, [], `${preset} should not need designer input`);
+    assert.ok(ds.typography.scale['display/lg'], `${preset} should resolve to Material scale roles`);
+  }
 }
 
 // 4-tier breakpoints add Wide
@@ -56,7 +72,9 @@ function makeDs(overrides) {
   ds4px.grid = { base: 4 };
   const { ds } = computeDsConfig(ds4px);
   assert.strictEqual(ds.spacing.radius.md, 4, 'radius.md should be 4 for 4px base');
-  assert.ok(ds.primitives.spacing.some(s => s[0] === 0.5), 'space/0.5 should exist for 4px base');
+  assert.ok(ds.primitives.spacing.some(s => s[0] === '050' && s[1] === 2), 'space/050 should exist for 4px base');
+  assert.ok(ds.primitives.spacing.some(s => s[0] === '100' && s[1] === 4), 'space/100 should exist for 4px base');
+  assert.ok(ds.primitives.spacing.some(s => s[0] === '200' && s[1] === 8), 'space/200 should exist for 4px base');
 }
 
 // ── generateColorRamps ───────────────────────────────────────────────────────
@@ -397,6 +415,118 @@ function makeDs(overrides) {
   assert.ok(result.summary.includes('wcag'), 'summary should mention wcag');
 }
 
+// Generated semantic pairs should converge before the setup preview. A medium
+// brand anchor can make the template's dark on-brand foreground fail WCAG; that
+// is Figlets-generated state, so the validator should pick the nearest passing
+// alias instead of asking the designer to approve a repair.
+{
+  let ds = computeDsConfig(makeDs({
+    color: {
+      scale: '50-950',
+      algorithm: 'oklch',
+      convention: 'role-based',
+      contrastAlgorithm: 'wcag',
+      brand: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }],
+    },
+  })).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  const brandPair = result.ds.color.semantics.pairs.find(pair => pair.bg === 'color/bg/brand');
+  assert.strictEqual(result.failCount, 0, 'generated pink brand semantic pairs should self-correct to pass WCAG');
+  assert.strictEqual(
+    brandPair.Dark.text,
+    'color/neutral/50',
+    'generated dark on-brand text should auto-adjust to the nearest passing neutral alias'
+  );
+  assert.deepStrictEqual(
+    result.pairSuggestions['color/bg/brand|color/text/on-brand'],
+    { Light: null, Dark: null },
+    'auto-corrected generated pairs should not surface a designer repair suggestion'
+  );
+}
+
+// If a designer chooses a shorter 100-900 scale, a generated pair may have no
+// foreground-only fix because neutral/50 and neutral/950 do not exist. Generated
+// setup should still converge by making the smallest same-ramp background shift
+// and choosing the best available foreground instead of surfacing a repair loop.
+{
+  let ds = computeDsConfig(makeDs({
+    color: {
+      scale: '100-900',
+      algorithm: 'oklch',
+      convention: 'role-based',
+      contrastAlgorithm: 'wcag',
+      brand: [
+        { name: 'pink', hex: '#FF5FA2', role: 'primary' },
+        { name: 'pale-pink', hex: '#FFD6E7', role: 'secondary' },
+        { name: 'warm-peach', hex: '#F6A04D', role: 'accent' },
+        { name: 'butter', hex: '#FFD166' },
+        { name: 'ink', hex: '#090A0C' },
+      ],
+    },
+  })).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  const brandPair = result.ds.color.semantics.pairs.find(pair => pair.bg === 'color/bg/brand');
+  assert.strictEqual(result.failCount, 0, 'generated 100-900 pink brand semantic pairs should self-correct to pass WCAG');
+  assert.strictEqual(brandPair.Dark.bg, 'color/pink/600');
+  assert.strictEqual(brandPair.Dark.text, 'color/neutral/100');
+  assert.deepStrictEqual(
+    result.pairSuggestions['color/bg/brand|color/text/on-brand'],
+    { Light: null, Dark: null },
+    'generated pair background shifts should not surface a designer repair suggestion'
+  );
+}
+
+// Generated companion roles should be evaluated against the actual semantic
+// pair backgrounds they are attached to. This guards setup preview and
+// post-build health checks against drifting apart for any pair.icon context,
+// not just a single named brand token.
+{
+  let ds = computeDsConfig(makeDs({
+    color: {
+      scale: '100-900',
+      algorithm: 'oklch',
+      convention: 'role-based',
+      contrastAlgorithm: 'wcag',
+      brand: [
+        { name: 'pink', hex: '#FF5FA2', role: 'primary' },
+        { name: 'pale-pink', hex: '#FFD6E7', role: 'secondary' },
+        { name: 'warm-peach', hex: '#F6A04D', role: 'accent' },
+        { name: 'butter', hex: '#FFD166' },
+        { name: 'ink', hex: '#090A0C' },
+      ],
+    },
+  })).ds;
+  ds = generateColorRamps(ds).ds;
+  const result = validateSemanticPairs(ds);
+  const iconByToken = new Map(result.ds.color.semantics.icons.map(icon => [icon.token, icon]));
+  const primitiveByName = new Map();
+  for (const ramp of result.ds.color.ramps) {
+    for (const [step, r, g, b] of ramp.steps) {
+      primitiveByName.set(`${ramp.folder}/${step}`, { r, g, b });
+    }
+  }
+
+  for (const pair of result.ds.color.semantics.pairs) {
+    if (!pair.icon) continue;
+    const icon = iconByToken.get(pair.icon);
+    assert.ok(icon, `${pair.icon} should exist for ${pair.bg}`);
+    for (const mode of ['Light', 'Dark']) {
+      if (!pair[mode] || !icon[mode]) continue;
+      const bgRgb = primitiveByName.get(pair[mode].bg);
+      const iconRgb = primitiveByName.get(icon[mode]);
+      assert.ok(bgRgb, `${pair[mode].bg} should resolve`);
+      assert.ok(iconRgb, `${icon[mode]} should resolve`);
+      assert.ok(
+        semanticContrast.contrastPasses({ role: 'icon', bgRgb, fgRgb: iconRgb }),
+        `${pair.icon} ${mode} should pass non-text contrast on ${pair.bg}`
+      );
+    }
+  }
+  assert.strictEqual(result.failCount, 0, 'generated companion contrast should self-correct before preview');
+}
+
 // Every resolved pair carries both `wcagPass` and `apcaPass` regardless of the
 // chosen algorithm, and `pass` is gated to whichever algorithm was selected.
 {
@@ -460,8 +590,21 @@ function makeDs(overrides) {
   assert.strictEqual(scrims.length, 10, 'Expected exactly 10 scrim vars');
   assert.ok(strings.length >= 2, 'Expected at least 2 font family strings');
   assert.ok(floats.find(f => f.name === 'shadow/1/offset-y'), 'Missing shadow/1/offset-y');
-  assert.ok(floats.find(f => f.name === 'space/11'),          'Missing space/11 (touch target)');
+  assert.ok(floats.find(f => f.name === 'space/025' && f.value === 2), 'Missing space/025 primitive');
+  assert.ok(floats.find(f => f.name === 'border/width/hairline' && f.value === 0.5), 'Missing border/width/hairline primitive');
+  assert.ok(floats.find(f => f.name === 'border/width/default' && f.value === 1), 'Missing border/width/default primitive');
+  assert.ok(floats.find(f => f.name === 'radius/full' && f.value === 9999), 'Missing radius/full primitive');
+  assert.ok(floats.find(f => f.name === 'space/550'),          'Missing space/550 (touch target)');
   assert.ok(floats.find(f => f.name === 'type/weight/bold'),  'Missing type/weight/bold');
+}
+
+{
+  let ds = computeDsConfig(makeDs({ typography: { scalePreset: 'fluid', families: { sans: 'Inter', mono: 'JetBrains Mono' } } })).ds;
+  ds = generateColorRamps(ds).ds;
+  ds = validateSemanticPairs(ds).ds;
+  const { floats } = generatePrimitivesData(ds);
+  assert.ok(floats.find(f => f.name === 'type/size/45' && f.value === 45), 'Fluid setup should expose type/size/45 primitive');
+  assert.ok(floats.find(f => f.name === 'type/size/57' && f.value === 57), 'Fluid setup should expose type/size/57 primitive');
 }
 
 // ── APCA math — validate-semantic-pairs uses APCA 0.0.98G, exercised via a

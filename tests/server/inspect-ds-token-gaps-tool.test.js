@@ -5,7 +5,9 @@ const path = require("path");
 
 const {
   inspectDsTokenGapsTool,
+  applyDsConfigResponsiveSpacingRepairsTool,
   handleInspectDsTokenGaps,
+  handleApplyDsConfigResponsiveSpacingRepairs,
   inspectDsTokenGapsFromConfigAndFigmaData,
 } = require("../../packages/figlets-mcp-server/src/tools/inspect-ds-token-gaps.js");
 
@@ -82,6 +84,7 @@ const figmaData = {
 
 module.exports = (() => {
   assert.strictEqual(inspectDsTokenGapsTool.name, "inspect_ds_token_gaps");
+  assert.strictEqual(applyDsConfigResponsiveSpacingRepairsTool.name, "apply_ds_config_responsive_spacing_repairs");
   assert.ok(inspectDsTokenGapsTool.description.includes("Read-only planner"));
   assert.ok(inspectDsTokenGapsTool.inputSchema.properties.categories, "schema should accept categories");
   assert.ok(inspectDsTokenGapsTool.inputSchema.properties.include_existing_updates, "schema should accept include_existing_updates");
@@ -502,7 +505,19 @@ module.exports = (() => {
       option => option.id === "responsive-spacing-values"
     );
     assert.ok(responsiveReview, "responsive spacing advisories should create a first-menu review option");
-    assert.strictEqual(responsiveReview.tool, "plan_ds_figma_operations");
+    assert.strictEqual(responsiveReview.tool, "apply_ds_config_responsive_spacing_repairs");
+    assert.strictEqual(responsiveReview.configRepairTool, "apply_ds_config_responsive_spacing_repairs");
+    assert.strictEqual(responsiveReview.figmaPlanTool, "plan_ds_figma_operations");
+    assert.deepStrictEqual(
+      responsiveReview.configRepairApplyInput.updates[0],
+      {
+        token: "space/layout/lg",
+        values: { Mobile: 48, Tablet: 64, Desktop: 80 },
+        expectedCurrentValues: { Mobile: 48, Tablet: 48, Desktop: 48 },
+        source: "responsive-advisory",
+      },
+      "responsive review should carry config-first approved values instead of a Figma-only operation"
+    );
     assert.ok(
       responsiveReview.designerSummary.includes("No raw semantic spacing alias repairs"),
       "responsive review should explicitly say when raw spacing cleanup is not also present"
@@ -621,6 +636,18 @@ module.exports = (() => {
       ),
       "duplicate raw layout repairs should get differentiated responsive alias suggestions on the first review"
     );
+    assert.ok(
+      responsiveReview.configRepairApplyInput.updates.some(update =>
+        update.token === "space/layout/lg" &&
+        update.values.Mobile === 48 &&
+        update.values.Tablet === 64 &&
+        update.values.Desktop === 80 &&
+        update.expectedCurrentValues.Mobile === 48 &&
+        update.expectedCurrentValues.Tablet === 48 &&
+        update.expectedCurrentValues.Desktop === 48
+      ),
+      "raw-layout responsive suggestions should include a config update so Figma writes do not drift from DS.spacing.semantic"
+    );
   }
 
   {
@@ -688,6 +715,44 @@ module.exports = (() => {
         change.token === "space/touch/comfortable" && change.toAlias === "space/40" && change.mode === "Desktop"
       ),
       "designer presentation should list touch/comfortable alias targets"
+    );
+  }
+
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-responsive-spacing-config-"));
+    const configPath = path.join(tmp, "design-system.config.js");
+    fs.writeFileSync(configPath, `const DS = {
+  breakpoints: { modes: ["Mobile", "Tablet", "Desktop"] },
+  spacing: { semantic: { "layout/lg": [48, 48, 48], "touch/min": [44, 44, 44] } }
+};\n`, "utf8");
+
+    const result = handleApplyDsConfigResponsiveSpacingRepairs({
+      config_path: configPath,
+      updates: [{
+        token: "space/layout/lg",
+        values: { Mobile: 48, Tablet: 64, Desktop: 80 },
+        expectedCurrentValues: { Mobile: 48, Tablet: 48, Desktop: 48 },
+      }],
+    });
+    assert.ok(!result.error, "responsive spacing config repair should accept fresh approved payload");
+    assert.strictEqual(result.configWritten, true);
+    assert.strictEqual(result.figmaChanged, false);
+    const written = fs.readFileSync(configPath, "utf8");
+    assert.ok(written.includes('"layout/lg": [\n        48,\n        64,\n        80\n      ]'), "config repair should update only DS.spacing.semantic values");
+    assert.ok(written.includes('"touch/min": [\n        44,\n        44,\n        44\n      ]'), "unapproved semantic spacing entries should remain unchanged");
+
+    const stale = handleApplyDsConfigResponsiveSpacingRepairs({
+      config_path: configPath,
+      updates: [{
+        token: "space/layout/lg",
+        values: { Tablet: 96 },
+        expectedCurrentValues: { Tablet: 48 },
+      }],
+    });
+    assert.ok(stale.error.includes("could not be validated"), "stale responsive config approvals should be rejected");
+    assert.ok(
+      fs.readFileSync(configPath, "utf8").includes('"layout/lg": [\n        48,\n        64,\n        80\n      ]'),
+      "stale rejection must not partially write config"
     );
   }
 

@@ -157,6 +157,83 @@ module.exports = (async () => {
   }
 
   {
+    const trueDuplicateSemantics = [
+      sem("text-on-fill-danger", "color/text/on-fill-danger", alias("n50"), alias("n950")),
+      sem("fg-on-fill-danger", "color/fg/on-fill-danger", alias("n50"), alias("n950")),
+    ];
+    const trueDuplicateData = {
+      variables: primitives.concat(trueDuplicateSemantics),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: trueDuplicateSemantics.map(v => v.id) },
+      ],
+    };
+    const undecided = planSemanticNamingConsolidationFromFigmaData(trueDuplicateData, { grammar: "element-first" });
+    assert.deepStrictEqual(
+      undecided.repairPlan.applyInput.renameVariables,
+      [],
+      "true duplicate cleanup should not guess a canonical token"
+    );
+    assert.strictEqual(
+      undecided.repairPlan.counts.manualReview,
+      1,
+      "undecided true duplicates should be visible as manual review items"
+    );
+
+    const decisions = [{
+      family: "danger",
+      role: "foreground",
+      context: "fill",
+      canonicalToken: "color/text/on-fill-danger",
+      duplicateTokens: ["color/fg/on-fill-danger"],
+    }];
+    const decided = planSemanticNamingConsolidationFromFigmaData(trueDuplicateData, {
+      grammar: "element-first",
+      decisions,
+    });
+    assert.strictEqual(decided.repairPlan.applyInput.canonicalConvention, undefined);
+    assert.deepStrictEqual(decided.repairPlan.applyInput.decisions, decisions);
+    assert.strictEqual(decided.repairPlan.applyInput.renameVariables.length, 1);
+    const rename = decided.repairPlan.applyInput.renameVariables[0];
+    assert.strictEqual(rename.expectedCurrentName, "color/fg/on-fill-danger");
+    assert.strictEqual(rename.canonicalName, "color/text/on-fill-danger");
+    assert.strictEqual(rename.expectedEquivalence.status, "equivalent");
+  }
+
+  {
+    const differentDuplicateSemantics = [
+      sem("text-on-fill-danger", "color/text/on-fill-danger", alias("n50"), alias("n950")),
+      sem("fg-on-fill-danger", "color/fg/on-fill-danger", alias("r700"), alias("n950")),
+    ];
+    const differentDuplicateData = {
+      variables: primitives.concat(differentDuplicateSemantics),
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: differentDuplicateSemantics.map(v => v.id) },
+      ],
+    };
+    const plan = planSemanticNamingConsolidationFromFigmaData(differentDuplicateData, {
+      grammar: "element-first",
+      decisions: [{
+        canonicalToken: "color/text/on-fill-danger",
+        duplicateTokens: ["color/fg/on-fill-danger"],
+      }],
+    });
+    assert.deepStrictEqual(
+      plan.repairPlan.applyInput.renameVariables,
+      [],
+      "non-equivalent true duplicates should not be deprecated as if they were the same role"
+    );
+    assert.ok(
+      plan.repairPlan.designerPresentation.manualReview.some(item =>
+        item.token === "color/fg/on-fill-danger" &&
+        item.reason.includes("values differ")
+      ),
+      "non-equivalent true duplicates should explain the manual review reason"
+    );
+  }
+
+  {
     const plan = planSemanticNamingConsolidationFromFigmaData(figmaData, { canonicalConvention: "role-based" });
     const renameNames = plan.repairPlan.applyInput.renameVariables.map(item => item.expectedCurrentName).sort();
     assert.deepStrictEqual(renameNames, [

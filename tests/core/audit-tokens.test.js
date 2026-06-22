@@ -89,21 +89,36 @@ const mockData = {
 {
   // Test 6: numeric primitive ramps are inventory, not unaliased defects.
   const primitiveRamp = {
-    collections: [{ id: "p", name: "Primitives", variableIds: ["p1", "p2", "s1", "s2", "t1"] }],
+    collections: [{ id: "p", name: "Primitives", variableIds: ["p1", "p2", "s1", "s2", "sfull", "t1", "r1", "b1"] }],
     variables: [
       { id: "p1", name: "color/neutral/100", resolvedType: "COLOR", valuesByMode: { m: { r: 1, g: 1, b: 1, a: 1 } } },
       { id: "p2", name: "color/neutral-variant/100", resolvedType: "COLOR", valuesByMode: { m: { r: 1, g: 1, b: 1, a: 1 } } },
       { id: "s1", name: "space/0_5", resolvedType: "FLOAT", valuesByMode: { m: 2 } },
       { id: "s2", name: "space/0-5", resolvedType: "FLOAT", valuesByMode: { m: 3 } },
+      { id: "sfull", name: "space/full", resolvedType: "FLOAT", valuesByMode: { m: 9999 } },
       { id: "t1", name: "type/size/md", resolvedType: "FLOAT", valuesByMode: { m: 16 } },
+      { id: "r1", name: "radius/md", resolvedType: "FLOAT", valuesByMode: { m: 8 } },
+      { id: "b1", name: "border/width/default", resolvedType: "FLOAT", valuesByMode: { m: 1 } },
     ]
   };
   const result = auditTokens(primitiveRamp);
   assert.strictEqual(result.summary.unaliasedCount, 0);
-  assert.strictEqual(result.summary.rawPrimitiveCount, 5);
+  assert.strictEqual(result.summary.rawPrimitiveCount, 8);
   assert.ok(
     !result.unaliased.some(row => row.name === "space/0-5"),
     "fractional primitive steps with hyphens (space/0-5) are inventory, not unaliased defects"
+  );
+  assert.ok(
+    !result.unaliased.some(row => row.name === "space/full"),
+    "full radius primitive (space/full) is inventory, not an unaliased semantic defect"
+  );
+  assert.ok(
+    !result.unaliased.some(row => row.name === "radius/md"),
+    "standalone radius primitives are inventory, not unaliased semantic defects"
+  );
+  assert.ok(
+    !result.unaliased.some(row => row.name === "border/width/default"),
+    "standalone border width primitives are inventory, not unaliased semantic defects"
   );
   assert.strictEqual(result.summary.collectionNamingIssues, 0, "numeric leaves and kebab path segments should not look like mixed naming");
   assert.strictEqual(result.summary.duplicateValueGroups, 0, "cross-ramp primitive coincidences should not be issue duplicates");

@@ -146,6 +146,7 @@ module.exports = (async () => {
       assert.strictEqual(requestBody.confirmation, "RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE");
       assert.strictEqual(requestBody.expectedFileName, "Figlets Disposable Smoke");
       assert.ok(requestBody.ds && requestBody.ds.project && requestBody.ds.project.name.includes("cli-positive"));
+      assert.ok(requestBody.primitivesData && Array.isArray(requestBody.primitivesData.floats), "fixture prep should send prepared primitive inventory to the bridge");
       assert.deepStrictEqual(
         requestBody.gaps.createSemanticNamingConflicts,
         [

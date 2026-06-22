@@ -41,6 +41,45 @@ const inspectDsTokenGapsTool = {
   }
 };
 
+const applyDsConfigResponsiveSpacingRepairsTool = {
+  name: "apply_ds_config_responsive_spacing_repairs",
+  description:
+    "Applies designer-approved responsive semantic spacing values to design-system.config.js only. Use the exact configRepairApplyInput emitted by inspect_ds_token_gaps.repairPlan.reviewOptions[id=responsive-spacing-values] before applying the paired Figma alias operations. Never mutates Figma.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      config_path: {
+        type: "string",
+        description: "Absolute path to the file-scoped design-system.config.js."
+      },
+      updates: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            token: { type: "string", description: "Semantic spacing token name, e.g. space/layout/lg." },
+            values: {
+              type: "object",
+              additionalProperties: { type: "number" },
+              description: "Mode-name map of approved numeric responsive values."
+            },
+            expectedCurrentValues: {
+              type: "object",
+              additionalProperties: { type: "number" },
+              description: "Optional mode-name map copied from inspect output for stale-config validation."
+            }
+          },
+          required: ["token", "values"],
+          additionalProperties: false
+        },
+        description: "Approved responsive spacing config updates copied from inspect_ds_token_gaps."
+      }
+    },
+    required: ["config_path", "updates"],
+    additionalProperties: false
+  }
+};
+
 const DEFAULT_CATEGORIES = [
   "primitive-spacing",
   "primitive-typography",
@@ -121,6 +160,16 @@ function _readDsConfig(configPath) {
   return readDsConfig(configPath);
 }
 
+function _writeDsConfig(configPath, ds) {
+  let writeDsConfig;
+  try {
+    ({ writeDsConfig } = require("../figlets-core.js").dsConfig);
+  } catch (err) {
+    ({ writeDsConfig } = require("../figlets-core.js").dsConfig);
+  }
+  return writeDsConfig(configPath, ds);
+}
+
 function _generatePrimitivesData(ds) {
   let generatePrimitivesData;
   try {
@@ -159,6 +208,141 @@ function _requestedCategories(input) {
       });
   }
   return DEFAULT_CATEGORIES.slice();
+}
+
+function _semanticSpacingConfigKey(token) {
+  const value = String(token || "").trim();
+  if (!value) return "";
+  return value.replace(/^space\//, "");
+}
+
+function _numberMap(input) {
+  const out = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) return out;
+  for (const key of Object.keys(input)) {
+    const value = Number(input[key]);
+    if (Number.isFinite(value)) out[String(key)] = value;
+  }
+  return out;
+}
+
+function _spacingSemanticArray(ds, key) {
+  const semantic = ds && ds.spacing && ds.spacing.semantic ? ds.spacing.semantic : null;
+  const values = semantic && semantic[key];
+  return Array.isArray(values) ? values : null;
+}
+
+function handleApplyDsConfigResponsiveSpacingRepairs(args) {
+  args = args || {};
+  const resolvedPath = path.resolve(args.config_path || "");
+  const guardError = getConfigPathGuardError(resolvedPath);
+  if (guardError) return guardError;
+
+  const updates = Array.isArray(args.updates) ? args.updates : [];
+  if (!updates.length) {
+    return {
+      error: "No responsive spacing config updates were provided.",
+      hint: "Pass inspect_ds_token_gaps.repairPlan.reviewOptions[id=responsive-spacing-values].configRepairApplyInput after designer approval.",
+    };
+  }
+
+  let ds;
+  try {
+    ds = _readDsConfig(resolvedPath);
+  } catch (err) {
+    return {
+      error: err.message,
+      hint: "Run create_ds_config_from_intake or prepare_ds_config before applying responsive spacing config repairs.",
+    };
+  }
+
+  const modes = _foundationModesForKind(ds, "spacing");
+  if (modes.length < 2) {
+    return {
+      error: "Config does not define enough spacing breakpoint modes for responsive spacing repairs.",
+      modes,
+      hint: "Run prepare_ds_config or define DS.breakpoints.modes before approving responsive spacing values.",
+    };
+  }
+  if (!ds.spacing || !ds.spacing.semantic || typeof ds.spacing.semantic !== "object") {
+    return {
+      error: "Config is missing DS.spacing.semantic.",
+      hint: "Responsive spacing config repairs can only update existing semantic spacing config entries.",
+    };
+  }
+
+  const blocked = [];
+  const planned = [];
+  for (const update of updates) {
+    const token = String(update && update.token || "").trim();
+    const key = _semanticSpacingConfigKey(token);
+    const approvedValues = _numberMap(update && update.values);
+    const expectedCurrentValues = _numberMap(update && update.expectedCurrentValues);
+    const current = _spacingSemanticArray(ds, key);
+    if (!token || !key || !current) {
+      blocked.push({ token, reason: "Token is not an existing DS.spacing.semantic entry." });
+      continue;
+    }
+    const next = current.slice();
+    const appliedModes = [];
+    for (const modeName of Object.keys(approvedValues)) {
+      const modeIndex = modes.indexOf(modeName);
+      if (modeIndex < 0) {
+        blocked.push({ token, mode: modeName, reason: "Mode is not configured in DS.breakpoints.modes." });
+        continue;
+      }
+      const before = Number(current[modeIndex]);
+      if (!Number.isFinite(before)) {
+        blocked.push({ token, mode: modeName, reason: "Current config value is not numeric." });
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(expectedCurrentValues, modeName) && before !== expectedCurrentValues[modeName]) {
+        blocked.push({
+          token,
+          mode: modeName,
+          reason: `Current config value is ${before}, not the approved expected value ${expectedCurrentValues[modeName]}.`,
+        });
+        continue;
+      }
+      next[modeIndex] = approvedValues[modeName];
+      appliedModes.push({ mode: modeName, before, after: approvedValues[modeName] });
+    }
+    if (!appliedModes.length) {
+      blocked.push({ token, reason: "No valid mode updates were provided for this token." });
+      continue;
+    }
+    planned.push({ token, key, before: current.slice(), after: next, appliedModes });
+  }
+
+  if (blocked.length) {
+    return {
+      error: "One or more responsive spacing config updates could not be validated against the current config.",
+      configPath: resolvedPath,
+      appliedCount: 0,
+      blocked,
+      hint: "Rerun inspect_ds_token_gaps and pass the fresh configRepairApplyInput payload.",
+    };
+  }
+
+  for (const item of planned) {
+    ds.spacing.semantic[item.key] = item.after;
+  }
+  _writeDsConfig(resolvedPath, ds);
+
+  return {
+    configPath: resolvedPath,
+    configWritten: true,
+    figmaChanged: false,
+    appliedCount: planned.length,
+    applied: planned.map(item => ({
+      token: item.token,
+      before: item.before,
+      after: item.after,
+      modes: item.appliedModes,
+    })),
+    nextTool: "inspect_ds_token_gaps",
+    message: "Applied approved responsive semantic spacing values to the local design-system.config.js only. No Figma changes were made. Rerun inspect_ds_token_gaps, then preview/apply the paired Figma alias operations if still ready.",
+  };
 }
 
 function _variableNameSet(figmaData) {
@@ -1170,16 +1354,23 @@ function _buildReviewOptions({
       id: "responsive-spacing-values",
       label: "Review responsive spacing value suggestions",
       boundary: "responsive-spacing-decision",
-      tool: "plan_ds_figma_operations",
+      tool: "apply_ds_config_responsive_spacing_repairs",
       designerSummary: responsiveSpacingReview.designerSummary,
       aliasRepairSummary: responsiveSpacingReview.aliasRepairSummary,
       excludedAliasRepairTokens: responsiveSpacingReview.excludedAliasRepairTokens,
       suggestedValues: responsiveSpacingReview.suggestedValues,
       editableTemplate: responsiveSpacingReview.editableTemplate,
       missingPrimitiveValues: responsiveSpacingReview.missingPrimitiveValues,
+      configRepairTool: "apply_ds_config_responsive_spacing_repairs",
+      configRepairApplyInput: {
+        config_path: configPath,
+        updates: responsiveSpacingReview.configUpdates || [],
+      },
+      figmaPlanTool: "plan_ds_figma_operations",
     };
     if ((responsiveSpacingReview.operations || []).length) {
-      option.previewInput = { operations: responsiveSpacingReview.operations };
+      option.figmaPreviewInput = { operations: responsiveSpacingReview.operations };
+      option.previewInput = option.figmaPreviewInput;
     }
     options.push(option);
   }
@@ -1347,6 +1538,7 @@ function _addResponsiveSuggestion({
   primitiveCollectionName,
   operations,
   suggestedValues,
+  configUpdates,
   templateRows,
   missingPrimitiveValues,
   excludedAliasRepairTokens,
@@ -1355,6 +1547,8 @@ function _addResponsiveSuggestion({
   const numericBaseline = Number(baselineValue);
   if (!token || !Number.isFinite(numericBaseline) || !Array.isArray(modes) || modes.length < 2) return;
   const values = {};
+  const configValues = {};
+  const expectedCurrentValues = {};
   const display = [];
   let allAliasesReady = true;
 
@@ -1362,6 +1556,13 @@ function _addResponsiveSuggestion({
     const modeName = modes[i] && modes[i].modeName;
     if (!modeName) continue;
     const suggestedValue = i === 0 ? numericBaseline : numericBaseline + (16 * i);
+    const expectedCurrent = Number(
+      modes[i] && Object.prototype.hasOwnProperty.call(modes[i], "currentValue")
+        ? modes[i].currentValue
+        : modes[i] && modes[i].value
+    );
+    expectedCurrentValues[modeName] = Number.isFinite(expectedCurrent) ? expectedCurrent : numericBaseline;
+    configValues[modeName] = suggestedValue;
     const primitive = resolvePrimitiveAliasTarget(primitiveLookup, suggestedValue);
     if (i > 0) display.push(`${modeName} ${suggestedValue}`);
     if (primitive) {
@@ -1387,6 +1588,12 @@ function _addResponsiveSuggestion({
   });
   templateRows.push(`${_responsiveSpacingTokenKey(token)}: ${display.join(", ")}`);
   if (source === "raw-layout-alias-repair") excludedAliasRepairTokens.push(token);
+  configUpdates.push({
+    token,
+    values: configValues,
+    expectedCurrentValues,
+    source,
+  });
   if (allAliasesReady) {
     operations.push({
       kind: "update_variable",
@@ -1410,6 +1617,7 @@ function _suggestResponsiveSpacingReviews(ds, figmaData, advisories, spacingAlia
   const other = all.filter(item => !_isLayoutSpacingToken(item && item.name));
   const operations = [];
   const suggestedValues = [];
+  const configUpdates = [];
   const templateRows = [];
   const missingPrimitiveValues = [];
   const excludedAliasRepairTokens = [];
@@ -1425,6 +1633,7 @@ function _suggestResponsiveSpacingReviews(ds, figmaData, advisories, spacingAlia
       primitiveCollectionName,
       operations,
       suggestedValues,
+      configUpdates,
       templateRows,
       missingPrimitiveValues,
       excludedAliasRepairTokens,
@@ -1436,6 +1645,7 @@ function _suggestResponsiveSpacingReviews(ds, figmaData, advisories, spacingAlia
     const modes = (repair.updates || []).map(update => ({
       modeId: update.modeId,
       modeName: update.modeName,
+      currentValue: update.configExpected,
     }));
     _addResponsiveSuggestion({
       token: repair.name,
@@ -1446,6 +1656,7 @@ function _suggestResponsiveSpacingReviews(ds, figmaData, advisories, spacingAlia
       primitiveCollectionName,
       operations,
       suggestedValues,
+      configUpdates,
       templateRows,
       missingPrimitiveValues,
       excludedAliasRepairTokens,
@@ -1481,14 +1692,16 @@ function _suggestResponsiveSpacingReviews(ds, figmaData, advisories, spacingAlia
     ? `Also, do not miss the spacing alias cleanup: ${aliasRepairSummary.tokenCount} semantic spacing token${aliasRepairSummary.tokenCount === 1 ? "" : "s"} still have ${aliasRepairSummary.updateCount} raw mode value${aliasRepairSummary.updateCount === 1 ? "" : "s"} that must be resolved before treating spacing as complete. ${rawLayoutSummary} ${remainingRawSummary}`.trim()
     : "No raw semantic spacing alias repairs are currently blocking this responsive-value review.";
   const applySummary = operations.length
-    ? `If the designer agrees, run plan_ds_figma_operations with the suggested update_variable operations, show the exact plan, then apply only that approved plan through apply_ds_figma_operations. Sync/reinspect afterward and refresh or update config so future config-backed checks expect the new responsive values.`
+    ? `If the designer agrees, first apply the approved configRepairApplyInput through apply_ds_config_responsive_spacing_repairs, then rerun inspect_ds_token_gaps and run plan_ds_figma_operations with the suggested update_variable operations only if the fresh plan still offers them. Sync/reinspect afterward.`
     : "The suggested values need matching primitive spacing variables before Figlets should write them as aliases. Do not write raw semantic spacing values; create/choose primitives or ask the designer for alias-backed values first.";
 
   return {
-    advisoryCount: all.length,
+    advisoryCount: all.length + rawLayoutCandidates.length,
+    advisoryOnlyCount: all.length,
     aliasRepairSummary,
     excludedAliasRepairTokens,
     suggestedValues,
+    configUpdates,
     operations,
     missingPrimitiveValues,
     editableTemplate: templateRows.join("\n"),
@@ -1631,7 +1844,7 @@ function _buildDesignerPresentation(context, total) {
         : 0,
       spacingAliasRepairSourceBreakdown: _spacingRepairBreakdown(spacingAliasRepairs),
     },
-    proposedChanges: spacingAliasRepairs.flatMap(repair => (repair.updates || []).map(update => ({
+    proposedChanges: spacingAliasRepairs.reduce((items, repair) => items.concat((repair.updates || []).map(update => ({
       token: repair.name,
       mode: update.modeName,
       action: _spacingRepairSourceKind(update) === "alias-retarget"
@@ -1641,7 +1854,7 @@ function _buildDesignerPresentation(context, total) {
           : "alias-to-existing-primitive",
       sourceKind: _spacingRepairSourceKind(update),
       toAlias: update.toAliasName,
-    }))),
+    }))), []),
   };
 }
 
@@ -1771,7 +1984,9 @@ function handleInspectDsTokenGaps(input = {}) {
 
 module.exports = {
   inspectDsTokenGapsTool,
+  applyDsConfigResponsiveSpacingRepairsTool,
   handleInspectDsTokenGaps,
+  handleApplyDsConfigResponsiveSpacingRepairs,
   inspectDsTokenGapsFromConfigAndFigmaData,
   _buildRepairPlan,
   expandTokenApplyCategories,

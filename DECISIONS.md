@@ -4,6 +4,139 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-06-22] Setup intake questions must use designer-readable examples
+
+**Decision:** New design-system setup questions should stay one-at-a-time, but they must not be cryptic. Semantic color naming grammar prompts must include concrete examples for paired context, element-first, intent/emphasis, component-scoped, and custom. Color scale prompts must ask for concrete labels such as `100-900`, `50-950`, or `0-100`, not abstract labels like compact/standard/expanded. If the designer says any/default/reasonable monospace, Figlets treats that as permission to choose a concrete platform default before config creation.
+
+**Why:** Manual low-agent testing showed the one-question flow worked, but the semantic naming question was jargon-heavy, the color scale question used vague option labels, and a vague monospace answer could be passed through literally. These are agent-level failures: the designer had already given enough intent for Figlets to ask a clearer question or choose the obvious default.
+
+**Consequence:** The Agent Interface exposes question help for setup intake, packaged skills and adapter docs carry the same examples, and `create_ds_config_from_intake` normalizes vague monospace answers to `SF Mono` for iOS/macOS, `Roboto Mono` for Android, and `JetBrains Mono` otherwise.
+
+---
+
+## [2026-06-20] Generated contrast repair may shift the generated background when foreground-only repair is impossible
+
+**Decision:** Generated semantic color pairs must converge before setup preview. The validator first preserves the generated background and searches the foreground ramp for a passing alias. If the chosen scale has no passing foreground for that background, the validator may make the smallest same-ramp background step shift and use the best available foreground. This internal repair must not surface as a designer approval prompt.
+
+**Why:** A 100-900 scale can omit the extreme neutral endpoints (`50` and `950`) needed for foreground-only repair. In the pink setup case, `color/bg/brand` at `pink/500` had no neutral foreground that passed WCAG AA: `neutral/100` was 4.29:1 and `neutral/900` was 4.02:1. Asking the designer to adjust the palette was wrong because Figlets generated the pair and had enough information to select the nearest passing generated combination.
+
+**Consequence:** Generated 100-900 pink brand setup now resolves `color/bg/brand` / `color/text/on-brand` to passing generated aliases (`pink/600` + `neutral/100`) with `failCount: 0` and no `contrastRepairOptions`. Manually-authored semantic pairs still surface structured repair options instead of being silently changed.
+
+---
+
+## [2026-06-20] Setup agents must not turn contrast repair into prose-only approval loops
+
+**Decision:** In setup, designer commands like "go for Figma" or "build it" count as build approval only when the latest `prepare_ds_config` result has `readyToBuild === true`. If semantic contrast fails with exact `contrastRepairOptions`, agents must show and apply those options after approval. If semantic contrast fails with no exact repair options, agents must rerun `prepare_ds_config` once for generated self-correction, then ask only for an executable choice such as an exact alias, brand hex, or color scale change. They must not ask designers to approve abstract repair directions like "preserve the background" as if those are applyable payloads.
+
+**Why:** A manual setup continuation showed an agent asking the designer to choose "preserve the background," then admitting it had no structured repair payload and refusing to build. That is worse than a normal blocker: it creates false agency and a dead end.
+
+**Consequence:** Agent Interface hard rules, workflow errors, adapter docs, plugin skills/commands, and `prepare_ds_config` messages now distinguish exact repair options from no-option blockers. `apply_ds_setup` remains blocked when `readyToBuild` is false, but the agent guidance no longer invites fake approvals.
+
+---
+
+## [2026-06-22] No blind single-axis contrast examples in setup repair prompts
+
+**Decision:** When a setup semantic pair fails contrast, Figlets must expose evaluated repair options. If a foreground-only repair passes, the option may contain only `suggestedText`. If no foreground-only repair passes, the option may contain a paired `suggestedBackground` + `suggestedText` combination that has already been contrast-checked. Agents must present these exact evaluated options and must not invent examples such as "darken the background to pink/600" without checking the resulting foreground/background pair.
+
+**Why:** Cursor Auto testing showed an acceptable recovery but a poor first suggestion: it proposed `pink/600` background while keeping `neutral/900` text, which made contrast worse. The agent eventually recovered only after the product produced an exact repair. The product should expose the evaluated pair up front.
+
+**Consequence:** `validateSemanticPairs` now returns `pairRepairSuggestions`, `prepare_ds_config` exposes combined contrast repair options, and `apply_ds_config_contrast_repairs` can apply approved background+text repairs to the local config before Figma build. Agent docs now say to show paired `suggestedBackground` + `suggestedText` aliases together and avoid untested single-axis examples.
+
+---
+
+## [2026-06-20] Generated semantic values should alias to category-correct primitives on first setup
+
+**Decision:** When Figlets owns a generated setup, every generated semantic typography size, spacing, radius, and border value that has an exact generated primitive should be written as a Figma variable alias on the first `apply_ds_setup` pass. Figlets should create the missing generated primitive targets up front instead of leaving semantic variables raw and asking health checks to repair them later. Semantic spacing aliases only to `space/*`, radius aliases only to `radius/*`, and border aliases only to `border/width/*`. Typography line-height remains raw px by design; it should not be forced through line-height ratio primitives.
+
+**Why:** Manual setup testing showed fluid typography sizes such as `45` and `57` in semantic `type/*/*/size` variables as raw values. Core primitive preview data already knew about `type/size/45` and `type/size/57`, but the bridge setup path had a duplicated static primitive list and did not create them. Fine generated radius/border values such as `2`, `1`, and `0.5`, plus full radius, had the same symptom when no exact primitive spacing value existed.
+
+**Implementation:** Generated spacing primitives use mainstream scale labels rather than fractional raw-value names: `space/025`, `space/050`, `space/100`, `space/150`, etc., where `100` is the configured grid base. Radius and border widths are generated as separate primitive categories (`radius/*` and `border/width/*`) instead of being hidden under `space/*`. Setup primitive creation now has one source of truth: `apply_ds_setup` prepares `generatePrimitivesData(ds)`, proofreads that generated semantic typography size/weight/tracking/family and spacing/radius/border values have exact category-correct primitive coverage, and sends `{ DS, primitivesData }` to the bridge. The bridge setup path no longer reconstructs primitive ramps from hard-coded typography, shadow, scrim, font, or spacing lists; it only executes the prepared primitive rows. Semantic aliases resolve by exact primitive value inside their category; if the generated setup payload lacks a required primitive, the server proofread fails before Figma mutation because the primitive and semantic phases are out of sync.
+
+**Naming basis:** Mainstream systems expose spacing through scale tokens, not tiny decimal names: Atlassian uses `space.025` through `space.1000`, Carbon uses ordinal `$spacing-01` through `$spacing-13`, and Tailwind uses numeric spacing multipliers over a base `--spacing` value.
+
+**Boundary:** This is a generated-first-pass setup fix, not a rule that all line-height values or arbitrary imported design-system values must become aliases. Line-height px values stay raw. The bridge is an executor for setup payloads, not a second primitive generator.
+
+---
+
+## [2026-06-20] New setup intake is one question per assistant turn
+
+**Decision:** The new-design-system setup workflow asks exactly one targeted intake question per assistant turn. Agents must record multi-topic answers when designers volunteer them, then continue with the next single missing choice. Generated background/foreground pairing intent is inferred from brand colors, contrast standard, light/dark behavior, and semantic grammar unless the designer explicitly wants custom pairings.
+
+**Why:**
+- Batched intake made the product feel forgetful and caused follow-up questions after the designer had already answered many items.
+- Asking designers to define generated pairings is unnecessary when the setup engine can infer useful semantic color pairs and validate contrast.
+
+**Consequence:** Agent contracts, workflow guidance, and plugin/adaptor prompts now enforce one-at-a-time setup intake and avoid asking the old generic pairing-intent question by default.
+
+---
+
+## [2026-06-20] Generated setup health must survive snapshot bootstrap and refresh
+
+**Decision:** A Figlets-generated Figma file must remain healthy when Figlets later creates or refreshes a file-scoped config from the synced snapshot. Snapshot bootstrap should prefer Figlets' known generated semantic grammar and preserve pair metadata before falling back to loose imported-system name inference.
+
+**Why:** The generated Figma variables can be correct while a later snapshot bootstrap reconstructs the config incorrectly. Pairing `color/bg/brand` with `color/text/brand` or `color/bg/muted` with `color/text/muted` makes Figlets criticize its own generated system even though the intended generated pairs are `text/on-brand`, `text/default`, and an exempt muted row on the default background.
+
+**Implementation:** Snapshot bootstrap runs the generated semantic template validator, filters template pairs/icons/unpaired rows to variables present in the snapshot, and carries `min`, `minLc`, `note`, and contextual icon fields. Generated utility families such as scrims, overlays, states, and shadow colors are known utility roles, not semantic naming advisories. Generated spacing config explicitly allows same-value responsive modes for component, stack, and touch defaults, while layout/inset values remain differentiated and manual systems still surface unvalidated duplicate advisories unless config allows them.
+
+**Boundary:** Unknown imported systems still use the loose name-inference fallback and may surface grammar advisories. This does not hide real manual contrast failures or turn duplicated responsive values into a universal pass.
+
+---
+
+## [2026-06-19] Generated setup health checks must match setup semantics
+
+**Decision:** A Figlets-generated setup that is marked build-ready must not immediately produce semantic color contrast failures when the post-build health check reads the resulting Figma variables with the same config. Setup generation and setup-gap QA must audit the same pair relationships, not separate approximations.
+
+**Why:** Designers do not choose generated semantic aliases one by one during first-pass setup. If Figlets creates a design system, then later says that same generated system has text/icon contrast failures, the product has failed its own generation contract.
+
+**Implementation:** Generated semantic pairs now preserve their contrast thresholds/exemptions and include an inferred icon companion where the generated icon token exists. `inspect_ds_setup_gaps` now treats configured semantic pairs as relationship rows, so one background can validly have multiple foregrounds with different thresholds. The inspector also uses foreground context when inferring icons, so `bg/brand` paired with `text/on-brand` checks `icon/on-brand` rather than `icon/brand`.
+
+**Boundary:** Manual/existing systems are still audited read-only and may surface contrast failures. Snapshot-only audits still infer pairings when no config pair describes a background. Pair-level exemptions apply only when the config explicitly carries them.
+
+## [2026-06-19] Generated setup contrast must self-correct before preview
+
+**Decision:** During new design-system setup, Figlets-generated semantic color pairs must converge to passing contrast before `prepare_ds_config` asks the designer to approve a Figma build. If the template/default alias for a generated pair fails and the validator can find a nearest passing alias in the same intended ramp, Figlets applies that alias in the generated config immediately and does not surface a designer repair prompt.
+
+**Why:** Designers are not choosing the raw generated ramp steps or semantic pair aliases during first-pass setup. Showing “Figlets generated a contrast issue; approve this fix” makes the setup flow feel broken and moves internal generation cleanup onto the designer.
+
+**Boundary:** This only applies to generated semantic pairs, where `DS.color.semantics.pairs` was absent before validation. Explicit/manual semantic pairs in an existing config are still preserved and may produce `semanticPairs.contrastRepairOptions` / `apply_ds_config_contrast_repairs`, because changing those values is a designer-owned config repair.
+
+**Implementation:** `validateSemanticPairs` now mirrors the existing icon auto-adjust behavior for generated text pairs: when a generated pair fails the chosen contrast gate and a passing alias exists, it rewrites that generated mode to the passing alias, recomputes contrast, and suppresses the repair suggestion for that pair.
+
+## [2026-06-19] Setup contrast suggestions need a local config apply boundary
+
+**Decision:** When `prepare_ds_config` finds semantic color contrast failures and computes exact nearest passing text-alias suggestions, Figlets must expose both the suggestion and a designer-approved local config repair path before any Figma build. The path is `prepare_ds_config.semanticPairs.contrastRepairOptions` / `setupApprovalPreview.semanticColor.contrast.repairOptions` → approved `apply_ds_config_contrast_repairs` → rerun `prepare_ds_config` → `apply_ds_setup` only if `readyToBuild === true`.
+
+**Why:** Manual setup testing showed agents could present an exact suggestion such as changing dark `color/text/on-brand` from `color/neutral/950` to `color/neutral/50`, receive approval, and then dead-end because no setup config repair tool existed. That made a deterministic pre-build fix feel like a product limitation and forced the designer back into config-editing language.
+
+**Boundary:** `apply_ds_config_contrast_repairs` writes only the file-scoped local `design-system.config.js`; it never mutates Figma. It revalidates approved repair objects against the current prepared contrast suggestions before writing, rejects stale or invented aliases, and sends agents back through `prepare_ds_config` rather than directly into `apply_ds_setup`.
+
+**Implementation:** `prepare_ds_config` now returns copy-ready `contrastRepairApplyInput` payloads with `config_path`. The Agent Interface and adapter/root docs now make the repair step explicit in the new design-system setup flow.
+
+---
+
+## [2026-06-14] New design-system intake creates local config through a Figlets tool
+
+**Decision:** After targeted setup intake, agents must call `create_ds_config_from_intake` before `prepare_ds_config`. The tool may write the file-scoped local Figlets config, but it never mutates Figma and must return `needsDesignerInput` when concrete setup choices are missing.
+
+**Why:**
+- The setup flow already had `create_ds_config_from_design_md`, `prepare_ds_config`, and `apply_ds_setup`, but there was no first-class surface for the common non-DESIGN.md path where a designer answers intake questions in chat.
+- Leaving config creation implicit caused low agents to claim there was no designer-safe tool and ask to switch to developer/config-editing mode.
+- Screenshot-derived direction can identify candidate color families, but exact brand hexes and font families are designer choices. The tool should ask for those rather than silently invent them.
+
+**Consequence:** New setup is now `intake questions -> create file-scoped local config -> prepare preview -> explicit Figma build approval`. This preserves the Designer Mode guardrails while removing the config-editing dead end.
+
+---
+
+## [2026-06-13] New design-system setup preview must be detailed before Figma writes
+
+**Decision:** `prepare_ds_config` must return a detailed, structured pre-write preview for new design-system creation. Agents should show `setupApprovalPreview` before asking to run `apply_ds_setup`, not compress the result into aggregate counts.
+
+**Why:** Manual testing showed the setup flow asking for Figma write approval after a short summary such as grid, breakpoint count, ramp count, and primitive totals. That is not enough context for a designer to approve creation of multiple Figma collections.
+
+**Product consequence:** The preview remains read-only and approval-gated. It should name the planned collections, modes, semantic color grammar, sample aliases, sample spacing/typography/shadow tokens, generated assumptions, warnings, and the explicit "nothing changed in Figma" boundary. Optional HTML/demo preview remains a follow-up feature; the core fix is a richer approval summary in the existing setup flow.
+
+**Implementation:** `prepare_ds_config` now includes `setupApprovalPreview`, and the new-DS Agent Interface guidance tells agents to show it before build approval.
+
 ## [2026-06-13] Setup-created spacing semantics resolve primitive aliases by value
 
 **Decision:** New design-system setup must resolve spacing primitive aliases by numeric primitive value, not by token-name coincidence. A semantic value of `48px` should alias to the primitive whose value is `48`, such as `space/12` in an 8px step scale. It must not require a primitive literally named `space/48`, and it must not alias `1px` to `space/1` when `space/1` resolves to `4px`.

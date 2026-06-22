@@ -61,6 +61,7 @@ try {
     assert.strictEqual(start.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(start.hardRules.bulkDesignSystemUpdatesAreInScope, true);
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_setup_repairs")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("optionalApplyInput")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("missingCapabilityNotes")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_primitives")));
@@ -78,6 +79,11 @@ try {
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("pass that exact object")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Never replace setup repair aliases with counts")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("schema validation rejects")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("contrastRepairOptions")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("apply_ds_config_contrast_repairs")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("suggestedBackground") && item.includes("suggestedText")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("prose-only repair direction")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("go for Figma")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Do not replace the exact entries with token names")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")));
@@ -156,12 +162,16 @@ try {
     const route = routeIntent(posterGalleryIntent);
     assert.strictEqual(route.workflow.id, "new-ds-setup");
     assert.ok(route.intakeContract);
-    assert.ok(route.intakeContract.firstResponseRule.includes("intake questions"));
+    assert.ok(route.intakeContract.firstResponseRule.includes("one targeted intake question"));
+    assert.ok(route.intakeContract.questionBatchingRule.includes("one setup intake question"));
+    assert.ok(route.intakeContract.inferPairingIntentRule.includes("infer reasonable generated"));
     assert.ok(route.intakeContract.doNotDraftBeforeIntake.some(item => /palette|proposal/i.test(item)));
     assert.ok(route.message.includes("do not draft a full proposal"));
-    assert.ok(route.designerResponse.includes("start by asking"));
+    assert.ok(route.message.includes("create_ds_config_from_intake"));
+    assert.ok(route.designerResponse.includes("one setup question at a time"));
     assert.ok(route.designerResponse.includes("won't draft"));
     assert.ok(route.designerResponse.includes("not a proposal to approve"));
+    assert.ok(route.designerResponse.includes("file-scoped local config"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
   }
 
@@ -186,12 +196,26 @@ try {
     const guide = getWorkflowGuide("new-ds-setup");
     assert.ok(guide.intakeContract);
     assert.ok(guide.intakeContract.requiredTopics.length >= 8);
-    assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "prepare_ds_config"));
+    assert.ok(guide.intakeContract.configCreationTool === "create_ds_config_from_intake");
+    assert.ok(guide.intakeContract.suggestionBoundary.includes("Do not confuse proposing with inventing"));
+    assert.ok(guide.intakeContract.suggestionBoundary.includes("wait for approval"));
+    assert.ok(guide.intakeContract.questionHelp.semanticColorNamingGrammar.includes("examples"));
+    assert.ok(guide.intakeContract.questionHelp.semanticColorNamingGrammar.includes("intent/emphasis"));
+    assert.ok(guide.intakeContract.questionHelp.colorScale.includes("100-900"));
+    assert.ok(guide.intakeContract.questionHelp.fontFamilies.includes("JetBrains Mono"));
+    assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "create_ds_config_from_intake"));
+    assert.ok(guide.steps.some(step => step.id === "create-config-from-intake" && step.tool === "create_ds_config_from_intake" && step.localConfigWrite === true));
     assert.ok(guide.steps.some(step => step.id === "optional-design-md-intake" && step.optional === true && step.designerMessage.includes("just drop it in")));
+    assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.designerMessage.includes("concrete examples")));
+    assert.ok(guide.steps.some(step => step.id === "repair-setup-contrast-config" && step.tool === "apply_ds_config_contrast_repairs" && step.localConfigWrite === true && step.requiresApproval === true));
+    assert.ok(guide.errors.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(guide.errors.some(item => item.includes("Do not invent missing brand colors")));
+    assert.ok(guide.errors.some(item => item.includes("100-900")));
+    assert.ok(guide.errors.some(item => item.includes("monospace")));
+    assert.ok(guide.errors.some(item => item.includes("create_ds_config_from_intake")));
     const handled = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
     assert.ok(handled.intakeContract);
-    assert.ok(handled.intakePresentationRule.includes("intake questions"));
+    assert.ok(handled.intakePresentationRule.includes("one targeted intake question"));
     assert.ok(handled.message.includes("do not draft a full proposal"));
   }
 
@@ -213,7 +237,7 @@ try {
     assert.strictEqual(health.status, "blocked");
     const proposal = health.checks.find(check => check.id === "setup_proposal_boundary");
     assert.strictEqual(proposal.status, "fail");
-    assert.ok(proposal.nextAction.includes("targeted intake questions"));
+    assert.ok(proposal.nextAction.includes("next single targeted intake question"));
     assert.strictEqual(health.nextAction.type, "ask_user");
   }
 
@@ -231,14 +255,15 @@ try {
         setupIntakeCompleted: false,
       },
       requestedAction: {
-        tool: "prepare_ds_config",
+        tool: "create_ds_config_from_intake",
         kind: "read",
       },
     });
     assert.strictEqual(health.status, "blocked");
     const intake = health.checks.find(check => check.id === "setup_intake_boundary");
     assert.strictEqual(intake.status, "fail");
-    assert.ok(intake.nextAction.includes("Ask targeted setup intake questions"));
+    assert.ok(intake.message.includes("create_ds_config_from_intake"));
+    assert.ok(intake.nextAction.includes("Ask exactly one setup intake question"));
     assert.strictEqual(health.nextAction.type, "ask_user");
   }
 
@@ -291,6 +316,7 @@ try {
       "audit_tokens",
       "inspect_ds_setup_gaps",
       "inspect_ds_token_gaps",
+      "qa_binding_audit",
       "apply_ds_setup_repairs",
       "plan_ds_semantic_naming_consolidation",
       "apply_ds_semantic_naming_consolidation",
@@ -306,6 +332,7 @@ try {
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
     assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.kind === "read" && step.tool === "inspect_ds_token_gaps"));
     assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("missing foundation collections or modes")));
+    assert.ok(guide.steps.some(step => step.id === "binding-audit-handoff" && step.kind === "read" && step.tool === "qa_binding_audit" && step.optional === true));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("semantic setup repairs separate from token-gap")));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("summarized by category")));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("include every available boundary")));
@@ -501,6 +528,63 @@ try {
       verification.nextAction.includes("instead of a drifting option number"),
       "post-apply health check should tell agents to name the applied repair instead of option numbers"
     );
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: [
+          "sync_figma_data",
+          "detect_design_system",
+          "audit_tokens",
+          "inspect_ds_token_gaps",
+        ],
+      },
+      requestedAction: {
+        tool: "summarize_results",
+        kind: "read",
+        claimsSemanticColorsClean: true,
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const summary = health.checks.find(check => check.id === "health_check_summary_boundary");
+    assert.strictEqual(summary.status, "fail");
+    assert.strictEqual(summary.recommendedTool, "inspect_ds_setup_gaps");
+    assert.ok(summary.message.includes("semantic colors"));
+    assert.ok(summary.nextAction.includes("inspect_ds_setup_gaps completed"));
+  }
+
+  {
+    const health = handleFigletsHealthCheck({
+      context: { mode: "designer", workflowId: "health-check" },
+      workflowState: {
+        figletsStartCalled: true,
+        routeIntentCalled: true,
+        workflowGuideCalled: true,
+        completedTools: [
+          "sync_figma_data",
+          "detect_design_system",
+          "audit_tokens",
+          "inspect_ds_setup_gaps",
+          "inspect_ds_token_gaps",
+        ],
+      },
+      requestedAction: {
+        tool: "summarize_results",
+        kind: "read",
+        claimsLayerBindingsClean: true,
+      },
+    });
+    assert.strictEqual(health.status, "blocked");
+    const summary = health.checks.find(check => check.id === "health_check_summary_boundary");
+    assert.strictEqual(summary.status, "fail");
+    assert.strictEqual(summary.recommendedTool, "qa_binding_audit");
+    assert.ok(summary.nextAction.includes("Run qa_binding_audit"));
+    assert.ok(summary.nextAction.includes("binding QA is out of scope"));
   }
 
   {

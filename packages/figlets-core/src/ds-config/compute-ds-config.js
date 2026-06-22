@@ -13,7 +13,9 @@ function computeDsConfig(ds) {
   const base   = DS.grid?.base || 8;
   const modes  = DS.breakpoints?.modes || ['Mobile', 'Tablet', 'Desktop'];
   const tier   = DS.breakpoints?.tier  || 3;
-  const preset = DS.typography?.scalePreset || 'material3';
+  const preset = normalizeTypographyPreset(DS.typography?.scalePreset || 'material3');
+  if (!DS.typography) DS.typography = {};
+  DS.typography.scalePreset = preset;
 
   const computed    = [];
   const needsDesignerInput = [];
@@ -21,15 +23,16 @@ function computeDsConfig(ds) {
 
   // ── Spacing primitives (Collection 1) ──────────────────────────────────────
   const PRIM_SPACING_8 = [
-    [0, 0], [1, 4], [2, 8], [3, 12], [4, 16], [5, 20], [6, 24],
-    [8, 32], [10, 40], [11, 44], [12, 48], [16, 64], [20, 80], [24, 96],
-    [32, 128], [40, 160], [48, 192], [64, 256],
+    ['0', 0], ['025', 2], ['050', 4], ['100', 8], ['150', 12], ['200', 16],
+    ['250', 20], ['300', 24], ['400', 32], ['500', 40], ['550', 44], ['600', 48],
+    ['800', 64], ['1000', 80], ['1200', 96], ['1600', 128], ['2000', 160],
+    ['2400', 192], ['3200', 256],
   ];
 
   const PRIM_SPACING_4 = [
-    [0, 0], [0.5, 2], [1, 4], [2, 8], [3, 12], [4, 16], [5, 20],
-    [6, 24], [8, 32], [10, 40], [11, 44], [12, 48], [16, 64], [20, 80],
-    [24, 96], [32, 128],
+    ['0', 0], ['050', 2], ['100', 4], ['200', 8], ['300', 12], ['400', 16],
+    ['500', 20], ['600', 24], ['800', 32], ['1000', 40], ['1100', 44],
+    ['1200', 48], ['1600', 64], ['2000', 80], ['2400', 96], ['3200', 128],
   ];
 
   const primSpacing = base === 4 ? PRIM_SPACING_4 : PRIM_SPACING_8;
@@ -99,6 +102,11 @@ function computeDsConfig(ds) {
 
   DS.spacing = {
     semantic,
+    responsiveModeValidation: {
+      allowSameValueModes: {
+        categories: ['component', 'stack', 'touch'],
+      },
+    },
     radius: {
       none:  0,
       xs:    r(0.25),
@@ -171,7 +179,6 @@ function computeDsConfig(ds) {
       needsDesignerInput.push('DS.typography.scale');
       preview.push(`  DS.typography.scale — ⚠ unknown preset "${preset}", needs designer input`);
     } else {
-      if (!DS.typography) DS.typography = {};
       DS.typography.scale = scale;
       computed.push('DS.typography.scale');
       preview.push(`  DS.typography.scale — ${Object.keys(scale).length} roles (${preset})`);
@@ -191,4 +198,34 @@ function computeDsConfig(ds) {
   };
 }
 
-module.exports = { computeDsConfig };
+function normalizeTypographyPreset(value) {
+  const text = String(value || '').trim().toLowerCase().replace(/[_\s]+/g, '-');
+  if (!text) return 'material3';
+  if ([
+    'material',
+    'material-3',
+    'material3',
+    'material-scale',
+    'material-type-scale',
+    'material-design',
+    'material-design-3',
+    'material-design-type-scale',
+    'm3',
+    'standard',
+    'default',
+  ].includes(text)) {
+    return 'material3';
+  }
+  if (['fluid', 'fluid-scale', 'responsive', 'responsive-scale'].includes(text)) {
+    return 'fluid';
+  }
+  if (['compact', 'compact-scale', 'dense', 'condensed'].includes(text)) {
+    return 'compact';
+  }
+  if (['custom', 'explicit', 'custom-scale'].includes(text)) {
+    return 'custom';
+  }
+  return text;
+}
+
+module.exports = { computeDsConfig, normalizeTypographyPreset };

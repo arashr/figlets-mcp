@@ -47,7 +47,7 @@ function tokenDomain(name) {
 }
 
 function isPrimitiveSpacingStepToken(name) {
-  return /^(space|spacing)\/[\d]+(?:[-_][\d]+)*$/.test(String(name || ""));
+  return /^(space|spacing)\/(?:[\d]+(?:[-_][\d]+)*|full)$/.test(String(name || ""));
 }
 
 function isSpacingSemanticTokenName(name) {
@@ -65,6 +65,8 @@ function isPrimitiveLikeName(name) {
   if (/^color\/scrim\//.test(value)) return true;
   if (isPrimitiveSpacingStepToken(value)) return true;
   if (/^(space|spacing)\/(radius|border)\//.test(value)) return true;
+  if (/^radius\//.test(value)) return true;
+  if (/^border\/width\//.test(value)) return true;
   if (/^type\/(size|line-height|tracking|weight)\//.test(value)) return true;
   if (/^type\/[^/]+\/[^/]+\/(line-height|size|tracking|weight)$/.test(value)) return true;
   if (/^font\//.test(value)) return true;

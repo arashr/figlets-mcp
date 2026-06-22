@@ -145,4 +145,19 @@ module.exports = (() => {
     assert.strictEqual(result.inferredGrammar, "unknown");
     assert.strictEqual(result.diagnostics[0].kind, "unknown-grammar");
   }
+
+  {
+    const result = classifySemanticColorGrammar([
+      sem("scrim", "color/scrim/black/12"),
+      sem("overlay", "color/scrim/overlay"),
+      sem("shadow-key", "color/shadow/key"),
+      sem("shadow-ambient", "color/shadow/ambient"),
+    ]);
+    assert.strictEqual(
+      result.diagnostics.length,
+      0,
+      "generated scrim and shadow color utilities should not surface semantic naming advisories"
+    );
+    assert.strictEqual(classifyName("color/shadow/key").assetRole, "utility");
+  }
 })();

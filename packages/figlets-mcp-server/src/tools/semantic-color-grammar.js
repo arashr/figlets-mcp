@@ -3,6 +3,7 @@ const FOREGROUND_GROUPS = ["text", "fg", "foreground"];
 const ICON_GROUPS = ["icon"];
 const BORDER_GROUPS = ["border", "outline", "stroke"];
 const ON_CONTEXT_GROUPS = ["on-surface", "on-bg", "on-background"];
+const UTILITY_GROUPS = ["scrim", "overlay", "state", "shadow"];
 const STRENGTH_WORDS = ["subtle", "muted", "bold", "emphasis", "strong", "weak", "container"];
 
 function norm(value) {
@@ -51,6 +52,25 @@ function splitOnLeaf(leaf) {
 function classifyName(name) {
   const parts = String(name || "").split("/");
   if (!isSemanticColorName(name)) return null;
+
+  const utilityIndex = findIndex(parts, UTILITY_GROUPS);
+  if (utilityIndex >= 0) {
+    const group = norm(parts[utilityIndex]);
+    return {
+      name,
+      assetRole: "utility",
+      group,
+      roleIndex: utilityIndex,
+      leaf: norm(parts[parts.length - 1] || ""),
+      family: norm(parts.slice(utilityIndex + 1).join("/") || group),
+      context: group,
+      targetContext: null,
+      diagnostic: "clean",
+      diagnosticReason: null,
+      strength: parts.map(norm).find(part => STRENGTH_WORDS.includes(part)) || null,
+      scope: parts.length > 4 ? "nested" : "global",
+    };
+  }
 
   const bgIndex = findIndex(parts, BACKGROUND_GROUPS);
   if (bgIndex >= 0) {
@@ -140,7 +160,9 @@ function classifyName(name) {
 }
 
 function scoreGrammars(classifications) {
-  const clean = classifications.filter(item => item && item.diagnostic !== "invalid-name");
+  const clean = classifications.filter(item =>
+    item && item.diagnostic !== "invalid-name" && item.assetRole !== "utility"
+  );
   const pairedEvidence = clean.filter(item =>
     (item.assetRole === "foreground" && item.context && item.context.indexOf("on-") === 0) ||
     (item.context === "surface" || item.context === "bg" || item.context === "background")

@@ -98,7 +98,9 @@ function postJson(url, body, timeoutMs) {
     await waitForPluginConnection(120000);
   }
   const plan = buildBrokenDsFixturePlan({ seed: args.seed });
-  plan.ds = require('../packages/figlets-mcp-server/src/figlets-core.js').dsConfig.readDsConfig(written.configPath);
+  const dsConfigCore = require('../packages/figlets-mcp-server/src/figlets-core.js').dsConfig;
+  plan.ds = dsConfigCore.readDsConfig(written.configPath);
+  plan.primitivesData = dsConfigCore.generatePrimitivesData(plan.ds);
   plan.configPath = written.configPath;
   plan.confirmation = CONFIRMATION_PHRASE;
   if (args.expectedFileName) plan.expectedFileName = args.expectedFileName;

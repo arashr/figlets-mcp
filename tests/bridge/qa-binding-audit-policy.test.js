@@ -279,6 +279,12 @@ assert.ok(
 );
 
 assert.ok(
+  !code.includes("itemSpacing = 6;") &&
+    !code.includes("cornerRadius = 16;"),
+  "Generated showcase chrome must avoid raw values that have no exact generated spacing/radius token"
+);
+
+assert.ok(
   code.includes("return { fg: candidates[i].fg, varRef: candidates[i].varRef, show: true };"),
   "Showcase primitive swatch indicators must preserve semantic foreground variables"
 );

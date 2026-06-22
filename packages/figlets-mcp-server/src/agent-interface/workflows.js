@@ -9,6 +9,7 @@ const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 
 const MUTATING_TOOLS = new Set([
   "apply_ds_setup",
+  "apply_ds_config_contrast_repairs",
   "apply_ds_foundation_repairs",
   "apply_ds_setup_repairs",
   "apply_ds_semantic_naming_consolidation",
@@ -72,6 +73,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "inspect_ds_setup_gaps.repairPlan.applyInput → apply_ds_setup_repairs for approved setup repairs, alias updates, and missing role creations; preserve each aliases object exactly",
     "inspect_ds_setup_gaps.repairPlan.optionalApplyInput → apply_ds_setup_repairs for separately approved optional convention-level role creation; preserve each aliases object exactly",
     "inspect_ds_setup_gaps.semanticColorGrammar / semanticNamingConflicts + designer's grammar/context decision → plan_ds_semantic_naming_consolidation, then approved repairPlan.applyInput → apply_ds_semantic_naming_consolidation for rename-only compatibility consolidation",
+    "prepare_ds_config.semanticPairs.contrastRepairOptions → apply_ds_config_contrast_repairs for designer-approved pre-build local config contrast alias repairs, then rerun prepare_ds_config before apply_ds_setup",
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
     "inspect_ds_token_gaps.repairPlan.previewInput / repairPlan.applyInput → update_ds_tokens for config-backed non-color token dry-run preview and narrow approved apply",
@@ -88,7 +90,11 @@ const DESIGNER_FLOW_HARD_RULES = {
     "If schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh structured repairPlan.applyInput instead of retrying invented arguments.",
     "If repairPlan.optionalApplyInput is non-empty, present it as optional bulk creation that needs separate approval.",
     "If inspect_ds_setup_gaps reports semanticNamingConflicts or semanticNamingAdvisories, report the inferred semanticColorGrammar first. Do not ask for a binary surface-based/role-based choice by default. Ask for a grammar/context decision only when the designer wants naming cleanup, then call plan_ds_semantic_naming_consolidation; show every proposed rename line and every advisory; only after approval pass repairPlan.applyInput unchanged to apply_ds_semantic_naming_consolidation.",
+    "For new design-system setup, if prepare_ds_config reports semantic color contrast failures with contrastRepairOptions, show the exact evaluated options, including any paired suggestedBackground + suggestedText changes; do not invent untested examples. Ask approval, call apply_ds_config_contrast_repairs with the approved option objects, then rerun prepare_ds_config. Do not stop at 'the setup surface cannot apply this' and do not run apply_ds_setup until readyToBuild is true.",
+    "For new design-system setup, if prepare_ds_config reports semantic color contrast failures with zero contrastRepairOptions, rerun prepare_ds_config once because generated setup should self-correct. If the latest result still fails with no exact options, do not ask for or approve a prose-only repair direction; ask only for an executable choice such as an exact alias, brand hex, or color scale change.",
+    "When the designer says go for Figma or build it during setup, treat it as build approval only if the latest prepare_ds_config result has readyToBuild === true. If readyToBuild is false, do not call apply_ds_setup; run the available repair path or give one concise blocker instead of starting another approval loop.",
     "For health-check, run inspect_ds_token_gaps as a read-only suggestion step before summarizing the design-system audit. Surface token-gap findings by category, including missing foundation collection/mode suggestions, without forcing the designer into a separate token-gap workflow.",
+    "For health-check, do not call semantic colors clean unless inspect_ds_setup_gaps completed and the fresh result has no semantic setup gaps, contrast failures, icon contrast failures, broken aliases, apply-ready setup repairs, or unresolved naming findings. Do not call token gaps clean unless inspect_ds_token_gaps completed. Do not call visible/page layer bindings clean unless qa_binding_audit completed; otherwise say binding QA is a separate check.",
     "When health-check finds both semantic setup repairs and token-gap suggestions, the next-step prompt must offer both boundaries. Do not make semantic color repair or naming consolidation the only clean next step if inspect_ds_token_gaps found foundation modes, primitive gaps, or semantic token repairs.",
     "End health-check repair summaries with a numbered repair choice menu: one numbered option per available repair category, then a numbered all option, then a numbered specific/other option where the designer can name exact fixes. Category choices must use designer goal language such as fix, review, plan, add, or create; do not use implementation terms like dry-run in the menu label. If a selected category needs a dry-run preview before writing, say the designer will review the proposed changes and be asked for confirmation before anything changes. Category choices must preserve separate write boundaries; all must state exactly which ready safe categories it includes and which optional, designer-decision, or separate-boundary items it excludes.",
     "If a designer asks to review token repairs from health-check, use inspect_ds_token_gaps.repairPlan.reviewOptions as a submenu and run only the selected preview option. Do not run repairPlan.previewInput plus primitiveRepairPlan.previewInput as one combined token preview. Token review options must stay separated: foundation modes, primitive typography, exact semantic spacing aliases, radius/border tokens, typography variables/styles, and full semantic spacing token completion when present.",
@@ -119,7 +125,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     mobileOnlyRule: "A Mobile-only semantic spacing alias approval must not be redirected into Tablet/Desktop foundation mode creation.",
   },
   designerPresentationRule:
-    "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Before approval, show every ready-to-apply entry from designerPresentation.proposedChanges or the What will change section (token, action, mode aliases, reason) — not only a count. Keep optional and needs-designer-decision tiers separate. For inspect_ds_token_gaps in health-check, summarize token gaps by category and call out foundation mode suggestions such as missing Tablet/Desktop modes; show exact token/mode repair rows only when asking approval for that token-gap boundary. The final next-step prompt should include available token-gap boundaries alongside semantic setup and naming choices, formatted as a numbered repair choice menu with goal-language category options, an all-ready-safe-repairs option that names included/excluded categories, and a specific/other option. Menu labels should say what the designer is trying to accomplish, not tool mechanics like dry-run. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
+    "When inspect_ds_setup_gaps returns repairPlan.designerPresentation, use that as the designer-facing summary shape. Before approval, show every ready-to-apply entry from designerPresentation.proposedChanges or the What will change section (token, action, mode aliases, reason) — not only a count. Keep optional and needs-designer-decision tiers separate. For inspect_ds_token_gaps in health-check, summarize token gaps by category and call out foundation mode suggestions such as missing Tablet/Desktop modes; show exact token/mode repair rows only when asking approval for that token-gap boundary. The final next-step prompt should include available token-gap boundaries alongside semantic setup and naming choices, formatted as a numbered repair choice menu with goal-language category options, an all-ready-safe-repairs option that names included/excluded categories, and a specific/other option. Menu labels should say what the designer is trying to accomplish, not tool mechanics like dry-run. Never report semantic colors clean from audit_tokens alone; semantic color status must come from inspect_ds_setup_gaps. Never imply visible/page layer bindings are clean unless qa_binding_audit ran. Do not present raw verification tables, JSON key audits, or pass/fail checklists unless the designer explicitly asks for implementation details.",
   missingCapabilityResponse: "If the Figlets workflow output does not expose the needed specialized planner or apply payload, route exact designer-specified high-level Figma edits through plan_ds_figma_operations when possible. Do not translate health-check findings into invented generic operations. For remaining product-specific planning or designer-decision gaps, say this is proposed Figlets planner scope instead of inventing a script or saying the gaps cannot be fixed.",
   neverLeaveDesignerModeForImplementation: {
     stopImmediatelyWhenYouWould: [
@@ -140,13 +146,41 @@ const DESIGNER_FLOW_HARD_RULES = {
 
 const NEW_DS_SETUP_INTAKE_CONTRACT = {
   treatPromptAs: "initial direction, not a complete design-system spec",
-  requireQuestionsBefore: ["prepare_ds_config", "apply_ds_setup"],
+  requireQuestionsBefore: ["create_ds_config_from_intake", "prepare_ds_config", "apply_ds_setup"],
+  configCreationTool: "create_ds_config_from_intake",
+  configCreationRule:
+    "After intake answers are collected, call create_ds_config_from_intake to write only the file-scoped local design-system.config.js. If it returns needsDesignerInput, ask for those exact missing choices. Do not ask to switch to developer/config-editing work.",
   firstResponseRule:
-    "For broad setup prompts, lead with targeted intake questions. Do not open with a synthesized design-system proposal, palette, or token plan.",
+    "For broad setup prompts, ask exactly one targeted intake question per assistant turn, following intakeQuestionOrder. Do not batch the whole intake checklist into one message. Do not open with a synthesized design-system proposal, palette, or token plan.",
+  questionBatchingRule:
+    "Ask one setup intake question per assistant turn. If the designer answers several topics at once, record all answered topics, then ask the next single missing question only.",
+  questionHelp: {
+    semanticColorNamingGrammar:
+      "When asking semantic color naming grammar, include one-line examples: paired context uses bg/surface + text/on-surface, element-first uses text/danger + bg/danger-subtle, intent/emphasis uses brand/strong/subtle states, component-scoped uses button/bg/default. Recommend intent/emphasis for broad product systems unless the designer has a stronger convention.",
+    colorScale:
+      "Ask for concrete scale labels, not abstract size words. Examples: 100-900, 50-950, or 0-100. If the designer asks for a recommendation, suggest 100-900 for simple product systems or 50-950 when they want extra extremes.",
+    fontFamilies:
+      "If the designer says any/default/reasonable monospace, treat that as approval to choose a concrete default: SF Mono for iOS/macOS, Roboto Mono for Android, JetBrains Mono otherwise.",
+  },
+  intakeQuestionOrder: [
+    "project name",
+    "platform",
+    "grid base",
+    "breakpoints",
+    "semantic color naming grammar",
+    "contrast standard",
+    "brand colors",
+    "color scale (100-900, 50-950, or 0-100)",
+    "typography preset",
+    "font families",
+    "light/dark behavior",
+  ],
+  inferPairingIntentRule:
+    "If the designer supplies brand colors and a semantic naming grammar, infer reasonable generated background/foreground pairing intent from those answers unless they explicitly ask for custom pairings. Do not ask a vague color-family pairing question by default.",
   doNotInvent: [
     "brand color hex values",
     "color family names or counts",
-    "background/foreground pairing choices",
+    "custom background/foreground pairing overrides",
     "typography scale or preset",
     "spacing, grid, radius, or breakpoint defaults",
     "contrast standard choice",
@@ -167,13 +201,15 @@ const NEW_DS_SETUP_INTAKE_CONTRACT = {
     "breakpoints (3-tier/4-tier)",
     "semantic color naming grammar (paired context / element-first / intent and emphasis / component-scoped / custom)",
     "contrast standard (APCA default / WCAG 2.2)",
-    "color scale and brand colors (name + hex)",
-    "color families and background/foreground pairing intent",
-    "typeface and typography preset",
+    "color scale (for example 100-900, 50-950, or 0-100)",
+    "brand colors (name + hex)",
+    "typeface and typography preset (material3/material/standard, fluid, compact, or custom with explicit scale)",
     "light/dark behavior",
   ],
   suggestionRule:
-    "You may ask multiple-choice questions or offer lightweight answer options, but label them as choices to pick from. Do not draft a full proposal before intake unless the designer explicitly asks for suggestions or has already answered the relevant intake topics.",
+    "You may ask multiple-choice questions or offer lightweight answer options, but label them as choices to pick from. Suggestions are allowed as editable proposals; they become config only after the designer approves one. Do not draft a full proposal before intake unless the designer explicitly asks for suggestions or has already answered the relevant intake topics.",
+  suggestionBoundary:
+    "Do not confuse proposing with inventing. Agents may suggest typography scales, preset choices, color directions, and spacing templates when the designer asks or when a tool returns suggestions, but must present them as options and wait for approval before create_ds_config_from_intake writes those values.",
   proposalRule:
     "Do not draft a full proposal before intake. Ask questions before suggesting concrete token values unless the designer explicitly asks for suggestions.",
 };
@@ -256,6 +292,13 @@ const WORKFLOWS = [
         kind: "read",
         tool: "inspect_ds_token_gaps",
         designerMessage: "I'll also inspect config-backed token gaps, including missing foundation collections or modes, and summarize them by category without changing Figma.",
+      },
+      {
+        id: "binding-audit-handoff",
+        kind: "read",
+        optional: true,
+        tool: "qa_binding_audit",
+        designerMessage: "If visible/page layer bindings are in scope, I'll run qa_binding_audit before saying rendered examples or documentation layers are clean.",
       },
       {
         id: "approve-repairs",
@@ -476,7 +519,7 @@ const WORKFLOWS = [
   {
     id: "new-ds-setup",
     title: "New Design System Setup",
-    summary: "Collect designer choices, prepare a config, preview generated tokens, then build collections only after approval.",
+    summary: "Collect designer choices, create the file-scoped config, preview generated tokens, then build collections only after approval.",
     intents: [
       "set up a design system",
       "set up a new design system",
@@ -499,21 +542,40 @@ const WORKFLOWS = [
       {
         id: "collect-answers",
         kind: "confirmation",
-        requiredBeforeTool: "prepare_ds_config",
-        designerMessage: "I'll ask targeted setup questions first. I won't draft color palettes, typography stacks, grid defaults, or token names before you answer.",
+        requiredBeforeTool: "create_ds_config_from_intake",
+        designerMessage: "I'll ask one setup question at a time. If you answer multiple topics at once, I'll record those answers and ask only the next missing question. Naming grammar and color scale questions should include concrete examples, and vague font defaults like 'any reasonable monospace' should resolve to a real font before config creation.",
         intakeTopics: NEW_DS_SETUP_INTAKE_CONTRACT.requiredTopics,
+        intakeQuestionOrder: NEW_DS_SETUP_INTAKE_CONTRACT.intakeQuestionOrder,
+        questionHelp: NEW_DS_SETUP_INTAKE_CONTRACT.questionHelp,
+      },
+      {
+        id: "create-config-from-intake",
+        kind: "read",
+        tool: "create_ds_config_from_intake",
+        localConfigWrite: true,
+        requiresIntake: true,
+        designerMessage: "I'll turn the approved intake answers into the file-scoped design-system.config.js. This writes only local Figlets config, never Figma; if exact hex colors or font families are missing, I'll ask for those instead of inventing them.",
       },
       {
         id: "prepare",
         kind: "read",
         tool: "prepare_ds_config",
         requiresIntake: true,
-        designerMessage: "I'll compute and preview the token plan before touching Figma.",
+        designerMessage: "I'll compute the token plan and show setupApprovalPreview with concrete collection groups, modes, semantic aliases, sample tokens, assumptions, and the no-write approval boundary before touching Figma.",
+      },
+      {
+        id: "repair-setup-contrast-config",
+        kind: "write",
+        tool: "apply_ds_config_contrast_repairs",
+        localConfigWrite: true,
+        requiresApproval: true,
+        conditional: "Only when prepare_ds_config returns semanticPairs.contrastRepairOptions.",
+        designerMessage: "If the preview finds contrast failures with exact repair options, I'll show those options, ask approval, apply only the approved local config alias repair, then rerun prepare_ds_config before any Figma write.",
       },
       {
         id: "approve-build",
         kind: "confirmation",
-        designerMessage: "Does the preview look right, and are you ready to build it in Figma?",
+        designerMessage: "After you review the detailed setupApprovalPreview, I'll ask whether the plan looks right and whether you're ready to build it in Figma.",
       },
       {
         id: "apply",
@@ -526,9 +588,18 @@ const WORKFLOWS = [
     next: ["build-showcase", "health-check", "export-design-md"],
     errors: [
       "If the designer prompt is evocative but incomplete, treat it as direction and run intake before prepare_ds_config.",
+      "After intake, call create_ds_config_from_intake before prepare_ds_config. If it returns needsDesignerInput, ask those exact follow-up questions instead of switching to developer/config-editing work.",
       "Do not invent missing brand colors, typography, spacing, contrast, or light/dark choices and ask for build confirmation.",
-      "Do not draft a full setup proposal, palette, or token plan before intake. Ask questions first; only offer lightweight multiple-choice options unless the designer asks for suggestions.",
-      "If prepare_ds_config reports contrast failures, fix or confirm the config before running apply_ds_setup.",
+      "Do not draft a full setup proposal, palette, or token plan before intake. Ask one question at a time; only offer lightweight multiple-choice options unless the designer asks for suggestions.",
+      "Do not ask a vague color-family/background-foreground pairing question by default after brand colors and semantic naming grammar are provided. Infer reasonable generated pairings unless the designer asks for custom pairings.",
+      "Do not ask semantic naming grammar as unexplained jargon. Include examples for paired context, element-first, intent/emphasis, component-scoped, and custom; if the designer is unsure, recommend intent/emphasis for broad product systems.",
+      "Do not ask for color scale with abstract labels such as compact/standard/expanded. Ask for concrete labels such as 100-900, 50-950, or 0-100.",
+      "If the designer authorizes an arbitrary/default monospace family, pick a concrete platform-appropriate default before create_ds_config_from_intake instead of passing vague prose into the config.",
+      "If prepare_ds_config reports failing semantic color contrast, show semanticPairs.contrastRepairOptions or setupApprovalPreview.semanticColor.contrast.repairOptions as exact evaluated suggestions instead of asking whether to keep revising the palette broadly. Some options may include both suggestedBackground and suggestedText; present both together.",
+      "If the designer approves a prepare_ds_config contrastRepairOptions item, call apply_ds_config_contrast_repairs with the approved option object(s), then rerun prepare_ds_config.",
+      "If prepare_ds_config reports contrast failures with zero contrastRepairOptions, do not ask for a prose-only repair direction such as preserve background or make text lighter. Rerun prepare_ds_config once on the current config; generated setup should self-correct. If the latest result still has failCount > 0 and no exact repair option, explain the exact blocker and ask for an executable choice such as a specific alias, a brand hex change, or a color scale change.",
+      "If the designer says go for Figma/build it, treat it as build approval only when the latest prepare_ds_config result has readyToBuild === true. If readyToBuild is false, do not call apply_ds_setup; run the appropriate contrast repair or give one concise blocker, not a new approval loop.",
+      "Never present an abstract suggested contrast direction or an untested single-axis example as something Figlets can apply. If there is no structured repair payload, suggestions must be concrete executable setup inputs or exact aliases.",
     ],
   },
   {
@@ -687,16 +758,14 @@ function _workflowStartResponse(workflow) {
       "",
       "Your prompt gives me direction, not a complete design-system spec yet.",
       "",
-      "I'll start by asking targeted setup questions for missing choices, such as:",
-      "- how many color families and background/foreground pairings you want",
-      "- brand colors (name + hex) once you're ready to provide them",
-      "- light/dark behavior",
-      "- typography, spacing, grid, breakpoints, and contrast standard",
+      "I'll ask one setup question at a time and record any extra answers you give along the way.",
+      "",
+      "First question: what should this design system be called?",
       "",
       "I won't draft a full palette, typography stack, grid defaults, or token names before you answer.",
-      "I may offer lightweight multiple-choice options, but not a proposal to approve.",
+      "I may offer lightweight multiple-choice options, but not a proposal to approve. If you provide brand colors and a semantic naming grammar, I'll infer the generated background/foreground pairing intent unless you ask for custom pairings.",
       "",
-      "After intake I'll preview tokens with prepare_ds_config, show the preview, and only then ask before building in Figma.",
+      "After intake I'll create the file-scoped local config, run prepare_ds_config, show the detailed setupApprovalPreview with concrete collections, modes, sample aliases, and assumptions, and only then ask before building in Figma.",
     ].join("\n");
   }
   if (workflow.id === "health-check") {
@@ -860,7 +929,7 @@ function _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, int
     message: best.workflowId === "start"
       ? "I am not sure which Figlets workflow fits yet. Use selectionPrompt if the host supports choices; otherwise ask with its message."
       : best.workflowId === "new-ds-setup"
-        ? `Recommended workflow: ${best.title}. Treat the designer prompt as initial direction, ask intake questions first, do not draft a full proposal or concrete token values before intake, run setup intake before prepare_ds_config, and ask before any Figma write.`
+        ? `Recommended workflow: ${best.title}. Treat the designer prompt as initial direction, ask exactly one intake question at a time, do not draft a full proposal or concrete token values before intake, infer generated background/foreground pairings unless custom pairings are requested, call create_ds_config_from_intake before prepare_ds_config, and ask before any Figma write.`
         : `Recommended workflow: ${best.title}. Use Figlets workflow tools/scripts only, start read-only, summarize plainly, and ask before any Figma write.`,
   };
   if (best.workflowId === "new-ds-setup") {

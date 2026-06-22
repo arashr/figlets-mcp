@@ -1,6 +1,6 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
-var _bridgeBuild = '0.1.0-dev+bnn53.20260604.1';
+var _bridgeBuild = '0.1.0-dev+bnn58.20260620.1';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -1292,7 +1292,10 @@ async function _prepareBrokenDsFixtureForDevPrep(payload) {
     result.reset = await _resetFigletsFile({});
   }
 
-  result.setup = await _applyDsSetup(payload.ds);
+  result.setup = await _applyDsSetup(payload.setupPayload || {
+    DS: payload.ds,
+    primitivesData: payload.primitivesData
+  });
 
   var gaps = payload.gaps || {};
   var variableResult = await _removeLocalVariablesByName(gaps.removeVariables || []);
@@ -2827,7 +2830,7 @@ async function _buildShowcase(opts) {
     table.strokes = [_paint(_RC.outlineSubtle,  _V.outlineSubtle)];
     table.strokeWeight = 0.5;
     table.strokeAlign  = 'INSIDE';
-    table.cornerRadius = 16;
+    table.cornerRadius = 8;
     table.clipsContent = true;
 
     if (title) {
@@ -3142,7 +3145,7 @@ async function _buildShowcase(opts) {
     title.layoutSizingHorizontal = 'FILL';
 
     const strip = _f('Swatches', 'HORIZONTAL');
-    strip.itemSpacing = 6;
+    strip.itemSpacing = 8;
     strip.counterAxisAlignItems = 'MIN';
 
     for (const v of vars) {
@@ -3244,7 +3247,7 @@ async function _buildShowcase(opts) {
 
     // ── LEFT: Pair box ──────────────────────────────────────────────────────
     const pairBox = _f('PairBox', 'VERTICAL');
-    pairBox.itemSpacing = 6;
+    pairBox.itemSpacing = 8;
     pairBox.counterAxisAlignItems = 'MIN';
     pairBox.primaryAxisAlignItems = 'CENTER';
 
@@ -5183,11 +5186,18 @@ function _ensureCollectionModes(collection, modeNames) {
 }
 
 // ── DS Setup implementation ──────────────────────────────────────────────────
-// Creates all 5 variable collections from a prepared DS config payload.
-// Input: the full DS object (from design-system.config.js after running prepare_ds_config).
+// Creates all 5 variable collections from a prepared setup payload.
+// Input: { DS, primitivesData } from apply_ds_setup. Primitive decisions are
+// prepared upstream; the bridge only executes the payload.
 
-async function _applyDsSetup(DS) {
+async function _applyDsSetup(setupPayload) {
+  if (!setupPayload) throw new Error('No DS setup payload received.');
+  var DS = setupPayload.DS || null;
+  var preparedPrimitives = setupPayload.primitivesData || null;
   if (!DS) throw new Error('No DS config data received.');
+  if (!preparedPrimitives) {
+    throw new Error('Prepared primitive inventory missing. Run apply_ds_setup through the Figlets MCP server so the Bridge only executes the core setup plan.');
+  }
 
   var built = [];
   var skipped = [];
@@ -5202,8 +5212,6 @@ async function _applyDsSetup(DS) {
       b: parseInt(h.slice(4, 6), 16) / 255,
     };
   }
-
-  function sanitize(s) { return String(s).replace('.', '-'); }
 
   async function getOrCreateCollection(name, initialMode) {
     var existing = await figma.variables.getLocalVariableCollectionsAsync();
@@ -5237,13 +5245,25 @@ async function _applyDsSetup(DS) {
     return map;
   }
 
-  async function buildPrimitiveSpacingAliasResolver(collectionId, modeId) {
+  function isSetupPrimitiveSpacingName(name) {
+    return /^space\/[\d]+(?:[-_][\d]+)*$/.test(String(name || ''));
+  }
+
+  function isSetupPrimitiveRadiusName(name) {
+    return /^radius\/[^/]+$/.test(String(name || ''));
+  }
+
+  function isSetupPrimitiveBorderName(name) {
+    return /^border\/width\/[^/]+$/.test(String(name || ''));
+  }
+
+  async function buildPrimitiveAliasResolver(collectionId, modeId, predicate) {
     var allVars = await figma.variables.getLocalVariablesAsync();
     var byValue = {};
     for (var psi = 0; psi < allVars.length; psi++) {
       var variable = allVars[psi];
       if (!variable || variable.variableCollectionId !== collectionId) continue;
-      if (!/^space\/[\d]+(?:[-_][\d]+)*$/.test(String(variable.name || ''))) continue;
+      if (!predicate(variable.name)) continue;
       var raw = variable.valuesByMode && modeId ? variable.valuesByMode[modeId] : null;
       if (raw && typeof raw === 'object' && raw.type === 'VARIABLE_ALIAS') continue;
       var num = Number(raw);
@@ -5398,144 +5418,73 @@ async function _applyDsSetup(DS) {
 
   // ── Collection 1 — Primitives ─────────────────────────────────────────────
 
-  var primName = _configuredCollectionName(DS, 'primitives');
+  var primName = preparedPrimitives.collectionName || _configuredCollectionName(DS, 'primitives');
   var _primRes = await getOrCreateCollection(primName, _configuredInitialMode(DS, 'primitives'));
   var primColl = _primRes.collection;
   var primModeId = primColl.modes[0].modeId;
 
-  // Check if Primitives is missing COLOR vars (user may have deleted ramps but kept FLOAT/STRING vars)
-  var _primHasColors = false;
+  var preparedColors = preparedPrimitives.colors || [];
+  var preparedScrims = preparedPrimitives.scrims || [];
+  var preparedFloats = preparedPrimitives.floats || [];
+  var preparedStrings = preparedPrimitives.strings || [];
+  var _primNeedsMerge = true;
   if (_primRes.existed) {
     var _primCheckVars = await figma.variables.getLocalVariablesAsync();
+    var _primExistingNames = {};
     for (var _pci = 0; _pci < _primCheckVars.length; _pci++) {
-      if (_primCheckVars[_pci].variableCollectionId === primColl.id && _primCheckVars[_pci].resolvedType === 'COLOR') {
-        _primHasColors = true; break;
+      if (_primCheckVars[_pci].variableCollectionId === primColl.id) {
+        _primExistingNames[_primCheckVars[_pci].name] = true;
+      }
+    }
+    _primNeedsMerge = false;
+    var _expectedPrimitiveRows = preparedColors.concat(preparedScrims).concat(preparedFloats).concat(preparedStrings);
+    for (var _epri = 0; _epri < _expectedPrimitiveRows.length; _epri++) {
+      var _expectedPrimitiveName = _expectedPrimitiveRows[_epri] && _expectedPrimitiveRows[_epri].name;
+      if (_expectedPrimitiveName && !_primExistingNames[_expectedPrimitiveName]) {
+        _primNeedsMerge = true;
+        break;
       }
     }
   }
 
-  if (_primRes.existed && _primHasColors) {
+  if (_primRes.existed && !_primNeedsMerge) {
     skipped.push(primName + ' (already exists — skipped)');
   } else {
     // Merge mode: skip vars that already exist (collection may have existing FLOAT/STRING vars)
     var _primMergeMap = await buildVarMap(primColl.id);
 
-    // 1A — color ramps
-    if (DS.color && DS.color.ramps) {
-      for (var ri = 0; ri < DS.color.ramps.length; ri++) {
-        var ramp = DS.color.ramps[ri];
-        for (var si = 0; si < ramp.steps.length; si++) {
-          var step = ramp.steps[si];
-          var vName = ramp.folder + '/' + step[0];
-          if (_primMergeMap[vName]) continue;
-          var v = await createSetupVariable(vName, primColl, 'COLOR');
-          _setVariableScopesForName(v, vName, 'COLOR');
-          v.setValueForMode(primModeId, { r: step[1], g: step[2], b: step[3] });
-        }
-      }
+    // 1A — prepared primitive inventory
+    for (var pci = 0; pci < preparedColors.length; pci++) {
+      var pc = preparedColors[pci] || {};
+      if (!pc.name || _primMergeMap[pc.name]) continue;
+      var pcv = await createSetupVariable(pc.name, primColl, 'COLOR');
+      _setVariableScopesForName(pcv, pc.name, 'COLOR');
+      if (pc.hex) pcv.setValueForMode(primModeId, hexToRgb(pc.hex));
+      else pcv.setValueForMode(primModeId, { r: pc.r, g: pc.g, b: pc.b, a: pc.a });
     }
 
-    // 1A-ii — scrims (COLOR with alpha)
-    var SCRIMS = [
-      { name: 'color/scrim/black/4',  r: 0, g: 0, b: 0, a: 0.04 },
-      { name: 'color/scrim/black/8',  r: 0, g: 0, b: 0, a: 0.08 },
-      { name: 'color/scrim/black/12', r: 0, g: 0, b: 0, a: 0.12 },
-      { name: 'color/scrim/black/20', r: 0, g: 0, b: 0, a: 0.20 },
-      { name: 'color/scrim/black/40', r: 0, g: 0, b: 0, a: 0.40 },
-      { name: 'color/scrim/black/60', r: 0, g: 0, b: 0, a: 0.60 },
-      { name: 'color/scrim/white/8',  r: 1, g: 1, b: 1, a: 0.08 },
-      { name: 'color/scrim/white/12', r: 1, g: 1, b: 1, a: 0.12 },
-      { name: 'color/scrim/white/16', r: 1, g: 1, b: 1, a: 0.16 },
-      { name: 'color/scrim/white/20', r: 1, g: 1, b: 1, a: 0.20 },
-    ];
-    for (var sci = 0; sci < SCRIMS.length; sci++) {
-      var sc = SCRIMS[sci];
-      if (_primMergeMap[sc.name]) continue;
-      var sv = await createSetupVariable(sc.name, primColl, 'COLOR');
-      _setVariableScopesForName(sv, sc.name, 'COLOR');
-      sv.setValueForMode(primModeId, { r: sc.r, g: sc.g, b: sc.b, a: sc.a });
+    for (var psci = 0; psci < preparedScrims.length; psci++) {
+      var psc = preparedScrims[psci] || {};
+      if (!psc.name || _primMergeMap[psc.name]) continue;
+      var psv = await createSetupVariable(psc.name, primColl, 'COLOR');
+      _setVariableScopesForName(psv, psc.name, 'COLOR');
+      psv.setValueForMode(primModeId, { r: psc.r, g: psc.g, b: psc.b, a: psc.a });
     }
 
-    // 1A-iii — shadow FLOAT primitives
-    var SHADOW_FLOATS = [
-      { name: 'shadow/1/offset-y', value: 1 }, { name: 'shadow/1/radius', value: 2 },
-      { name: 'shadow/2/offset-y', value: 4 }, { name: 'shadow/2/radius', value: 8 },
-      { name: 'shadow/3/offset-y', value: 8 }, { name: 'shadow/3/radius', value: 16 },
-      { name: 'shadow/4/offset-y', value: 12 }, { name: 'shadow/4/radius', value: 24 },
-      { name: 'shadow/5/offset-y', value: 16 }, { name: 'shadow/5/radius', value: 32 },
-      { name: 'shadow/ambient/2/radius', value: 8 }, { name: 'shadow/ambient/3/radius', value: 12 },
-      { name: 'shadow/ambient/4/radius', value: 16 }, { name: 'shadow/ambient/5/radius', value: 20 },
-    ];
-    for (var sfi = 0; sfi < SHADOW_FLOATS.length; sfi++) {
-      var sf = SHADOW_FLOATS[sfi];
-      if (_primMergeMap[sf.name]) continue;
-      var sfv = await createSetupVariable(sf.name, primColl, 'FLOAT');
-      _setVariableScopesForName(sfv, sf.name, 'FLOAT');
-      sfv.setValueForMode(primModeId, sf.value);
+    for (var pfi = 0; pfi < preparedFloats.length; pfi++) {
+      var pf = preparedFloats[pfi] || {};
+      if (!pf.name || _primMergeMap[pf.name]) continue;
+      var pfv = await createSetupVariable(pf.name, primColl, 'FLOAT');
+      _setVariableScopesForName(pfv, pf.name, 'FLOAT');
+      pfv.setValueForMode(primModeId, pf.value);
     }
 
-    // 1B — type primitives (FLOAT + STRING)
-    var _tp = _typePrefixSetup;
-    var TYPE_WEIGHTS = [
-      { name: _tp + '/weight/regular', value: 400 }, { name: _tp + '/weight/medium', value: 500 },
-      { name: _tp + '/weight/semibold', value: 600 }, { name: _tp + '/weight/bold', value: 700 },
-    ];
-    var TYPE_LH = [
-      { name: _tp + '/line-height/tight', value: 1.2 }, { name: _tp + '/line-height/snug', value: 1.35 },
-      { name: _tp + '/line-height/normal', value: 1.5 }, { name: _tp + '/line-height/relaxed', value: 1.65 },
-      { name: _tp + '/line-height/loose', value: 1.8 },
-    ];
-    var TYPE_TRACKING = [
-      { name: _tp + '/tracking/tight', value: -0.02 }, { name: _tp + '/tracking/snug', value: -0.01 },
-      { name: _tp + '/tracking/normal', value: 0 }, { name: _tp + '/tracking/open', value: 0.01 },
-      { name: _tp + '/tracking/wide', value: 0.02 }, { name: _tp + '/tracking/wider', value: 0.05 },
-      { name: _tp + '/tracking/widest', value: 0.1 },
-    ];
-    var TYPE_SIZES = [
-      { name: _tp + '/size/2xs', value: 10 }, { name: _tp + '/size/xs', value: 12 },
-      { name: _tp + '/size/sm', value: 14 }, { name: _tp + '/size/md', value: 16 },
-      { name: _tp + '/size/lg', value: 18 }, { name: _tp + '/size/xl', value: 20 },
-      { name: _tp + '/size/2xl', value: 24 }, { name: _tp + '/size/3xl', value: 30 },
-      { name: _tp + '/size/4xl', value: 36 }, { name: _tp + '/size/5xl', value: 48 },
-      { name: _tp + '/size/6xl', value: 60 }, { name: _tp + '/size/7xl', value: 72 },
-    ];
-
-    var allTypeFloats = TYPE_WEIGHTS.concat(TYPE_LH).concat(TYPE_TRACKING).concat(TYPE_SIZES);
-    for (var tfi = 0; tfi < allTypeFloats.length; tfi++) {
-      var tf = allTypeFloats[tfi];
-      if (_primMergeMap[tf.name]) continue;
-      var tfv = await createSetupVariable(tf.name, primColl, 'FLOAT');
-      _setVariableScopesForName(tfv, tf.name, 'FLOAT');
-      tfv.setValueForMode(primModeId, tf.value);
-    }
-
-    // Font family strings
-    var _ff = _fontFamilyPatternSetup;
-    var families = (DS.typography && DS.typography.families) ? DS.typography.families : {};
-    var famEntries = [
-      { key: 'sans',  value: families.sans  || 'Inter' },
-      { key: 'mono',  value: families.mono  || 'JetBrains Mono' },
-    ];
-    if (families.serif) famEntries.push({ key: 'serif', value: families.serif });
-    for (var fami = 0; fami < famEntries.length; fami++) {
-      var fam = famEntries[fami];
-      var famVarName = _ff.replace('{variant}', fam.key);
-      if (_primMergeMap[famVarName]) continue;
-      var famv = await createSetupVariable(famVarName, primColl, 'STRING');
-      _setVariableScopesForName(famv, famVarName, 'STRING');
-      famv.setValueForMode(primModeId, fam.value);
-    }
-
-    // 1C — spacing primitives
-    if (DS.primitives && DS.primitives.spacing) {
-      for (var spi = 0; spi < DS.primitives.spacing.length; spi++) {
-        var sp = DS.primitives.spacing[spi];
-        var spVarName = 'space/' + sanitize(sp[0]);
-        if (_primMergeMap[spVarName]) continue;
-        var spv = await createSetupVariable(spVarName, primColl, 'FLOAT');
-        _setVariableScopesForName(spv, spVarName, 'FLOAT');
-        spv.setValueForMode(primModeId, sp[1]);
-      }
+    for (var psti = 0; psti < preparedStrings.length; psti++) {
+      var ps = preparedStrings[psti] || {};
+      if (!ps.name || _primMergeMap[ps.name]) continue;
+      var psvs = await createSetupVariable(ps.name, primColl, 'STRING');
+      _setVariableScopesForName(psvs, ps.name, 'STRING');
+      psvs.setValueForMode(primModeId, ps.value);
     }
 
     // Hide primitives from publishing
@@ -5905,7 +5854,9 @@ async function _applyDsSetup(DS) {
     // Merge mode: skip vars that already exist.
     var spaceModeMap = buildModeMap(spacingColl, modes3);
 
-    var spaceAlias = await buildPrimitiveSpacingAliasResolver(primColl.id, primModeId);
+    var spaceAlias = await buildPrimitiveAliasResolver(primColl.id, primModeId, isSetupPrimitiveSpacingName);
+    var radiusAliasForSetup = await buildPrimitiveAliasResolver(primColl.id, primModeId, isSetupPrimitiveRadiusName);
+    var borderAliasForSetup = await buildPrimitiveAliasResolver(primColl.id, primModeId, isSetupPrimitiveBorderName);
 
     if (DS.spacing) {
       // Semantic spacing tokens (responsive)
@@ -5935,7 +5886,7 @@ async function _applyDsSetup(DS) {
         var radVar = await createSetupVariable(radVarName, spacingColl, 'FLOAT');
         _setVariableScopesForName(radVar, radVarName, 'FLOAT');
         for (var rmi = 0; rmi < modes3.length; rmi++) {
-          var radAlias = spaceAlias(radius[radKey]);
+          var radAlias = radiusAliasForSetup(radius[radKey]);
           radVar.setValueForMode(spaceModeMap[modes3[rmi]], radAlias || radius[radKey]);
         }
       }
@@ -5949,7 +5900,7 @@ async function _applyDsSetup(DS) {
         var bVar = await createSetupVariable(bVarName, spacingColl, 'FLOAT');
         _setVariableScopesForName(bVar, bVarName, 'FLOAT');
         for (var bmi = 0; bmi < modes3.length; bmi++) {
-          var borderAlias = spaceAlias(border[bKey]);
+          var borderAlias = borderAliasForSetup(border[bKey]);
           bVar.setValueForMode(spaceModeMap[modes3[bmi]], borderAlias || border[bKey]);
         }
       }
@@ -7261,7 +7212,7 @@ async function _updateDsTokens(payload) {
       var primVar = allVars[pvi];
       if (primVar.variableCollectionId !== primCollId) continue;
       primByName[primVar.name] = primVar.id;
-      if (!/^space\/[\d]+(?:[-_][\d]+)*$/.test(String(primVar.name || ''))) continue;
+      if (!/^space\/(?:[\d]+(?:[-_][\d]+)*|full)$/.test(String(primVar.name || ''))) continue;
       var primRaw = primDefaultModeId && primVar.valuesByMode
         ? primVar.valuesByMode[primDefaultModeId]
         : null;

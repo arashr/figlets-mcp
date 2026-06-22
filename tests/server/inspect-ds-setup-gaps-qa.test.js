@@ -206,6 +206,84 @@ module.exports = (() => {
   }
   assert.ok(apcaResult.iconContrastFailures.every(f => f.algorithm === "wcag-non-text"));
 
+  // ── Configured pair rows are relationships, not bg→single-fg maps. A
+  // decorative muted pair can share bg/default with default/subtle pairs and
+  // remain contrast-exempt without poisoning the health check.
+  {
+    const configuredPairSnap = {
+      variables: [
+        prim("cfg-n50", "color/neutral/50", 0.98, 0.98, 0.98),
+        prim("cfg-n500", "color/neutral/500", 0.50, 0.50, 0.50),
+        prim("cfg-n950", "color/neutral/950", 0.05, 0.05, 0.05),
+        sem("cfg-bg-default", "color/bg/default", alias("cfg-n50"), alias("cfg-n950")),
+        sem("cfg-text-default", "color/text/default", alias("cfg-n950"), alias("cfg-n50")),
+        sem("cfg-text-subtle", "color/text/subtle", alias("cfg-n950"), alias("cfg-n50")),
+        sem("cfg-text-muted", "color/text/muted", alias("cfg-n500"), alias("cfg-n500")),
+      ],
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: ["cfg-n50", "cfg-n500", "cfg-n950"] },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }, { modeId: "darkId", name: "Dark" }], variableIds: ["cfg-bg-default", "cfg-text-default", "cfg-text-subtle", "cfg-text-muted"] },
+      ],
+    };
+    const configuredPairResult = inspectDsSetupGapsFromFigmaData(configuredPairSnap, {
+      algorithm: "wcag",
+      existingDs: {
+        color: {
+          contrastAlgorithm: "wcag",
+          semantics: {
+            pairs: [
+              { bg: "color/bg/default", text: "color/text/default", min: 4.5, minLc: 75 },
+              { bg: "color/bg/default", text: "color/text/subtle", min: 4.5, minLc: 75 },
+              { bg: "color/bg/default", text: "color/text/muted", min: null, minLc: null, note: "decorative" },
+            ],
+          },
+        },
+      },
+    });
+    assert.deepStrictEqual(
+      configuredPairResult.contrastFailures.filter(f => f.bg === "color/bg/default"),
+      [],
+      "configured multi-pair backgrounds should honor each row's contrast threshold/exemption"
+    );
+  }
+
+  // ── Foreground context should drive icon inference for configured pairs.
+  // bg/brand + text/on-brand must pair with icon/on-brand, not icon/brand.
+  {
+    const brandPairSnap = {
+      variables: [
+        prim("brand-n50", "color/neutral/50", 0.98, 0.98, 0.98),
+        prim("brand-p600", "color/pink/600", 0.70, 0.18, 0.38),
+        sem("brand-bg", "color/bg/brand", alias("brand-p600"), undefined),
+        sem("brand-text-on", "color/text/on-brand", alias("brand-n50"), undefined),
+        sem("brand-icon", "color/icon/brand", alias("brand-p600"), undefined),
+        sem("brand-icon-on", "color/icon/on-brand", alias("brand-n50"), undefined),
+      ],
+      collections: [
+        { id: "primColl", name: "Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: ["brand-n50", "brand-p600"] },
+        { id: "semColl", name: "Color", modes: [{ modeId: "lightId", name: "Light" }], variableIds: ["brand-bg", "brand-text-on", "brand-icon", "brand-icon-on"] },
+      ],
+    };
+    const brandPairResult = inspectDsSetupGapsFromFigmaData(brandPairSnap, {
+      algorithm: "wcag",
+      existingDs: {
+        color: {
+          contrastAlgorithm: "wcag",
+          semantics: {
+            pairs: [
+              { bg: "color/bg/brand", text: "color/text/on-brand", min: 4.5, minLc: 75 },
+            ],
+          },
+        },
+      },
+    });
+    assert.deepStrictEqual(
+      brandPairResult.iconContrastFailures.filter(f => f.bg === "color/bg/brand"),
+      [],
+      "configured text/on-brand pair should infer icon/on-brand instead of failing icon/brand"
+    );
+  }
+
   // ── Advisory suppression vs bulk icon repair: when ≥3 complete pairs are
   // all missing passive borders, the inspector suppresses that as DS-wide
   // absence. Missing icons are different: they can be planned as structured

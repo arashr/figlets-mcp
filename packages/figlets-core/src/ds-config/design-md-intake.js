@@ -249,7 +249,6 @@ function _deriveIntakeNeeds(ds, context) {
   if (!ds.color || !Array.isArray(ds.color.brand) || !ds.color.brand.length) {
     needs.push('color scale and brand colors (name + hex)');
   }
-  needs.push('color families and background/foreground pairing intent');
   if (
     !ds.typography
     || (

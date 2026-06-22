@@ -6,9 +6,25 @@ const {
   inferCollectionsFromSnapshot,
   inferSemanticsFromSnapshot,
 } = require("../../packages/figlets-mcp-server/src/utils/bootstrap-ds-from-figma.js");
+const {
+  inspectDsSetupGapsFromFigmaData,
+} = require("../../packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js");
 
 function makePrim(id, name, r, g, b) {
   return { id, name, resolvedType: "COLOR", valuesByMode: { primMode: { r, g, b } } };
+}
+
+function semanticColor(id, name, lightId, darkId) {
+  return {
+    id,
+    name,
+    resolvedType: "COLOR",
+    variableCollectionId: "color",
+    valuesByMode: {
+      light: { type: "VARIABLE_ALIAS", id: lightId },
+      dark: { type: "VARIABLE_ALIAS", id: darkId },
+    },
+  };
 }
 
 module.exports = (async () => {
@@ -127,5 +143,68 @@ module.exports = (async () => {
     const ds = bootstrapDsFromSnapshot(snapshot, { createdAt: "2026-05-16T00:00:00.000Z" });
     assert.strictEqual(ds.figlets.source, "figma-snapshot-bootstrap");
     assert.strictEqual(ds.color.semantics.pairs[0].icon, "color/icon/brand");
+  }
+
+  // A Figlets-generated role-style system may be reopened without the original
+  // intake config. Snapshot bootstrap must not downgrade its rich semantic map
+  // into loose bg→same-leaf text pairings such as bg/brand → text/brand.
+  {
+    const primitives = [
+      makePrim("p50", "color/pink/50", 1, 0.9, 0.96),
+      makePrim("p100", "color/pink/100", 0.98, 0.8, 0.9),
+      makePrim("p300", "color/pink/300", 0.9, 0.45, 0.7),
+      makePrim("p500", "color/pink/500", 0.8, 0.05, 0.45),
+      makePrim("p600", "color/pink/600", 0.65, 0.03, 0.35),
+      makePrim("p700", "color/pink/700", 0.5, 0.02, 0.25),
+      makePrim("p950", "color/pink/950", 0.12, 0, 0.08),
+      makePrim("n50", "color/neutral/50", 0.98, 0.98, 0.98),
+      makePrim("n200", "color/neutral/200", 0.9, 0.9, 0.9),
+      makePrim("n500", "color/neutral/500", 0.5, 0.5, 0.5),
+      makePrim("n800", "color/neutral/800", 0.15, 0.15, 0.15),
+      makePrim("n950", "color/neutral/950", 0.02, 0.02, 0.02),
+    ];
+    const semantics = [
+      semanticColor("bg-default", "color/bg/default", "n50", "n950"),
+      semanticColor("bg-muted", "color/bg/muted", "n200", "n800"),
+      semanticColor("text-default", "color/text/default", "n950", "n50"),
+      semanticColor("text-muted", "color/text/muted", "n500", "n500"),
+      semanticColor("bg-brand", "color/bg/brand", "p600", "p500"),
+      semanticColor("text-on-brand", "color/text/on-brand", "n50", "n50"),
+      semanticColor("icon-on-brand", "color/icon/on-brand", "n50", "n50"),
+      semanticColor("bg-brand-subtle", "color/bg/brand-subtle", "p50", "p950"),
+      semanticColor("text-brand", "color/text/brand", "p700", "p100"),
+      semanticColor("icon-brand", "color/icon/brand", "p600", "p300"),
+    ];
+    const snapshot = {
+      collections: [
+        { id: "prim", name: "1. Primitives", modes: [{ modeId: "primMode", name: "Value" }], variableIds: primitives.map(v => v.id) },
+        { id: "color", name: "2. Color", modes: [{ modeId: "light", name: "Light" }, { modeId: "dark", name: "Dark" }], variableIds: semantics.map(v => v.id) },
+      ],
+      variables: primitives.concat(semantics),
+    };
+
+    const ds = bootstrapDsFromSnapshot(snapshot, { algorithm: "wcag" });
+    const pairs = ds.color.semantics.pairs;
+    assert.ok(
+      pairs.some(pair => pair.bg === "color/bg/brand" && pair.text === "color/text/on-brand" && pair.icon === "color/icon/on-brand"),
+      "bootstrap should keep the generated on-brand foreground/icon context for brand fills"
+    );
+    assert.ok(
+      !pairs.some(pair => pair.bg === "color/bg/brand" && pair.text === "color/text/brand"),
+      "bootstrap should not pair strong brand backgrounds with normal brand text"
+    );
+    assert.ok(
+      pairs.some(pair => pair.bg === "color/bg/default" && pair.text === "color/text/muted" && pair.min === null),
+      "bootstrap should preserve generated muted-text contrast exemption metadata"
+    );
+    assert.deepStrictEqual(
+      ds.spacing.responsiveModeValidation.allowSameValueModes.categories,
+      ["component", "stack", "touch"],
+      "bootstrap should carry generated spacing same-value allowances for stable categories"
+    );
+
+    const health = inspectDsSetupGapsFromFigmaData(snapshot, { existingDs: ds, algorithm: "wcag" });
+    assert.deepStrictEqual(health.contrastFailures, [], "bootstrapped generated semantics should not create text contrast failures");
+    assert.deepStrictEqual(health.iconContrastFailures, [], "bootstrapped generated semantics should not create icon contrast failures");
   }
 })();

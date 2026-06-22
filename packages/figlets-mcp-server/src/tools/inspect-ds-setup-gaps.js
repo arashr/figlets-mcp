@@ -5,6 +5,7 @@ const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/f
 const { computePlannedAliases, loadDsConfigSafe } = require("../utils/accessible-repair-aliases.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 const { classifySemanticColorGrammar } = require("./semantic-color-grammar.js");
+const { semanticContrast } = require("../figlets-core.js").dsConfig;
 
 const inspectDsSetupGapsTool = {
   name: "inspect_ds_setup_gaps",
@@ -37,13 +38,13 @@ const _FOUNDATION_ROLE_SPECS = [
   },
 ];
 
-const _WCAG_THRESHOLD = 4.5;
-const _WCAG_ICON_THRESHOLD = 3;
-const _APCA_THRESHOLD = 75;
+const _WCAG_THRESHOLD = semanticContrast.WCAG_TEXT_THRESHOLD;
+const _WCAG_ICON_THRESHOLD = semanticContrast.WCAG_NON_TEXT_THRESHOLD;
+const _APCA_THRESHOLD = semanticContrast.APCA_TEXT_THRESHOLD;
 // Hairline-failure tolerance: scores within this distance of the threshold are
 // flagged near-miss so a triage pass can prioritize gross failures first.
-const _WCAG_NEARMISS = 0.3;
-const _APCA_NEARMISS = 5;
+const _WCAG_NEARMISS = semanticContrast.WCAG_NEARMISS;
+const _APCA_NEARMISS = semanticContrast.APCA_NEARMISS;
 // Minimum complete pairs before "every pair is missing role X" can be treated
 // as "this DS doesn't use role X" instead of coincidence.
 const _ADVISORY_SUPPRESS_MIN_PAIRS = 3;
@@ -402,13 +403,29 @@ function _semanticContextFromConfig(ds) {
   const pairTextByBg = new Map();
   const pairIconByBg = new Map();
   const pairBorderByBg = new Map();
+  const pairRows = [];
+  const pairRowsByBg = new Map();
   const unpairedTokens = new Set();
   const unpairedRows = [];
   if (Array.isArray(semantics.pairs)) {
     for (const pair of semantics.pairs) {
-      if (pair && pair.bg && pair.text) pairTextByBg.set(pair.bg, pair.text);
-      if (pair && pair.bg && pair.icon) pairIconByBg.set(pair.bg, pair.icon);
-      if (pair && pair.bg && pair.border) pairBorderByBg.set(pair.bg, pair.border);
+      if (!pair || !pair.bg) continue;
+      const row = {
+        bg: pair.bg,
+        text: pair.text || null,
+        icon: pair.icon || null,
+        border: pair.border || null,
+        min: pair.min === null ? null : (Number.isFinite(Number(pair.min)) ? Number(pair.min) : undefined),
+        minLc: pair.minLc === null ? null : (Number.isFinite(Number(pair.minLc)) ? Number(pair.minLc) : undefined),
+        contrast: pair.contrast,
+        note: pair.note || null,
+      };
+      pairRows.push(row);
+      if (!pairRowsByBg.has(pair.bg)) pairRowsByBg.set(pair.bg, []);
+      pairRowsByBg.get(pair.bg).push(row);
+      if (pair.text && !pairTextByBg.has(pair.bg)) pairTextByBg.set(pair.bg, pair.text);
+      if (pair.icon && !pairIconByBg.has(pair.bg)) pairIconByBg.set(pair.bg, pair.icon);
+      if (pair.border && !pairBorderByBg.has(pair.bg)) pairBorderByBg.set(pair.bg, pair.border);
     }
   }
   if (Array.isArray(semantics.unpaired)) {
@@ -419,7 +436,7 @@ function _semanticContextFromConfig(ds) {
       }
     }
   }
-  return { pairTextByBg, pairIconByBg, pairBorderByBg, unpairedTokens, unpairedRows };
+  return { pairTextByBg, pairIconByBg, pairBorderByBg, pairRows, pairRowsByBg, unpairedTokens, unpairedRows };
 }
 
 // Pick fg target families in priority order. Preserves the existing convention
@@ -459,8 +476,32 @@ function _foregroundCandidatesForBackgroundParts(parts, bgIndex, allNames) {
   return Array.from(new Set(candidates));
 }
 
-function _iconCandidatesForBackgroundParts(parts, bgIndex) {
+function _iconCandidatesForForegroundName(fgName) {
   const candidates = [];
+  if (!fgName) return candidates;
+  const parts = String(fgName || "").split("/");
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const segment = _norm(parts[i]);
+    if (segment === "text" || segment === "fg" || segment === "foreground") {
+      const next = parts.slice();
+      next[i] = _sameCaseSegment(parts[i], "icon");
+      candidates.push(next.join("/"));
+    }
+    if (segment === "on-fill" || segment === "on-surface") {
+      const contextual = parts.slice();
+      contextual.splice(i, 1, _sameCaseSegment(parts[i], "icon"), parts[i]);
+      candidates.push(contextual.join("/"));
+      const plain = parts.slice();
+      plain[i] = _sameCaseSegment(parts[i], "icon");
+      candidates.push(plain.join("/"));
+    }
+  }
+  return candidates;
+}
+
+function _iconCandidatesForBackgroundParts(parts, bgIndex, fgName) {
+  const candidates = [];
+  candidates.push.apply(candidates, _iconCandidatesForForegroundName(fgName));
   const base = _swapSegment(parts, bgIndex, "icon");
   candidates.push(base.join("/"));
   if (_norm(parts[bgIndex]) === "fill") {
@@ -617,14 +658,12 @@ function _resolveTerminalByModeName(variable, modeName, varsById, collections, d
   return null;
 }
 
-// Contrast math mirrors validate-semantic-pairs.js. Inlined here so the QA
-// inspector has no hard dependency on a config — Figma is the source of truth.
-function _linearize(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
-function _luminance(rgb) { return 0.2126 * _linearize(rgb.r) + 0.7152 * _linearize(rgb.g) + 0.0722 * _linearize(rgb.b); }
+// Contrast math comes from figlets-core so setup preview and post-build QA use
+// the same thresholds and scoring. The inspector still resolves values from
+// the synced Figma snapshot; only the pure math is shared.
+function _luminance(rgb) { return semanticContrast.relativeLuminance(rgb); }
 function _wcagRatio(a, b) {
-  const la = _luminance(a), lb = _luminance(b);
-  const hi = Math.max(la, lb), lo = Math.min(la, lb);
-  return (hi + 0.05) / (lo + 0.05);
+  return semanticContrast.wcagContrastRatio(a, b);
 }
 function _hex(rgb) {
   if (!rgb || typeof rgb !== "object") return null;
@@ -635,17 +674,8 @@ function _hex(rgb) {
   };
   return "#" + channel(rgb.r) + channel(rgb.g) + channel(rgb.b);
 }
-function _apcaLum(rgb) { return 0.2126729 * Math.pow(rgb.r, 2.4) + 0.7151522 * Math.pow(rgb.g, 2.4) + 0.0721750 * Math.pow(rgb.b, 2.4); }
 function _apcaLc(txt, bg) {
-  const BC = 0.022, BE = 1.414;
-  const Yt = _apcaLum(txt), Yb = _apcaLum(bg);
-  const Yt2 = Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt;
-  const Yb2 = Yb < BC ? Yb + Math.pow(BC - Yb, BE) : Yb;
-  let lc;
-  if (Yb2 >= Yt2) lc = (Math.pow(Yb2, 0.56) - Math.pow(Yt2, 0.57)) * 1.14;
-  else            lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14;
-  if (Math.abs(lc) < 0.1) return 0;
-  return Math.round(lc > 0 ? lc * 100 - 2.7 : lc * 100 + 2.7);
+  return semanticContrast.apcaLc(txt, bg);
 }
 
 function _primitiveInfo(name) {
@@ -684,10 +714,24 @@ function _planIconReAlias(bgTerm, iconTerm, modeName, colorVars, varsById, colle
 }
 
 function _passesContrastForRole(role, algorithm, bgRgb, fgRgb) {
-  if (!bgRgb || !fgRgb) return false;
-  if (role === "icon") return _wcagRatio(bgRgb, fgRgb) >= _WCAG_ICON_THRESHOLD;
-  if (algorithm === "apca") return Math.abs(_apcaLc(fgRgb, bgRgb)) >= _APCA_THRESHOLD;
-  return _wcagRatio(bgRgb, fgRgb) >= _WCAG_THRESHOLD;
+  return semanticContrast.contrastPasses({
+    algorithm,
+    role: role === "icon" ? "icon" : "text",
+    bgRgb,
+    fgRgb,
+  });
+}
+
+function _textContrastThresholdForPair(pair, algorithm) {
+  if (pair && pair.contrast === false) return null;
+  if (algorithm === "apca") {
+    if (pair && pair.minLc === null) return null;
+    const minLc = pair && Number.isFinite(Number(pair.minLc)) ? Number(pair.minLc) : _APCA_THRESHOLD;
+    return { algorithm: "apca", value: minLc, nearMissDelta: _APCA_NEARMISS };
+  }
+  if (pair && pair.min === null) return null;
+  const min = pair && Number.isFinite(Number(pair.min)) ? Number(pair.min) : _WCAG_THRESHOLD;
+  return { algorithm: "wcag", value: min, nearMissDelta: _WCAG_NEARMISS };
 }
 
 function _sharedReAliasSafety(update, figmaData, existingDs, algorithm, role) {
@@ -1404,61 +1448,75 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   incompleteModes.sort((left, right) => left.token.localeCompare(right.token));
 
   // ── Contrast failures ──────────────────────────────────────────────────────
-  // For each background that has a resolvable foreground partner (by naming),
-  // resolve both to literal RGB per mode and check WCAG ratio (or APCA Lc) at
-  // the same thresholds the setup flow uses (4.5 / 75). Pairs that can't be
-  // resolved to RGB on either side are skipped silently.
+  // Configured semantic pairs are relationships, not a bg→single-fg map. Audit
+  // each configured row with its own threshold/exemption metadata first; then
+  // infer pairings only for background tokens not described by config.
   const contrastFailures = [];
-  for (const variable of semanticVars) {
-    const parts = variable.name.split("/");
-    const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
-    if (bgIndex < 0) continue;
-    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
-    const families = _targetFamiliesFor(parts[bgIndex], allColorNames);
-    const configuredText = semanticContext.pairTextByBg.get(variable.name);
-    const candidate = (configuredText && byName.has(configuredText))
-      ? configuredText
-      : _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
-    if (!candidate) continue;
-    const fgVar = byName.get(candidate);
-    const coll = _collectionFor(variable, collections);
-    if (!coll || !Array.isArray(coll.modes)) continue;
+  const configuredBgNames = new Set();
+  const seenTextContexts = new Set();
+
+  function checkTextPair(bgVar, fgVar, pairMeta) {
+    if (!bgVar || !fgVar) return;
+    const thresholdInfo = _textContrastThresholdForPair(pairMeta, algorithm);
+    if (!thresholdInfo) return;
+    const coll = _collectionFor(bgVar, collections);
+    if (!coll || !Array.isArray(coll.modes)) return;
 
     for (const mode of coll.modes) {
-      const bgTerm = _resolveTerminalByModeName(variable, mode.name, varsById, collections);
+      const key = [bgVar.name, fgVar.name, mode.name || mode.modeId].join("|");
+      if (seenTextContexts.has(key)) continue;
+      seenTextContexts.add(key);
+      const bgTerm = _resolveTerminalByModeName(bgVar, mode.name, varsById, collections);
       const fgTerm = _resolveTerminalByModeName(fgVar, mode.name, varsById, collections);
       if (!bgTerm || !fgTerm) continue;
-      let pass = true, score = null, threshold = null, nearMissDelta = null;
-      if (algorithm === "apca") {
-        const lc = Math.abs(_apcaLc(fgTerm.rgb, bgTerm.rgb));
-        score = lc;
-        threshold = _APCA_THRESHOLD;
-        nearMissDelta = _APCA_NEARMISS;
-        pass = lc >= _APCA_THRESHOLD;
+      let pass = true, score = null;
+      if (thresholdInfo.algorithm === "apca") {
+        score = Math.abs(_apcaLc(fgTerm.rgb, bgTerm.rgb));
+        pass = score >= thresholdInfo.value;
       } else {
         const ratio = _wcagRatio(bgTerm.rgb, fgTerm.rgb);
         score = Math.round(ratio * 10) / 10;
-        threshold = _WCAG_THRESHOLD;
-        nearMissDelta = _WCAG_NEARMISS;
-        pass = ratio >= _WCAG_THRESHOLD;
+        pass = ratio >= thresholdInfo.value;
       }
       if (!pass) {
         contrastFailures.push({
           kind: "contrast-failure",
-          bg: variable.name,
+          bg: bgVar.name,
           fg: fgVar.name,
           mode: mode.name,
-          algorithm,
+          algorithm: thresholdInfo.algorithm,
           score,
-          threshold,
-          nearMiss: (threshold - score) <= nearMissDelta,
-          gap: Math.round((threshold - score) * 10) / 10,
+          threshold: thresholdInfo.value,
+          nearMiss: (thresholdInfo.value - score) <= thresholdInfo.nearMissDelta,
+          gap: Math.round((thresholdInfo.value - score) * 10) / 10,
           bgPrimitive: { name: bgTerm.name, rgb: bgTerm.rgb },
           fgPrimitive: { name: fgTerm.name, rgb: fgTerm.rgb },
           reason: "Pair fails the contrast threshold in this mode.",
         });
       }
     }
+  }
+
+  for (const pair of semanticContext.pairRows || []) {
+    if (!pair || !pair.bg) continue;
+    configuredBgNames.add(pair.bg);
+    if (!pair.text) continue;
+    const bgVar = byName.get(pair.bg);
+    const fgVar = byName.get(pair.text);
+    if (!bgVar || !fgVar) continue;
+    checkTextPair(bgVar, fgVar, pair);
+  }
+
+  for (const variable of semanticVars) {
+    const parts = variable.name.split("/");
+    const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+    if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
+    if (configuredBgNames.has(variable.name)) continue;
+    const candidate = _foregroundCandidatesForBackgroundParts(parts, bgIndex, allColorNames).find(name => byName.has(name));
+    if (!candidate) continue;
+    const fgVar = byName.get(candidate);
+    checkTextPair(variable, fgVar, null);
   }
   contrastFailures.sort((a, b) => a.bg.localeCompare(b.bg) || a.mode.localeCompare(b.mode));
 
@@ -1468,30 +1526,18 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   // wins; otherwise infer the companion by the same bg→icon naming pattern the
   // showcase uses for paired semantic rows.
   const iconContrastFailures = [];
-  for (const variable of semanticVars) {
-    const parts = variable.name.split("/");
-    const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
-    if (bgIndex < 0) continue;
-    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
-    const configuredIcon = semanticContext.pairIconByBg.get(variable.name);
-    let iconName = null;
-    if (configuredIcon && byName.has(configuredIcon)) {
-      iconName = configuredIcon;
-    } else {
-      const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
-      if (bgIndex >= 0) {
-        const iconCandidates = _iconCandidatesForBackgroundParts(parts, bgIndex);
-        iconName = iconCandidates.find(name => byName.has(name)) || null;
-      }
-      if (!iconName) iconName = _companionRoleCandidate(variable.name, _ICON_FAMILIES, allColorNames);
-    }
-    if (!iconName || !byName.has(iconName)) continue;
-    const iconVar = byName.get(iconName);
-    const coll = _collectionFor(variable, collections);
-    if (!coll || !Array.isArray(coll.modes)) continue;
+  const seenIconContexts = new Set();
+
+  function checkIconPair(bgVar, iconVar) {
+    if (!bgVar || !iconVar) return;
+    const coll = _collectionFor(bgVar, collections);
+    if (!coll || !Array.isArray(coll.modes)) return;
 
     for (const mode of coll.modes) {
-      const bgTerm = _resolveTerminalByModeName(variable, mode.name, varsById, collections);
+      const key = [bgVar.name, iconVar.name, mode.name || mode.modeId].join("|");
+      if (seenIconContexts.has(key)) continue;
+      seenIconContexts.add(key);
+      const bgTerm = _resolveTerminalByModeName(bgVar, mode.name, varsById, collections);
       const iconTerm = _resolveTerminalByModeName(iconVar, mode.name, varsById, collections);
       if (!bgTerm || !iconTerm) continue;
       const ratio = _wcagRatio(bgTerm.rgb, iconTerm.rgb);
@@ -1499,7 +1545,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       const plannedIconAlias = _planIconReAlias(bgTerm, iconTerm, mode.name, colorVars, varsById, collections);
       iconContrastFailures.push({
         kind: "icon-contrast-failure",
-        bg: variable.name,
+        bg: bgVar.name,
         icon: iconVar.name,
         mode: mode.name,
         algorithm: "wcag-non-text",
@@ -1521,6 +1567,39 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
         reason: "Icon semantic role fails WCAG non-text contrast (3:1) on its paired surface.",
       });
     }
+  }
+
+  function inferredIconNameFor(bgVar, fgName, pairIcon) {
+    if (!bgVar) return null;
+    if (pairIcon && byName.has(pairIcon)) return pairIcon;
+    const parts = bgVar.name.split("/");
+    const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+    if (bgIndex >= 0) {
+      const iconCandidates = _iconCandidatesForBackgroundParts(parts, bgIndex, fgName);
+      const iconName = iconCandidates.find(name => byName.has(name));
+      if (iconName) return iconName;
+    }
+    return _companionRoleCandidate(bgVar.name, _ICON_FAMILIES, allColorNames);
+  }
+
+  for (const pair of semanticContext.pairRows || []) {
+    if (!pair || !pair.bg) continue;
+    const bgVar = byName.get(pair.bg);
+    if (!bgVar) continue;
+    const iconName = inferredIconNameFor(bgVar, pair.text, pair.icon);
+    if (!iconName || !byName.has(iconName)) continue;
+    checkIconPair(bgVar, byName.get(iconName));
+  }
+
+  for (const variable of semanticVars) {
+    const parts = variable.name.split("/");
+    const bgIndex = _findFamilyIndex(parts, _BG_FAMILIES);
+    if (bgIndex < 0) continue;
+    if (_isInvalidOnBackgroundParts(parts, bgIndex)) continue;
+    if (configuredBgNames.has(variable.name)) continue;
+    const iconName = inferredIconNameFor(variable, null, null);
+    if (!iconName || !byName.has(iconName)) continue;
+    checkIconPair(variable, byName.get(iconName));
   }
   iconContrastFailures.sort((a, b) =>
     (a.score - b.score)

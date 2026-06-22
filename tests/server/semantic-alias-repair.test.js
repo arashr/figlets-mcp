@@ -25,7 +25,7 @@ function stepPrimitiveSnapshot() {
       {
         id: "primitives",
         name: "1. Primitives",
-        variableIds: ["p05", "p12", "p16", "p24", "p32", "p40"],
+        variableIds: ["p05", "p12", "p16", "p24", "p32", "p40", "pfull"],
         modes: [{ modeId: "default", name: "Default" }],
       },
       {
@@ -46,6 +46,7 @@ function stepPrimitiveSnapshot() {
       { id: "p24", name: "space/24", resolvedType: "FLOAT", valuesByMode: { default: 96 } },
       { id: "p32", name: "space/32", resolvedType: "FLOAT", valuesByMode: { default: 128 } },
       { id: "p40", name: "space/40", resolvedType: "FLOAT", valuesByMode: { default: 40 } },
+      { id: "pfull", name: "space/full", resolvedType: "FLOAT", valuesByMode: { default: 9999 } },
       {
         id: "layout-lg",
         name: "space/layout/lg",
@@ -66,6 +67,7 @@ module.exports = (() => {
   assert.ok(SEMANTIC_ALIAS_REPAIR_MODEL.primitiveLookup.includes("float"));
   assert.strictEqual(isSpacingSemanticTokenName("space/layout/lg"), true);
   assert.strictEqual(isSpacingSemanticTokenName("space/12"), false);
+  assert.strictEqual(isSpacingSemanticTokenName("space/full"), false);
 
   const snapshot = stepPrimitiveSnapshot();
   const variableMap = new Map(snapshot.variables.map(item => [item.name, item]));
@@ -74,6 +76,7 @@ module.exports = (() => {
   assert.deepStrictEqual(resolvePrimitiveAliasTarget(lookup, 48), { id: "p12", name: "space/12" });
   assert.deepStrictEqual(resolvePrimitiveAliasTarget(lookup, 64), { id: "p16", name: "space/16" });
   assert.deepStrictEqual(resolvePrimitiveAliasTarget(lookup, 96), { id: "p24", name: "space/24" });
+  assert.deepStrictEqual(resolvePrimitiveAliasTarget(lookup, 9999), { id: "pfull", name: "space/full" });
 
   const stepScaleConflictSnapshot = {
     collections: [

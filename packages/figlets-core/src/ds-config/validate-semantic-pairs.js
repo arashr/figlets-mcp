@@ -1,5 +1,13 @@
 'use strict';
 
+const {
+  WCAG_NON_TEXT_THRESHOLD,
+  relativeLuminance,
+  wcagRatioFromLuminance,
+  wcagContrastRatio,
+  apcaLc,
+} = require('./semantic-contrast');
+
 /**
  * validate-semantic-pairs.js
  * Generates default semantic color pair mappings, computes WCAG 2.2 + APCA contrast for
@@ -56,34 +64,12 @@ function validateSemanticPairs(ds) {
   }
 
   // ── Color math ───────────────────────────────────────────────────────────────
-  function linearize(c) {
-    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  }
-  function luminance({ r, g, b }) {
-    return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
-  }
-  function wcagRatio(lum1, lum2) {
-    const hi = Math.max(lum1, lum2), lo = Math.min(lum1, lum2);
-    return (hi + 0.05) / (lo + 0.05);
-  }
-  function apcaLum({ r, g, b }) {
-    return 0.2126729 * Math.pow(r, 2.4) + 0.7151522 * Math.pow(g, 2.4) + 0.0721750 * Math.pow(b, 2.4);
-  }
-  function apcaLc(txt, bg) {
-    const BC = 0.022, BE = 1.414;
-    const Yt = apcaLum(txt), Yb = apcaLum(bg);
-    const Yt2 = Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt;
-    const Yb2 = Yb < BC ? Yb + Math.pow(BC - Yb, BE) : Yb;
-    let lc;
-    if (Yb2 >= Yt2) lc = (Math.pow(Yb2, 0.56) - Math.pow(Yt2, 0.57)) * 1.14;
-    else             lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14;
-    if (Math.abs(lc) < 0.1) return 0;
-    return Math.round(lc > 0 ? lc * 100 - 2.7 : lc * 100 + 2.7);
-  }
+  const luminance = relativeLuminance;
+  const wcagRatio = wcagRatioFromLuminance;
 
   // Score helpers — same signature `(txtRgb, bgRgb) => number`, higher is more legible.
   // WCAG returns the contrast ratio; APCA returns the absolute Lc.
-  const wcagScorer = (txt, bg) => wcagRatio(luminance(bg), luminance(txt));
+  const wcagScorer = (txt, bg) => wcagContrastRatio(txt, bg);
   const apcaScorer = (txt, bg) => Math.abs(apcaLc(txt, bg));
 
   // Generic ramp walker: pick the nearest existing step whose `scorer` against `bgRgb`
@@ -109,6 +95,66 @@ function validateSemanticPairs(ds) {
   // for WCAG-only scoring (the surface/success backfill retry preserves old behavior).
   function suggestStep(textRampRef, bgRgb, minRatio) {
     return suggestStepFor(textRampRef, bgRgb, wcagScorer, minRatio);
+  }
+
+  function rampInfo(ref) {
+    let [rampName, stepStr] = String(ref || '').split('/');
+    if (rampName === 'primary') rampName = PRIMARY;
+    const ramp = rampByName[rampName];
+    if (!ramp || !ramp.length) return null;
+    const desiredStep = parseInt(stepStr, 10);
+    const idx = ramp.reduce((best, entry, i) =>
+      Math.abs(entry[0] - desiredStep) < Math.abs(ramp[best][0] - desiredStep) ? i : best
+    , 0);
+    return { rampName, ramp, desiredStep, idx };
+  }
+
+  function entryRgb(entry) {
+    return { r: entry[1], g: entry[2], b: entry[3] };
+  }
+
+  function suggestGeneratedPairAdjustment(bgRef, textRef, scorer, threshold) {
+    const bgInfo = rampInfo(bgRef);
+    const textInfo = rampInfo(textRef);
+    if (!bgInfo || !textInfo) return null;
+
+    const currentBg = bgInfo.ramp[bgInfo.idx];
+    const currentBgRgb = entryRgb(currentBg);
+    const textCandidates = textInfo.ramp
+      .map((entry, idx) => ({
+        entry,
+        idx,
+        rgb: entryRgb(entry),
+        score: scorer(entryRgb(entry), currentBgRgb),
+      }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return Math.abs(a.idx - textInfo.idx) - Math.abs(b.idx - textInfo.idx);
+      });
+    const bestText = textCandidates[0];
+    if (!bestText) return null;
+
+    const bgCandidates = bgInfo.ramp
+      .map((entry, idx) => ({
+        entry,
+        idx,
+        rgb: entryRgb(entry),
+        score: scorer(bestText.rgb, entryRgb(entry)),
+      }))
+      .filter(candidate => candidate.score >= threshold)
+      .sort((a, b) => {
+        const bgDistance = Math.abs(a.idx - bgInfo.idx) - Math.abs(b.idx - bgInfo.idx);
+        if (bgDistance !== 0) return bgDistance;
+        return b.score - a.score;
+      });
+    const bestBg = bgCandidates[0];
+    if (!bestBg) return null;
+
+    return {
+      bgPath: `color/${bgInfo.rampName}/${bestBg.entry[0]}`,
+      textPath: `color/${textInfo.rampName}/${bestText.entry[0]}`,
+      score: bestBg.score,
+    };
   }
 
   // ── Preserve manually edited pairs on re-run ─────────────────────────────────
@@ -405,6 +451,7 @@ function validateSemanticPairs(ds) {
       }
 
       let suggestion = null;
+      let adjustmentSuggestion = null;
 
       if (pass === false) {
         const scorer    = algorithm === 'apca' ? apcaScorer : wcagScorer;
@@ -424,6 +471,30 @@ function validateSemanticPairs(ds) {
             side.text = suggestion.path.replace(/^color\//, '');
           }
         }
+        if (!existingPairs && pass === false && !suggestion) {
+          adjustmentSuggestion = suggestGeneratedPairAdjustment(side.bg, side.text, scorer, threshold);
+          if (adjustmentSuggestion) {
+            const adjustedBg = resolve(adjustmentSuggestion.bgPath.replace(/^color\//, ''));
+            const adjustedText = resolve(adjustmentSuggestion.textPath.replace(/^color\//, ''));
+            if (adjustedBg && adjustedText) {
+              bgRes = adjustedBg;
+              txtRes = adjustedText;
+              bgLum = luminance(adjustedBg.rgb);
+              const adjustedTxtLum = luminance(adjustedText.rgb);
+              ratio = wcagRatio(bgLum, adjustedTxtLum);
+              lc = apcaLc(adjustedText.rgb, adjustedBg.rgb);
+              const adjustedGate = gatePass(ratio, lc, tmpl);
+              wcagPass = adjustedGate.wcagPass;
+              apcaPass = adjustedGate.apcaPass;
+              pass = adjustedGate.pass;
+              side.bg = adjustmentSuggestion.bgPath.replace(/^color\//, '');
+              side.text = adjustmentSuggestion.textPath.replace(/^color\//, '');
+            }
+          }
+        }
+        if (existingPairs && pass === false && !suggestion) {
+          adjustmentSuggestion = suggestGeneratedPairAdjustment(side.bg, side.text, scorer, threshold);
+        }
         if (pass === false) failCount++;
       }
 
@@ -441,6 +512,12 @@ function validateSemanticPairs(ds) {
         pass,
         bgClamped: bgRes.clamped, txtClamped: txtRes.clamped,
         suggestion: pass === false && suggestion ? { path: suggestion.path, wcag: Math.round(suggestion.ratio * 10) / 10, score: suggestion.score } : null,
+        adjustmentSuggestion: pass === false && adjustmentSuggestion ? {
+          bg: adjustmentSuggestion.bgPath,
+          text: adjustmentSuggestion.textPath,
+          wcag: Math.round((algorithm === 'wcag' ? adjustmentSuggestion.score : wcagRatio(luminance(resolve(adjustmentSuggestion.bgPath.replace(/^color\//, '')).rgb), luminance(resolve(adjustmentSuggestion.textPath.replace(/^color\//, '')).rgb))) * 10) / 10,
+          score: adjustmentSuggestion.score,
+        } : null,
       };
     }
 
@@ -483,10 +560,11 @@ function validateSemanticPairs(ds) {
     }
   }
 
-  // Icon contrast gates. WCAG icon minimum is 3:1 (graphical objects, WCAG 2.2 SC 1.4.11).
-  // APCA icon minimum is Lc 60 (essential graphical info, "spot reading" tier).
-  const iconScorer    = algorithm === 'apca' ? apcaScorer : wcagScorer;
-  const iconThreshold = algorithm === 'apca' ? 60 : 3;
+  // Non-text companion contrast gates. Icons and similar graphical companion
+  // roles use WCAG 3:1 regardless of the text contrast algorithm, matching the
+  // post-build setup health check.
+  const iconScorer    = wcagScorer;
+  const iconThreshold = WCAG_NON_TEXT_THRESHOLD;
 
   const resolvedIcons = wantsIconSemantics ? ROLE_ICONS.map(ic => {
     // Prefer saved values from a previous run; fall back to template defaults.
@@ -528,7 +606,6 @@ function validateSemanticPairs(ds) {
       }
     }
 
-    if (lPass === false || dPass === false) failCount++;
     return {
       token: ic.token,
       Light: finalLIcon ? finalLIcon.path : null,
@@ -584,6 +661,82 @@ function validateSemanticPairs(ds) {
     return null;
   }
 
+  function resolveColorPath(path) {
+    return path ? resolve(String(path).replace(/^color\//, '')) : null;
+  }
+
+  function updateIconModeMetrics(iconRow, modeKey, bgPaths) {
+    if (!iconRow || !modeKey || !Array.isArray(bgPaths) || !bgPaths.length) return;
+    const backgrounds = bgPaths.map(resolveColorPath).filter(Boolean);
+    if (!backgrounds.length) return;
+    let icon = resolveColorPath(iconRow[modeKey]);
+    if (!icon) return;
+
+    let scores = backgrounds.map(bg => iconScorer(icon.rgb, bg.rgb));
+    let ratios = backgrounds.map(bg => wcagContrastRatio(icon.rgb, bg.rgb));
+    let score = Math.min.apply(Math, scores);
+    let ratio = Math.min.apply(Math, ratios);
+    if (score < iconThreshold) {
+      const info = rampInfo(String(iconRow[modeKey]).replace(/^color\//, ''));
+      const passing = info ? info.ramp
+        .map((entry, idx) => {
+          const rgb = entryRgb(entry);
+          const entryScores = backgrounds.map(bg => iconScorer(rgb, bg.rgb));
+          const entryRatios = backgrounds.map(bg => wcagContrastRatio(rgb, bg.rgb));
+          return {
+            entry,
+            idx,
+            rgb,
+            score: Math.min.apply(Math, entryScores),
+            ratio: Math.min.apply(Math, entryRatios),
+          };
+        })
+        .filter(candidate => candidate.score >= iconThreshold)
+        .sort((a, b) => {
+          const distance = Math.abs(a.idx - info.idx) - Math.abs(b.idx - info.idx);
+          if (distance !== 0) return distance;
+          if (b.score !== a.score) return b.score - a.score;
+          return a.entry[0] - b.entry[0];
+        }) : [];
+      const adj = passing[0];
+      if (adj) {
+        iconRow[modeKey] = `color/${info.rampName}/${adj.entry[0]}`;
+        icon = resolveColorPath(iconRow[modeKey]);
+        score = adj.score;
+        ratio = adj.ratio;
+      }
+    }
+
+    const ratioKey = modeKey === 'Light' ? 'lRatio' : 'dRatio';
+    const passKey = modeKey === 'Light' ? 'lPass' : 'dPass';
+    iconRow[ratioKey] = Math.round(ratio * 10) / 10;
+    iconRow[passKey] = score >= iconThreshold;
+  }
+
+  const iconNames = new Set(resolvedIcons.map(ic => ic.token));
+  const iconByToken = new Map(resolvedIcons.map(ic => [ic.token, ic]));
+  const iconContexts = new Map();
+
+  for (const row of resolvedPairs) {
+    const icon = pairIconFor(row, iconNames);
+    if (!icon) continue;
+    if (!iconByToken.has(icon)) continue;
+    if (!iconContexts.has(icon)) iconContexts.set(icon, { Light: [], Dark: [] });
+    const context = iconContexts.get(icon);
+    if (row.Light && row.Light.bg) context.Light.push(row.Light.bg);
+    if (row.Dark && row.Dark.bg) context.Dark.push(row.Dark.bg);
+  }
+
+  for (const [icon, context] of iconContexts.entries()) {
+    const iconRow = iconByToken.get(icon);
+    updateIconModeMetrics(iconRow, 'Light', context.Light);
+    updateIconModeMetrics(iconRow, 'Dark', context.Dark);
+  }
+
+  for (const ic of resolvedIcons) {
+    if (ic.lPass === false || ic.dPass === false) failCount++;
+  }
+
   // ── Format output ────────────────────────────────────────────────────────────
   const r2 = x => x != null ? `${x.toFixed(1)}:1` : '—';
   // Badge text reflects the gated algorithm. Both algorithms surface their own
@@ -619,7 +772,7 @@ function validateSemanticPairs(ds) {
   }
 
   // Icon table: render the chosen algorithm's verdict label.
-  const iconBadgeOk = algorithm === 'apca' ? '✓ Lc≥60' : '✓ 3:1';
+  const iconBadgeOk = '✓ 3:1';
   let iconTable = `| icon token | Light ratio | Light | Dark ratio | Dark |\n`;
   iconTable    += `|---|---|---|---|---|\n`;
   for (const ic of resolvedIcons) {
@@ -627,8 +780,6 @@ function validateSemanticPairs(ds) {
     const dB = ic.dPass === false ? '✗ FAIL' : ic.dPass ? iconBadgeOk : '—';
     iconTable += `| \`${ic.token}\` | ${r2(ic.lRatio)} | ${lB} | ${r2(ic.dRatio)} | ${dB} |\n`;
   }
-
-  const iconNames = new Set(resolvedIcons.map(ic => ic.token));
 
   DS.color.semantics = {
     convention,
@@ -672,14 +823,31 @@ function validateSemanticPairs(ds) {
   // accessible step for either mode without re-walking the ramp. Additive —
   // existing consumers ignore this field.
   const pairSuggestions = {};
+  const pairRepairSuggestions = {};
   for (const row of resolvedPairs) {
     pairSuggestions[`${row.bg}|${row.text}`] = {
       Light: row.Light && row.Light.suggestion ? row.Light.suggestion.path : null,
       Dark:  row.Dark  && row.Dark.suggestion  ? row.Dark.suggestion.path  : null,
     };
+    pairRepairSuggestions[`${row.bg}|${row.text}`] = {
+      Light: row.Light && row.Light.suggestion
+        ? { suggestedText: row.Light.suggestion.path }
+        : (row.Light && row.Light.adjustmentSuggestion ? {
+          suggestedBackground: row.Light.adjustmentSuggestion.bg,
+          suggestedText: row.Light.adjustmentSuggestion.text,
+          wcag: row.Light.adjustmentSuggestion.wcag,
+        } : null),
+      Dark: row.Dark && row.Dark.suggestion
+        ? { suggestedText: row.Dark.suggestion.path }
+        : (row.Dark && row.Dark.adjustmentSuggestion ? {
+          suggestedBackground: row.Dark.adjustmentSuggestion.bg,
+          suggestedText: row.Dark.adjustmentSuggestion.text,
+          wcag: row.Dark.adjustmentSuggestion.wcag,
+        } : null),
+    };
   }
 
-  return { ds: DS, markdownTable, iconTable, failCount, summary, pairSuggestions };
+  return { ds: DS, markdownTable, iconTable, failCount, summary, pairSuggestions, pairRepairSuggestions };
 }
 
 module.exports = { validateSemanticPairs };

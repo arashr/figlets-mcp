@@ -498,7 +498,7 @@ function handleFigletsHealthCheck(args) {
           "setupIntakeCompleted is not true",
           `requestedOrCompletedTool=${requestedTool || "prepare_ds_config"}`,
         ],
-        nextAction: "Ask targeted setup intake questions for missing choices. Treat the designer prompt as direction, not a complete spec. Do not draft a full proposal or concrete token values before intake.",
+        nextAction: "Ask exactly one setup intake question at a time for the next missing choice. Treat the designer prompt as direction, not a complete spec. Do not draft a full proposal or concrete token values before intake.",
         recommendedTool: "figlets_workflow_guide",
       }));
     } else if (workflow.id === "new-ds-setup") {
@@ -511,7 +511,7 @@ function handleFigletsHealthCheck(args) {
           ? "Setup intake is marked complete for this workflow."
           : "Setup intake has not been requested yet.",
         evidence: [`setupIntakeCompleted=${setupIntakeCompleted}`],
-        nextAction: "Collect missing setup choices before calling create_ds_config_from_intake or prepare_ds_config.",
+        nextAction: "Collect missing setup choices one question at a time before calling create_ds_config_from_intake or prepare_ds_config.",
       }));
     } else {
       checks.push(_makeCheck({
@@ -538,7 +538,7 @@ function handleFigletsHealthCheck(args) {
           "proposalDraftedBeforeIntake is true",
           "setupIntakeCompleted is not true",
         ],
-        nextAction: "Replace the proposal with targeted intake questions. Offer lightweight multiple-choice options only; do not draft a full setup proposal before intake unless the designer explicitly asks for suggestions.",
+        nextAction: "Replace the proposal with the next single targeted intake question. Offer lightweight multiple-choice options only; do not draft a full setup proposal before intake unless the designer explicitly asks for suggestions.",
         recommendedTool: "figlets_workflow_guide",
       }));
     } else if (workflow.id === "new-ds-setup") {
@@ -551,7 +551,7 @@ function handleFigletsHealthCheck(args) {
           ? "A setup proposal was drafted after intake began; confirm the designer asked for suggestions."
           : "No pre-intake setup proposal risk detected.",
         evidence: [`proposalDraftedBeforeIntake=${proposalDraftedBeforeIntake}`],
-        nextAction: "Lead with intake questions for broad setup prompts; avoid full proposals before answers.",
+        nextAction: "Lead with one intake question at a time for broad setup prompts; avoid full proposals before answers.",
       }));
     } else {
       checks.push(_makeCheck({
@@ -987,7 +987,7 @@ function handleFigletsWorkflowGuide(args) {
   if (workflow.id === "new-ds-setup" && workflow.intakeContract) {
     response.intakeContract = workflow.intakeContract;
     response.intakePresentationRule = workflow.intakeContract.firstResponseRule;
-    response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Ask intake questions first and do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. Run setup intake before create_ds_config_from_intake and prepare_ds_config. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
+    response.message = `Workflow guide: ${workflow.title}. Treat the designer prompt as initial direction, not a complete spec. Ask exactly one intake question at a time and do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. Infer generated background/foreground pairing intent from supplied brand colors and semantic naming grammar unless the designer asks for custom pairings. Run setup intake before create_ds_config_from_intake and prepare_ds_config. Follow the steps in order, summarize plainly, and ask for approval before any write step.`;
   }
   if (workflow.id === "token-gap-completion" && workflow.approvalContract) {
     response.approvalContract = workflow.approvalContract;

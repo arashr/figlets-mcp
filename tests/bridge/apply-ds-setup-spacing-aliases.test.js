@@ -4,6 +4,11 @@ const path = require("path");
 const vm = require("vm");
 
 const code = fs.readFileSync(path.join(__dirname, "../../packages/figma-bridge-plugin/code.js"), "utf8");
+const setupSource = extractFunction(code, "_applyDsSetup", true);
+assert.ok(setupSource.includes("preparedPrimitives"), "setup executor should consume prepared primitive inventory");
+assert.ok(!setupSource.includes("TYPE_SIZES"), "setup executor should not define typography primitive ramps");
+assert.ok(!setupSource.includes("SHADOW_FLOATS"), "setup executor should not define shadow primitive ramps");
+assert.ok(!setupSource.includes("SCRIMS"), "setup executor should not define scrim primitive ramps");
 
 function extractFunction(source, name, isAsync) {
   const prefix = isAsync ? `async function ${name}` : `function ${name}`;
@@ -128,7 +133,7 @@ module.exports = (async () => {
     ["_ensureCollectionModes", false],
   ];
   const source = functions.map(([name, isAsync]) => extractFunction(code, name, isAsync)).join("\n")
-    + "\n" + extractFunction(code, "_applyDsSetup", true)
+    + "\n" + setupSource
     + "\nmodule.exports = { _applyDsSetup };";
 
   const context = { figma, module: { exports: {} }, Set };
@@ -146,24 +151,59 @@ module.exports = (async () => {
     breakpoints: { modes: ["Mobile", "Tablet", "Desktop"] },
     primitives: {
       spacing: [
-        [0, 0],
-        [1, 4],
-        [2, 8],
-        [12, 48],
-        [16, 64],
-        [24, 96],
+        ["0", 0],
+        ["025", 2],
+        ["050", 4],
+        ["100", 8],
+        ["600", 48],
+        ["800", 64],
+        ["1200", 96],
       ],
     },
     color: { ramps: [] },
     spacing: {
       semantic: { "layout/lg": [48, 64, 96] },
-      radius: { md: 8 },
-      border: { thick: 4, default: 1 },
+      radius: { xs: 2, md: 8, full: 9999 },
+      border: { hairline: 0.5, thick: 4, default: 1 },
     },
-    typography: { scale: {} },
+    typography: {
+      scale: {
+        "display/lg": { sizes: [45, 57, 72], lineHeights: [52, 64, 80], weight: 400, tracking: -0.02 },
+      },
+    },
   };
 
-  const result = await context.module.exports._applyDsSetup(DS);
+  const primitivesData = {
+    collectionName: "1. Primitives",
+    colors: [],
+    scrims: [],
+    floats: [
+      { name: "space/0", value: 0 },
+      { name: "space/025", value: 2 },
+      { name: "space/050", value: 4 },
+      { name: "space/100", value: 8 },
+      { name: "space/600", value: 48 },
+      { name: "space/800", value: 64 },
+      { name: "space/1200", value: 96 },
+      { name: "radius/xs", value: 2 },
+      { name: "radius/md", value: 8 },
+      { name: "radius/full", value: 9999 },
+      { name: "border/width/hairline", value: 0.5 },
+      { name: "border/width/default", value: 1 },
+      { name: "border/width/thick", value: 4 },
+      { name: "type/size/45", value: 45 },
+      { name: "type/size/57", value: 57 },
+      { name: "type/size/7xl", value: 72 },
+      { name: "type/weight/regular", value: 400 },
+      { name: "type/tracking/tight", value: -0.02 },
+    ],
+    strings: [
+      { name: "font/sans", value: "Inter" },
+      { name: "font/mono", value: "JetBrains Mono" },
+    ],
+  };
+
+  const result = await context.module.exports._applyDsSetup({ DS, primitivesData });
   assert.ok(/Created:/.test(result.message), result.message);
 
   const byName = new Map(variables.map(variable => [variable.name, variable]));
@@ -180,21 +220,50 @@ module.exports = (async () => {
 
   const layout = byName.get("space/layout/lg");
   assert.ok(layout, "semantic spacing token should be created");
-  assertJsonEqual(layout.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("space/12")));
-  assertJsonEqual(layout.valuesByMode[modeByName.get("Tablet")], alias(primitiveId("space/16")));
-  assertJsonEqual(layout.valuesByMode[modeByName.get("Desktop")], alias(primitiveId("space/24")));
+  assertJsonEqual(layout.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("space/600")));
+  assertJsonEqual(layout.valuesByMode[modeByName.get("Tablet")], alias(primitiveId("space/800")));
+  assertJsonEqual(layout.valuesByMode[modeByName.get("Desktop")], alias(primitiveId("space/1200")));
 
   const radius = byName.get("space/radius/md");
   assert.ok(radius, "radius token should be created");
-  assertJsonEqual(radius.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("space/2")));
-  assertJsonEqual(radius.valuesByMode[modeByName.get("Tablet")], alias(primitiveId("space/2")));
-  assertJsonEqual(radius.valuesByMode[modeByName.get("Desktop")], alias(primitiveId("space/2")));
+  assertJsonEqual(radius.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("radius/md")));
+  assertJsonEqual(radius.valuesByMode[modeByName.get("Tablet")], alias(primitiveId("radius/md")));
+  assertJsonEqual(radius.valuesByMode[modeByName.get("Desktop")], alias(primitiveId("radius/md")));
+
+  const tinyRadius = byName.get("space/radius/xs");
+  assert.ok(tinyRadius, "tiny radius token should be created");
+  assertJsonEqual(tinyRadius.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("radius/xs")));
+
+  const fullRadius = byName.get("space/radius/full");
+  assert.ok(fullRadius, "full radius token should be created");
+  assertJsonEqual(fullRadius.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("radius/full")));
+
+  const hairline = byName.get("space/border/hairline");
+  assert.ok(hairline, "hairline border token should be created");
+  assertJsonEqual(hairline.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("border/width/hairline")));
 
   const thick = byName.get("space/border/thick");
   assert.ok(thick, "border token with a matching primitive should be created");
-  assertJsonEqual(thick.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("space/1")));
+  assertJsonEqual(thick.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("border/width/thick")));
 
   const defaultBorder = byName.get("space/border/default");
-  assert.ok(defaultBorder, "border token without a matching primitive should still be created");
-  assert.strictEqual(defaultBorder.valuesByMode[modeByName.get("Mobile")], 1);
+  assert.ok(defaultBorder, "default border token should be created");
+  assertJsonEqual(defaultBorder.valuesByMode[modeByName.get("Mobile")], alias(primitiveId("border/width/default")));
+
+  assert.ok(byName.get("type/size/45"), "setup should create a primitive for non-standard fluid size 45");
+  assert.ok(byName.get("type/size/57"), "setup should create a primitive for non-standard fluid size 57");
+  const displaySize = byName.get("type/display/lg/size");
+  assert.ok(displaySize, "typography size semantic should be created");
+  const typographyCollection = collections.find(collection => collection.name === "3. Typography");
+  assert.ok(typographyCollection, "setup should create the typography collection");
+  const typoModeByName = new Map(typographyCollection.modes.map(mode => [mode.name, mode.modeId]));
+  assertJsonEqual(displaySize.valuesByMode[typoModeByName.get("Mobile")], alias(primitiveId("type/size/45")));
+  assertJsonEqual(displaySize.valuesByMode[typoModeByName.get("Tablet")], alias(primitiveId("type/size/57")));
+  assertJsonEqual(displaySize.valuesByMode[typoModeByName.get("Desktop")], alias(primitiveId("type/size/7xl")));
+
+  const displayLineHeight = byName.get("type/display/lg/line-height");
+  assert.ok(displayLineHeight, "typography line-height semantic should be created");
+  assert.strictEqual(displayLineHeight.valuesByMode[typoModeByName.get("Mobile")], 52);
+  assert.strictEqual(displayLineHeight.valuesByMode[typoModeByName.get("Tablet")], 64);
+  assert.strictEqual(displayLineHeight.valuesByMode[typoModeByName.get("Desktop")], 80);
 })();

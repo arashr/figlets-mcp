@@ -532,7 +532,7 @@ try {
     assert.ok(route.intakeContract.proposalRule.includes("Do not draft a full proposal before intake"));
     assert.ok(route.message.includes("do not draft a full proposal"));
     assert.ok(route.message.includes("create_ds_config_from_intake"));
-    assert.ok(route.designerResponse.includes("start by asking"));
+    assert.ok(route.designerResponse.includes("one setup question at a time"));
     assert.ok(route.designerResponse.includes("won't draft"));
     assert.ok(route.designerResponse.includes("setupApprovalPreview"));
     assert.ok(route.designerResponse.includes("file-scoped local config"));
@@ -544,7 +544,7 @@ try {
     assert.ok(guide.intakeContract.requiredTopics.some(topic => topic.includes("brand colors")));
     assert.strictEqual(guide.intakeContract.configCreationTool, "create_ds_config_from_intake");
     assert.ok(guide.intakeContract.suggestionBoundary.includes("Do not confuse proposing with inventing"));
-    assert.ok(guide.intakePresentationRule.includes("intake questions"));
+    assert.ok(guide.intakePresentationRule.includes("one targeted intake question"));
     assert.ok(guide.message.includes("do not draft a full proposal"));
     assert.ok(guide.workflow.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "create_ds_config_from_intake"));
     assert.ok(guide.workflow.steps.some(step => step.id === "create-config-from-intake" && step.tool === "create_ds_config_from_intake" && step.localConfigWrite === true));
@@ -559,6 +559,10 @@ try {
     assert.ok(contrastRepairStep.designerMessage.includes("rerun prepare_ds_config"));
     assert.ok(guide.workflow.errors.some(item => item.includes("contrastRepairOptions")));
     assert.ok(guide.workflow.errors.some(item => item.includes("apply_ds_config_contrast_repairs")));
+    assert.ok(guide.workflow.errors.some(item => item.includes("suggestedBackground") && item.includes("suggestedText")));
+    assert.ok(guide.workflow.errors.some(item => item.includes("prose-only repair direction")));
+    assert.ok(guide.workflow.errors.some(item => item.includes("untested single-axis example")));
+    assert.ok(guide.workflow.errors.some(item => item.includes("go for Figma")));
 
     assertDocsIncludeAny(
       DESIGNER_DOC_PATHS,
@@ -573,7 +577,7 @@ try {
       DESIGNER_DOC_PATHS,
       [
         "ask questions before suggesting concrete token values",
-        "Ask targeted intake questions first",
+        "Ask exactly one targeted intake question",
       ],
       "setup intake question-first docs"
     );
@@ -618,7 +622,7 @@ try {
     assert.strictEqual(draftedProposal.status, "blocked");
     const proposal = findCheck(draftedProposal, "setup_proposal_boundary");
     assert.strictEqual(proposal.status, "fail");
-    assert.ok(proposal.nextAction.includes("targeted intake questions"));
+    assert.ok(proposal.nextAction.includes("next single targeted intake question"));
     assert.strictEqual(draftedProposal.nextAction.type, "ask_user");
 
     const negativeRoutes = [

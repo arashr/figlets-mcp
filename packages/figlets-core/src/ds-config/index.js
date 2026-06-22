@@ -4,6 +4,7 @@ const { computeDsConfig, normalizeTypographyPreset } = require('./compute-ds-con
 const { generateColorRamps }     = require('./generate-color-ramps');
 const { validateSemanticPairs }  = require('./validate-semantic-pairs');
 const { generatePrimitivesData } = require('./generate-primitives-data');
+const semanticContrast           = require('./semantic-contrast');
 const designMdIntake             = require('./design-md-intake');
 
 /**
@@ -121,6 +122,7 @@ function runDsPipeline(configPath) {
     failCount:            apcaFailCount,
     apcaFailCount:        apcaFailCount,
     pairSuggestions:      step3.pairSuggestions || {},
+    pairRepairSuggestions: step3.pairRepairSuggestions || {},
     staleSemantics:       staleSemantics,
     semanticSummary:      step3.summary,
     primitivesData:       step4,
@@ -133,6 +135,7 @@ module.exports = {
   generateColorRamps,
   validateSemanticPairs,
   generatePrimitivesData,
+  semanticContrast,
   readDsConfig,
   writeDsConfig,
   runDsPipeline,

@@ -4,9 +4,9 @@
  * apply-ds-setup.js
  * MCP tool handler for apply_ds_setup.
  *
- * Reads the prepared design-system.config.js, sends the full DS object to the
- * bridge plugin via /request-ds-setup, and waits for the plugin to create all
- * 5 variable collections. Returns the list of built collection names.
+ * Reads the prepared design-system.config.js, prepares the primitive inventory
+ * in core/server code, and sends a setup execution payload to the bridge plugin
+ * via /request-ds-setup. Returns the list of built collection names.
  *
  * Precondition: prepare_ds_config must have been called first (failCount === 0).
  */
@@ -73,6 +73,133 @@ function _staleSemanticRefs(ds) {
     check(item.token || 'unpaired', item.Dark);
   }
   return staleSemantics;
+}
+
+function _primitiveInventory(primitivesData) {
+  const names = new Set();
+  const floatValues = new Map();
+  const addName = (item) => {
+    if (item && item.name) names.add(String(item.name));
+  };
+  for (const item of (primitivesData && primitivesData.colors) || []) addName(item);
+  for (const item of (primitivesData && primitivesData.scrims) || []) addName(item);
+  for (const item of (primitivesData && primitivesData.strings) || []) addName(item);
+  for (const item of (primitivesData && primitivesData.floats) || []) {
+    addName(item);
+    const value = Number(item && item.value);
+    if (!isFinite(value)) continue;
+    if (!floatValues.has(value)) floatValues.set(value, new Set());
+    floatValues.get(value).add(String(item.name));
+  }
+  return { names, floatValues };
+}
+
+function _typeSizeTokenName(typePrefix, px) {
+  const sizeMap = {
+    10: '2xs',
+    12: 'xs',
+    14: 'sm',
+    16: 'md',
+    18: 'lg',
+    20: 'xl',
+    24: '2xl',
+    30: '3xl',
+    36: '4xl',
+    48: '5xl',
+    60: '6xl',
+    72: '7xl',
+  };
+  return `${typePrefix}/size/${sizeMap[px] || px}`;
+}
+
+function _typeTrackingTokenName(typePrefix, tracking) {
+  const trackingMap = {
+    '-0.02': 'tight',
+    '-0.01': 'snug',
+    '0': 'normal',
+    '0.01': 'open',
+    '0.02': 'wide',
+    '0.05': 'wider',
+    '0.1': 'widest',
+  };
+  const key = String(tracking);
+  return `${typePrefix}/tracking/${trackingMap[key] || key}`;
+}
+
+function _typeWeightTokenName(typePrefix, weight) {
+  const weightMap = { 400: 'regular', 500: 'medium', 600: 'semibold', 700: 'bold' };
+  return `${typePrefix}/weight/${weightMap[weight] || 'regular'}`;
+}
+
+function _checkGeneratedSetupPrimitiveCoverage(ds, primitivesData) {
+  const errors = [];
+  const inventory = _primitiveInventory(primitivesData);
+  const typePrefix = (ds.naming && ds.naming.typePrefix) ? ds.naming.typePrefix : 'type';
+  const fontPattern = (ds.naming && ds.naming.fontFamily) ? ds.naming.fontFamily : 'font/{variant}';
+  const scale = (ds.typography && ds.typography.scale) ? ds.typography.scale : {};
+
+  for (const role of Object.keys(scale)) {
+    const roleDef = scale[role] || {};
+    for (const size of (roleDef.sizes || [])) {
+      const tokenName = _typeSizeTokenName(typePrefix, size);
+      if (!inventory.names.has(tokenName)) errors.push(`missing primitive ${tokenName} for typography ${role} size ${size}`);
+    }
+    const weight = roleDef.weight || 400;
+    const weightName = _typeWeightTokenName(typePrefix, weight);
+    if (!inventory.names.has(weightName)) errors.push(`missing primitive ${weightName} for typography ${role} weight ${weight}`);
+    const tracking = roleDef.tracking != null ? roleDef.tracking : 0;
+    const trackingName = _typeTrackingTokenName(typePrefix, tracking);
+    if (!inventory.names.has(trackingName)) errors.push(`missing primitive ${trackingName} for typography ${role} tracking ${tracking}`);
+  }
+
+  const fontName = fontPattern.replace('{variant}', 'sans');
+  if (Object.keys(scale).length && !inventory.names.has(fontName)) {
+    errors.push(`missing primitive ${fontName} for typography family aliases`);
+  }
+
+  function hasPrimitiveValue(value, predicate) {
+    const numeric = Number(value);
+    if (!isFinite(numeric)) return true;
+    const names = inventory.floatValues.get(numeric);
+    return !!(names && Array.from(names).some(predicate));
+  }
+
+  function checkPrimitiveValue(kind, token, value, predicate) {
+    const numeric = Number(value);
+    if (!isFinite(numeric)) return;
+    if (!hasPrimitiveValue(numeric, predicate)) errors.push(`missing primitive for ${kind} ${token} value ${numeric}`);
+  }
+
+  const spacing = ds.spacing || {};
+  for (const token of Object.keys(spacing.semantic || {})) {
+    const values = Array.isArray(spacing.semantic[token]) ? spacing.semantic[token] : [spacing.semantic[token]];
+    for (const value of values) {
+      checkPrimitiveValue('semantic spacing', token, value, name => /^space\/[\d]+(?:[-_][\d]+)*$/.test(name));
+    }
+  }
+  for (const token of Object.keys(spacing.radius || {})) {
+    checkPrimitiveValue('radius', token, spacing.radius[token], name => /^radius\/[^/]+$/.test(name));
+  }
+  for (const token of Object.keys(spacing.border || {})) {
+    checkPrimitiveValue('border', token, spacing.border[token], name => /^border\/width\/[^/]+$/.test(name));
+  }
+
+  return errors;
+}
+
+function _buildDsSetupPayload(core, ds) {
+  const primitivesData = core.generatePrimitivesData(ds);
+  const coverageErrors = _checkGeneratedSetupPrimitiveCoverage(ds, primitivesData);
+  if (coverageErrors.length) {
+    const err = new Error('Generated setup primitive coverage failed.');
+    err.coverageErrors = coverageErrors;
+    throw err;
+  }
+  return {
+    setupPayloadVersion: 1,
+    DS: ds,
+    primitivesData,
+  };
 }
 
 function _writeDesignMdExport(configPath) {
@@ -147,7 +274,18 @@ function handleApplyDsSetup({ config_path }) {
     });
   }
 
-  return requestBridgePost('/request-ds-setup', ds, { timeoutMs: 185000 }).then((response) => {
+  let setupPayload;
+  try {
+    setupPayload = _buildDsSetupPayload(core, validation.ds || ds);
+  } catch (err) {
+    return Promise.resolve({
+      error: err.message || 'Generated setup primitive coverage failed.',
+      primitiveCoverageErrors: err.coverageErrors || [],
+      hint: 'Run prepare_ds_config again. If this persists, the generated primitive ramp and semantic setup contract are out of sync.',
+    });
+  }
+
+  return requestBridgePost('/request-ds-setup', setupPayload, { timeoutMs: 185000 }).then((response) => {
     if (response.statusCode === 200) {
       const parsed = response.data || {};
       const result = parsed.result || {};
@@ -173,4 +311,8 @@ function handleApplyDsSetup({ config_path }) {
   });
 }
 
-module.exports = { handleApplyDsSetup };
+module.exports = {
+  handleApplyDsSetup,
+  _buildDsSetupPayload,
+  _checkGeneratedSetupPrimitiveCoverage,
+};

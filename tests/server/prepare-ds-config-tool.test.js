@@ -177,6 +177,116 @@ assert.ok(
   "setup preview should show the corrected generated dark on-brand alias"
 );
 
+const generatedShortScalePinkPath = path.join(tmp, "generated-short-scale-pink.config.js");
+fs.writeFileSync(generatedShortScalePinkPath, `const DS = {
+  project: { name: 'Generated 100-900 Pink Preview', platform: 'Multi-platform' },
+  grid: { base: 8 },
+  breakpoints: { modes: ['Mobile', 'Tablet', 'Desktop'], tier: 3 },
+  typography: { scalePreset: 'fluid', families: { sans: 'Inter', mono: 'JetBrains Mono' } },
+  color: {
+    scale: '100-900',
+    algorithm: 'oklch',
+    contrastAlgorithm: 'wcag',
+    convention: 'role-based',
+    brand: [
+      { name: 'pink', hex: '#FF5FA2', role: 'primary' },
+      { name: 'pale-pink', hex: '#FFD6E7', role: 'secondary' },
+      { name: 'warm-peach', hex: '#F6A04D', role: 'accent' },
+      { name: 'butter', hex: '#FFD166' },
+      { name: 'ink', hex: '#090A0C' }
+    ]
+  },
+  naming: { textStyle: 'type/{role}/{size}', fontFamily: 'font/{variant}' },
+  collections: {
+    primitives: '1. Primitives',
+    color: '2. Color',
+    typography: '3. Typography',
+    spacing: '4. Spacing',
+    elevation: '5. Elevation'
+  }
+};\n`, "utf8");
+const generatedShortScalePink = handlePrepareDsConfig({ config_path: generatedShortScalePinkPath });
+assert.ok(!generatedShortScalePink.error, "generated 100-900 pink setup config should prepare");
+assert.strictEqual(
+  generatedShortScalePink.semanticPairs.failCount,
+  0,
+  "generated 100-900 setup pairs should self-correct instead of surfacing contrast failures"
+);
+assert.deepStrictEqual(
+  generatedShortScalePink.semanticPairs.contrastRepairOptions,
+  [],
+  "generated 100-900 setup should not ask the designer to approve Figlets' own contrast correction"
+);
+assert.ok(
+  generatedShortScalePink.setupApprovalPreview.collections.some(collection =>
+    collection.name === "2. Color" &&
+    collection.sampleAliases.some(alias =>
+      alias.background === "color/bg/brand" &&
+      alias.text === "color/text/on-brand" &&
+      alias.Dark &&
+      alias.Dark.background === "color/pink/600" &&
+      alias.Dark.text === "color/neutral/100"
+    )
+  ),
+  "setup preview should show the generated background shift when no foreground-only fix exists"
+);
+
+const noOptionManualContrastPath = path.join(tmp, "no-option-manual-contrast.config.js");
+fs.writeFileSync(noOptionManualContrastPath, `const DS = {
+  project: { name: 'Manual No Option Contrast', platform: 'Web app' },
+  grid: { base: 8 },
+  breakpoints: { modes: ['Mobile', 'Tablet', 'Desktop'], tier: 3 },
+  typography: { scalePreset: 'fluid', families: { sans: 'Inter', mono: 'JetBrains Mono' } },
+  color: {
+    scale: '100-900',
+    algorithm: 'oklch',
+    contrastAlgorithm: 'wcag',
+    convention: 'role-based',
+    brand: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }],
+    semantics: {
+      convention: 'role-based',
+      pairs: [{
+        bg: 'color/bg/brand',
+        text: 'color/text/on-brand',
+        Light: { bg: 'color/pink/500', text: 'color/neutral/900' },
+        Dark: { bg: 'color/pink/500', text: 'color/neutral/900' }
+      }]
+    }
+  },
+  naming: { textStyle: 'type/{role}/{size}', fontFamily: 'font/{variant}' },
+  collections: {
+    primitives: '1. Primitives',
+    color: '2. Color',
+    typography: '3. Typography',
+    spacing: '4. Spacing',
+    elevation: '5. Elevation'
+  }
+};\n`, "utf8");
+const noOptionManualContrast = handlePrepareDsConfig({ config_path: noOptionManualContrastPath });
+assert.ok(!noOptionManualContrast.error, "manual no-option contrast config should still prepare");
+assert.strictEqual(noOptionManualContrast.readyToBuild, false);
+assert.ok(noOptionManualContrast.semanticPairs.contrastRepairOptions.length > 0);
+const combinedManualRepair = noOptionManualContrast.semanticPairs.contrastRepairOptions.find(option =>
+  option.mode === "Dark" &&
+  option.background === "color/bg/brand" &&
+  option.text === "color/text/on-brand" &&
+  option.suggestedBackground === "color/pink/600" &&
+  option.suggestedText === "color/neutral/100"
+);
+assert.ok(combinedManualRepair, "manual no-foreground-only state should expose an evaluated background+text repair");
+assert.ok(
+  combinedManualRepair.approvalLabel.includes("color/pink/600") &&
+  combinedManualRepair.approvalLabel.includes("color/neutral/100"),
+  "combined repair approval label should include both evaluated aliases"
+);
+const appliedCombinedManualRepair = handleApplyDsConfigContrastRepairs({
+  config_path: noOptionManualContrastPath,
+  repairs: noOptionManualContrast.semanticPairs.contrastRepairOptions,
+});
+assert.ok(!appliedCombinedManualRepair.error, "combined background+text contrast repair should apply");
+const afterCombinedManualRepair = handlePrepareDsConfig({ config_path: noOptionManualContrastPath });
+assert.strictEqual(afterCombinedManualRepair.readyToBuild, true, "combined repair should make the manual setup build-ready");
+
 const failingContrastPath = path.join(tmp, "failing-contrast.config.js");
 fs.writeFileSync(failingContrastPath, `const DS = {
   project: { name: 'Failing Contrast Preview', platform: 'Web app' },

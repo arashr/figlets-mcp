@@ -136,6 +136,25 @@ function _breakpointTier(args, modes) {
   return null;
 }
 
+function _defaultMonoForPlatform(platform) {
+  const text = String(platform || '').trim().toLowerCase();
+  if (/ios|mac|apple/.test(text)) return 'SF Mono';
+  if (/android/.test(text)) return 'Roboto Mono';
+  return 'JetBrains Mono';
+}
+
+function _normalizeMonoFamily(value, platform) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^(any|default|reasonable|system)(\s+(reasonable|default|system))?\s+(mono|monospace|mono family|monospace family)$/.test(raw.toLowerCase())) {
+    return _defaultMonoForPlatform(platform);
+  }
+  if (/^any\s+reasonable\s+monospace$/i.test(raw) || /^any\s+reasonable\s+mono$/i.test(raw)) {
+    return _defaultMonoForPlatform(platform);
+  }
+  return raw;
+}
+
 function _brandColors(args, needsDesignerInput) {
   const colors = Array.isArray(args.brand_colors) ? args.brand_colors : [];
   const valid = [];
@@ -172,7 +191,7 @@ function _typography(args, needsDesignerInput) {
   const input = args.typography && typeof args.typography === 'object' ? args.typography : {};
   const families = input.families && typeof input.families === 'object' ? input.families : {};
   const sans = families.sans || input.sans || input.display_family || input.body_family;
-  const mono = families.mono || input.mono || input.mono_family;
+  const mono = _normalizeMonoFamily(families.mono || input.mono || input.mono_family, args.platform);
   const scale = input.scale && typeof input.scale === 'object'
     ? input.scale
     : (args.typography_scale && typeof args.typography_scale === 'object' ? args.typography_scale : null);
@@ -323,7 +342,7 @@ function handleCreateDsConfigFromIntake(args) {
   const contrast = _normalizeContrast(args.contrast_standard || args.contrast || args.accessibility_standard);
   if (!contrast) needsDesignerInput.push('contrast standard (APCA or WCAG 2.2)');
   if (!String(args.theme_behavior || '').trim()) needsDesignerInput.push('light/dark behavior');
-  if (!String(args.color_scale || '').trim()) needsDesignerInput.push('color scale (for example 50-950)');
+  if (!String(args.color_scale || '').trim()) needsDesignerInput.push('color scale (for example 100-900, 50-950, or 0-100)');
   const brand = _brandColors(args, needsDesignerInput);
   const typography = _typography(args, needsDesignerInput);
 

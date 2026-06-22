@@ -115,6 +115,62 @@ assert.ok(outsideActiveResult.error, 'intake config should reject non-active con
 assert.strictEqual(outsideActiveResult.configWritten, false);
 assert.ok(!fs.existsSync(outsideActiveConfigPath), 'intake config should not write outside the active file-scoped path');
 
+const completeIntakeResult = handleCreateDsConfigFromIntake({
+  config_path: intakeConfigPath,
+  project_name: 'Complete intake',
+  platform: 'Web',
+  grid_base: 8,
+  breakpoint_tier: '3-tier',
+  semantic_color_grammar: 'intent/emphasis',
+  contrast_standard: 'WCAG 2.2',
+  theme_behavior: 'light + dark',
+  color_scale: '50-950',
+  brand_colors: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }],
+  typography: {
+    scalePreset: 'fluid',
+    families: {
+      sans: 'Inter',
+      mono: 'JetBrains Mono',
+    },
+  },
+});
+
+assert.ok(!completeIntakeResult.error, 'complete intake should write config');
+assert.strictEqual(completeIntakeResult.configWritten, true);
+assert.ok(
+  !completeIntakeResult.needsDesignerInput.some(item => /pairing intent|background\/foreground/i.test(item)),
+  'complete generated intake should not ask a vague pairing-intent follow-up'
+);
+fs.unlinkSync(intakeConfigPath);
+
+const vagueMonoResult = handleCreateDsConfigFromIntake({
+  config_path: intakeConfigPath,
+  project_name: 'Concrete mono intake',
+  platform: 'cross-platform',
+  grid_base: 8,
+  breakpoint_tier: '3-tier',
+  semantic_color_grammar: 'intent/emphasis',
+  contrast_standard: 'WCAG 2.2',
+  theme_behavior: 'light + dark',
+  color_scale: '100-900',
+  brand_colors: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }],
+  typography: {
+    scalePreset: 'standard',
+    families: {
+      sans: 'Inter',
+      mono: 'any reasonable monospace',
+    },
+  },
+});
+
+assert.ok(!vagueMonoResult.error, 'vague approved monospace choice should not block intake');
+assert.strictEqual(vagueMonoResult.preview.typography.families.mono, 'JetBrains Mono');
+assert.ok(
+  fs.readFileSync(intakeConfigPath, 'utf8').includes('"mono": "JetBrains Mono"'),
+  'config should write a concrete monospace family, not vague prose'
+);
+fs.unlinkSync(intakeConfigPath);
+
 const missingIntakeResult = handleCreateDsConfigFromIntake({
   config_path: intakeConfigPath,
   project_name: 'Case study',
@@ -142,7 +198,7 @@ assert.ok(
   'screenshot-derived color families should require confirmed hex values'
 );
 assert.ok(
-  missingIntakeResult.needsDesignerInput.includes('color scale (for example 50-950)'),
+  missingIntakeResult.needsDesignerInput.includes('color scale (for example 100-900, 50-950, or 0-100)'),
   'missing color scale should remain a designer input instead of defaulting'
 );
 assert.ok(

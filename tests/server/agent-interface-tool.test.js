@@ -81,6 +81,9 @@ try {
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("schema validation rejects")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("contrastRepairOptions")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("apply_ds_config_contrast_repairs")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("suggestedBackground") && item.includes("suggestedText")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("prose-only repair direction")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("go for Figma")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Do not replace the exact entries with token names")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")));
@@ -159,11 +162,13 @@ try {
     const route = routeIntent(posterGalleryIntent);
     assert.strictEqual(route.workflow.id, "new-ds-setup");
     assert.ok(route.intakeContract);
-    assert.ok(route.intakeContract.firstResponseRule.includes("intake questions"));
+    assert.ok(route.intakeContract.firstResponseRule.includes("one targeted intake question"));
+    assert.ok(route.intakeContract.questionBatchingRule.includes("one setup intake question"));
+    assert.ok(route.intakeContract.inferPairingIntentRule.includes("infer reasonable generated"));
     assert.ok(route.intakeContract.doNotDraftBeforeIntake.some(item => /palette|proposal/i.test(item)));
     assert.ok(route.message.includes("do not draft a full proposal"));
     assert.ok(route.message.includes("create_ds_config_from_intake"));
-    assert.ok(route.designerResponse.includes("start by asking"));
+    assert.ok(route.designerResponse.includes("one setup question at a time"));
     assert.ok(route.designerResponse.includes("won't draft"));
     assert.ok(route.designerResponse.includes("not a proposal to approve"));
     assert.ok(route.designerResponse.includes("file-scoped local config"));
@@ -194,16 +199,23 @@ try {
     assert.ok(guide.intakeContract.configCreationTool === "create_ds_config_from_intake");
     assert.ok(guide.intakeContract.suggestionBoundary.includes("Do not confuse proposing with inventing"));
     assert.ok(guide.intakeContract.suggestionBoundary.includes("wait for approval"));
+    assert.ok(guide.intakeContract.questionHelp.semanticColorNamingGrammar.includes("examples"));
+    assert.ok(guide.intakeContract.questionHelp.semanticColorNamingGrammar.includes("intent/emphasis"));
+    assert.ok(guide.intakeContract.questionHelp.colorScale.includes("100-900"));
+    assert.ok(guide.intakeContract.questionHelp.fontFamilies.includes("JetBrains Mono"));
     assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.requiredBeforeTool === "create_ds_config_from_intake"));
     assert.ok(guide.steps.some(step => step.id === "create-config-from-intake" && step.tool === "create_ds_config_from_intake" && step.localConfigWrite === true));
     assert.ok(guide.steps.some(step => step.id === "optional-design-md-intake" && step.optional === true && step.designerMessage.includes("just drop it in")));
+    assert.ok(guide.steps.some(step => step.id === "collect-answers" && step.designerMessage.includes("concrete examples")));
     assert.ok(guide.steps.some(step => step.id === "repair-setup-contrast-config" && step.tool === "apply_ds_config_contrast_repairs" && step.localConfigWrite === true && step.requiresApproval === true));
     assert.ok(guide.errors.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(guide.errors.some(item => item.includes("Do not invent missing brand colors")));
+    assert.ok(guide.errors.some(item => item.includes("100-900")));
+    assert.ok(guide.errors.some(item => item.includes("monospace")));
     assert.ok(guide.errors.some(item => item.includes("create_ds_config_from_intake")));
     const handled = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });
     assert.ok(handled.intakeContract);
-    assert.ok(handled.intakePresentationRule.includes("intake questions"));
+    assert.ok(handled.intakePresentationRule.includes("one targeted intake question"));
     assert.ok(handled.message.includes("do not draft a full proposal"));
   }
 
@@ -225,7 +237,7 @@ try {
     assert.strictEqual(health.status, "blocked");
     const proposal = health.checks.find(check => check.id === "setup_proposal_boundary");
     assert.strictEqual(proposal.status, "fail");
-    assert.ok(proposal.nextAction.includes("targeted intake questions"));
+    assert.ok(proposal.nextAction.includes("next single targeted intake question"));
     assert.strictEqual(health.nextAction.type, "ask_user");
   }
 
@@ -251,7 +263,7 @@ try {
     const intake = health.checks.find(check => check.id === "setup_intake_boundary");
     assert.strictEqual(intake.status, "fail");
     assert.ok(intake.message.includes("create_ds_config_from_intake"));
-    assert.ok(intake.nextAction.includes("Ask targeted setup intake questions"));
+    assert.ok(intake.nextAction.includes("Ask exactly one setup intake question"));
     assert.strictEqual(health.nextAction.type, "ask_user");
   }
 

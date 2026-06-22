@@ -5,6 +5,7 @@ const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/f
 const { computePlannedAliases, loadDsConfigSafe } = require("../utils/accessible-repair-aliases.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 const { classifySemanticColorGrammar } = require("./semantic-color-grammar.js");
+const { semanticContrast } = require("../figlets-core.js").dsConfig;
 
 const inspectDsSetupGapsTool = {
   name: "inspect_ds_setup_gaps",
@@ -37,13 +38,13 @@ const _FOUNDATION_ROLE_SPECS = [
   },
 ];
 
-const _WCAG_THRESHOLD = 4.5;
-const _WCAG_ICON_THRESHOLD = 3;
-const _APCA_THRESHOLD = 75;
+const _WCAG_THRESHOLD = semanticContrast.WCAG_TEXT_THRESHOLD;
+const _WCAG_ICON_THRESHOLD = semanticContrast.WCAG_NON_TEXT_THRESHOLD;
+const _APCA_THRESHOLD = semanticContrast.APCA_TEXT_THRESHOLD;
 // Hairline-failure tolerance: scores within this distance of the threshold are
 // flagged near-miss so a triage pass can prioritize gross failures first.
-const _WCAG_NEARMISS = 0.3;
-const _APCA_NEARMISS = 5;
+const _WCAG_NEARMISS = semanticContrast.WCAG_NEARMISS;
+const _APCA_NEARMISS = semanticContrast.APCA_NEARMISS;
 // Minimum complete pairs before "every pair is missing role X" can be treated
 // as "this DS doesn't use role X" instead of coincidence.
 const _ADVISORY_SUPPRESS_MIN_PAIRS = 3;
@@ -657,14 +658,12 @@ function _resolveTerminalByModeName(variable, modeName, varsById, collections, d
   return null;
 }
 
-// Contrast math mirrors validate-semantic-pairs.js. Inlined here so the QA
-// inspector has no hard dependency on a config — Figma is the source of truth.
-function _linearize(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
-function _luminance(rgb) { return 0.2126 * _linearize(rgb.r) + 0.7152 * _linearize(rgb.g) + 0.0722 * _linearize(rgb.b); }
+// Contrast math comes from figlets-core so setup preview and post-build QA use
+// the same thresholds and scoring. The inspector still resolves values from
+// the synced Figma snapshot; only the pure math is shared.
+function _luminance(rgb) { return semanticContrast.relativeLuminance(rgb); }
 function _wcagRatio(a, b) {
-  const la = _luminance(a), lb = _luminance(b);
-  const hi = Math.max(la, lb), lo = Math.min(la, lb);
-  return (hi + 0.05) / (lo + 0.05);
+  return semanticContrast.wcagContrastRatio(a, b);
 }
 function _hex(rgb) {
   if (!rgb || typeof rgb !== "object") return null;
@@ -675,17 +674,8 @@ function _hex(rgb) {
   };
   return "#" + channel(rgb.r) + channel(rgb.g) + channel(rgb.b);
 }
-function _apcaLum(rgb) { return 0.2126729 * Math.pow(rgb.r, 2.4) + 0.7151522 * Math.pow(rgb.g, 2.4) + 0.0721750 * Math.pow(rgb.b, 2.4); }
 function _apcaLc(txt, bg) {
-  const BC = 0.022, BE = 1.414;
-  const Yt = _apcaLum(txt), Yb = _apcaLum(bg);
-  const Yt2 = Yt < BC ? Yt + Math.pow(BC - Yt, BE) : Yt;
-  const Yb2 = Yb < BC ? Yb + Math.pow(BC - Yb, BE) : Yb;
-  let lc;
-  if (Yb2 >= Yt2) lc = (Math.pow(Yb2, 0.56) - Math.pow(Yt2, 0.57)) * 1.14;
-  else            lc = (Math.pow(Yb2, 0.65) - Math.pow(Yt2, 0.62)) * 1.14;
-  if (Math.abs(lc) < 0.1) return 0;
-  return Math.round(lc > 0 ? lc * 100 - 2.7 : lc * 100 + 2.7);
+  return semanticContrast.apcaLc(txt, bg);
 }
 
 function _primitiveInfo(name) {
@@ -724,10 +714,12 @@ function _planIconReAlias(bgTerm, iconTerm, modeName, colorVars, varsById, colle
 }
 
 function _passesContrastForRole(role, algorithm, bgRgb, fgRgb) {
-  if (!bgRgb || !fgRgb) return false;
-  if (role === "icon") return _wcagRatio(bgRgb, fgRgb) >= _WCAG_ICON_THRESHOLD;
-  if (algorithm === "apca") return Math.abs(_apcaLc(fgRgb, bgRgb)) >= _APCA_THRESHOLD;
-  return _wcagRatio(bgRgb, fgRgb) >= _WCAG_THRESHOLD;
+  return semanticContrast.contrastPasses({
+    algorithm,
+    role: role === "icon" ? "icon" : "text",
+    bgRgb,
+    fgRgb,
+  });
 }
 
 function _textContrastThresholdForPair(pair, algorithm) {

@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const vm = require("vm");
 
-const { readDsConfig } = require("../../packages/figlets-core/src/ds-config");
+const { generatePrimitivesData, readDsConfig } = require("../../packages/figlets-core/src/ds-config");
 const { handlePrepareDsConfig } = require("../../packages/figlets-mcp-server/src/tools/prepare-ds-config.js");
 const { inspectDsSetupGapsFromFigmaData } = require("../../packages/figlets-mcp-server/src/tools/inspect-ds-setup-gaps.js");
 const { inspectDsTokenGapsFromConfigAndFigmaData } = require("../../packages/figlets-mcp-server/src/tools/inspect-ds-token-gaps.js");
@@ -123,7 +123,7 @@ async function buildSetupSnapshot(ds) {
   const context = { figma, module: { exports: {} }, Set };
   vm.createContext(context);
   vm.runInContext(source, context, { filename: "generated-setup-qa-parity.vm.js" });
-  await context.module.exports._applyDsSetup(ds);
+  await context.module.exports._applyDsSetup({ DS: ds, primitivesData: generatePrimitivesData(ds) });
   return { variables, collections };
 }
 
@@ -136,11 +136,17 @@ module.exports = (async () => {
   breakpoints: { modes: ['Mobile', 'Tablet', 'Desktop'], tier: 3 },
   typography: { scalePreset: 'fluid', families: { sans: 'JetBrains Mono', mono: 'JetBrains Mono' } },
   color: {
-    scale: '50-950',
+    scale: '100-900',
     algorithm: 'oklch',
     contrastAlgorithm: 'wcag',
     convention: 'role-based',
-    brand: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }]
+    brand: [
+      { name: 'pink', hex: '#FF5FA2', role: 'primary' },
+      { name: 'pale-pink', hex: '#FFD6E7', role: 'secondary' },
+      { name: 'warm-peach', hex: '#F6A04D', role: 'accent' },
+      { name: 'butter', hex: '#FFD166' },
+      { name: 'ink', hex: '#090A0C' }
+    ]
   },
   naming: { textStyle: 'type/{role}/{size}', fontFamily: 'font/{variant}' },
   collections: {

@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-20 — BNN-58 follow-up; generated setup aliases type size and fine radius values]
+
+**Status:** Manual testing found a newly generated setup still left raw semantic typography size values such as `45` and `57`, plus fine spacing/radius/border values, in Figma variable tables. Line-height raw values were explicitly accepted because px line-height should not be forced through ratio primitives.
+
+**Finding:** Core primitive preview generation already extended typography primitives for non-standard configured sizes such as `type/size/45` and `type/size/57`, but the bridge `apply_ds_setup` path had a duplicated static type-size primitive list and never created those variables. For generated spacing, the primitive scale also lacked exact fine values for hairline/default border and tiny radius (`0.5`, `1`, `2`) plus a full-radius primitive, so setup-created semantic radius/border tokens had to fall back to raw values.
+
+**Shipped behavior:** Generated spacing primitives now include fine values and `space/full`; setup/update/audit classifiers treat `space/full` as primitive inventory. `apply_ds_setup` now prepares the full primitive inventory in core/server code with `generatePrimitivesData`, proofreads that generated typography/spacing/radius/border semantics have exact primitive coverage, and sends `{ DS, primitivesData }` to the bridge. The bridge setup path no longer reconstructs primitive ramps; it only executes prepared `colors`, `scrims`, `floats`, and `strings` rows. Setup-created typography sizes, semantic spacing, radius, and border values now alias to exact primitives when Figlets generated the corresponding primitive, while line-height remains raw by design.
+
+**Verification:** Focused core/bridge/planner/audit tests passed, including `tests/bridge/apply-ds-setup-spacing-aliases.test.js` coverage for `type/size/45`, `type/size/57`, `space/0-0625`, `space/0-125`, `space/0-25`, and `space/full` aliases, with line-height still raw. `tests/server/apply-ds-setup-export.test.js` now asserts the prepared setup payload shape and proofread failure when a semantic value lacks an exact primitive. Full `npm test` passed **104/104** and `git diff --check` passed.
+
+---
+
 ### [2026-06-20 — BNN-58 follow-up; generated setup survives snapshot bootstrap]
 
 **Status:** Manual testing found a design system created "using Figlets" could be marked done, then immediately report setup health issues when the active file config was refreshed from the Figma snapshot. Live inspection on `local_mqm9v59r_kcqw2rn3` showed the snapshot itself contained Figlets-generated tokens, but the fallback bootstrap config inferred shallow pairs such as `color/bg/brand -> color/text/brand` and `color/bg/muted -> color/text/muted`, producing self-inflicted contrast failures. It also treated generated `color/scrim/*` / `color/shadow/*` utilities as naming advisories and reported generated component/stack/touch same-value responsive spacing defaults as unvalidated.
@@ -2932,3 +2944,82 @@ Fixes shipped:
 
 - `tests/server/prepare-ds-config-tool.test.js` now covers the full failing-contrast → approved local config repair → reprepare clean path.
 - Full supported-runtime suite passed: `npm test` → `103/103`.
+
+### [2026-06-20 — BNN-58 setup agent contract and primitive naming checkpoint]
+
+**Objective completed:** Tightened the setup conversation contract and replaced generated spacing primitive names that looked like raw math artifacts.
+
+**What changed:**
+
+- New-design-system setup intake now asks exactly one targeted question per assistant turn. Agents still record multi-topic answers when the designer volunteers them, but continue with the next single missing choice.
+- Generated background/foreground pairing intent is inferred from brand colors, semantic grammar, contrast standard, and light/dark behavior unless the designer explicitly asks for custom pairings.
+- Generated spacing primitives now use mainstream scale labels (`space/025`, `space/050`, `space/100`, `space/150`, etc.) instead of names like `space/0-0625`.
+- Radius and border primitives are separate categories (`radius/*`, `border/width/*`). Setup semantics alias spacing only to `space/*`, radius only to `radius/*`, and border only to `border/width/*`.
+
+**Research basis:**
+
+- Atlassian uses `space.025` through `space.1000` style scale tokens.
+- Carbon uses ordinal spacing scale tokens such as `$spacing-01` through `$spacing-13`.
+- Tailwind uses numeric spacing multipliers over a base spacing variable.
+
+**Validation:**
+
+- Focused regressions passed for ds config generation, Bridge setup spacing/radius/border aliasing, setup export coverage proof, generated setup QA parity, intake config creation, Agent Interface guidance, and workflow documentation.
+
+### [2026-06-20 — BNN-58 generated contrast fallback checkpoint]
+
+**Objective completed:** Fixed the setup preview leak where a generated WCAG contrast issue could surface without repair options.
+
+**What happened:**
+
+- With a `100-900` color scale and the pink palette (`#FF5FA2` primary), generated `color/bg/brand` landed on `pink/500`.
+- Because the scale omitted neutral `50` and `950`, no neutral foreground passed WCAG AA against that background (`neutral/100` was 4.29:1; `neutral/900` was 4.02:1).
+- The old validator only auto-corrected generated pairs when a foreground-only fix existed, so it reported a failing generated pair with no `contrastRepairOptions`.
+
+**What changed:**
+
+- Generated semantic validation still tries foreground-only repair first.
+- If no foreground in the text ramp can pass, generated validation now chooses the best available foreground and makes the smallest same-ramp background step shift needed to pass.
+- Manual/existing semantic pairs remain designer-owned and still surface structured repair options instead of silent changes.
+
+**Validation:**
+
+- Added core and prepare-level regressions for the exact `100-900` pink setup case.
+- Full supported-runtime suite passed: `npm test` → `104/104`.
+
+### [2026-06-20 — BNN-58 setup command/dead-end contract checkpoint]
+
+**Objective completed:** Fixed the agent contract that let setup contrast repair turn into a stubborn, prose-only approval loop.
+
+**What changed:**
+
+- "Go for Figma" / "build it" is treated as build approval only when the latest `prepare_ds_config` result has `readyToBuild === true`.
+- If contrast fails with exact `contrastRepairOptions`, agents must show/apply those options after approval and rerun `prepare_ds_config`.
+- If contrast fails with no exact options, agents must rerun `prepare_ds_config` once for generated self-correction. If it still fails, they must ask only for an executable choice: exact alias, brand hex, or color scale change.
+- Agents must not ask designers to approve prose-only directions like "preserve the background" or "make text lighter" as though those can be applied.
+- `prepare_ds_config` no-option messages now explicitly say not to ask for prose-only repair approval.
+
+**Validation:**
+
+- Added prepare-level regression for a manual no-option contrast state.
+- Added Agent Interface/doc regressions for no prose-only repair direction and "go for Figma" build approval semantics.
+- Full supported-runtime suite passed: `npm test` → `104/104`.
+
+### [2026-06-22 — BNN-58 evaluated contrast repair options checkpoint]
+
+**Objective completed:** Removed the remaining setup-loop smell where agents could suggest untested single-axis contrast changes.
+
+**What changed:**
+
+- `validateSemanticPairs` now returns `pairRepairSuggestions` in addition to legacy text-only `pairSuggestions`.
+- When foreground-only repair passes, the repair option carries `suggestedText`.
+- When foreground-only repair cannot pass, Figlets computes an evaluated same-ramp background+text combination and exposes both `suggestedBackground` and `suggestedText`.
+- `prepare_ds_config.semanticPairs.contrastRepairOptions` and `setupApprovalPreview.semanticColor.contrast.repairOptions` now carry those combined options.
+- `apply_ds_config_contrast_repairs` can validate and apply approved background+text local config repairs, not only text repairs.
+- Agent/root/adapter/plugin guidance now tells agents to present exact evaluated options and not invent examples like "darken background to pink/600" without a checked paired foreground.
+
+**Validation:**
+
+- Extended `tests/server/prepare-ds-config-tool.test.js` to cover the no-foreground-only state, combined repair payload, apply, and reprepare build-ready path.
+- Updated Agent Interface/doc regressions for paired `suggestedBackground` + `suggestedText` options and no untested single-axis examples.
+- Full supported-runtime suite passed: `npm test` → `104/104`.

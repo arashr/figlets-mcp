@@ -36,9 +36,10 @@ const applyDsConfigContrastRepairsTool = {
             mode: { type: 'string', description: 'Semantic mode to update, usually Light or Dark.' },
             background: { type: 'string', description: 'Semantic background token from the approved repair option.' },
             text: { type: 'string', description: 'Semantic text token from the approved repair option.' },
-            suggestedText: { type: 'string', description: 'Approved primitive text alias target from the repair option.' }
+            suggestedBackground: { type: 'string', description: 'Approved primitive background alias target from the repair option, when the evaluated repair changes background.' },
+            suggestedText: { type: 'string', description: 'Approved primitive text alias target from the repair option, when the evaluated repair changes text.' }
           },
-          required: ['mode', 'background', 'text', 'suggestedText'],
+          required: ['mode', 'background', 'text'],
           additionalProperties: true
         }
       }
@@ -121,16 +122,28 @@ function _contrastRepairOptions(pairSuggestions) {
     const background = parts[0];
     const text = parts[1];
     for (const mode of ['Light', 'Dark']) {
-      const suggestedText = suggestion[mode];
-      if (!suggestedText) continue;
+      const rawSuggestion = suggestion[mode];
+      if (!rawSuggestion) continue;
+      const suggestionObject = typeof rawSuggestion === 'string'
+        ? { suggestedText: rawSuggestion }
+        : rawSuggestion;
+      const suggestedText = suggestionObject.suggestedText || suggestionObject.text;
+      const suggestedBackground = suggestionObject.suggestedBackground || suggestionObject.background || null;
+      if (!suggestedText && !suggestedBackground) continue;
       options.push({
         id: `${background}|${text}|${mode}`,
         mode,
         background,
         text,
+        suggestedBackground,
         suggestedText,
-        action: 'Update the semantic pair text alias for this mode to the suggested passing step, then rerun prepare_ds_config.',
-        approvalLabel: `${mode}: ${text} on ${background} -> ${suggestedText}`,
+        wcag: suggestionObject.wcag || null,
+        action: suggestedBackground
+          ? 'Update the semantic pair background and text aliases for this mode to the evaluated passing combination, then rerun prepare_ds_config.'
+          : 'Update the semantic pair text alias for this mode to the suggested passing step, then rerun prepare_ds_config.',
+        approvalLabel: suggestedBackground
+          ? `${mode}: ${background} -> ${suggestedBackground}; ${text} -> ${suggestedText}`
+          : `${mode}: ${text} on ${background} -> ${suggestedText}`,
       });
     }
   }
@@ -292,7 +305,7 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
         repairApplyInput: contrastRepairOptions.length ? { config_path: configPath, repairs: contrastRepairOptions } : null,
         message: contrastRepairOptions.length
           ? 'Contrast failed for one or more semantic pairs. Review these exact alias suggestions before changing Figma.'
-          : (failCount ? 'Contrast failed, but no nearest passing alias suggestion was found. Ask for a designer color decision.' : 'All semantic pairs pass.'),
+          : (failCount ? 'Contrast failed, but no exact alias repair option was found. Do not ask for a prose-only repair approval; ask for a concrete alias, brand hex, or color scale change.' : 'All semantic pairs pass.'),
       },
       samplePairs: semanticPairs.slice(0, 10).map(_semanticPairExample),
       sampleIcons: semanticIcons.slice(0, 8).map(icon => ({
@@ -425,7 +438,7 @@ function handlePrepareDsConfig({ config_path }) {
   const {
     spacingPreview, computed, needsDesignerInput,
     colorRampsSummary, colorRampsTable, contrastAnnotations, derivedColors,
-    semanticSummary, semanticPairsTable, iconTable, failCount, apcaFailCount, pairSuggestions,
+    semanticSummary, semanticPairsTable, iconTable, failCount, apcaFailCount, pairSuggestions, pairRepairSuggestions,
     staleSemantics,
     primitivesData,
     ds,
@@ -440,9 +453,9 @@ function handlePrepareDsConfig({ config_path }) {
     staleSemantics: staleSemantics || [],
     needsDesignerInput: needsDesignerInput || [],
     derivedColors,
-    pairSuggestions,
+    pairSuggestions: pairRepairSuggestions || pairSuggestions,
   });
-  const contrastRepairOptions = _contrastRepairOptions(pairSuggestions);
+  const contrastRepairOptions = _contrastRepairOptions(pairRepairSuggestions || pairSuggestions);
   let designMdPath = null;
   try {
     if (designMdIntake && designMdIntake.writeDesignMdFromDsConfig) {
@@ -472,6 +485,7 @@ function handlePrepareDsConfig({ config_path }) {
       failCount,
       apcaFailCount:  apcaFailCount || 0,
       pairSuggestions: pairSuggestions || {},
+      pairRepairSuggestions: pairRepairSuggestions || {},
       contrastRepairTool: applyDsConfigContrastRepairsTool.name,
       contrastRepairOptions,
       contrastRepairApplyInput: contrastRepairOptions.length
@@ -498,7 +512,9 @@ function handlePrepareDsConfig({ config_path }) {
     message: staleWarning
       ? staleWarning
       : failCount > 0
-      ? `Config computed but ${failCount} semantic pair(s) fail contrast. Review semanticPairs.contrastRepairOptions before building.`
+      ? (contrastRepairOptions.length
+        ? `Config computed but ${failCount} semantic pair(s) fail contrast. Review semanticPairs.contrastRepairOptions before building.`
+        : `Config computed but ${failCount} semantic pair(s) fail contrast and no exact contrastRepairOptions were found. Do not build yet; rerun prepare_ds_config once, then ask for a concrete alias, brand hex, or color scale change if it still fails.`)
       : needsDesignerInput.length > 0
       ? `Config computed but ${needsDesignerInput.join(', ')} need designer input before building.`
       : 'Config ready. Call apply_ds_setup to build all collections in Figma.',
@@ -529,6 +545,7 @@ function _normalizeRepair(raw) {
     background,
     text,
     mode,
+    suggestedBackground: String(item.suggestedBackground || '').trim(),
     suggestedText: String(item.suggestedText || '').trim(),
   };
 }
@@ -587,32 +604,46 @@ function handleApplyDsConfigContrastRepairs(args) {
       hint: 'Run prepare_ds_config first and use the fresh contrastRepairOptions payload.',
     };
   }
-  const currentSuggestions = validated && validated.pairSuggestions ? validated.pairSuggestions : {};
+  const currentSuggestions = validated && validated.pairRepairSuggestions
+    ? validated.pairRepairSuggestions
+    : (validated && validated.pairSuggestions ? validated.pairSuggestions : {});
   const applied = [];
   const blocked = [];
 
   for (const repair of repairs) {
-    if (!repair.background || !repair.text || !repair.mode || !repair.suggestedText) {
+    if (!repair.background || !repair.text || !repair.mode || (!repair.suggestedText && !repair.suggestedBackground)) {
       blocked.push({
         repair,
-        reason: 'Repair must include background, text, mode, and suggestedText from prepare_ds_config.',
+        reason: 'Repair must include background, text, mode, and suggestedText and/or suggestedBackground from prepare_ds_config.',
       });
       continue;
     }
-    if (!/^color\/[^/]+\/.+/.test(repair.suggestedText)) {
+    if (repair.suggestedText && !/^color\/[^/]+\/.+/.test(repair.suggestedText)) {
       blocked.push({
         repair,
         reason: 'suggestedText must be a color variable reference from prepare_ds_config.',
       });
       continue;
     }
-    const key = `${repair.background}|${repair.text}`;
-    const expectedSuggestion = currentSuggestions[key] && currentSuggestions[key][repair.mode];
-    if (expectedSuggestion !== repair.suggestedText) {
+    if (repair.suggestedBackground && !/^color\/[^/]+\/.+/.test(repair.suggestedBackground)) {
       blocked.push({
         repair,
-        reason: expectedSuggestion
-          ? `Current prepared suggestion is ${expectedSuggestion}, not ${repair.suggestedText}.`
+        reason: 'suggestedBackground must be a color variable reference from prepare_ds_config.',
+      });
+      continue;
+    }
+    const key = `${repair.background}|${repair.text}`;
+    const rawExpected = currentSuggestions[key] && currentSuggestions[key][repair.mode];
+    const expected = typeof rawExpected === 'string'
+      ? { suggestedText: rawExpected, suggestedBackground: '' }
+      : (rawExpected || {});
+    const expectedText = expected.suggestedText || expected.text || '';
+    const expectedBackground = expected.suggestedBackground || expected.background || '';
+    if (expectedText !== repair.suggestedText || expectedBackground !== repair.suggestedBackground) {
+      blocked.push({
+        repair,
+        reason: rawExpected
+          ? `Current prepared suggestion is background ${expectedBackground || '(unchanged)'} and text ${expectedText || '(unchanged)'}, not background ${repair.suggestedBackground || '(unchanged)'} and text ${repair.suggestedText || '(unchanged)'}.`
           : 'This repair is not in the current prepare_ds_config contrast suggestions.',
       });
       continue;
@@ -625,27 +656,35 @@ function handleApplyDsConfigContrastRepairs(args) {
       });
       continue;
     }
-    const before = pair[repair.mode].text;
-    if (before === repair.suggestedText) {
+    const before = {
+      background: pair[repair.mode].bg,
+      text: pair[repair.mode].text,
+    };
+    const after = {
+      background: repair.suggestedBackground || before.background,
+      text: repair.suggestedText || before.text,
+    };
+    if (before.background === after.background && before.text === after.text) {
       applied.push({
         id: repair.id,
         background: repair.background,
         text: repair.text,
         mode: repair.mode,
         before,
-        after: repair.suggestedText,
+        after,
         unchanged: true,
       });
       continue;
     }
-    pair[repair.mode].text = repair.suggestedText;
+    pair[repair.mode].bg = after.background;
+    pair[repair.mode].text = after.text;
     applied.push({
       id: repair.id,
       background: repair.background,
       text: repair.text,
       mode: repair.mode,
       before,
-      after: repair.suggestedText,
+      after,
     });
   }
 

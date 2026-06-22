@@ -57,7 +57,7 @@ function isSpacingSemanticTokenName(name) {
 }
 
 function isPrimitiveSpacingTokenName(name) {
-  return /^space\/[\d]+(?:[-_][\d]+)*$/.test(String(name || ""));
+  return /^space\/(?:[\d]+(?:[-_][\d]+)*|full)$/.test(String(name || ""));
 }
 
 function collectionRecordByName(figmaData, collectionName) {

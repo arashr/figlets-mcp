@@ -134,6 +134,18 @@ function generatePrimitivesData(ds) {
     floats.push({ name: `space/${sanitize(step)}`, value });
   }
 
+  if (DS.spacing && DS.spacing.radius) {
+    for (const key of Object.keys(DS.spacing.radius)) {
+      floats.push({ name: `radius/${sanitize(key)}`, value: DS.spacing.radius[key] });
+    }
+  }
+
+  if (DS.spacing && DS.spacing.border) {
+    for (const key of Object.keys(DS.spacing.border)) {
+      floats.push({ name: `border/width/${sanitize(key)}`, value: DS.spacing.border[key] });
+    }
+  }
+
   // ── Strings: font families ───────────────────────────────────────────────────
   const strings = [];
   const _ff = (DS.naming && DS.naming.fontFamily) ? DS.naming.fontFamily : 'font/{variant}';

@@ -85,3 +85,24 @@ PR review protocol: when opening, reviewing, or giving merge guidance for a GitH
 ## Default
 
 If the request is ambiguous but mentions Figlets as a product or a Figma design system, default to Designer Mode.
+
+## Cursor Cloud specific instructions
+
+This is a Node.js 22+ npm-workspaces monorepo with no external service dependencies (no databases, Docker, or cloud backends). The update script runs `npm install` from the repo root.
+
+**Key commands** (see `docs/developer-guide.md` for full reference):
+
+| Action | Command |
+|---|---|
+| Install deps | `npm install` |
+| Run tests | `npm test` (custom runner; 82 test files) |
+| Build | `npm run build` |
+| Lint | `npm run lint` |
+| Doctor check | `figlets-mcp doctor` (after `npm link -w @figlets/mcp-server`) |
+
+**Caveats:**
+
+- The root `npm run dev` script references a non-existent `dev` script in `@figlets/mcp-server`. To start the MCP server manually, use `node packages/figlets-mcp-server/src/index.js` (stdio transport) or `figlets-mcp launch --skip-setup` for the CLI launcher report.
+- The MCP server communicates over stdio (JSON-RPC), not HTTP. To verify it works, pipe an `initialize` request: `echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | node packages/figlets-mcp-server/src/index.js 2>/dev/null`.
+- Live Figma interaction requires Figma Desktop with the bridge plugin; this is not available in Cloud Agent VMs, so designer-facing workflows cannot be tested end-to-end. All 82 unit/integration tests pass without Figma Desktop.
+- `npm link --workspace=@figlets/mcp-server` makes the `figlets-mcp` CLI available globally. This is not in the update script because it modifies global state; run it manually when needed.

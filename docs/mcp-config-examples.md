@@ -7,13 +7,19 @@ How to wire `figlets-mcp` into your AI agent host.
 
 ## Quick Install
 
-From the repo root, link the server globally so every agent can find it by name:
+For normal use, install the released Figlets command from the GitHub release tarball:
+
+```bash
+npm install -g https://github.com/arashr/figlets-mcp/releases/download/v1.0.1/figlets-mcp-server-1.0.1.tgz
+```
+
+For local development from this repo checkout, link the server globally instead:
 
 ```bash
 npm link --workspace=@figlets/mcp-server
 ```
 
-After linking, `figlets-mcp` is available as a global command. All configs below use it this way — no absolute paths needed.
+After either install, `figlets-mcp` is available as a global command. Raw MCP host configs below use it this way — no absolute paths needed.
 
 To preview agent config updates without changing files:
 
@@ -21,7 +27,7 @@ To preview agent config updates without changing files:
 figlets-mcp setup
 ```
 
-For local designer-experience testing, use the launcher:
+For local designer-experience testing from a repo checkout, use the launcher:
 
 ```bash
 figlets-mcp launch
@@ -142,7 +148,9 @@ File: `.vscode/mcp.json` in your project root:
 
 ### Codex plugin (recommended local-marketplace path)
 
-For Codex, the recommended Figlets path is the Codex plugin package. It registers the Figlets MCP server through the plugin's `.mcp.json` and ships the `figlets-designer` skill so designer phrases route into the Figlets-curated capability menu:
+For Codex, the recommended Figlets path is the Codex plugin package. It registers the Figlets MCP server through the plugin's `.mcp.json` and ships the `figlets-designer` skill so designer phrases route into the Figlets-curated capability menu.
+
+This path currently uses a local Codex plugin marketplace, so run it from a `figlets-mcp` repo checkout or set `FIGLETS_CODEX_MARKETPLACE_SOURCE` to that checkout:
 
 ```bash
 figlets-mcp setup --hosts=codex-plugin --yes

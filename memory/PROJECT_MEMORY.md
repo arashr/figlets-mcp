@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-04 — v1.0.1 release polish; bridge title and public setup docs]
+
+**Status:** Follow-up patch release cleanup after v1.0.0.
+
+**Shipped behavior:** The Figma Bridge development import now displays as `Figlets Bridge` instead of `Figlets Bridge Dev`, while still avoiding a hardcoded plugin id. The visible bridge build string now uses the product version (`1.0.1`) instead of a `0.1.0-dev+bnn...` marker, and product-version checks/sync now include the bridge build and public docs tarball URLs so future releases cannot drift. The root README now describes Figlets as the local-first AI interface for Figma design-system workflows, documents the GitHub release tarball install path, distinguishes the Claude Code plugin, Codex local-marketplace path, raw MCP hosts, and the Figma Desktop bridge setup. The MCP config examples now match the release-tarball install path and clarify the Codex plugin checkout requirement.
+
+**Verification:** Focused bridge, product-version, public docs, Claude plugin, and Codex plugin tests passed. `npm run release:prepare -- --check`, `npm run build:server-tarball`, `npm run verify:release`, `npm run smoke:plugins`, `git diff --check`, and full `npm test` passed **108/108**.
+
+---
+
 ### [2026-06-24 — pruning checkpoint; receiver special sync routes]
 
 **Status:** Continued the cautious pruning plan with tests-first coverage for receiver `/request-sync` + `/sync` and `/request-selection` + `/sync-selection` special routes.

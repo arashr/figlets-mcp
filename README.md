@@ -1,10 +1,10 @@
 # Figlets
 
-**Figlets** helps you work on your Figma design system through an AI assistant. You can check health, set things up, fix gaps, build a showcase, document components, or export design docs.
+**Figlets** lets a designer work on a Figma design system through an AI assistant. Ask in plain language; Figlets runs the structured local checks, planning, and approved Figma writes.
 
-You stay in Figma and plain language. Figlets handles the structured work behind the scenes and **asks before changing anything** in your file.
+You stay in Figma and conversation. Figlets inspects first, explains what it found, and **asks before changing anything** in your file.
 
-Figlets works with MCP-capable AI assistants such as Cursor, Claude, Codex, Windsurf, and GitHub Copilot in VS Code. You do not need to read this repository to use it.
+Figlets currently works best in **Claude Code** through the Figlets plugin. It also supports OpenAI Codex, Cursor, Claude Desktop, Windsurf, VS Code/GitHub Copilot, Gemini CLI, and Google Antigravity through MCP setup paths.
 
 ## About Figlets
 
@@ -24,7 +24,7 @@ That is the core idea of this project: keep deterministic Figma logic local, res
 
 **What still uses other services.** Your file still lives in **Figma** as usual. Your **AI app** (Claude, Cursor, Codex, and so on) still processes what you type and the summaries it needs to explain results to you. That is normal for any AI assistant. Figlets reduces how much raw file reasoning the model has to do, but it does not replace your AI provider. Installing Figlets may download the MCP server from GitHub. That is setup software, not uploading your design file to Figlets.
 
-## What you can do
+## What Figlets Can Do
 
 Ask your assistant to help with any of these:
 
@@ -33,24 +33,39 @@ Ask your assistant to help with any of these:
 - **Build a token showcase:** generate a visual reference in Figma
 - **Document a component:** create a spec sheet for handoff
 - **Export DESIGN.md:** export design documentation from your file
+- **Check the selected component:** audit selected layers for raw values and suggest safe bindings
 
 ## Get started
 
-### 1. Connect Figlets to your AI tool
+### Requirements
+
+- **Figma Desktop.** The browser version of Figma cannot run the local bridge plugin.
+- **Node.js 18 or newer.** The repo development suite uses Node 22+, but the released Figlets MCP server supports Node 18+.
+- **An MCP-capable AI app.** Claude Code is the most polished path today.
+
+### 1. Install the Figlets command
+
+Figlets is distributed as a GitHub release tarball. Install the command once:
+
+```bash
+npm install -g https://github.com/arashr/figlets-mcp/releases/download/v1.0.1/figlets-mcp-server-1.0.1.tgz
+```
+
+Then check that it runs:
+
+```bash
+figlets-mcp doctor
+```
+
+You can also run setup from a local checkout with `npm link --workspace=@figlets/mcp-server`; that path is mainly for local development and Codex plugin testing.
+
+### 2. Connect Figlets to your AI tool
 
 Pick the section for the assistant you use. Each path is a one-time setup, then **restart that app**.
 
-You need the `figlets-mcp` command available first. If you do not have it yet, see **[docs/mcp-config-examples.md](./docs/mcp-config-examples.md)** for how to get it.
+#### Claude Code Recommended
 
-To preview what setup would change before anything is written:
-
-```bash
-figlets-mcp setup
-```
-
-#### Claude Code
-
-Uses a Figlets plugin (MCP server plus designer routing). After setup you can type **`/figlets:start`** or describe what you need in plain language.
+The Claude Code plugin is the recommended setup. It installs the Figlets MCP server entry, a `/figlets:start` command, and a designer skill so normal phrases route into Figlets automatically:
 
 ```bash
 figlets-mcp setup --hosts=claude-code-plugin --yes
@@ -60,9 +75,11 @@ Restart Claude Code, then ask something like: *“Help me with my Figma design s
 
 #### OpenAI Codex
 
-Uses a Figlets plugin (MCP server plus designer routing):
+Codex support uses a local plugin marketplace entry today, so run this from a `figlets-mcp` repo checkout rather than from the global tarball install:
 
 ```bash
+npm install
+npm link --workspace=@figlets/mcp-server
 figlets-mcp setup --hosts=codex-plugin --yes
 ```
 
@@ -70,17 +87,29 @@ Restart Codex, then ask something like: *“Help me with my Figma design system 
 
 #### Cursor, Claude Desktop, Windsurf, VS Code (GitHub Copilot), Gemini CLI
 
-These assistants share the same Figlets MCP connection. One setup command updates the config for each app it finds on your machine:
+These assistants use a raw MCP server entry. One setup command previews or updates the config for each app it finds on your machine:
 
 ```bash
+figlets-mcp setup
 figlets-mcp setup --yes
+```
+
+If you use only one host, target it directly:
+
+```bash
+figlets-mcp setup --hosts=cursor --yes
+figlets-mcp setup --hosts=claude-desktop --yes
+figlets-mcp setup --hosts=windsurf --yes
+figlets-mcp setup --hosts=vscode --yes
+figlets-mcp setup --hosts=gemini --yes
+figlets-mcp setup --hosts=antigravity --yes
 ```
 
 Restart whichever app you use, then start a Figlets conversation in plain language.
 
-If you use only one of these and prefer setup to touch just that app, add `--hosts=` with its name. Examples: `--hosts=cursor` or `--hosts=claude-desktop`. More detail: **[docs/mcp-config-examples.md](./docs/mcp-config-examples.md)**.
+More detail: **[docs/mcp-config-examples.md](./docs/mcp-config-examples.md)**.
 
-### 2. Open the Figlets Bridge in Figma Desktop
+### 3. Open the Figlets Bridge in Figma Desktop
 
 Figlets talks to Figma through a small companion plugin called **Figlets Bridge**. Your AI assistant cannot read or change your file until this plugin is open in **Figma Desktop** (the desktop app).
 
@@ -134,7 +163,7 @@ When it is ready, the plugin shows **Listening for Agent**. It may say **Waiting
 
 Your file stays in Figma. The bridge only runs locally on your machine to connect Figma and your assistant.
 
-### 3. Start a conversation
+### 4. Start a conversation
 
 Tell your assistant what you want. For example:
 

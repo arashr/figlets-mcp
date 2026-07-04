@@ -11,6 +11,11 @@ const SERVER_PKG_PATH = path.join(REPO_ROOT, "packages", "figlets-mcp-server", "
 const PRODUCT_VERSION_SOURCE = path.relative(REPO_ROOT, SERVER_PKG_PATH);
 
 const LOCKFILE_PATH = "package-lock.json";
+const BRIDGE_CODE_PATH = "packages/figma-bridge-plugin/code.js";
+const RELEASE_DOC_PATHS = [
+  "README.md",
+  "docs/mcp-config-examples.md",
+];
 
 const WORKSPACE_PACKAGE_PATHS = [
   "package.json",
@@ -22,6 +27,8 @@ const WORKSPACE_PACKAGE_PATHS = [
 
 const TARBALL_URL_RE =
   /^https:\/\/github\.com\/arashr\/figlets-mcp\/releases\/download\/v(\d+\.\d+\.\d+)\/figlets-mcp-server-(\d+\.\d+\.\d+)\.tgz$/;
+const TARBALL_URL_GLOBAL_RE =
+  /https:\/\/github\.com\/arashr\/figlets-mcp\/releases\/download\/v\d+\.\d+\.\d+\/figlets-mcp-server-\d+\.\d+\.\d+\.tgz/g;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf-8"));
@@ -161,6 +168,28 @@ function collectProductVersionDrift(options = {}) {
     mismatches.push(`Codex plugin MCP URL is ${codexUrl}, expected ${expectedUrl}`);
   }
 
+  const bridgeCode = fs.readFileSync(path.join(repoRoot, BRIDGE_CODE_PATH), "utf-8");
+  const bridgeBuildMatch = bridgeCode.match(/var _bridgeBuild = '([^']+)';/);
+  if (!bridgeBuildMatch) {
+    mismatches.push(`${BRIDGE_CODE_PATH} is missing the _bridgeBuild marker`);
+  } else if (bridgeBuildMatch[1] !== version) {
+    mismatches.push(`${BRIDGE_CODE_PATH} bridge build is ${JSON.stringify(bridgeBuildMatch[1])}, expected ${JSON.stringify(version)}`);
+  }
+
+  for (const relPath of RELEASE_DOC_PATHS) {
+    const text = fs.readFileSync(path.join(repoRoot, relPath), "utf-8");
+    const urls = text.match(TARBALL_URL_GLOBAL_RE) || [];
+    if (urls.length === 0) {
+      mismatches.push(`${relPath} must include the current release tarball install URL`);
+      continue;
+    }
+    for (const url of urls) {
+      if (url !== expectedUrl) {
+        mismatches.push(`${relPath} release tarball URL is ${url}, expected ${expectedUrl}`);
+      }
+    }
+  }
+
   return { version, expectedUrl, mismatches };
 }
 
@@ -230,6 +259,27 @@ function syncProductVersion(newVersion, options = {}) {
     changed.push(path.relative(repoRoot, codexMcpPath));
   }
 
+  const bridgeCodePath = path.join(repoRoot, BRIDGE_CODE_PATH);
+  const bridgeCode = fs.readFileSync(bridgeCodePath, "utf-8");
+  const bridgeBuildMatch = bridgeCode.match(/var _bridgeBuild = '([^']+)';/);
+  if (!bridgeBuildMatch) {
+    throw new Error(`${BRIDGE_CODE_PATH} is missing the _bridgeBuild marker`);
+  }
+  if (bridgeBuildMatch[1] !== newVersion) {
+    fs.writeFileSync(bridgeCodePath, bridgeCode.replace(/var _bridgeBuild = '[^']+';/, `var _bridgeBuild = '${newVersion}';`));
+    changed.push(BRIDGE_CODE_PATH);
+  }
+
+  for (const relPath of RELEASE_DOC_PATHS) {
+    const absPath = path.join(repoRoot, relPath);
+    const text = fs.readFileSync(absPath, "utf-8");
+    const next = text.replace(TARBALL_URL_GLOBAL_RE, expectedTarballUrl(newVersion));
+    if (next !== text) {
+      fs.writeFileSync(absPath, next);
+      changed.push(relPath);
+    }
+  }
+
   if (!options.skipLockfile && !options.repoRoot) {
     const lockDrift = collectLockfileDrift(REPO_ROOT, newVersion);
     if (changed.length > 0 || lockDrift.length > 0) {
@@ -254,6 +304,8 @@ function syncProductVersion(newVersion, options = {}) {
 module.exports = {
   REPO_ROOT,
   PRODUCT_VERSION_SOURCE,
+  BRIDGE_CODE_PATH,
+  RELEASE_DOC_PATHS,
   WORKSPACE_PACKAGE_PATHS,
   TARBALL_URL_RE,
   readProductVersion,

@@ -1,6 +1,6 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
-var _bridgeBuild = '0.1.0-dev+bnn58.20260620.1';
+var _bridgeBuild = '1.0.1';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 

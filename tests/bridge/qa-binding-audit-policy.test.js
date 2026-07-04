@@ -1,6 +1,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const { readProductVersion } = require("../../scripts/lib/product-version.js");
 
 const repoRoot = path.resolve(__dirname, "../..");
 const codePath = path.join(repoRoot, "packages/figma-bridge-plugin/code.js");
@@ -187,7 +188,7 @@ assert.ok(
 
 assert.ok(
   code.includes("figma.showUI(__html__, { width: 296, height: 348, themeColors: true });") &&
-    /var _bridgeBuild = '0\.1\.0-dev\+bnn\d+\.\d{8}\.\d+';/.test(code) &&
+    code.includes(`var _bridgeBuild = '${readProductVersion()}';`) &&
     code.includes("if (msg.type === 'ui-resize')") &&
     code.includes("figma.ui.resize(msg.expanded ? 576 : 296, 348);") &&
     ui.includes("id=\"log-toggle\"") &&
@@ -199,9 +200,9 @@ assert.ok(
 );
 
 assert.ok(
-  manifest.name === "Figlets Bridge Dev" &&
+  manifest.name === "Figlets Bridge" &&
     !Object.prototype.hasOwnProperty.call(manifest, "id"),
-  "Development bridge manifest must be visibly distinct and avoid a hardcoded plugin id so stale Figma dev imports are easier to spot"
+  "Bridge manifest must use the user-facing product name and avoid a hardcoded plugin id so stale Figma dev imports are easier to refresh"
 );
 
 assert.ok(

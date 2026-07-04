@@ -6,6 +6,8 @@ const path = require("path");
 
 const {
   PRODUCT_VERSION_SOURCE,
+  BRIDGE_CODE_PATH,
+  RELEASE_DOC_PATHS,
   WORKSPACE_PACKAGE_PATHS,
   assertProductVersionAlignment,
   bumpVersion,
@@ -53,8 +55,16 @@ function copyProductVersionFixtures(destRoot) {
     "plugins/claude-code/figlets/.claude-plugin/plugin.json",
     "plugins/codex/figlets/.codex-plugin/plugin.json",
     "plugins/codex/figlets/.mcp.json",
+    BRIDGE_CODE_PATH,
   ];
   for (const relPath of pluginPaths) {
+    const src = path.join(REPO_ROOT, relPath);
+    const dest = path.join(destRoot, relPath);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+  }
+
+  for (const relPath of RELEASE_DOC_PATHS) {
     const src = path.join(REPO_ROOT, relPath);
     const dest = path.join(destRoot, relPath);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -91,6 +101,14 @@ try {
 
   const codexMcp = JSON.parse(fs.readFileSync(path.join(tempRoot, pluginPaths[2]), "utf-8"));
   assert.strictEqual(codexMcp.mcpServers.figlets.args[1], expectedTarballUrl(nextVersion));
+
+  const bridgeCode = fs.readFileSync(path.join(tempRoot, BRIDGE_CODE_PATH), "utf-8");
+  assert.ok(bridgeCode.includes(`var _bridgeBuild = '${nextVersion}';`), "bridge build should sync to the product version");
+
+  for (const relPath of RELEASE_DOC_PATHS) {
+    const text = fs.readFileSync(path.join(tempRoot, relPath), "utf-8");
+    assert.ok(text.includes(expectedTarballUrl(nextVersion)), `${relPath} should sync release install URL`);
+  }
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }
@@ -121,6 +139,14 @@ try {
   const claudePlugin = JSON.parse(fs.readFileSync(path.join(repairRoot, pluginPaths[0]), "utf-8"));
   assert.strictEqual(claudePlugin.version, targetVersion);
   assert.strictEqual(claudePlugin.mcpServers.figlets.args[1], expectedTarballUrl(targetVersion));
+
+  const bridgeCode = fs.readFileSync(path.join(repairRoot, BRIDGE_CODE_PATH), "utf-8");
+  assert.ok(bridgeCode.includes(`var _bridgeBuild = '${targetVersion}';`), "exact-version sync should repair bridge build drift");
+
+  for (const relPath of RELEASE_DOC_PATHS) {
+    const text = fs.readFileSync(path.join(repairRoot, relPath), "utf-8");
+    assert.ok(text.includes(expectedTarballUrl(targetVersion)), `${relPath} should repair release install URL drift`);
+  }
 } finally {
   fs.rmSync(repairRoot, { recursive: true, force: true });
 }

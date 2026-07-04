@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-04 — README bridge source ZIP clarification]
+
+**Status:** Follow-up docs fix after v1.0.1 release testing.
+
+**Finding:** The README told users to open `packages/figma-bridge-plugin/` inside the unzipped folder, but did not distinguish the repository/source ZIP from the `figlets-mcp-server-*.tgz` release asset. The server tarball intentionally contains only the MCP server package, so users who unzipped that asset could not find the Figma Bridge plugin path.
+
+**Shipped behavior:** The README now explicitly says to download the repository source ZIP, not the server `.tgz`, and names the actual unzipped folder paths for the stable v1.0.1 source ZIP and latest `main` source ZIP. Product-version checks/sync now also cover source ZIP URLs and versioned bridge source-folder paths in release docs.
+
+**Verification:** `node tests/scripts/product-version.test.js`, `node tests/docs/public-workflow.test.js`, `npm run release:prepare -- --check`, and `git diff --check` passed.
+
+---
+
 ### [2026-07-04 — v1.0.1 release polish; bridge title and public setup docs]
 
 **Status:** Follow-up patch release cleanup after v1.0.0.

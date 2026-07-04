@@ -16,6 +16,7 @@ const {
   expectedTarballUrl,
   parseSemver,
   readProductVersion,
+  expectedSourceZipUrl,
   syncProductVersion,
 } = require("../../scripts/lib/product-version.js");
 
@@ -108,6 +109,10 @@ try {
   for (const relPath of RELEASE_DOC_PATHS) {
     const text = fs.readFileSync(path.join(tempRoot, relPath), "utf-8");
     assert.ok(text.includes(expectedTarballUrl(nextVersion)), `${relPath} should sync release install URL`);
+    if (text.includes("archive/refs/tags")) {
+      assert.ok(text.includes(expectedSourceZipUrl(nextVersion)), `${relPath} should sync source ZIP URL`);
+      assert.ok(text.includes(`figlets-mcp-${nextVersion}/packages/figma-bridge-plugin/`), `${relPath} should sync bridge source folder`);
+    }
   }
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -146,6 +151,10 @@ try {
   for (const relPath of RELEASE_DOC_PATHS) {
     const text = fs.readFileSync(path.join(repairRoot, relPath), "utf-8");
     assert.ok(text.includes(expectedTarballUrl(targetVersion)), `${relPath} should repair release install URL drift`);
+    if (text.includes("archive/refs/tags")) {
+      assert.ok(text.includes(expectedSourceZipUrl(targetVersion)), `${relPath} should repair source ZIP URL drift`);
+      assert.ok(text.includes(`figlets-mcp-${targetVersion}/packages/figma-bridge-plugin/`), `${relPath} should repair bridge source folder drift`);
+    }
   }
 } finally {
   fs.rmSync(repairRoot, { recursive: true, force: true });

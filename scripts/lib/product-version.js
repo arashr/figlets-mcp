@@ -90,6 +90,10 @@ function expectedTarballUrl(version) {
   return `https://github.com/arashr/figlets-mcp/releases/download/v${version}/figlets-mcp-server-${version}.tgz`;
 }
 
+function expectedSourceZipUrl(version) {
+  return `https://github.com/arashr/figlets-mcp/archive/refs/tags/v${version}.zip`;
+}
+
 function parseSemver(version) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) {
@@ -188,6 +192,22 @@ function collectProductVersionDrift(options = {}) {
         mismatches.push(`${relPath} release tarball URL is ${url}, expected ${expectedUrl}`);
       }
     }
+
+    const expectedSourceUrl = expectedSourceZipUrl(version);
+    const sourceUrls = text.match(/https:\/\/github\.com\/arashr\/figlets-mcp\/archive\/refs\/tags\/v\d+\.\d+\.\d+\.zip/g) || [];
+    for (const url of sourceUrls) {
+      if (url !== expectedSourceUrl) {
+        mismatches.push(`${relPath} source ZIP URL is ${url}, expected ${expectedSourceUrl}`);
+      }
+    }
+
+    const expectedBridgeSourceFolder = `figlets-mcp-${version}/packages/figma-bridge-plugin/`;
+    const bridgeSourceFolders = text.match(/figlets-mcp-\d+\.\d+\.\d+\/packages\/figma-bridge-plugin\//g) || [];
+    for (const folder of bridgeSourceFolders) {
+      if (folder !== expectedBridgeSourceFolder) {
+        mismatches.push(`${relPath} bridge source folder is ${folder}, expected ${expectedBridgeSourceFolder}`);
+      }
+    }
   }
 
   return { version, expectedUrl, mismatches };
@@ -273,7 +293,10 @@ function syncProductVersion(newVersion, options = {}) {
   for (const relPath of RELEASE_DOC_PATHS) {
     const absPath = path.join(repoRoot, relPath);
     const text = fs.readFileSync(absPath, "utf-8");
-    const next = text.replace(TARBALL_URL_GLOBAL_RE, expectedTarballUrl(newVersion));
+    const next = text
+      .replace(TARBALL_URL_GLOBAL_RE, expectedTarballUrl(newVersion))
+      .replace(/https:\/\/github\.com\/arashr\/figlets-mcp\/archive\/refs\/tags\/v\d+\.\d+\.\d+\.zip/g, expectedSourceZipUrl(newVersion))
+      .replace(/figlets-mcp-\d+\.\d+\.\d+\/packages\/figma-bridge-plugin\//g, `figlets-mcp-${newVersion}/packages/figma-bridge-plugin/`);
     if (next !== text) {
       fs.writeFileSync(absPath, next);
       changed.push(relPath);
@@ -311,6 +334,7 @@ module.exports = {
   readProductVersion,
   readServerVersion: readProductVersion,
   expectedTarballUrl,
+  expectedSourceZipUrl,
   parseSemver,
   bumpVersion,
   assertTarballUrl,

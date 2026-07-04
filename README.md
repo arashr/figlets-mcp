@@ -117,8 +117,15 @@ Figlets talks to Figma through a small companion plugin called **Figlets Bridge*
 
 You need the Figlets Bridge folder once. It is **not** installed by step 1 alone.
 
-1. Download the Figlets project from GitHub: [github.com/arashr/figlets-mcp](https://github.com/arashr/figlets-mcp) → **Code** → **Download ZIP**, then unzip it.
-2. Inside the unzipped folder, open **`packages/figma-bridge-plugin/`**.
+Download the repository source ZIP, not the `figlets-mcp-server-*.tgz` release asset. The `.tgz` file is only the MCP server used by your AI app; it does not include the Figma plugin files.
+
+1. Download the Figlets source ZIP:
+   - Stable v1.0.1 source: [figlets-mcp v1.0.1 source ZIP](https://github.com/arashr/figlets-mcp/archive/refs/tags/v1.0.1.zip)
+   - Or latest source: [github.com/arashr/figlets-mcp](https://github.com/arashr/figlets-mcp) → **Code** → **Download ZIP**
+2. Unzip it.
+3. Inside the unzipped folder, open:
+   - **`figlets-mcp-1.0.1/packages/figma-bridge-plugin/`** if you downloaded the stable v1.0.1 source ZIP
+   - **`figlets-mcp-main/packages/figma-bridge-plugin/`** if you downloaded latest source from **Code** → **Download ZIP**
 
 That folder contains **`manifest.json`**. Figma will ask for this file during setup.
 

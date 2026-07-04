@@ -1,6 +1,6 @@
 {
   "name": "figlets",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Figlets MCP toolkit for designer-driven Figma design-system workflows. Registers the Figlets MCP server and adds a curated designer entrypoint for Codex.",
   "author": {
     "name": "Figlets"

@@ -108,6 +108,33 @@ module.exports = (async () => {
     "wrong-type alias operations should be blocked"
   );
 
+  const forgivingCreatePlan = planDsFigmaOperationsFromFigmaData(figmaData, {
+    operations: [
+      {
+        kind: "create_variable",
+        name: "color/fill/sold-out",
+        collection: "2. Color",
+        type: "COLOR",
+        modeValues: { Light: "#E52121", Dark: { value: "#E52121" } },
+      },
+      {
+        kind: "create_variable",
+        name: "color/fill/sold-out-alt",
+        collection: "2. Color",
+        type: "COLOR",
+        mode_values: [
+          { mode: "Light", value: "#E52121" },
+          { mode: "Dark", value: "#E52121" },
+        ],
+      },
+    ],
+  });
+  assert.strictEqual(forgivingCreatePlan.repairPlan.counts.ready, 2);
+  assert.ok(
+    forgivingCreatePlan.repairPlan.applyInput.operations.every(operation => operation.kind === "create_variable"),
+    "create_variable planner should accept values, modeValues, and mode_values payload shapes"
+  );
+
   const applyInput = {
     operations: plan.repairPlan.applyInput.operations.filter(operation =>
       ["create_variable", "update_variable", "rename_variable", "delete_variable", "create_mode"].includes(operation.kind)

@@ -1,4 +1,4 @@
-const { requestBridgePost } = require("../bridges/bridge-request.js");
+const { bridgeStatusError, requestBridgePost } = require("../bridges/bridge-request.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { inspectDsSetupGapsFromFigmaData } = require("./inspect-ds-setup-gaps.js");
 
@@ -608,7 +608,6 @@ function handleApplySemanticNamingConsolidation(args = {}) {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
   }).then((response) => {
-    if (response.connectionError) return { error: response.connectionError };
     const parsed = response.data || {};
     const statusCode = response.statusCode;
     if (statusCode === 200) {
@@ -623,18 +622,12 @@ function handleApplySemanticNamingConsolidation(args = {}) {
         error: result.error,
       };
     }
-    if (statusCode === 409) {
-      return {
-        error: parsed.error || "The connected plugin does not advertise semantic naming consolidation. Reload the Figlets Bridge plugin.",
-        activeSessionId: parsed.activeSessionId || null,
-        pluginCapabilities: parsed.pluginCapabilities || [],
-      };
-    }
-    if (statusCode === 503) {
-      return { error: "Figma plugin is not listening for semantic naming consolidation. Open the Figlets Bridge plugin in Figma Desktop and try again." };
-    }
-    if (statusCode === 504) return { error: "Semantic naming consolidation timed out." };
-    return { error: `Unexpected status ${statusCode}` };
+    return bridgeStatusError(response, {
+      action: "semantic naming consolidation",
+      includeActiveSession: false,
+      timeoutError: "Semantic naming consolidation timed out.",
+      conflictError: "The connected plugin does not advertise semantic naming consolidation. Reload the Figlets Bridge plugin.",
+    });
   });
 }
 

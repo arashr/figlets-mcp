@@ -1,6 +1,6 @@
 {
   "name": "@figlets/mcp-server",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Agent-agnostic MCP server for Figma design system workflows.",
   "keywords": [
     "figma",

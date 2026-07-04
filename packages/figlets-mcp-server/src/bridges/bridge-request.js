@@ -107,7 +107,7 @@ function requestBridgeViaHttp(receiverUrl, method, routePath, body, options) {
   });
 }
 
-function requestBridgePost(routePath, body, options) {
+function _requestBridgePostOnce(routePath, body, options) {
   if (options && typeof options.transport === "function") {
     return Promise.resolve(options.transport({
       method: "POST",
@@ -135,9 +135,97 @@ function requestBridgePost(routePath, body, options) {
   return requestBridgeViaHttp(receiverUrl, "POST", routePath, body, options);
 }
 
+function _isRetryablePluginListeningGap(response) {
+  if (!response || response.statusCode !== 503) return false;
+  const parsed = response.data || {};
+  return Boolean(parsed.pluginRecentlySeen);
+}
+
+function bridgeActiveSessionText(parsed) {
+  return parsed && parsed.activeSessionId ? ` Active plugin session: ${parsed.activeSessionId}.` : "";
+}
+
+function bridgePluginRetryHint(parsed, fallback) {
+  if (parsed && parsed.pluginRecentlySeen) {
+    return "Figlets retried automatically because the plugin was seen recently, but it did not return to listening before the retry window ended.";
+  }
+  return fallback || "Open the Figlets Bridge plugin in Figma Desktop and try again.";
+}
+
+function formatPluginNotListening(action, parsed, options) {
+  const actionText = action ? ` for ${action}` : "";
+  const fallback = options && options.fallbackHint;
+  return `Figma plugin is not connected or not listening${actionText}. ${bridgePluginRetryHint(parsed, fallback)}${bridgeActiveSessionText(parsed)}`;
+}
+
+function formatReceiverConnectionError(connectionError) {
+  if (String(connectionError || "").includes("Bridge receiver")) {
+    return String(connectionError);
+  }
+  return `Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP server. ${connectionError}`;
+}
+
+function bridgeStatusError(response, options) {
+  const opts = options || {};
+  if (response.connectionError) {
+    return { error: opts.formatConnectionError ? formatReceiverConnectionError(response.connectionError) : response.connectionError };
+  }
+
+  const statusCode = response.statusCode;
+  const parsed = response.data || {};
+  if (statusCode === 200) return null;
+  if (statusCode === 503) {
+    const payload = {
+      error: formatPluginNotListening(opts.action, parsed, { fallbackHint: opts.fallbackHint }),
+    };
+    if (opts.includeActiveSession !== false) payload.activeSessionId = parsed.activeSessionId || null;
+    return payload;
+  }
+  if (statusCode === 504) {
+    return { error: opts.timeoutError || parsed.error || "Bridge request timed out." };
+  }
+  if (statusCode === 409) {
+    const payload = {
+      error: parsed.error || opts.conflictError || "The connected plugin does not advertise the required command. Reload the Figlets Bridge plugin.",
+      activeSessionId: parsed.activeSessionId || null,
+      pluginCapabilities: parsed.pluginCapabilities || [],
+    };
+    return payload;
+  }
+  return { error: opts.unexpectedStatusError || `Unexpected status ${statusCode}` };
+}
+
+function requestBridgePost(routePath, body, options) {
+  const maxAttempts = options && typeof options.bridgeRetryAttempts === "number" && options.bridgeRetryAttempts > 0
+    ? Math.floor(options.bridgeRetryAttempts)
+    : 8;
+  const retryDelayMs = options && typeof options.bridgeRetryDelayMs === "number" && options.bridgeRetryDelayMs >= 0
+    ? Math.floor(options.bridgeRetryDelayMs)
+    : 750;
+  const disablePluginRetry = options && options.disablePluginRetry;
+
+  function attempt(attemptNumber) {
+    return _requestBridgePostOnce(routePath, body, options).then((response) => {
+      if (!disablePluginRetry && _isRetryablePluginListeningGap(response) && attemptNumber < maxAttempts) {
+        return new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+          .then(() => attempt(attemptNumber + 1));
+      }
+      return response;
+    });
+  }
+
+  return attempt(1);
+}
+
 module.exports = {
   requestBridgePost,
   requestBridgeViaHook,
   requestBridgeViaHttp,
   _hookRouteKey,
+  _isRetryablePluginListeningGap,
+  bridgeActiveSessionText,
+  bridgePluginRetryHint,
+  bridgeStatusError,
+  formatPluginNotListening,
+  formatReceiverConnectionError,
 };

@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { requestBridgePost } = require("../bridges/bridge-request.js");
+const { bridgeStatusError, requestBridgePost } = require("../bridges/bridge-request.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getConfigPathGuardError } = require("../utils/paths.js");
 const {
@@ -452,9 +452,6 @@ function _handleApplyDsTokens(args, configPath, ds) {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
   }).then((response) => {
-    if (response.connectionError) {
-      return { error: response.connectionError };
-    }
     const statusCode = response.statusCode;
     const parsed = response.data || {};
     if (statusCode === 200) {
@@ -477,26 +474,11 @@ function _handleApplyDsTokens(args, configPath, ds) {
         applySupported: true,
       };
     }
-    if (statusCode === 503) {
-      const retryHint = parsed.pluginRecentlySeen
-        ? "The plugin was connected recently and may be finishing another action; wait a moment, then try again."
-        : "Open the Figlets Bridge plugin in Figma Desktop and try again.";
-      return {
-        error: `Figma plugin is not listening for token updates. ${retryHint}`,
-        activeSessionId: parsed.activeSessionId || null,
-      };
-    }
-    if (statusCode === 504) {
-      return { error: "Token update timed out — try again with the plugin open." };
-    }
-    if (statusCode === 409) {
-      return {
-        error: parsed.error || "The Figlets Bridge plugin is connected but does not advertise the token-update command. Reload the plugin from Figma Desktop so it loads the latest local code.",
-        activeSessionId: parsed.activeSessionId || null,
-        pluginCapabilities: parsed.pluginCapabilities || [],
-      };
-    }
-    return { error: `Unexpected status ${statusCode}` };
+    return bridgeStatusError(response, {
+      action: "token updates",
+      timeoutError: "Token update timed out — try again with the plugin open.",
+      conflictError: "The Figlets Bridge plugin is connected but does not advertise the token-update command. Reload the plugin from Figma Desktop so it loads the latest local code.",
+    });
   });
 }
 

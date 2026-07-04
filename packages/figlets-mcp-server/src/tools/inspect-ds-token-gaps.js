@@ -2,6 +2,10 @@
 
 const fs = require("fs");
 const path = require("path");
+const {
+  designSystemInventory,
+  emptyDesignSystemPrompt,
+} = require("../figlets-core.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/paths.js");
 const {
@@ -208,6 +212,23 @@ function _requestedCategories(input) {
       });
   }
   return DEFAULT_CATEGORIES.slice();
+}
+
+function _emptyDesignSystemState(figmaData) {
+  const inventory = designSystemInventory(figmaData);
+  return {
+    isEmpty: inventory.isEmpty,
+    state: inventory.state,
+    hasFoundationShell: inventory.hasFoundationShell,
+    counts: inventory.counts,
+    recommendedWorkflow: "new-ds-setup",
+    recommendedDesignerPrompt: emptyDesignSystemPrompt(inventory),
+    agentInstruction: inventory.isEmpty
+      ? (inventory.hasFoundationShell
+        ? "Treat this as an empty foundation-shell health-check state before ordinary token-gap repair. Tell the designer the file has foundation collections but no design-system variables or local styles yet, then ask whether they want to continue setting up the foundation. Do not apply token repairs until they explicitly approve that boundary."
+        : "Treat this as an empty-file health-check state before ordinary token-gap repair. Tell the designer the file has no design-system collections, variables, text styles, or effect styles, then ask whether they want to set up a new foundation. Do not apply foundation repairs until they explicitly approve that boundary.")
+      : null,
+  };
 }
 
 function _semanticSpacingConfigKey(token) {
@@ -793,6 +814,7 @@ function _expectedForCategory(ds, category) {
 
 function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const categories = _requestedCategories(options);
+  const emptyDesignSystem = _emptyDesignSystemState(figmaData);
   const variableNames = _variableNameSet(figmaData);
   const variableMap = _variableByName(figmaData);
   const textStyleNames = _styleNameSet(figmaData, "textStyles");
@@ -1085,6 +1107,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   }
   const repairPlan = _buildRepairPlan({
     configPath: options.configPath || null,
+    emptyDesignSystem,
     categoriesWithGaps,
     foundationBlockedApplyCategories: Array.from(foundationBlockedApplyCategories),
     foundationRepairs,
@@ -1117,6 +1140,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     ),
   });
   const summary = {
+    emptyDesignSystem: emptyDesignSystem.isEmpty,
+    designSystemArtifactCount: emptyDesignSystem.counts.designSystemArtifacts,
     missingVariableCount: missingVariables.length,
     staleVariableCount: spacingAliasRepairGaps.length,
     configDriftCount: spacingAliasConfigDriftGaps.length,
@@ -1154,6 +1179,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       unsupported: unsupportedCategories,
       planned: categoriesWithGaps,
     },
+    emptyDesignSystem,
   };
 }
 
@@ -1283,9 +1309,14 @@ function _buildRepairPlan(context) {
         collections: foundationCollections.length,
       },
       designerSummary: foundationCollections.length
-        ? "Figlets can create " + foundationCollections.length + " missing foundation collection shell" + (foundationCollections.length === 1 ? "" : "s") + " before the token update. This creates configured collections and modes only; it does not create variables or styles until the next approved update_ds_tokens step."
+        ? ((context.emptyDesignSystem && context.emptyDesignSystem.isEmpty)
+          ? (context.emptyDesignSystem.hasFoundationShell
+            ? "This file has foundation collections but no design-system variables or local styles yet. Continue setup before treating token gaps as ordinary repairs."
+            : "This file looks empty as a design-system file. Figlets can create the configured foundation collection shells and modes as a first approved setup step. This does not create variables or styles until a later approved step.")
+          : "Figlets can create " + foundationCollections.length + " missing foundation collection shell" + (foundationCollections.length === 1 ? "" : "s") + " before the token update. This creates configured collections and modes only; it does not create variables or styles until the next approved update_ds_tokens step.")
         : "No missing foundation collection repair is needed.",
     },
+    emptyDesignSystem: context.emptyDesignSystem || null,
     semanticAliasRepairModel: context.semanticAliasRepairModel || SEMANTIC_ALIAS_REPAIR_MODEL,
     spacingAliasPlanSummary: context.spacingAliasPlanSummary || null,
     counts: {
@@ -1302,7 +1333,12 @@ function _buildRepairPlan(context) {
     missingCapabilityNotes: context.missingCapabilityNotes || [],
     designerPresentation: _buildDesignerPresentation(context, total),
     agentInstruction: total
-      ? "STOP before any Figma write. This inspect pass is read-only. For designer-facing review, present repairPlan.reviewOptions as separate choices and run only the selected preview. Do not run repairPlan.previewInput and primitiveRepairPlan.previewInput together as one combined token preview. Summarize repairPlan.designerPresentation in plain language, then wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
+      ? ((context.emptyDesignSystem && context.emptyDesignSystem.isEmpty)
+        ? (context.emptyDesignSystem.hasFoundationShell
+          ? "EMPTY FOUNDATION SHELL FIRST: Tell the designer this file has foundation collections but no design-system variables or local styles yet, and ask whether they want to continue setup before presenting ordinary token-gap repair choices. "
+          : "EMPTY FILE FIRST: Tell the designer this file has no design-system collections, variables, text styles, or effect styles, and ask whether they want to set up a new design-system foundation before presenting ordinary token-gap repair choices. ")
+        : "")
+        + "STOP before any Figma write. This inspect pass is read-only. For designer-facing review, present repairPlan.reviewOptions as separate choices and run only the selected preview. Do not run repairPlan.previewInput and primitiveRepairPlan.previewInput together as one combined token preview. Summarize repairPlan.designerPresentation in plain language, then wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
         + (advisoryTotal ? " Report responsive spacing mode advisories as responsive setup validation work when modes were just created, or designer validation items when modes already existed. They are not token gaps and not apply-ready repairs." : "")
       : advisoryTotal
         ? "No update_ds_tokens payload is ready from this read-only pass. Report responsive spacing mode advisories as responsive setup validation work when modes were just created, or designer validation items when modes already existed. They are not token gaps, not product/tool gaps, and not apply-ready repairs. Do not write custom Figma scripts or invent token updates."
@@ -1340,12 +1376,20 @@ function _buildReviewOptions({
   if ((foundationCollections || []).length) {
     options.push(_reviewOption(
       "foundation-modes",
-      "Add missing foundation modes only",
+      context.emptyDesignSystem && context.emptyDesignSystem.isEmpty
+        ? (context.emptyDesignSystem.hasFoundationShell
+          ? "Continue foundation setup"
+          : "Set up foundation collections only")
+        : "Add missing foundation modes only",
       "foundation",
       "apply_ds_foundation_repairs",
       null,
       foundationApplyInput,
-      "Creates only configured collection modes or shells. After this, sync and reinspect, then stop before any token write."
+      context.emptyDesignSystem && context.emptyDesignSystem.isEmpty
+        ? (context.emptyDesignSystem.hasFoundationShell
+          ? "The foundation shell exists but has no variables or local styles yet. Review the next setup step before any token write."
+          : "Creates only configured foundation collection shells and modes in the empty file. After this, sync and reinspect, then stop before any token write.")
+        : "Creates only configured collection modes or shells. After this, sync and reinspect, then stop before any token write."
     ));
   }
 
@@ -1723,8 +1767,25 @@ function _buildDesignerPresentation(context, total) {
   const responsiveSpacingReview = context.responsiveSpacingReview || null;
   const notes = context.missingCapabilityNotes || [];
   const foundationRepairs = context.foundationRepairs || [];
+  const emptyDesignSystem = context.emptyDesignSystem || null;
   const lines = [];
   const sections = [];
+
+  if (emptyDesignSystem && emptyDesignSystem.isEmpty) {
+    if (emptyDesignSystem.hasFoundationShell) {
+      lines.push("This file has foundation collections, but I do not see design-system variables, local text styles, or local effect styles yet.");
+      lines.push("Best next step: ask whether the designer wants to continue setting up the design-system foundation before treating this like ordinary missing-token repair.");
+    } else {
+      lines.push("This file looks empty as a design-system file: I do not see variable collections, variables, local text styles, or local effect styles.");
+      lines.push("Best next step: ask whether the designer wants to set up a new design-system foundation before treating this like ordinary missing-token repair.");
+    }
+    sections.push({
+      title: "Empty design-system file",
+      message: emptyDesignSystem.hasFoundationShell
+        ? "Say that the file has foundation collections but no design-system variables or local styles yet, then ask whether to continue setup before ordinary token-gap repair."
+        : "Say that the file is empty from a design-system perspective and ask whether to set up a new foundation. If the designer wants only the foundation shells, use foundationRepairPlan.applyInput after approval, then sync and reinspect before any token creation.",
+    });
+  }
 
   if (total) {
     sections.unshift({
@@ -1833,6 +1894,7 @@ function _buildDesignerPresentation(context, total) {
       "repairPlan.missingCapabilityNotes",
     ],
     summaryCounts: {
+      emptyDesignSystem: Boolean(emptyDesignSystem && emptyDesignSystem.isEmpty),
       readyToPreview: total,
       optional: 0,
       foundationRepairs: foundationRepairs.length,
@@ -1893,6 +1955,16 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 function _composeMessage(summary) {
   const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount
     + (summary.staleVariableCount || 0) + (summary.configDriftCount || 0);
+  if (summary.emptyDesignSystem) {
+    const setupMessage = "This file has no design-system variables or local styles yet. Ask whether the designer wants to set up or continue the design-system foundation before presenting ordinary token-gap repair choices.";
+    if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
+      return `${setupMessage} Read-only inspection only; no Figma write is implied.`;
+    }
+    return [
+      setupMessage,
+      "Read-only inspection. Do not call apply_ds_foundation_repairs, update_ds_primitives, or update_ds_tokens with dry_run:false until the designer explicitly approves after seeing the separated foundation/token options.",
+    ].join(" ");
+  }
   if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
     return "No config-backed non-color token gaps found in the inspected categories.";
   }

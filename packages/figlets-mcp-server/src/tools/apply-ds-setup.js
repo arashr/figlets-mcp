@@ -13,7 +13,7 @@
 
 const path = require('path');
 const { getConfigPathGuardError } = require('../utils/paths.js');
-const { requestBridgePost } = require('../bridges/bridge-request.js');
+const { bridgeStatusError, requestBridgePost } = require('../bridges/bridge-request.js');
 
 function _loadDsConfigCore() {
   try {
@@ -298,16 +298,11 @@ function handleApplyDsSetup({ config_path }) {
         configPath:  resolvedPath,
       };
     }
-    if (response.connectionError) {
-      return { error: response.connectionError };
-    }
-    if (response.statusCode === 503) {
-      return { error: 'Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop and try again.' };
-    }
-    if (response.statusCode === 504) {
-      return { error: 'DS setup timed out. For large systems this can take 3+ minutes — try again with the plugin open.' };
-    }
-    return { error: `Unexpected status ${response.statusCode}` };
+    return bridgeStatusError(response, {
+      action: 'design-system setup',
+      includeActiveSession: false,
+      timeoutError: 'DS setup timed out. For large systems this can take 3+ minutes — try again with the plugin open.',
+    });
   });
 }
 

@@ -1,6 +1,11 @@
 const { analyzeDesignSystemData } = require("./analyze-design-system.js");
 const { inspectComponentData } = require("./inspect-component.js");
 const { auditTokens } = require("./audit-tokens.js");
+const {
+  designSystemInventory,
+  emptyDesignSystemMessage,
+  emptyDesignSystemPrompt,
+} = require("./design-system-inventory.js");
 const dsConfig = require("./ds-config/index.js");
 const variableBinding = require("./variable-binding.js");
 
@@ -75,6 +80,9 @@ module.exports = {
   detectDesignSystem,
   detectDesignSystemFromFigmaData,
   inspectComponentData,
+  designSystemInventory,
+  emptyDesignSystemMessage,
+  emptyDesignSystemPrompt,
   normalizeDesignSystemSnapshot,
   summarizeDesignSystem,
   variableBinding,

@@ -7,6 +7,11 @@
  * - Naming inconsistencies (mixed naming conventions within a collection)
  */
 
+const {
+  designSystemInventory,
+  emptyDesignSystemMessage,
+} = require("./design-system-inventory.js");
+
 /**
  * Detects whether a variable value is an alias to another variable.
  * Figma represents aliases as: { type: "VARIABLE_ALIAS", id: "VariableID:..." }
@@ -87,8 +92,32 @@ function auditTokens(input = {}) {
   const collections = Array.isArray(input.collections) ? input.collections : [];
 
   if (variables.length === 0) {
+    const inventory = designSystemInventory({ collections, variables });
     return {
-      error: "No variables found in the data. Run sync_figma_data first."
+      summary: {
+        totalVariables: 0,
+        unaliasedCount: 0,
+        partiallyUnaliasedCount: 0,
+        rawPrimitiveCount: 0,
+        duplicateValueGroups: 0,
+        informationalDuplicateValueGroups: 0,
+        collectionNamingIssues: 0
+      },
+      emptyDesignSystem: {
+        isEmpty: inventory.isEmpty,
+        state: inventory.state,
+        counts: {
+          collections: inventory.counts.collections,
+          variables: inventory.counts.variables,
+        },
+        message: emptyDesignSystemMessage(inventory)
+      },
+      unaliased: [],
+      partiallyUnaliased: [],
+      rawPrimitives: [],
+      duplicates: [],
+      informationalDuplicates: [],
+      namingIssues: []
     };
   }
 

@@ -1,6 +1,6 @@
 const { getActiveFileKey, getActiveFilePaths, getFilePaths, writeActiveFile } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
-const { requestBridgePost } = require("../bridges/bridge-request.js");
+const { formatPluginNotListening, requestBridgePost } = require("../bridges/bridge-request.js");
 
 const syncFigmaDataTool = {
   name: "sync_figma_data",
@@ -16,13 +16,9 @@ function _syncErrorMessage(response) {
   const parsed = response.data || {};
   if (response.connectionError) return response.connectionError;
   if (response.statusCode === 503) {
-    const activeSessionText = parsed.activeSessionId
-      ? ` Active plugin session: ${parsed.activeSessionId}.`
-      : "";
-    const retryText = parsed.pluginRecentlySeen
-      ? " The plugin was connected recently and may be finishing another action; wait a moment, then try again."
-      : " Open the Figlets Bridge plugin in Figma Desktop on the target file, then try again.";
-    return `${parsed.error || "Figma plugin is not connected or listening."}${activeSessionText}${retryText}`;
+    return formatPluginNotListening("sync", parsed, {
+      fallbackHint: "Open the Figlets Bridge plugin in Figma Desktop on the target file, then try again."
+    });
   }
   if (response.statusCode === 504) {
     return "Sync timed out. Keep the Figlets Bridge plugin open in Figma Desktop and try again.";

@@ -67,6 +67,24 @@ try {
   }
 
   {
+    const emptyDataPath = path.join(TEMP_DIR, "figma-data-empty.json");
+    fs.writeFileSync(emptyDataPath, JSON.stringify({
+      collections: [],
+      variables: [],
+      textStyles: [],
+      effectStyles: [],
+    }), "utf-8");
+    const result = handleAuditTokens({ figmaDataPath: emptyDataPath });
+    const data = JSON.parse(result.content[0].text);
+    assert.strictEqual(data.summary.totalVariables, 0);
+    assert.strictEqual(data.emptyDesignSystem.isEmpty, true);
+    assert.ok(
+      data.emptyDesignSystem.message.includes("No variables or variable collections"),
+      "empty synced file should not tell the designer to rerun sync"
+    );
+  }
+
+  {
     const configPath = path.join(TEMP_DIR, "design-system.config.js");
     const repairableDataPath = path.join(TEMP_DIR, "figma-data-spacing-repair.json");
     const repairableData = {

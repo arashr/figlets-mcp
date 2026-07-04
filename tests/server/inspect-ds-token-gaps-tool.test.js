@@ -1111,6 +1111,85 @@ module.exports = (() => {
   }
 
   {
+    const emptyFile = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [],
+      variables: [],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["radius", "border-width", "typography"],
+    });
+    assert.strictEqual(emptyFile.emptyDesignSystem.isEmpty, true);
+    assert.strictEqual(emptyFile.summary.emptyDesignSystem, true);
+    assert.strictEqual(emptyFile.summary.designSystemArtifactCount, 0);
+    assert.ok(
+      emptyFile.message.includes("no design-system variables or local styles yet"),
+      "empty design-system files should be presented as an empty-state setup choice"
+    );
+    assert.ok(
+      emptyFile.repairPlan.agentInstruction.includes("EMPTY FILE FIRST"),
+      "agent instruction should put the empty-file explanation before ordinary token repair routing"
+    );
+    assert.ok(
+      emptyFile.repairPlan.designerPresentation.lines.some(line => line.includes("looks empty as a design-system file")),
+      "designer presentation should say the file is empty from a design-system perspective"
+    );
+    assert.ok(
+      emptyFile.repairPlan.designerPresentation.sections.some(section => section.title === "Empty design-system file"),
+      "designer presentation should include an empty-file section"
+    );
+    assert.strictEqual(
+      emptyFile.repairPlan.designerPresentation.summaryCounts.emptyDesignSystem,
+      true
+    );
+    assert.ok(
+      emptyFile.repairPlan.foundationRepairPlan.designerSummary.includes("empty as a design-system file"),
+      "foundation repair summary should frame empty files as setup/foundation work"
+    );
+    assert.ok(
+      emptyFile.repairPlan.reviewOptions.some(option =>
+        option.id === "foundation-modes" &&
+        option.label === "Set up foundation collections only"
+      ),
+      "empty files should expose foundation setup as the explicit first approved boundary"
+    );
+  }
+
+  {
+    const emptyShell = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
+      collections: [
+        { name: "1. Primitives", variableIds: [], modes: [{ name: "Default" }] },
+        { name: "3. Typography", variableIds: [], modes: [{ name: "Mobile" }, { name: "Tablet" }, { name: "Desktop" }] },
+        { name: "4. Spacing", variableIds: [], modes: [{ name: "Mobile" }, { name: "Tablet" }, { name: "Desktop" }] },
+        { name: "5. Elevation", variableIds: [], modes: [{ name: "Default" }] },
+      ],
+      variables: [],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["elevation", "typography"],
+    });
+    assert.strictEqual(emptyShell.emptyDesignSystem.isEmpty, true);
+    assert.strictEqual(emptyShell.emptyDesignSystem.state, "empty-foundation-shell");
+    assert.ok(
+      emptyShell.message.includes("no design-system variables or local styles yet"),
+      "empty foundation shells should not look like ordinary token gaps"
+    );
+    assert.ok(
+      emptyShell.repairPlan.agentInstruction.includes("EMPTY FOUNDATION SHELL FIRST"),
+      "agent should lead with setup continuation for empty shells"
+    );
+    assert.ok(
+      emptyShell.repairPlan.designerPresentation.lines.some(line =>
+        line.includes("foundation collections") && line.includes("do not see design-system variables")
+      ),
+      "designer presentation should explain the foundation shell state"
+    );
+  }
+
+  {
     const missingFoundation = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
       collections: [{ name: "1. Primitives" }],
       variables: [],

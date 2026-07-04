@@ -399,6 +399,16 @@ assert.strictEqual(
   'icon/on-warning must not be a chrome text candidate'
 );
 assert.strictEqual(
+  _scoreShowcaseTextRoleName('color/text/on-warning'),
+  0,
+  'text/on-warning must not be a generic chrome text candidate'
+);
+assert.strictEqual(
+  _scoreShowcaseTextRoleName('color/text/warning'),
+  0,
+  'text/warning must not be a generic chrome text candidate'
+);
+assert.strictEqual(
   _scoreShowcaseTextRoleName('color/bg/default'),
   0,
   'background roles must not be chrome text candidates'

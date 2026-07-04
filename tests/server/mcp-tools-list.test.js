@@ -83,10 +83,17 @@ module.exports = new Promise((resolve, reject) => {
         "registered update_ds_tokens schema should expose exact spacing_semantic_repairs"
       );
       assert.ok(toolNames.indexOf("apply_ds_foundation_repairs") >= 0, "tools/list should expose apply_ds_foundation_repairs");
+      const generateComponentDoc = listResponse.result.tools.find(tool => tool.name === "generate_component_doc");
+      assert.ok(generateComponentDoc, "tools/list should expose generate_component_doc");
+      assert.ok(
+        !generateComponentDoc.inputSchema.required ||
+          generateComponentDoc.inputSchema.required.indexOf("component_name") === -1,
+        "registered generate_component_doc schema should allow live-selection docs by omitting component_name"
+      );
       assert.ok(toolNames.indexOf("plan_ds_semantic_naming_consolidation") >= 0, "tools/list should expose semantic naming consolidation planner");
       assert.ok(toolNames.indexOf("apply_ds_semantic_naming_consolidation") >= 0, "tools/list should expose semantic naming consolidation apply");
-      assert.ok(toolNames.indexOf("plan_ds_variable_creations") >= 0, "tools/list should expose generic variable creation planner");
-      assert.ok(toolNames.indexOf("apply_ds_variable_creations") >= 0, "tools/list should expose generic variable creation apply");
+      assert.ok(toolNames.indexOf("plan_ds_variable_creations") < 0, "tools/list should not expose a parallel variable creation planner");
+      assert.ok(toolNames.indexOf("apply_ds_variable_creations") < 0, "tools/list should not expose a parallel variable creation apply");
       assert.ok(toolNames.indexOf("plan_ds_figma_operations") >= 0, "tools/list should expose high-level Figma operations planner");
       assert.ok(toolNames.indexOf("apply_ds_figma_operations") >= 0, "tools/list should expose high-level Figma operations apply");
       finish();

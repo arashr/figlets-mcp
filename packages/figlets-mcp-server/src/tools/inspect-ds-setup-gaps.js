@@ -5,7 +5,8 @@ const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/f
 const { computePlannedAliases, loadDsConfigSafe } = require("../utils/accessible-repair-aliases.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 const { classifySemanticColorGrammar } = require("./semantic-color-grammar.js");
-const { semanticContrast } = require("../figlets-core.js").dsConfig;
+const { designSystemInventory, dsConfig } = require("../figlets-core.js");
+const { semanticContrast } = dsConfig;
 
 const inspectDsSetupGapsTool = {
   name: "inspect_ds_setup_gaps",
@@ -1312,6 +1313,8 @@ function _planFoundationRoleRepair(finding, byName, colorVars, varsById, collect
 function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
   const variables = Array.isArray(figmaData.variables) ? figmaData.variables : [];
   const collections = Array.isArray(figmaData.collections) ? figmaData.collections : [];
+  const emptyDesignSystem = designSystemInventory(figmaData);
+  const designSystemArtifactCount = emptyDesignSystem.designSystemArtifactCount;
   const colorVars = variables.filter(v => v && v.resolvedType === "COLOR" && typeof v.name === "string");
   const semanticVars = colorVars.filter(v => _isSemanticColorName(v.name));
   const byName = new Map(colorVars.map(v => [v.name, v]));
@@ -1884,6 +1887,7 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
     suppressedAdvisoryRoles: suppressedRoles,
     contrastAlgorithm: algorithm,
     counts: {
+      emptyDesignSystem: emptyDesignSystem.isEmpty,
       semanticVariables: semanticVars.length,
       completePairs: totalCompletePairs,
       semanticFamilies: semanticFamilies.length,
@@ -1897,6 +1901,8 @@ function inspectDsSetupGapsFromFigmaData(figmaData = {}, options = {}) {
       optionalRoleRepairs: optionalSemanticRoleFindings.filter(gap => gap.plannedRoleRepair).slice(0, 8),
     },
     summary: {
+      emptyDesignSystem: emptyDesignSystem.isEmpty,
+      designSystemArtifactCount,
       missingSemanticRoleCount: missingSemanticRoles.length,
       highConfidenceSemanticRoleGapCount: missingSemanticRoles.filter(gap => gap.confidence === "high").length,
       semanticGapCount: semanticGaps.length,
@@ -2484,7 +2490,13 @@ function _buildDesignerPresentation(context) {
     });
   }
 
-  if (!context.total && !context.optionalTotal && !proposedChanges.needsDesignerDecision.length) {
+  if (summary.emptyDesignSystem) {
+    lines[0] = "This file has no design-system variables or local styles yet, so there is no semantic color layer to audit yet.";
+    sections.unshift({
+      title: "Empty design-system file",
+      message: "Do not call semantic colors clean. Say that no design-system variables, local text styles, or local effect styles were found, then ask whether to set up or continue the foundation.",
+    });
+  } else if (!context.total && !context.optionalTotal && !proposedChanges.needsDesignerDecision.length) {
     lines[0] = "The semantic color setup looks clean from this QA pass.";
   }
 
@@ -2527,6 +2539,9 @@ function _buildDesignerPresentation(context) {
 }
 
 function _composeMessage(s) {
+  if (s.emptyDesignSystem) {
+    return "No semantic color layer to audit yet — this file has no design-system variables or local styles. Ask whether the designer wants to set up or continue the foundation before calling semantic colors clean.";
+  }
   const parts = [];
   if (s.missingSemanticRoleCount) parts.push(`${s.missingSemanticRoleCount} semantic-family role gap${s.missingSemanticRoleCount === 1 ? "" : "s"}`);
   if (s.semanticGapCount) parts.push(`${s.semanticGapCount} missing fg companion${s.semanticGapCount === 1 ? "" : "s"}`);

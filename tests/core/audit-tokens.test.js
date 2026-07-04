@@ -55,7 +55,9 @@ const mockData = {
 {
   // Test 1: empty input
   const result = auditTokens({ variables: [], collections: [] });
-  assert.ok(result.error, "Should return error for empty variables");
+  assert.strictEqual(result.summary.totalVariables, 0, "empty synced files should return an empty audit summary");
+  assert.strictEqual(result.emptyDesignSystem.isEmpty, true, "empty synced files should be reported as an empty design-system state");
+  assert.deepStrictEqual(result.unaliased, []);
 }
 
 {

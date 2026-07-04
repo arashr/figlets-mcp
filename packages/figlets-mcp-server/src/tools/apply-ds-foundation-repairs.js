@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { requestBridgePost } = require("../bridges/bridge-request.js");
+const { bridgeStatusError, requestBridgePost } = require("../bridges/bridge-request.js");
 const { getConfigPathGuardError } = require("../utils/paths.js");
 
 const applyDsFoundationRepairsTool = {
@@ -167,9 +167,6 @@ function handleApplyDsFoundationRepairs(args = {}) {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
   }).then((response) => {
-    if (response.connectionError) {
-      return { error: response.connectionError, configPath };
-    }
     const parsed = response.data || {};
     const statusCode = response.statusCode;
     if (statusCode === 200) {
@@ -187,26 +184,11 @@ function handleApplyDsFoundationRepairs(args = {}) {
         error: result.error,
       };
     }
-    if (statusCode === 503) {
-      return {
-        error: parsed.error || "Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop and try again.",
-        activeSessionId: parsed.activeSessionId || null,
-        pluginCapabilities: parsed.pluginCapabilities || [],
-        configPath,
-      };
-    }
-    if (statusCode === 504) {
-      return { error: "Foundation repair timed out.", configPath };
-    }
-    if (statusCode === 409) {
-      return {
-        error: parsed.error || "The Figlets Bridge plugin does not advertise the foundation-repairs command. Reload the plugin in Figma Desktop.",
-        activeSessionId: parsed.activeSessionId || null,
-        pluginCapabilities: parsed.pluginCapabilities || [],
-        configPath,
-      };
-    }
-    return { error: `Unexpected status ${statusCode}`, configPath };
+    return Object.assign(bridgeStatusError(response, {
+      action: "foundation repairs",
+      timeoutError: "Foundation repair timed out.",
+      conflictError: "The Figlets Bridge plugin does not advertise the foundation-repairs command. Reload the plugin in Figma Desktop.",
+    }), { configPath });
   });
 }
 

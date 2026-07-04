@@ -2,7 +2,9 @@ const fs = require("fs");
 const path = require("path");
 const {
   detectDesignSystem,
-  detectDesignSystemFromFigmaData
+  detectDesignSystemFromFigmaData,
+  designSystemInventory,
+  emptyDesignSystemPrompt,
 } = require("../figlets-core.js");
 const {
   explainMissingFigmaBridge,
@@ -32,6 +34,20 @@ const detectDesignSystemTool = {
     additionalProperties: false
   }
 };
+
+function _designSystemEmptyState(result) {
+  const snapshot = result && result.snapshot ? result.snapshot : {};
+  const inventory = designSystemInventory(snapshot);
+  return {
+    isEmpty: inventory.isEmpty,
+    state: inventory.state,
+    designSystemArtifactCount: inventory.designSystemArtifactCount,
+    foundationCollectionCount: inventory.foundationCollectionCount,
+    counts: inventory.counts,
+    recommendedWorkflow: "new-ds-setup",
+    recommendedDesignerPrompt: emptyDesignSystemPrompt(inventory),
+  };
+}
 
 // Internal: run full analysis via core (returns raw result with snapshot)
 function runAnalysis(input = {}) {
@@ -86,6 +102,7 @@ function handleDetectDesignSystem(input = {}) {
   }
 
   // Agent receives only what it needs to reason and report
+  const emptyState = _designSystemEmptyState(result);
   return {
     saved: contextPath,
     source: dataSource ? {
@@ -95,6 +112,7 @@ function handleDetectDesignSystem(input = {}) {
       path: dataSource.meta && dataSource.meta.path ? dataSource.meta.path : null,
     } : null,
     summary: result.summary,
+    emptyDesignSystem: emptyState,
     typographyStrategy: result.snapshot && result.snapshot.context
       ? result.snapshot.context.typographyStrategy
       : "unknown",

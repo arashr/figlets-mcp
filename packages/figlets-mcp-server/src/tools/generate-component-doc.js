@@ -12,7 +12,12 @@
  */
 
 const fs = require('fs');
-const { requestBridgePost } = require('../bridges/bridge-request.js');
+const {
+  bridgeActiveSessionText,
+  formatPluginNotListening,
+  formatReceiverConnectionError,
+  requestBridgePost,
+} = require('../bridges/bridge-request.js');
 
 const generateComponentDocTool = {
   name: 'generate_component_doc',
@@ -23,7 +28,7 @@ const generateComponentDocTool = {
     properties: {
       component_name: {
         type: 'string',
-        description: 'Name of the COMPONENT or COMPONENT_SET to document. Must exist on the current Figma page.'
+        description: 'Optional name of the COMPONENT or COMPONENT_SET to document. Omit to document the selected component or selected variant\'s parent component set.'
       },
       description: {
         type: 'string',
@@ -64,9 +69,9 @@ function handleGenerateComponentDoc(args) {
     const selected = selectionInfo && selectionInfo.component ? selectionInfo.component : null;
     const selectionContext = selectionInfo && selectionInfo.context ? selectionInfo.context : {};
     const componentId = selected && selected.id ? selected.id : '';
-    const componentName = selected && selected.name ? selected.name : fallbackComponentName;
+    const componentName = fallbackComponentName || (selected && selected.name ? selected.name : '');
 
-    if (selected && fallbackComponentName && selected.name !== fallbackComponentName) {
+    if (selected && fallbackComponentName && selected.name !== fallbackComponentName && selected.type !== 'COMPONENT') {
       return {
         content: [{
           type: 'text',
@@ -117,105 +122,75 @@ function handleGenerateComponentDoc(args) {
         ? args.variant_descriptions
         : {}
     };
-    return new Promise((resolve) => {
-      let attempts = 0;
-      const maxAttempts = 8;
-      const retryDelayMs = 750;
-
-      function sendDocBuildRequest() {
-        attempts += 1;
-        requestBridgePost('/request-doc-build', payload, { timeoutMs: 125000 }).then((response) => {
-          if (response.statusCode === 200) {
-            const parsed = response.data || {};
-            const result = parsed.result || parsed;
-            if (result.error) {
-              resolve({
-                content: [{ type: 'text', text: `Plugin error: ${result.error}` }],
-                isError: true
-              });
-              return;
-            }
-            resolve({
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  componentName: result.componentName || componentName,
-                  path: result.path,
-                  markdown: result.markdown,
-                  componentMeta: result.componentMeta || {},
-                  bindingsCount: result.bindingsCount || 0,
-                  bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
-                  bindingDiagnostics: result.bindingDiagnostics || {},
-                  anatomyCount: result.anatomyCount || 0,
-                  selectionContext: result.selectionContext || selectionContext,
-                  specSheet: result.specSheet || {},
-                  message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Write the 'markdown' field to '${result.path}' via the Write tool.`
-                }, null, 2)
-              }]
-            });
-          } else if (response.statusCode === 503) {
-            const parsed = response.data || {};
-            if (attempts < maxAttempts) {
-              setTimeout(sendDocBuildRequest, retryDelayMs);
-              return;
-            }
-            resolve({
-              content: [{ type: 'text', text: _formatPluginConnectionError(parsed) }],
-              isError: true
-            });
-          } else if (response.statusCode === 504) {
-            resolve({
-              content: [{ type: 'text', text: 'Error: Doc build timed out. The component may be very large or the plugin may have crashed.' }],
-              isError: true
-            });
-          } else if (response.connectionError) {
-            resolve({
-              content: [{ type: 'text', text: _formatReceiverConnectionError(response.connectionError) }],
-              isError: true
-            });
-          } else {
-            resolve({
-              content: [{ type: 'text', text: `Error: Unexpected status ${response.statusCode}: ${response.raw}` }],
-              isError: true
-            });
-          }
-        }).catch((err) => {
-          resolve({
-            content: [{ type: 'text', text: `Error: ${err.message}` }],
+    return requestBridgePost('/request-doc-build', payload, { timeoutMs: 125000 }).then((response) => {
+      if (response.statusCode === 200) {
+        const parsed = response.data || {};
+        const result = parsed.result || parsed;
+        if (result.error) {
+          return {
+            content: [{ type: 'text', text: `Plugin error: ${result.error}` }],
             isError: true
-          });
-        });
+          };
+        }
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              componentName: result.componentName || componentName,
+              path: result.path,
+              markdown: result.markdown,
+              componentMeta: result.componentMeta || {},
+              bindingsCount: result.bindingsCount || 0,
+              bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
+              bindingDiagnostics: result.bindingDiagnostics || {},
+              anatomyCount: result.anatomyCount || 0,
+              selectionContext: result.selectionContext || selectionContext,
+              specSheet: result.specSheet || {},
+              message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Write the 'markdown' field to '${result.path}' via the Write tool.`
+            }, null, 2)
+          }]
+        };
       }
-
-      sendDocBuildRequest();
+      if (response.statusCode === 503) {
+        return {
+          content: [{ type: 'text', text: `Error: ${formatPluginNotListening('component documentation', response.data || {})}` }],
+          isError: true
+        };
+      }
+      if (response.statusCode === 504) {
+        return {
+          content: [{ type: 'text', text: 'Error: Doc build timed out. The component may be very large or the plugin may have crashed.' }],
+          isError: true
+        };
+      }
+      if (response.connectionError) {
+        return {
+          content: [{ type: 'text', text: `Error: ${formatReceiverConnectionError(response.connectionError)}` }],
+          isError: true
+        };
+      }
+      return {
+        content: [{ type: 'text', text: `Error: Unexpected status ${response.statusCode}: ${response.raw}` }],
+        isError: true
+      };
+    }).catch((err) => {
+      return {
+        content: [{ type: 'text', text: `Error: ${err.message}` }],
+        isError: true
+      };
     });
   });
 }
 
 function _resolveSelectedComponent() {
-  const maxAttempts = 3;
-  const retryDelayMs = 750;
-
-  function attempt(attemptNumber) {
-    return _requestSelectedComponent().then((result) => {
-      if (
-        result &&
-        result.bridgeError &&
-        (result.bridgeError.statusCode === 503 || result.bridgeError.statusCode === 504) &&
-        attemptNumber < maxAttempts
-      ) {
-        return new Promise((resolve) => setTimeout(resolve, retryDelayMs))
-          .then(() => attempt(attemptNumber + 1));
-      }
-      return result;
-    });
-  }
-
-  return attempt(1);
+  return _requestSelectedComponent();
 }
 
 function _requestSelectedComponent() {
-  return requestBridgePost('/request-selection', {}, { timeoutMs: 16000 }).then((response) => {
+  return requestBridgePost('/request-selection', {}, {
+    timeoutMs: 16000,
+    bridgeRetryAttempts: 3
+  }).then((response) => {
     if (response.connectionError) return null;
     if (response.statusCode !== 200) {
       const parsed = response.data || {};
@@ -260,17 +235,7 @@ function _requestSelectedComponent() {
   }).catch(() => null);
 }
 
-function _formatReceiverConnectionError(connectionError) {
-  if (String(connectionError || '').includes('Bridge receiver')) {
-    return `Error: ${connectionError}`;
-  }
-  return `Error: Bridge receiver is not running. The MCP server should start it automatically — try restarting the MCP server. ${connectionError}`;
-}
-
 function _formatPluginConnectionError(parsed) {
-  const activeSessionText = parsed && parsed.activeSessionId
-    ? ` Active plugin session: ${parsed.activeSessionId}.`
-    : '';
   const recentlySeenText = parsed && parsed.pluginRecentlySeen
     ? ' The plugin was seen recently but did not return to listening before the retry window ended.'
     : '';
@@ -280,7 +245,7 @@ function _formatPluginConnectionError(parsed) {
   const receiverErrorText = parsed && parsed.error
     ? ` Receiver said: ${parsed.error}`
     : '';
-  return `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${activeSessionText}${recentlySeenText}${capabilitiesText}${receiverErrorText}`;
+  return `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${bridgeActiveSessionText(parsed)}${recentlySeenText}${capabilitiesText}${receiverErrorText}`;
 }
 
 module.exports = { generateComponentDocTool, handleGenerateComponentDoc };

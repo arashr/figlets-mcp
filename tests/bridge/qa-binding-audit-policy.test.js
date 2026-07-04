@@ -12,6 +12,7 @@ const code = fs.readFileSync(codePath, "utf8");
 const ui = fs.readFileSync(uiPath, "utf8");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const tool = fs.readFileSync(toolPath, "utf8");
+const colorSuggestionStart = code.indexOf("function _colorSuggestion");
 
 assert.ok(
   code.includes("outlineBrand: pickColorRole('outlineBrand'"),
@@ -21,6 +22,19 @@ assert.ok(
 assert.ok(
   code.includes("if (suggestion.confidence !== 'high') return 'LOW_CONFIDENCE';"),
   "fix apply must reject non-high-confidence suggestions at bind time"
+);
+
+assert.ok(
+  code.includes("const approvedSuggestions = Array.isArray(opts.approvedSuggestions)") &&
+    code.includes("function _applyQaApprovedSuggestion(violation, approval)") &&
+    code.includes("function _validateApprovedSuggestion(violation, approval)") &&
+    code.includes("violations[i].issueNumber = i + 1") &&
+    code.includes("issueNumber: violation.issueNumber || null") &&
+    code.includes("return 'STALE_RAW_VALUE';") &&
+    code.includes("return 'SUGGESTION_MISMATCH';") &&
+    code.includes("designerDecisionApplyInput") &&
+    code.includes("approved_suggestions"),
+  "QA audit must expose and validate designer-approved suggestions without weakening fix:true"
 );
 
 assert.ok(
@@ -35,15 +49,59 @@ assert.ok(
 
 assert.ok(
   code.includes("function _exactTextStyleForNode(node)") &&
-    code.includes("Exact text style match by font family, size, line height, and tracking") &&
-    code.includes("Role/name-based text style suggestion"),
+    code.includes("function _typographyCandidates(node, limit)") &&
+    code.includes("rawTypography") &&
+    code.includes("confidence: 'medium'"),
   "Typography QA must distinguish exact text-style matches from role-only suggestions"
 );
 
 assert.ok(
-  code.includes("variable ? 'high' : 'none'") &&
-    code.includes("Semantic color variable \""),
-  "Semantic color suggestions with a resolved variable must be high-confidence fixableNow candidates"
+  code.includes("return _augmentSuggestion(_suggestion('variable', variable, variable ? (ambiguousStateSurface ? 'medium' : 'high') : 'none')") &&
+    !code.includes("Semantic color variable \"") &&
+    !code.includes("Matched by binding policy"),
+  "Semantic color suggestions must expose structured fields without prose reasons"
+);
+
+assert.ok(
+  code.includes("function _colorCandidates(rawColor, kind, limit)") &&
+    code.includes("function _colorDistanceMetrics(rawColor, tokenColor)") &&
+    code.includes("function _nodeFactPacket(node, rawColor, kind)") &&
+    code.includes("function _hasStateLikeContext(node)") &&
+    code.includes("function _isGenericStateSurfaceToken(name)") &&
+    code.includes("ambiguousStateSurface") &&
+    code.includes("ambiguousStateSurface ? 'medium' : 'high'") &&
+    code.includes("facts.rawFill") &&
+    code.includes("textDescendants") &&
+    code.includes("suggestion.candidates = extras.candidates") &&
+    code.includes("visualWins") &&
+    !code.includes("Candidate selected from nearest available color token; review before binding."),
+  "QA color binding must expose fact-only candidate data and downgrade visual/name ambiguity to designer-decision"
+);
+
+assert.ok(
+  code.includes("function _typographyCandidates(node, limit)") &&
+    code.includes("function _styleDistanceForNode(node, style)") &&
+    code.includes("rawTypography") &&
+    code.includes("candidates: candidates"),
+  "QA typography binding must expose ranked text-style candidates for agent/designer decisions"
+);
+
+assert.ok(
+  code.includes("function _approvedCandidateSuggestion(violation, approval)") &&
+    code.includes("function _exactApprovedSuggestion(violation, approval)") &&
+    code.includes("function _findApprovedVariable(approval)") &&
+    code.includes("function _findApprovedTextStyle(approval)") &&
+    code.includes("variable.resolvedType !== 'COLOR'") &&
+    code.includes("variable.resolvedType !== 'FLOAT'") &&
+    code.includes("exactDesignerChoice: true") &&
+    code.includes("const candidates = Array.isArray(suggestion.candidates) ? suggestion.candidates : []") &&
+    code.includes("candidate.token") &&
+    code.includes("candidate.name") &&
+    code.includes("issueNumber: violation.issueNumber") &&
+    code.includes("boundTo: approved && approved.name || violation.suggestion.name") &&
+    code.includes("violation.suggestion = approved") &&
+    code.includes("violation.suggestion = originalSuggestion"),
+  "Approved QA binding must allow exact candidate or designer-named existing token/style entries from the audit finding without widening fix:true"
 );
 
 assert.ok(
@@ -53,12 +111,40 @@ assert.ok(
     code.includes("ICON: -8") &&
     code.includes("function adjustedSegScore(name, role, score)") &&
     code.includes("role === 'dangerText' && /(?:^|\\/)on[-_]danger") &&
+    code.includes("function isIntentOrContextTextName(name)") &&
+    code.includes("function scoreGenericTextName(name)") &&
+    code.includes("function isGenericTextRole(role)") &&
+    code.includes("if (isGenericTextRole(role) && isIntentOrContextTextName(s.name)) continue;") &&
+    code.includes("if (isGenericTextRole(role) && isIntentOrContextTextName(scored[i].name)) continue;") &&
+    code.includes("SUCCESS: -6, WARNING: -6, DANGER: -6") &&
     code.includes("lum: c ? lum(c) : 0") &&
     code.includes("if (isTextRole(role) && isIconColorName(s.name)) continue;") &&
     code.includes("if (isTextRole(role) && isIconColorName(scored[i].name)) continue;") &&
     code.includes("if (node.type !== 'TEXT' && /icon|glyph/.test(name))") &&
     code.includes("return 'iconDefault';"),
-  "Shared color-role picker must consider unresolved semantic color variables by name, avoid color/icon/* for text roles, and preserve icon roles for icon nodes"
+  "Shared color-role picker must consider unresolved semantic color variables by name, avoid color/icon/* and status/context tokens for generic text roles, and preserve icon roles for icon nodes"
+);
+
+assert.ok(
+  code.includes("function _surfaceTextSuggestion(node, rawColor)") &&
+    code.includes("let cursor = node && node.parent;") &&
+    code.includes("function _pairedForegroundForSurface(surfaceVariable)") &&
+    code.includes("function _foregroundCandidatesForSurfaceName(name)") &&
+    code.includes("function _isQaIconColorName(name)") &&
+    code.includes("!_isQaIconColorName(variable.name)") &&
+    !code.includes("!isIconColorName(variable.name)) return variable") &&
+    !code.includes("Paired foreground \"") &&
+    code.includes("property === 'Fill color' && node.type === 'TEXT'") &&
+    code.indexOf("const surfaceSuggestion = _surfaceTextSuggestion(node, rawColor);", colorSuggestionStart) <
+      code.indexOf("const role = _colorRoleFor(node, property);", colorSuggestionStart),
+  "Text fill QA must prefer the nearest surface/background paired foreground before falling back to layer-name color roles"
+);
+
+assert.ok(
+  !code.includes("suggestion.reason") &&
+    !code.includes("reason: violation.suggestion.reason") &&
+    !code.includes("reason: 'No suggestion.'"),
+  "QA suggestion payloads must not include prose reason fields; agents should infer from facts and candidates"
 );
 
 assert.ok(
@@ -152,6 +238,51 @@ assert.ok(
 assert.ok(
   code.includes("const _ds = await _createDsBindingContext();"),
   "QA and documentation flows must use the shared live binding resolver"
+);
+
+assert.ok(
+  code.includes("function _componentDocTarget(component)") &&
+    code.includes("component.parent && component.parent.type === 'COMPONENT_SET'") &&
+    code.includes("selectedVariantName") &&
+    code.includes("documentedVariantSelection") &&
+    code.includes("Documented parent component set") &&
+    !code.includes("componentPropertyDefinitions: compSet.componentPropertyDefinitions || {}"),
+  "Component docs must promote selected variant components to their parent component set instead of calling componentPropertyDefinitions on a variant"
+);
+
+assert.ok(
+  code.includes("function _isDocPrivateNodeName(name)") &&
+    code.includes("first === '_' || first === '.'") &&
+    code.includes("function _absoluteDocX(node)") &&
+    code.includes("function _positionDocumentationSection(section, frame, target)") &&
+    code.includes("function _syncDocumentationSectionBounds(section, frame)") &&
+    code.includes("componentX: _absoluteDocX(compSet)") &&
+    code.includes("section.resizeWithoutConstraints(frame.width, frame.height)") &&
+    code.includes("if (_isDocPrivateNodeName(node.name)) return"),
+  "Component docs must position the documentation section beside the component, fit the section to frame content, and ignore private _/. anatomy layers"
+);
+
+assert.ok(
+  code.includes("function _collectSlotDocs(root, propertyDefinitions)") &&
+    code.includes("node.type === 'SLOT'") &&
+    code.includes("limitViolations") &&
+    code.includes("slotSettings") &&
+    code.includes("allowPreferredValuesOnly") &&
+    code.includes("minChildren") &&
+    code.includes("maxChildren") &&
+    code.includes("stretchChildOnInsert") &&
+    code.includes("displayEmptyByDefault") &&
+    code.includes("preferredValues") &&
+    code.includes("## Slots") &&
+    code.includes("SLOTS"),
+  "Component docs must include slot property settings, preferred value limits, default content, and limit violations in Figma and markdown output"
+);
+
+assert.ok(
+  code.includes("function _mkTable(parent, name)") &&
+    code.includes("t.strokes = [_paint(_cBorder, _vBorder)]; t.strokeWeight = 1;") &&
+    code.includes("_bindVar(t, 'strokeWeight', _docSpace.border);"),
+  "Component doc tables must draw a single border on the table container, not on row/cell helpers"
 );
 
 assert.ok(

@@ -26,6 +26,16 @@ function writeSelectionFile(componentName = "Button") {
   return { dir, filePath };
 }
 
+function writeSelectionFileForNode(node, meta = { fileName: "Figlets Test", pageName: "Components" }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-doc-selection-"));
+  const filePath = path.join(dir, "figma-selection.json");
+  fs.writeFileSync(filePath, JSON.stringify({
+    selection: [node],
+    meta
+  }));
+  return { dir, filePath };
+}
+
 module.exports = (async () => {
   // --- Tool metadata ---
   assert.strictEqual(generateComponentDocTool.name, "generate_component_doc");
@@ -99,6 +109,71 @@ module.exports = (async () => {
       assert.ok(parsed.markdown.startsWith("# Button"));
       assert.strictEqual(parsed.bindingsCount, 7);
       assert.ok(parsed.message.includes("component-specs/Button.md"));
+    } finally {
+      server.close();
+      fs.rmSync(selection.dir, { recursive: true, force: true });
+      delete process.env.FIGLETS_RECEIVER_URL;
+    }
+  }
+
+  // --- Selected variant component may be documented through its parent component name ---
+  {
+    let capturedBody = "";
+    const selection = writeSelectionFileForNode({ id: "1:9", name: "State=Sold Out", type: "COMPONENT" });
+    const server = await startMockReceiver((req, res) => {
+      if (req.url === "/request-selection") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, path: selection.filePath }));
+        return;
+      }
+      assert.strictEqual(req.url, "/request-doc-build");
+      req.on("data", (chunk) => { capturedBody += chunk.toString(); });
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          success: true,
+          result: {
+            componentName: "Product Card",
+            markdown: "# Product Card\n\n> stub",
+            path: "component-specs/Product Card.md",
+            componentMeta: {
+              type: "COMPONENT_SET",
+              variantCount: 2,
+              width: 320,
+              height: 240,
+              propertyCount: 1,
+              documentedVariantSelection: true,
+              selectedVariantName: "State=Sold Out"
+            },
+            selectionContext: {
+              componentName: "Product Card",
+              componentId: "1:9",
+              componentType: "COMPONENT",
+              documentedComponentId: "1:8",
+              documentedComponentType: "COMPONENT_SET",
+              documentedVariantSelection: true,
+              selectedVariantName: "State=Sold Out"
+            }
+          }
+        }));
+      });
+    });
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${server.address().port}`;
+    try {
+      const result = await handleGenerateComponentDoc({
+        component_name: "Product Card",
+        description: "A product card used to show purchasable and unavailable item states.",
+        usage_do: ["Use for product listings", "Document the full variant set"],
+        usage_dont: ["Don't document only one state", "Don't detach variants"]
+      });
+      assert.ok(!result.isError, `expected success, got: ${JSON.stringify(result)}`);
+      const sentPayload = JSON.parse(capturedBody);
+      assert.strictEqual(sentPayload.componentId, "1:9");
+      assert.strictEqual(sentPayload.componentName, "Product Card");
+      const parsed = JSON.parse(result.content[0].text);
+      assert.strictEqual(parsed.componentName, "Product Card");
+      assert.strictEqual(parsed.componentMeta.documentedVariantSelection, true);
+      assert.strictEqual(parsed.selectionContext.selectedVariantName, "State=Sold Out");
     } finally {
       server.close();
       fs.rmSync(selection.dir, { recursive: true, force: true });

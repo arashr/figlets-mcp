@@ -175,6 +175,37 @@ function serializeNode(node) {
   return result;
 }
 
+function _errorMessageForCommand(err, options) {
+  if (options && options.stringifyNonError) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  return err && err.message;
+}
+
+async function _runPluginBridgeCommand(msg, options) {
+  try {
+    _appendSessionLog(options.executeLog);
+    var payload = options.getPayload ? options.getPayload(msg) : (msg.data || {});
+    const result = await options.handler(payload);
+    if (options.afterResult) options.afterResult(result, msg);
+    figma.ui.postMessage({ type: options.doneType, fileKey: _getFigletsFileKey(), data: result });
+    if (options.resultErrorIsFailure && result && result.error) {
+      _appendSessionLog(options.failedPrefix + result.error);
+    } else {
+      _appendSessionLog(options.completedLog);
+      if (options.notify) figma.notify(options.notify);
+    }
+  } catch (err) {
+    var errorMessage = _errorMessageForCommand(err, options);
+    _appendSessionLog(options.failedPrefix + errorMessage);
+    figma.ui.postMessage({
+      type: options.doneType,
+      fileKey: _getFigletsFileKey(),
+      data: { error: errorMessage || options.errorFallback }
+    });
+  }
+}
+
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'ui-resize') {
     try {
@@ -322,17 +353,16 @@ figma.ui.onmessage = async (msg) => {
   // plugin so no agent reasoning is needed. All rendering stays on the machine.
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'build-showcase') {
-    try {
-      _appendSessionLog('Executing build_ds_showcase.');
-      const result = await _buildShowcase(msg.data || {});
-      figma.ui.postMessage({ type: 'showcase-built', fileKey: _getFigletsFileKey(), data: result });
-      _appendSessionLog('Completed build_ds_showcase.');
-      figma.notify('Token showcase built!');
-    } catch (err) {
-      const _errMsg = err instanceof Error ? err.message : String(err);
-      _appendSessionLog('build_ds_showcase failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'showcase-built', fileKey: _getFigletsFileKey(), data: { error: _errMsg || 'Unknown error' } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'showcase-built',
+      handler: _buildShowcase,
+      executeLog: 'Executing build_ds_showcase.',
+      completedLog: 'Completed build_ds_showcase.',
+      failedPrefix: 'build_ds_showcase failed: ',
+      notify: 'Token showcase built!',
+      stringifyNonError: true,
+      errorFallback: 'Unknown error'
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -340,173 +370,132 @@ figma.ui.onmessage = async (msg) => {
   // Config payload is produced by prepare_ds_config MCP tool (figlets-core).
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'apply-ds-setup') {
-    try {
-      _appendSessionLog('Executing apply_ds_setup.');
-      const result = await _applyDsSetup(msg.data);
-      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: _getFigletsFileKey(), data: result });
-      _appendSessionLog('Completed apply_ds_setup.');
-      figma.notify('Design system collections created!');
-    } catch (err) {
-      _appendSessionLog('apply_ds_setup failed: ' + err.message);
-      figma.ui.postMessage({ type: 'ds-setup-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'ds-setup-done',
+      handler: _applyDsSetup,
+      getPayload: function (incoming) { return incoming.data; },
+      executeLog: 'Executing apply_ds_setup.',
+      completedLog: 'Completed apply_ds_setup.',
+      failedPrefix: 'apply_ds_setup failed: ',
+      notify: 'Design system collections created!'
+    });
   }
 
   if (msg.type === 'apply-foundation-repairs') {
-    try {
-      _appendSessionLog('Executing apply_ds_foundation_repairs.');
-      const result = await _applyDsFoundationRepairs(msg.data || {});
-      figma.ui.postMessage({ type: 'foundation-repairs-done', fileKey: _getFigletsFileKey(), data: result });
-      if (result && result.error) {
-        _appendSessionLog('apply_ds_foundation_repairs failed: ' + result.error);
-      } else {
-        _appendSessionLog('Completed apply_ds_foundation_repairs.');
-        figma.notify('Foundation repairs applied.');
-      }
-    } catch (err) {
-      _appendSessionLog('apply_ds_foundation_repairs failed: ' + err.message);
-      figma.ui.postMessage({ type: 'foundation-repairs-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'foundation-repairs-done',
+      handler: _applyDsFoundationRepairs,
+      executeLog: 'Executing apply_ds_foundation_repairs.',
+      completedLog: 'Completed apply_ds_foundation_repairs.',
+      failedPrefix: 'apply_ds_foundation_repairs failed: ',
+      notify: 'Foundation repairs applied.',
+      resultErrorIsFailure: true
+    });
   }
 
   if (msg.type === 'reset-figlets-file') {
-    try {
-      _appendSessionLog('Executing reset_figlets_file.');
-      const result = await _resetFigletsFile(msg.data || {});
-      figma.ui.postMessage({ type: 'figlets-reset-done', fileKey: _getFigletsFileKey(), data: result });
-      _appendSessionLog('Completed reset_figlets_file.');
-      figma.notify('Figlets file content reset.');
-    } catch (err) {
-      _appendSessionLog('reset_figlets_file failed: ' + err.message);
-      figma.ui.postMessage({ type: 'figlets-reset-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'figlets-reset-done',
+      handler: _resetFigletsFile,
+      executeLog: 'Executing reset_figlets_file.',
+      completedLog: 'Completed reset_figlets_file.',
+      failedPrefix: 'reset_figlets_file failed: ',
+      notify: 'Figlets file content reset.'
+    });
   }
 
   // Developer-only bridge command (FIGLETS_DEV_BRIDGE=1). Not advertised in plugin capabilities.
   if (msg.type === 'trim-collection-modes') {
-    try {
-      _appendSessionLog('Executing trim_collection_modes.');
-      const result = await _trimCollectionModesForDevPrep(msg.data || {});
-      figma.ui.postMessage({ type: 'figlets-trim-collection-modes-done', fileKey: _getFigletsFileKey(), data: result });
-      _appendSessionLog('Completed trim_collection_modes.');
-    } catch (err) {
-      _appendSessionLog('trim_collection_modes failed: ' + err.message);
-      figma.ui.postMessage({ type: 'figlets-trim-collection-modes-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'figlets-trim-collection-modes-done',
+      handler: _trimCollectionModesForDevPrep,
+      executeLog: 'Executing trim_collection_modes.',
+      completedLog: 'Completed trim_collection_modes.',
+      failedPrefix: 'trim_collection_modes failed: '
+    });
   }
 
   if (msg.type === 'remove-text-styles') {
-    try {
-      _appendSessionLog('Executing remove_text_styles.');
-      const result = await _removeLocalTextStylesByName((msg.data && msg.data.names) || []);
-      figma.ui.postMessage({ type: 'figlets-remove-text-styles-done', fileKey: _getFigletsFileKey(), data: result });
-      _appendSessionLog('Completed remove_text_styles.');
-    } catch (err) {
-      _appendSessionLog('remove_text_styles failed: ' + err.message);
-      figma.ui.postMessage({ type: 'figlets-remove-text-styles-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'figlets-remove-text-styles-done',
+      handler: _removeLocalTextStylesByName,
+      getPayload: function (incoming) { return (incoming.data && incoming.data.names) || []; },
+      executeLog: 'Executing remove_text_styles.',
+      completedLog: 'Completed remove_text_styles.',
+      failedPrefix: 'remove_text_styles failed: '
+    });
   }
 
   if (msg.type === 'prepare-broken-ds-fixture') {
-    try {
-      _appendSessionLog('Executing prepare_broken_ds_fixture.');
-      const result = await _prepareBrokenDsFixtureForDevPrep(msg.data || {});
-      figma.ui.postMessage({ type: 'figlets-prepare-broken-ds-fixture-done', fileKey: _getFigletsFileKey(), data: result });
-      if (result && result.error) {
-        _appendSessionLog('prepare_broken_ds_fixture failed: ' + result.error);
-      } else {
-        _appendSessionLog('Completed prepare_broken_ds_fixture.');
-        figma.notify('Broken DS fixture prepared. Developer test prep only.');
-      }
-    } catch (err) {
-      _appendSessionLog('prepare_broken_ds_fixture failed: ' + err.message);
-      figma.ui.postMessage({ type: 'figlets-prepare-broken-ds-fixture-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'figlets-prepare-broken-ds-fixture-done',
+      handler: _prepareBrokenDsFixtureForDevPrep,
+      executeLog: 'Executing prepare_broken_ds_fixture.',
+      completedLog: 'Completed prepare_broken_ds_fixture.',
+      failedPrefix: 'prepare_broken_ds_fixture failed: ',
+      notify: 'Broken DS fixture prepared. Developer test prep only.',
+      resultErrorIsFailure: true
+    });
   }
 
   if (msg.type === 'update-primitives') {
-    try {
-      _appendSessionLog('Executing update_ds_primitives.');
-      const result = await _updateDsPrimitives(msg.data || {});
-      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: _getFigletsFileKey(), data: result });
-      if (result && result.error) {
-        _appendSessionLog('update_ds_primitives failed: ' + result.error);
-      } else {
-        _appendSessionLog('Completed update_ds_primitives.');
-        figma.notify('Primitives updated.');
-      }
-    } catch (err) {
-      _appendSessionLog('update_ds_primitives failed: ' + err.message);
-      figma.ui.postMessage({ type: 'primitives-update-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'primitives-update-done',
+      handler: _updateDsPrimitives,
+      executeLog: 'Executing update_ds_primitives.',
+      completedLog: 'Completed update_ds_primitives.',
+      failedPrefix: 'update_ds_primitives failed: ',
+      notify: 'Primitives updated.',
+      resultErrorIsFailure: true
+    });
   }
 
   if (msg.type === 'update-tokens') {
-    try {
-      _appendSessionLog('Executing update_ds_tokens.');
-      const result = await _updateDsTokens(msg.data || {});
-      figma.ui.postMessage({ type: 'tokens-update-done', fileKey: _getFigletsFileKey(), data: result });
-      if (result && result.error) {
-        _appendSessionLog('update_ds_tokens failed: ' + result.error);
-      } else {
-        _appendSessionLog('Completed update_ds_tokens.');
-        figma.notify('Tokens updated.');
-      }
-    } catch (err) {
-      _appendSessionLog('update_ds_tokens failed: ' + err.message);
-      figma.ui.postMessage({ type: 'tokens-update-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'tokens-update-done',
+      handler: _updateDsTokens,
+      executeLog: 'Executing update_ds_tokens.',
+      completedLog: 'Completed update_ds_tokens.',
+      failedPrefix: 'update_ds_tokens failed: ',
+      notify: 'Tokens updated.',
+      resultErrorIsFailure: true
+    });
   }
 
   if (msg.type === 'apply-setup-repairs') {
-    try {
-      _appendSessionLog('Executing apply_ds_setup_repairs.');
-      const result = await _applyDsSetupRepairs(msg.data || {});
-      figma.ui.postMessage({ type: 'setup-repairs-done', fileKey: _getFigletsFileKey(), data: result });
-      if (result && result.error) {
-        _appendSessionLog('apply_ds_setup_repairs failed: ' + result.error);
-      } else {
-        _appendSessionLog('Completed apply_ds_setup_repairs.');
-        figma.notify('Setup repairs applied.');
-      }
-    } catch (err) {
-      _appendSessionLog('apply_ds_setup_repairs failed: ' + err.message);
-      figma.ui.postMessage({ type: 'setup-repairs-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'setup-repairs-done',
+      handler: _applyDsSetupRepairs,
+      executeLog: 'Executing apply_ds_setup_repairs.',
+      completedLog: 'Completed apply_ds_setup_repairs.',
+      failedPrefix: 'apply_ds_setup_repairs failed: ',
+      notify: 'Setup repairs applied.',
+      resultErrorIsFailure: true
+    });
   }
 
   if (msg.type === 'apply-semantic-naming-consolidation') {
-    try {
-      _appendSessionLog('Executing apply_ds_semantic_naming_consolidation.');
-      const result = await _applySemanticNamingConsolidation(msg.data || {});
-      figma.ui.postMessage({ type: 'semantic-naming-consolidation-done', fileKey: _getFigletsFileKey(), data: result });
-      if (result && result.error) {
-        _appendSessionLog('apply_ds_semantic_naming_consolidation failed: ' + result.error);
-      } else {
-        _appendSessionLog('Completed apply_ds_semantic_naming_consolidation.');
-        figma.notify('Semantic naming consolidation applied.');
-      }
-    } catch (err) {
-      _appendSessionLog('apply_ds_semantic_naming_consolidation failed: ' + err.message);
-      figma.ui.postMessage({ type: 'semantic-naming-consolidation-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'semantic-naming-consolidation-done',
+      handler: _applySemanticNamingConsolidation,
+      executeLog: 'Executing apply_ds_semantic_naming_consolidation.',
+      completedLog: 'Completed apply_ds_semantic_naming_consolidation.',
+      failedPrefix: 'apply_ds_semantic_naming_consolidation failed: ',
+      notify: 'Semantic naming consolidation applied.',
+      resultErrorIsFailure: true
+    });
   }
 
   if (msg.type === 'apply-figma-operations') {
-    try {
-      _appendSessionLog('Executing apply_ds_figma_operations.');
-      const result = await _applyFigmaOperations(msg.data || {});
-      figma.ui.postMessage({ type: 'figma-operations-done', fileKey: _getFigletsFileKey(), data: result });
-      if (result && result.error) {
-        _appendSessionLog('apply_ds_figma_operations failed: ' + result.error);
-      } else {
-        _appendSessionLog('Completed apply_ds_figma_operations.');
-        figma.notify('Figma operations applied.');
-      }
-    } catch (err) {
-      _appendSessionLog('apply_ds_figma_operations failed: ' + err.message);
-      figma.ui.postMessage({ type: 'figma-operations-done', fileKey: _getFigletsFileKey(), data: { error: err.message } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'figma-operations-done',
+      handler: _applyFigmaOperations,
+      executeLog: 'Executing apply_ds_figma_operations.',
+      completedLog: 'Completed apply_ds_figma_operations.',
+      failedPrefix: 'apply_ds_figma_operations failed: ',
+      notify: 'Figma operations applied.',
+      resultErrorIsFailure: true
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -515,17 +504,17 @@ figma.ui.onmessage = async (msg) => {
   // Equivalent of figlets fig-document skill.
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'build-doc') {
-    try {
-      _appendSessionLog('Executing generate_component_doc.');
-      const result = await _buildComponentDoc(msg.data || {});
-      figma.ui.postMessage({ type: 'doc-built', fileKey: _getFigletsFileKey(), data: result });
-      _appendSessionLog(result && result.error ? ('generate_component_doc failed: ' + result.error) : 'Completed generate_component_doc.');
-      if (!result.error) figma.notify('Component spec sheet built!');
-    } catch (err) {
-      const _errMsg = err instanceof Error ? err.message : String(err);
-      _appendSessionLog('generate_component_doc failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'doc-built', fileKey: _getFigletsFileKey(), data: { error: _errMsg || 'Unknown error' } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'doc-built',
+      handler: _buildComponentDoc,
+      executeLog: 'Executing generate_component_doc.',
+      completedLog: 'Completed generate_component_doc.',
+      failedPrefix: 'generate_component_doc failed: ',
+      notify: 'Component spec sheet built!',
+      resultErrorIsFailure: true,
+      stringifyNonError: true,
+      errorFallback: 'Unknown error'
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -533,18 +522,20 @@ figma.ui.onmessage = async (msg) => {
   // design-system styles or variables.
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'qa-audit') {
-    try {
-      _appendSessionLog('Executing qa_binding_audit.');
-      const result = await _runQaBindingAudit(msg.data || {});
-      if (msg.data && msg.data.local) result.local = true;
-      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: _getFigletsFileKey(), data: result });
-      _appendSessionLog(result && result.error ? ('qa_binding_audit failed: ' + result.error) : 'Completed qa_binding_audit.');
-      if (!result.error) figma.notify('QA audit complete.');
-    } catch (err) {
-      const _errMsg = err instanceof Error ? err.message : String(err);
-      _appendSessionLog('qa_binding_audit failed: ' + _errMsg);
-      figma.ui.postMessage({ type: 'qa-audit-done', fileKey: _getFigletsFileKey(), data: { error: _errMsg || 'Unknown error' } });
-    }
+    await _runPluginBridgeCommand(msg, {
+      doneType: 'qa-audit-done',
+      handler: _runQaBindingAudit,
+      executeLog: 'Executing qa_binding_audit.',
+      completedLog: 'Completed qa_binding_audit.',
+      failedPrefix: 'qa_binding_audit failed: ',
+      notify: 'QA audit complete.',
+      resultErrorIsFailure: true,
+      stringifyNonError: true,
+      errorFallback: 'Unknown error',
+      afterResult: function (result) {
+        if (msg.data && msg.data.local) result.local = true;
+      }
+    });
   }
 };
 
@@ -683,6 +674,19 @@ async function _createDsBindingContext() {
   function isTextColorName(name) {
     return /(?:on[-_]surface|foreground|(?:^|\/)text(?:[-_\/]|$)|(?:^|\/)label(?:[-_\/]|$)|(?:^|\/)content(?:[-_\/]|$))/i.test(String(name || ''));
   }
+  function isIntentOrContextTextName(name) {
+    return /(?:^|\/)(?:brand|primary|accent|danger|error|destructive|success|positive|confirm|warning|caution|alert|info|on[-_](?:brand|primary|accent|danger|error|destructive|success|positive|confirm|warning|caution|alert|info))(?:\/|$)/i.test(String(name || ''));
+  }
+  function scoreGenericTextName(name) {
+    const n = String(name || '').toLowerCase();
+    if (isIconColorName(n) || !isTextColorName(n) || isIntentOrContextTextName(n)) return 0;
+    if (/^(?:color\/)?text\/default$/.test(n)) return 100;
+    if (/^(?:color\/)?(?:fg|foreground)\/default$/.test(n)) return 95;
+    if (/^(?:color\/)?on[-_]surface\/default$/.test(n)) return 90;
+    if (/(?:^|\/)(?:text|fg|foreground|on[-_]surface)(?:\/|$)/.test(n) &&
+        /(?:^|\/)(?:default|primary|base)(?:\/|$)/.test(n)) return 80;
+    return 40;
+  }
 
   function bestBgVar() {
     for (let i = 0; i < semanticRoleVars.length; i++) {
@@ -698,15 +702,16 @@ async function _createDsBindingContext() {
     return best;
   }
   function bestTextVar() {
+    let named = null, namedScore = 0;
     for (let i = 0; i < semanticRoleVars.length; i++) {
-      if (/(?:on[-_]surface|foreground)(?:[/_-]default)?$/i.test(semanticRoleVars[i].name)) return semanticRoleVars[i];
+      const score = scoreGenericTextName(semanticRoleVars[i].name);
+      if (score > namedScore) { named = semanticRoleVars[i]; namedScore = score; }
     }
-    for (let i = 0; i < semanticRoleVars.length; i++) {
-      if (isTextColorName(semanticRoleVars[i].name) && !isIconColorName(semanticRoleVars[i].name)) return semanticRoleVars[i];
-    }
+    if (named) return named;
     let best = null, bestLum = 2;
     for (let i = 0; i < semanticRoleVars.length; i++) {
       if (isIconColorName(semanticRoleVars[i].name)) continue;
+      if (isIntentOrContextTextName(semanticRoleVars[i].name)) continue;
       const c = rgb(semanticRoleVars[i]);
       if (c && lum(c) < bestLum) { best = semanticRoleVars[i]; bestLum = lum(c); }
     }
@@ -750,8 +755,8 @@ async function _createDsBindingContext() {
   };
 
   const ROLE = {
-    onSurface: { FG: 3, ICON: -8, BG: -4, OUTLINE: -3, VARIANT: -1, DEFAULT: 1, STRONG: 1 },
-    onSurfaceVar: { FG: 3, ICON: -8, BG: -4, OUTLINE: -3, VARIANT: 2 },
+    onSurface: { FG: 3, ICON: -8, BG: -4, OUTLINE: -3, VARIANT: -1, DEFAULT: 1, STRONG: 1, BRAND: -3, SUCCESS: -6, WARNING: -6, DANGER: -6 },
+    onSurfaceVar: { FG: 3, ICON: -8, BG: -4, OUTLINE: -3, VARIANT: 2, BRAND: -3, SUCCESS: -6, WARNING: -6, DANGER: -6 },
     surfaceDefault: { BG: 3, FG: -4, VARIANT: -1, DEFAULT: 2, BRAND: -2 },
     surfaceVariant: { BG: 3, FG: -4, VARIANT: 2 },
     surfaceBrand: { BG: 2, FG: -4, BRAND: 3 },
@@ -776,6 +781,9 @@ async function _createDsBindingContext() {
   };
   function isTextRole(role) {
     return role === 'onSurface' || role === 'onSurfaceVar' || role === 'onBrandVariant' || /Text$/.test(String(role || ''));
+  }
+  function isGenericTextRole(role) {
+    return role === 'onSurface' || role === 'onSurfaceVar';
   }
 
   function pathCats(name) {
@@ -819,6 +827,7 @@ async function _createDsBindingContext() {
       const seg = adjustedSegScore(s.name, role, segScore(s.name, role));
       if (seg <= 0) continue;
       if (isTextRole(role) && isIconColorName(s.name)) continue;
+      if (isGenericTextRole(role) && isIntentOrContextTextName(s.name)) continue;
       if (requiredCats) {
         const cats = pathCats(s.name);
         let ok = true;
@@ -836,6 +845,7 @@ async function _createDsBindingContext() {
     let funcBest = null, funcScore = 0;
     for (let i = 0; i < scored.length; i++) {
       if (isTextRole(role) && isIconColorName(scored[i].name)) continue;
+      if (isGenericTextRole(role) && isIntentOrContextTextName(scored[i].name)) continue;
       const score = scorer(scored[i]);
       if (score > funcScore) { funcScore = score; funcBest = scored[i]; }
     }
@@ -1409,6 +1419,7 @@ async function _resetFigletsFile(opts) {
 async function _runQaBindingAudit(opts) {
   opts = opts || {};
   const shouldFix = !!opts.fix;
+  const approvedSuggestions = Array.isArray(opts.approvedSuggestions) ? opts.approvedSuggestions : [];
   const maxNodes = typeof opts.maxNodes === 'number' && opts.maxNodes > 0 ? opts.maxNodes : 2500;
   const deadlineMs = typeof opts.deadlineMs === 'number' && opts.deadlineMs > 0 ? opts.deadlineMs : 45000;
   const startedAt = Date.now();
@@ -1428,15 +1439,133 @@ async function _runQaBindingAudit(opts) {
     return 'rgb(' + Math.round(c.r * 255) + ',' + Math.round(c.g * 255) + ',' + Math.round(c.b * 255) + ')';
   }
 
-  function _suggestion(kind, variable, confidence, reason) {
-    if (!variable) return { kind: 'none', confidence: 'none', reason: reason || 'No semantic style or variable available.' };
+  function _roundMetric(value) {
+    return Math.round(Number(value || 0) * 1000) / 1000;
+  }
+
+  function _rgbToHsl(c) {
+    const r = c.r, g = c.g, b = c.b;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    let h = 0;
+    let s = 0;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h /= 6;
+    }
+    return { h: h, s: s, l: l };
+  }
+
+  function _hueDistance(a, b) {
+    const d = Math.abs(a - b);
+    return Math.min(d, 1 - d);
+  }
+
+  function _colorDistanceMetrics(rawColor, tokenColor) {
+    const raw = _rgbToHsl(rawColor);
+    const token = _rgbToHsl(tokenColor);
+    const chromaWeight = Math.max(raw.s, token.s);
+    const hueDistance = _hueDistance(raw.h, token.h);
+    const saturationDistance = Math.abs(raw.s - token.s);
+    const lightnessDistance = Math.abs(raw.l - token.l);
+    const hueScore = chromaWeight < 0.08 ? 0 : hueDistance * 2.5;
+    const distance = hueScore + saturationDistance * 0.8 + lightnessDistance * 1.2;
+    return {
+      distance: _roundMetric(distance),
+      hueDistance: _roundMetric(hueDistance),
+      saturationDistance: _roundMetric(saturationDistance),
+      lightnessDistance: _roundMetric(lightnessDistance)
+    };
+  }
+
+  function _isSurfaceTokenName(name) {
+    return /(?:^|\/)(?:bg|background|surface|fill|container|base|page|canvas)(?:\/|$)/i.test(String(name || '')) &&
+      !/(?:^|\/)(?:text|foreground|fg|icon|border|outline|stroke|shadow|scrim|overlay|elevation)(?:\/|$)/i.test(String(name || ''));
+  }
+
+  function _isTextTokenName(name) {
+    return /(?:^|\/)(?:text|foreground|fg|on[-_]surface|on[-_][a-z0-9_-]+)(?:\/|$)/i.test(String(name || '')) &&
+      !/(?:^|\/)(?:icon|bg|background|surface|fill|border|outline|stroke|shadow|scrim|overlay|elevation)(?:\/|$)/i.test(String(name || ''));
+  }
+
+  function _isStrokeTokenName(name) {
+    return /(?:^|\/)(?:border|outline|stroke)(?:\/|$)/i.test(String(name || ''));
+  }
+
+  function _colorCandidateKindForProperty(node, property) {
+    if (property === 'Stroke color') return 'stroke';
+    if (node && node.type === 'TEXT') return 'text';
+    return 'surface';
+  }
+
+  function _colorCandidateMatchesKind(variable, kind) {
+    if (!variable || variable.resolvedType !== 'COLOR') return false;
+    if (kind === 'surface') return _isSurfaceTokenName(variable.name);
+    if (kind === 'text') return _isTextTokenName(variable.name);
+    if (kind === 'stroke') return _isStrokeTokenName(variable.name);
+    return true;
+  }
+
+  function _colorCandidates(rawColor, kind, limit) {
+    limit = limit || 6;
+    const out = [];
+    if (!rawColor) return out;
+    const keys = Object.keys(_ds.varByName || {});
+    for (let i = 0; i < keys.length; i++) {
+      const variable = _ds.varByName[keys[i]];
+      if (!_colorCandidateMatchesKind(variable, kind)) continue;
+      const value = _ds.resolveVarValue(variable);
+      if (!value || typeof value !== 'object' || !('r' in value)) continue;
+      const metrics = _colorDistanceMetrics(rawColor, value);
+      out.push({
+        token: variable.name,
+        id: variable.id,
+        kind: kind,
+        value: {
+          r: _roundMetric(value.r),
+          g: _roundMetric(value.g),
+          b: _roundMetric(value.b)
+        },
+        distance: metrics.distance,
+        hueDistance: metrics.hueDistance,
+        saturationDistance: metrics.saturationDistance,
+        lightnessDistance: metrics.lightnessDistance
+      });
+    }
+    out.sort(function (a, b) {
+      return a.distance - b.distance || a.hueDistance - b.hueDistance || a.lightnessDistance - b.lightnessDistance || a.token.localeCompare(b.token);
+    });
+    return out.slice(0, limit);
+  }
+
+  function _suggestion(kind, variable, confidence) {
+    if (!variable) return { kind: 'none', confidence: 'none' };
+    const resolvedValue = _ds.resolveVarValue(variable);
     return {
       kind: kind || 'variable',
       name: variable.name,
       id: variable.id,
       confidence: confidence || 'high',
-      reason: reason || 'Matched by binding policy.'
+      value: resolvedValue === undefined ? null : resolvedValue
     };
+  }
+
+  function _nearestFloatSuggestion(value, purpose, label) {
+    const exact = _ds.pickFloatByValue(value, purpose);
+    if (exact) return _suggestion('variable', exact, 'high');
+    const nearest = _ds.pickFloatByNearest(value, purpose, 'nearest', 8);
+    if (!nearest) return _suggestion('variable', null, 'none');
+    const nearestValue = _ds.resolveVarValue(nearest);
+    const distance = typeof nearestValue === 'number' ? Math.abs(Number(nearestValue) - Number(value)) : null;
+    const suggestion = _suggestion('variable', nearest, 'medium');
+    suggestion.distance = distance;
+    suggestion.expectedValue = value;
+    return suggestion;
   }
 
   function _scalarTypoMatch(nodeValue, styleValue) {
@@ -1464,6 +1593,65 @@ async function _runQaBindingAudit(opts) {
     return null;
   }
 
+  function _lineHeightPx(value, fontSize) {
+    if (!value || value === figma.mixed) return null;
+    if (typeof value === 'object') {
+      if (value.unit === 'PIXELS') return Number(value.value);
+      if (value.unit === 'PERCENT' && typeof fontSize === 'number') return Number(value.value) * fontSize / 100;
+    }
+    return null;
+  }
+
+  function _letterSpacingPx(value, fontSize) {
+    if (!value || value === figma.mixed) return null;
+    if (typeof value === 'object') {
+      if (value.unit === 'PIXELS') return Number(value.value);
+      if (value.unit === 'PERCENT' && typeof fontSize === 'number') return Number(value.value) * fontSize / 100;
+    }
+    return null;
+  }
+
+  function _styleDistanceForNode(node, style) {
+    let distance = 0;
+    const nodeSize = typeof node.fontSize === 'number' ? node.fontSize : null;
+    const styleSize = typeof style.fontSize === 'number' ? style.fontSize : null;
+    if (nodeSize !== null && styleSize !== null) distance += Math.abs(nodeSize - styleSize) * 1.4;
+    const nodeLine = _lineHeightPx(node.lineHeight, nodeSize);
+    const styleLine = _lineHeightPx(style.lineHeight, styleSize);
+    if (nodeLine !== null && styleLine !== null) distance += Math.abs(nodeLine - styleLine) * 0.4;
+    const nodeTracking = _letterSpacingPx(node.letterSpacing, nodeSize);
+    const styleTracking = _letterSpacingPx(style.letterSpacing, styleSize);
+    if (nodeTracking !== null && styleTracking !== null) distance += Math.abs(nodeTracking - styleTracking) * 0.8;
+    if (node.fontName !== figma.mixed && style.fontName && node.fontName) {
+      if (node.fontName.family !== style.fontName.family) distance += 6;
+      if (node.fontName.style !== style.fontName.style) distance += 2;
+    }
+    return distance;
+  }
+
+  function _typographyCandidates(node, limit) {
+    limit = limit || 6;
+    const out = [];
+    if (!node || node.type !== 'TEXT') return out;
+    for (let i = 0; i < _ds.textStyles.length; i++) {
+      const style = _ds.textStyles[i];
+      const distance = _styleDistanceForNode(node, style);
+      out.push({
+        token: style.name,
+        id: style.id,
+        kind: 'textStyle',
+        fontSize: typeof style.fontSize === 'number' ? style.fontSize : null,
+        fontFamily: style.fontName && style.fontName.family || '',
+        fontStyle: style.fontName && style.fontName.style || '',
+        distance: _roundMetric(distance)
+      });
+    }
+    out.sort(function (a, b) {
+      return a.distance - b.distance || a.token.localeCompare(b.token);
+    });
+    return out.slice(0, limit);
+  }
+
   function _fixabilityForViolation(violation) {
     const suggestion = violation.suggestion || {};
     if (suggestion.confidence === 'high' && suggestion.id) return 'fixableNow';
@@ -1479,6 +1667,189 @@ async function _runQaBindingAudit(opts) {
 
   function _nameText(node) {
     return String((node && node.name) || '').toLowerCase();
+  }
+
+  function _ancestorNames(node) {
+    const names = [];
+    let cursor = node && node.parent;
+    while (cursor && cursor !== figma.currentPage && names.length < 6) {
+      if (cursor.name) names.push(cursor.name);
+      cursor = cursor.parent;
+    }
+    return names;
+  }
+
+  function _textDescendants(node) {
+    const out = [];
+    function walk(current) {
+      if (!current || out.length >= 6) return;
+      if (current.type === 'TEXT') {
+        const chars = String(current.characters || '').trim();
+        if (chars) out.push(chars.slice(0, 80));
+      }
+      if ('children' in current && current.children) {
+        for (let i = 0; i < current.children.length && out.length < 6; i++) walk(current.children[i]);
+      }
+    }
+    walk(node);
+    return out;
+  }
+
+  function _stateContextText(node) {
+    const parts = [];
+    if (node && node.name) parts.push(node.name);
+    const parents = _ancestorNames(node);
+    for (let i = 0; i < parents.length; i++) parts.push(parents[i]);
+    const texts = _textDescendants(node);
+    for (let j = 0; j < texts.length; j++) parts.push(texts[j]);
+    return parts.join(' ').toLowerCase();
+  }
+
+  function _hasStateLikeContext(node) {
+    return /(?:sold\s*out|out\s*of\s*stock|unavailable|disabled|inactive|error|danger|destructive|warning|caution|alert|success|positive|confirm)/i.test(_stateContextText(node));
+  }
+
+  function _isGenericStateSurfaceToken(name) {
+    const n = String(name || '').toLowerCase();
+    if (/(?:danger|error|destructive|warning|caution|alert|success|positive|confirm|disabled|unavailable|sold[-_\s]*out)/.test(n)) return false;
+    return /(?:^|\/)(?:default|muted|subtle|secondary|variant|surface|bg|background|base|page|canvas)(?:\/|$|-)/.test(n);
+  }
+
+  function _nodeFactPacket(node, rawColor, kind) {
+    const facts = {
+      name: node && node.name || '',
+      type: node && node.type || '',
+      role: kind || '',
+      parentNames: _ancestorNames(node)
+    };
+    if (rawColor) {
+      facts.rawFill = {
+        rgb: {
+          r: _roundMetric(rawColor.r),
+          g: _roundMetric(rawColor.g),
+          b: _roundMetric(rawColor.b)
+        },
+        text: _rgbText(rawColor)
+      };
+    }
+    const texts = _textDescendants(node);
+    if (texts.length) facts.textDescendants = texts;
+    return facts;
+  }
+
+  function _paintBoundColorVarId(paint) {
+    const bound = paint && paint.boundVariables && paint.boundVariables.color;
+    if (!bound) return '';
+    return String(bound.id || bound);
+  }
+
+  function _isQaIconColorName(name) {
+    return /(?:^|\/)icon(?:\/|$|-)/i.test(String(name || ''));
+  }
+
+  function _nodeBoundFillVariable(node) {
+    if (!node || !node.fills || !Array.isArray(node.fills)) return null;
+    for (let i = 0; i < node.fills.length; i++) {
+      const paint = node.fills[i];
+      if (!paint || paint.type !== 'SOLID') continue;
+      const paintId = _paintBoundColorVarId(paint);
+      if (paintId && _ds.varById[paintId]) return _ds.varById[paintId];
+      const nodeBound = node.boundVariables && node.boundVariables.fills && node.boundVariables.fills[i];
+      const nodeBoundId = nodeBound && (nodeBound.id || (nodeBound.color && nodeBound.color.id) || nodeBound);
+      if (nodeBoundId && _ds.varById[String(nodeBoundId)]) return _ds.varById[String(nodeBoundId)];
+    }
+    return null;
+  }
+
+  function _surfaceRoleVariableForNode(node) {
+    if (!node || node.type === 'TEXT') return null;
+    const bound = _nodeBoundFillVariable(node);
+    if (bound) return bound;
+    if (!node.fills || !Array.isArray(node.fills)) return null;
+    for (let i = 0; i < node.fills.length; i++) {
+      const fill = node.fills[i];
+      if (!fill || fill.type !== 'SOLID') continue;
+      const role = _colorRoleFor(node, 'Fill color');
+      const variable = _ds.colorRoles[role] || null;
+      if (variable) return variable;
+    }
+    return null;
+  }
+
+  function _firstSolidFillColor(node) {
+    if (!node || !node.fills || !Array.isArray(node.fills)) return null;
+    for (let i = 0; i < node.fills.length; i++) {
+      const fill = node.fills[i];
+      if (fill && fill.type === 'SOLID') return fill.color;
+    }
+    return null;
+  }
+
+  function _foregroundCandidatesForSurfaceName(name) {
+    const raw = String(name || '');
+    const hasColorPrefix = /^color\//i.test(raw);
+    const parts = raw.toLowerCase().split('/').filter(Boolean);
+    if (parts[0] === 'color') parts.shift();
+    if (!parts.length) return [];
+    const family = parts[0];
+    if (['bg', 'background', 'surface', 'fill', 'container', 'base', 'page', 'canvas'].indexOf(family) < 0) return [];
+    const rest = parts.slice(1);
+    const leaf = rest.join('/');
+    if (!leaf) return [];
+    const first = rest[0] || '';
+    const candidates = [];
+    function add(value) {
+      if (!value) return;
+      candidates.push(hasColorPrefix ? 'color/' + value : value);
+      candidates.push(value);
+    }
+    if (/^(default|base|page|canvas)$/.test(leaf)) {
+      add('text/default');
+      add('foreground/default');
+      add('on-surface/default');
+    }
+    if (family === 'surface') {
+      add('on-surface/' + leaf);
+      add('text/' + leaf);
+      add('foreground/' + leaf);
+    }
+    add('text/on-' + leaf);
+    add('foreground/on-' + leaf);
+    add('on-' + leaf);
+    add('text/' + leaf);
+    add('foreground/' + leaf);
+    return candidates;
+  }
+
+  function _pairedForegroundForSurface(surfaceVariable) {
+    const candidates = _foregroundCandidatesForSurfaceName(surfaceVariable && surfaceVariable.name);
+    for (let i = 0; i < candidates.length; i++) {
+      const variable = _ds.varByName[candidates[i]];
+      if (variable && variable.resolvedType === 'COLOR' && !_isQaIconColorName(variable.name)) return variable;
+    }
+    return null;
+  }
+
+  function _surfaceTextSuggestion(node, rawColor) {
+    let cursor = node && node.parent;
+    while (cursor && cursor !== figma.currentPage) {
+      const surface = _surfaceRoleVariableForNode(cursor);
+      const foreground = _pairedForegroundForSurface(surface);
+      if (surface && foreground) {
+        const ambiguousStateSurface = _hasStateLikeContext(cursor) && _isGenericStateSurfaceToken(surface.name);
+        return _augmentSuggestion(_suggestion(
+          'variable',
+          foreground,
+          ambiguousStateSurface ? 'medium' : 'high'
+        ), {
+          facts: _nodeFactPacket(node, rawColor, 'text'),
+          candidates: rawColor ? _colorCandidates(rawColor, 'text', 6) : undefined,
+          roleCandidate: { token: foreground.name, id: foreground.id, surfaceToken: surface.name, surfaceId: surface.id }
+        });
+      }
+      cursor = cursor.parent;
+    }
+    return null;
   }
 
   function _colorRoleFor(node, property) {
@@ -1509,13 +1880,60 @@ async function _runQaBindingAudit(opts) {
     return 'surfaceDefault';
   }
 
-  function _colorSuggestion(node, property) {
+  function _augmentSuggestion(suggestion, extras) {
+    extras = extras || {};
+    if (extras.candidates) suggestion.candidates = extras.candidates;
+    if (extras.facts) suggestion.facts = extras.facts;
+    if (extras.roleCandidate) suggestion.roleCandidate = extras.roleCandidate;
+    return suggestion;
+  }
+
+  function _colorSuggestion(node, property, rawColor) {
+    if (property === 'Fill color' && node.type === 'TEXT') {
+      const surfaceSuggestion = _surfaceTextSuggestion(node, rawColor);
+      if (surfaceSuggestion) return surfaceSuggestion;
+    }
     const role = _colorRoleFor(node, property);
     const variable = _ds.colorRoles[role] || null;
-    return _suggestion('variable', variable, variable ? 'high' : 'none',
-      variable
-        ? 'Semantic color variable "' + variable.name + '" matches role "' + role + '".'
-        : 'No semantic color variable found for role "' + role + '". Use token completion if a new color token is needed.');
+    const kind = _colorCandidateKindForProperty(node, property);
+    const candidates = _colorCandidates(rawColor, kind, 6);
+    const facts = _nodeFactPacket(node, rawColor, kind);
+    const roleCandidate = variable ? { token: variable.name, id: variable.id, role: role } : { role: role };
+    const ambiguousStateSurface = kind === 'surface' && _hasStateLikeContext(node) && variable && _isGenericStateSurfaceToken(variable.name);
+    if (rawColor && candidates.length) {
+      const top = candidates[0];
+      const roleMatch = variable && top.id === variable.id;
+      const roleRank = variable ? candidates.findIndex(function (candidate) { return candidate.id === variable.id; }) : -1;
+      const roleCandidateMetrics = roleRank >= 0 ? candidates[roleRank] : null;
+      const roleDistance = roleCandidateMetrics ? roleCandidateMetrics.distance : Infinity;
+      const visualWins = !roleMatch && top.distance <= 0.16 && (roleDistance - top.distance > 0.06 || roleRank < 0);
+      if (visualWins && _ds.varById[top.id]) {
+        return _augmentSuggestion(_suggestion('variable', _ds.varById[top.id], 'medium'), {
+          candidates: candidates,
+          facts: facts,
+          roleCandidate: roleCandidate
+        });
+      }
+      if (roleMatch && top.distance <= 0.16) {
+        return _augmentSuggestion(_suggestion('variable', variable, ambiguousStateSurface ? 'medium' : 'high'), {
+          candidates: candidates,
+          facts: facts,
+          roleCandidate: roleCandidate
+        });
+      }
+      if (variable && top.distance <= 0.16 && roleDistance <= 0.22) {
+        return _augmentSuggestion(_suggestion('variable', variable, 'medium'), {
+          candidates: candidates,
+          facts: facts,
+          roleCandidate: roleCandidate
+        });
+      }
+    }
+    return _augmentSuggestion(_suggestion('variable', variable, variable ? (ambiguousStateSurface ? 'medium' : 'high') : 'none'), {
+      candidates: candidates,
+      facts: facts,
+      roleCandidate: roleCandidate
+    });
   }
 
   function _textRolePatterns(node) {
@@ -1527,6 +1945,7 @@ async function _runQaBindingAudit(opts) {
   }
 
   function _typographySuggestion(node) {
+    const candidates = _typographyCandidates(node, 6);
     const exactStyle = _exactTextStyleForNode(node);
     if (exactStyle) {
       return {
@@ -1534,7 +1953,16 @@ async function _runQaBindingAudit(opts) {
         name: exactStyle.name,
         id: exactStyle.id,
         confidence: 'high',
-        reason: 'Exact text style match by font family, size, line height, and tracking.'
+        candidates: candidates,
+        facts: {
+          name: node.name || '',
+          type: node.type || '',
+          rawTypography: {
+            fontSize: typeof node.fontSize === 'number' ? node.fontSize : null,
+            fontFamily: node.fontName && node.fontName.family || '',
+            fontStyle: node.fontName && node.fontName.style || ''
+          }
+        }
       };
     }
     const match = _textRolePatterns(node);
@@ -1545,17 +1973,25 @@ async function _runQaBindingAudit(opts) {
         name: binding.style.name,
         id: binding.style.id,
         confidence: 'medium',
-        reason: 'Role/name-based text style suggestion for "' + match.role + '"; not an exact property match.'
+        candidates: candidates,
+        facts: {
+          name: node.name || '',
+          type: node.type || '',
+          rawTypography: {
+            fontSize: typeof node.fontSize === 'number' ? node.fontSize : null,
+            fontFamily: node.fontName && node.fontName.family || '',
+            fontStyle: node.fontName && node.fontName.style || ''
+          }
+        }
       };
     }
     if (binding.kind === 'variables' && binding.variables) {
       const variable = binding.variables.sizeVar || binding.variables.lineHeightVar || binding.variables.weightVar || binding.variables.familyVar;
-      return _suggestion('typographyVariables', variable, variable ? 'medium' : 'none',
-        variable
-          ? 'Typography variables found for role "' + match.role + '"; review before binding raw text fields.'
-          : binding.warning);
+      const suggestion = _suggestion('typographyVariables', variable, variable ? 'medium' : 'none');
+      suggestion.candidates = candidates;
+      return suggestion;
     }
-    return { kind: 'none', confidence: 'none', reason: binding.warning || 'No typography style or variables found; use inspect_ds_token_gaps if new tokens are needed.' };
+    return { kind: 'none', confidence: 'none', candidates: candidates };
   }
 
   function _pushViolation(node, property, rawValue, type, details) {
@@ -1567,13 +2003,188 @@ async function _runQaBindingAudit(opts) {
       property: property,
       rawValue: rawValue,
       type: type,
-      suggestion: details.suggestion || { kind: 'none', confidence: 'none', reason: 'No suggestion.' }
+      suggestion: details.suggestion || { kind: 'none', confidence: 'none' }
     };
     if (details.fillIndex !== undefined) violation.fillIndex = details.fillIndex;
     if (details.strokeIndex !== undefined) violation.strokeIndex = details.strokeIndex;
     violation.fixability = _fixabilityForViolation(violation);
     violations.push(violation);
     return violation;
+  }
+
+  function _approvalInputForViolation(violation) {
+    const item = {
+      issueNumber: violation.issueNumber || null,
+      nodeId: violation.nodeId,
+      nodeName: violation.nodeName,
+      property: violation.property,
+      type: violation.type,
+      rawValue: violation.rawValue,
+      expectedRawValue: violation.rawValue,
+      suggestion: {
+        kind: violation.suggestion.kind,
+        name: violation.suggestion.name,
+        id: violation.suggestion.id,
+        confidence: violation.suggestion.confidence
+      }
+    };
+    if (violation.fillIndex !== undefined) item.fillIndex = violation.fillIndex;
+    if (violation.strokeIndex !== undefined) item.strokeIndex = violation.strokeIndex;
+    if (violation.suggestion.value !== undefined) item.suggestion.value = violation.suggestion.value;
+    if (violation.suggestion.distance !== undefined) item.suggestion.distance = violation.suggestion.distance;
+    if (violation.suggestion.expectedValue !== undefined) item.suggestion.expectedValue = violation.suggestion.expectedValue;
+    if (Array.isArray(violation.suggestion.candidates)) item.suggestion.candidates = violation.suggestion.candidates;
+    if (violation.suggestion.facts) item.suggestion.facts = violation.suggestion.facts;
+    if (violation.suggestion.roleCandidate) item.suggestion.roleCandidate = violation.suggestion.roleCandidate;
+    return item;
+  }
+
+  function _approvedSuggestionId(approval) {
+    const approvedSuggestion = approval && approval.suggestion || {};
+    return approvedSuggestion.id || approvedSuggestion.variableId || approvedSuggestion.styleId || '';
+  }
+
+  function _approvedSuggestionName(approval) {
+    const approvedSuggestion = approval && approval.suggestion || {};
+    return approvedSuggestion.name || approvedSuggestion.token || approvedSuggestion.variableName || approvedSuggestion.styleName || '';
+  }
+
+  function _approvedTarget(approval) {
+    return {
+      id: _approvedSuggestionId(approval),
+      name: _approvedSuggestionName(approval),
+      kind: approval && approval.suggestion && approval.suggestion.kind || '',
+      confidence: approval && approval.suggestion && approval.suggestion.confidence || ''
+    };
+  }
+
+  function _targetMatches(target, id, name) {
+    return Boolean(
+      (target.id && String(target.id) === String(id)) ||
+      (target.name && String(target.name) === String(name))
+    );
+  }
+
+  function _suggestionApprovalMetadata(suggestion) {
+    return {
+      candidates: Array.isArray(suggestion && suggestion.candidates) ? suggestion.candidates : undefined,
+      facts: suggestion && suggestion.facts || null,
+      roleCandidate: suggestion && suggestion.roleCandidate || null
+    };
+  }
+
+  function _findApprovedVariable(approval) {
+    const target = _approvedTarget(approval);
+    if (target.id && _ds.varById[target.id]) return _ds.varById[target.id];
+    if (target.name && _ds.varByName[target.name]) return _ds.varByName[target.name];
+    return null;
+  }
+
+  function _findApprovedTextStyle(approval) {
+    const target = _approvedTarget(approval);
+    for (let i = 0; i < _ds.textStyles.length; i++) {
+      const style = _ds.textStyles[i];
+      if (_targetMatches(target, style.id, style.name)) return style;
+    }
+    return null;
+  }
+
+  function _isQaColorProperty(property) {
+    return property === 'Fill color' || property === 'Stroke color';
+  }
+
+  function _isQaFloatProperty(property) {
+    return property === 'Stroke weight' ||
+      property === 'Corner radius' ||
+      ['paddingTop','paddingBottom','paddingLeft','paddingRight','itemSpacing','counterAxisSpacing'].indexOf(property) >= 0;
+  }
+
+  function _exactApprovedSuggestion(violation, approval) {
+    const approvedSuggestion = approval && approval.suggestion || {};
+    const suggestion = violation && violation.suggestion || {};
+    const metadata = _suggestionApprovalMetadata(suggestion);
+    if (!_approvedSuggestionId(approval) && !_approvedSuggestionName(approval)) return null;
+    if (violation.property === 'Text style') {
+      const style = _findApprovedTextStyle(approval);
+      if (!style) return null;
+      return {
+        kind: 'textStyle',
+        name: style.name,
+        id: style.id,
+        confidence: 'medium',
+        candidates: metadata.candidates,
+        facts: metadata.facts,
+        exactDesignerChoice: true
+      };
+    }
+    const variable = _findApprovedVariable(approval);
+    if (!variable) return null;
+    if (_isQaColorProperty(violation.property) && variable.resolvedType !== 'COLOR') return null;
+    if (_isQaFloatProperty(violation.property) && variable.resolvedType !== 'FLOAT') return null;
+    if (approvedSuggestion.kind === 'textStyle') return null;
+    return {
+      kind: 'variable',
+      name: variable.name,
+      id: variable.id,
+      confidence: 'medium',
+      value: suggestion.value,
+      expectedValue: suggestion.expectedValue,
+      candidates: metadata.candidates,
+      facts: metadata.facts,
+      roleCandidate: metadata.roleCandidate,
+      exactDesignerChoice: true
+    };
+  }
+
+  function _approvedCandidateSuggestion(violation, approval) {
+    const target = _approvedTarget(approval);
+    const suggestion = violation && violation.suggestion || {};
+    const metadata = _suggestionApprovalMetadata(suggestion);
+    if (!target.id && !target.name) return suggestion;
+    if (_targetMatches(target, suggestion.id, suggestion.name)) {
+      return suggestion;
+    }
+    const candidates = Array.isArray(suggestion.candidates) ? suggestion.candidates : [];
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      if (_targetMatches(target, candidate.id, candidate.token || candidate.name)) {
+        return {
+          kind: suggestion.kind || 'variable',
+          name: candidate.token || candidate.name,
+          id: candidate.id,
+          confidence: suggestion.confidence,
+          candidates: candidates,
+          facts: metadata.facts,
+          roleCandidate: metadata.roleCandidate
+        };
+      }
+    }
+    return _exactApprovedSuggestion(violation, approval);
+  }
+
+  function _matchesApproval(violation, approval) {
+    if (!approval || String(approval.nodeId || '') !== String(violation.nodeId || '')) return false;
+    if (String(approval.property || '') !== String(violation.property || '')) return false;
+    if (approval.fillIndex !== undefined && Number(approval.fillIndex) !== Number(violation.fillIndex || 0)) return false;
+    if (approval.strokeIndex !== undefined && Number(approval.strokeIndex) !== Number(violation.strokeIndex || 0)) return false;
+    return true;
+  }
+
+  function _validateApprovedSuggestion(violation, approval) {
+    if (!violation) return 'APPROVAL_NOT_FOUND';
+    const expectedRawValue = approval.expectedRawValue !== undefined ? approval.expectedRawValue : approval.rawValue;
+    if (expectedRawValue !== undefined && String(expectedRawValue) !== String(violation.rawValue)) return 'STALE_RAW_VALUE';
+    const approvedSuggestion = approval.suggestion || {};
+    const target = _approvedTarget(approval);
+    const suggestion = _approvedCandidateSuggestion(violation, approval);
+    if (!suggestion) return 'SUGGESTION_MISMATCH';
+    if (!suggestion.id) return 'NO_SUGGESTION';
+    if (target.id && String(target.id) !== String(suggestion.id)) return 'SUGGESTION_MISMATCH';
+    if (target.name && String(target.name) !== String(suggestion.name)) return 'SUGGESTION_MISMATCH';
+    if (approvedSuggestion.kind && String(approvedSuggestion.kind) !== String(suggestion.kind)) return 'SUGGESTION_MISMATCH';
+    if (approvedSuggestion.confidence && String(approvedSuggestion.confidence) !== String(suggestion.confidence)) return 'SUGGESTION_MISMATCH';
+    if (suggestion.confidence !== 'medium' && suggestion.confidence !== 'high') return 'LOW_CONFIDENCE';
+    return 'OK';
   }
 
   function _applyQaFix(violation) {
@@ -1640,6 +2251,20 @@ async function _runQaBindingAudit(opts) {
     return 'UNKNOWN_PROPERTY';
   }
 
+  function _applyQaApprovedSuggestion(violation, approval) {
+    const validation = _validateApprovedSuggestion(violation, approval);
+    if (validation !== 'OK') return validation;
+    const approved = _approvedCandidateSuggestion(violation, approval);
+    const originalSuggestion = violation.suggestion;
+    violation.suggestion = approved;
+    const originalConfidence = violation.suggestion.confidence;
+    violation.suggestion.confidence = 'high';
+    const result = _applyQaFix(violation);
+    violation.suggestion.confidence = originalConfidence;
+    violation.suggestion = originalSuggestion;
+    return result;
+  }
+
   function _auditNode(node) {
     if (truncated) return;
     if (!node || node.type === 'INSTANCE') return;
@@ -1660,7 +2285,7 @@ async function _runQaBindingAudit(opts) {
       for (let i = 0; i < node.fills.length; i++) {
         const fill = node.fills[i];
         if (fill && fill.type === 'SOLID' && !(node.boundVariables && node.boundVariables.fills && node.boundVariables.fills[i])) {
-          _pushViolation(node, 'Fill color', _rgbText(fill.color), 'color', { fillIndex: i, suggestion: _colorSuggestion(node, 'Fill color') });
+          _pushViolation(node, 'Fill color', _rgbText(fill.color), 'color', { fillIndex: i, suggestion: _colorSuggestion(node, 'Fill color', fill.color) });
         }
       }
     }
@@ -1669,7 +2294,7 @@ async function _runQaBindingAudit(opts) {
       for (let i = 0; i < node.strokes.length; i++) {
         const stroke = node.strokes[i];
         if (stroke && stroke.type === 'SOLID' && !(node.boundVariables && node.boundVariables.strokes && node.boundVariables.strokes[i])) {
-          _pushViolation(node, 'Stroke color', _rgbText(stroke.color), 'color', { strokeIndex: i, suggestion: _colorSuggestion(node, 'Stroke color') });
+          _pushViolation(node, 'Stroke color', _rgbText(stroke.color), 'color', { strokeIndex: i, suggestion: _colorSuggestion(node, 'Stroke color', stroke.color) });
         }
       }
     }
@@ -1685,18 +2310,16 @@ async function _runQaBindingAudit(opts) {
         )
       );
       if (!swBound) {
-        const variable = _ds.pickFloatByValue(node.strokeWeight, 'border');
         _pushViolation(node, 'Stroke weight', node.strokeWeight + 'px', 'border', {
-          suggestion: _suggestion('variable', variable, variable ? 'high' : 'none', variable ? 'Exact value and border semantics.' : 'No exact border variable found.')
+          suggestion: _nearestFloatSuggestion(node.strokeWeight, 'border', 'border')
         });
       }
     }
 
     if (node.type !== 'TEXT' && typeof node.cornerRadius === 'number' && node.cornerRadius !== 0) {
       if (!(node.boundVariables && node.boundVariables.topLeftRadius)) {
-        const variable = _ds.pickFloatByValue(node.cornerRadius, 'radius');
         _pushViolation(node, 'Corner radius', node.cornerRadius + 'px', 'border', {
-          suggestion: _suggestion('variable', variable, variable ? 'high' : 'none', variable ? 'Exact value and radius semantics.' : 'No exact radius variable found.')
+          suggestion: _nearestFloatSuggestion(node.cornerRadius, 'radius', 'radius')
         });
       }
     }
@@ -1704,9 +2327,8 @@ async function _runQaBindingAudit(opts) {
     if (node.layoutMode && node.layoutMode !== 'NONE') {
       ['paddingTop','paddingBottom','paddingLeft','paddingRight','itemSpacing','counterAxisSpacing'].forEach(function (prop) {
         if (typeof node[prop] === 'number' && node[prop] !== 0 && !(node.boundVariables && node.boundVariables[prop])) {
-          const variable = _ds.pickFloatByValue(node[prop], 'spacing');
           _pushViolation(node, prop, node[prop] + 'px', 'spacing', {
-            suggestion: _suggestion('variable', variable, variable ? 'high' : 'none', variable ? 'Exact value and spacing semantics.' : 'No exact spacing variable found.')
+            suggestion: _nearestFloatSuggestion(node[prop], 'spacing', 'spacing')
           });
         }
       });
@@ -1739,13 +2361,34 @@ async function _runQaBindingAudit(opts) {
     _auditNode(scopeNodes[i]);
   }
 
+  for (let i = 0; i < violations.length; i++) {
+    violations[i].issueNumber = i + 1;
+  }
+
   if (shouldFix) {
     for (let i = 0; i < violations.length; i++) {
       const v = violations[i];
       if (v.fixability !== 'fixableNow') continue;
       const result = _applyQaFix(v);
-      if (result === 'OK') fixed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, boundTo: v.suggestion.name });
-      else failed.push({ nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, reason: result });
+      if (result === 'OK') fixed.push({ issueNumber: v.issueNumber, nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, boundTo: v.suggestion.name });
+      else failed.push({ issueNumber: v.issueNumber, nodeId: v.nodeId, nodeName: v.nodeName, property: v.property, reason: result });
+    }
+  }
+
+  if (approvedSuggestions.length) {
+    for (let i = 0; i < approvedSuggestions.length; i++) {
+      const approval = approvedSuggestions[i];
+      let violation = null;
+      for (let j = 0; j < violations.length; j++) {
+        if (_matchesApproval(violations[j], approval)) {
+          violation = violations[j];
+          break;
+        }
+      }
+      const approved = violation ? _approvedCandidateSuggestion(violation, approval) : null;
+      const result = _applyQaApprovedSuggestion(violation, approval);
+      if (result === 'OK') fixed.push({ issueNumber: violation.issueNumber, nodeId: violation.nodeId, nodeName: violation.nodeName, property: violation.property, boundTo: approved && approved.name || violation.suggestion.name, approval: true });
+      else failed.push({ issueNumber: approval && approval.issueNumber || null, nodeId: approval && approval.nodeId || '', nodeName: approval && approval.nodeName || '', property: approval && approval.property || '', reason: result, approval: true });
     }
   }
 
@@ -1763,10 +2406,17 @@ async function _runQaBindingAudit(opts) {
     else byFixability.unsupported++;
   }
 
+  const designerDecisionSuggestions = violations
+    .filter(function (v) { return v.fixability === 'needsDesignerDecision' && v.suggestion && v.suggestion.id; })
+    .map(_approvalInputForViolation);
+
   const repairPlan = {
     tool: 'qa_binding_audit',
     approvalRequired: true,
     applyInput: { fix: true },
+    designerDecisionApplyInput: {
+      approved_suggestions: designerDecisionSuggestions
+    },
     counts: {
       fixableNow: byFixability.fixableNow,
       needsExistingToken: byFixability.needsExistingToken,
@@ -1776,7 +2426,7 @@ async function _runQaBindingAudit(opts) {
     agentInstruction:
       'Ask before applying fixable bindings with qa_binding_audit({ fix: true }). fix: true applies only fixableNow violations. ' +
       'For needsExistingToken, use inspect_ds_token_gaps and the approved token-completion tools before rebinding. ' +
-      'For needsDesignerDecision, explain the suggestion reason and let the designer choose or adjust the layer.'
+      'For needsDesignerDecision, explain the decision using structured facts/candidates. If the designer approves the suggested binding or closest token, pass the exact entries from repairPlan.designerDecisionApplyInput.approved_suggestions to qa_binding_audit. If the designer names a different exact existing token/style for that same finding, preserve nodeId/property/rawValue/fillIndex/strokeIndex from the audit entry and replace only suggestion with the designer-approved target.'
   };
 
   return {
@@ -1794,7 +2444,7 @@ async function _runQaBindingAudit(opts) {
     byType: byType,
     byFixability: byFixability,
     repairPlan: repairPlan,
-    fixApplied: shouldFix,
+    fixApplied: shouldFix || approvedSuggestions.length > 0,
     fixedCount: fixed.length,
     failedCount: failed.length,
     fixed: fixed,
@@ -2104,6 +2754,9 @@ async function _buildShowcase(opts) {
         !/(?:^|\/)(?:brand|danger|error|success|warning|info|on[-_](?:brand|danger|error|success|warning|info))(?:\/|$)/.test(n)) return 40;
     return 0;
   }
+  function _isIntentOrContextTextName(name) {
+    return /(?:^|\/)(?:brand|primary|accent|danger|error|destructive|success|positive|confirm|warning|caution|alert|info|on[-_](?:brand|primary|accent|danger|error|destructive|success|positive|confirm|warning|caution|alert|info))(?:\/|$)/i.test(String(name || ''));
+  }
 
   const _textRaw = (() => {
     const named = _semRoleVars
@@ -2271,8 +2924,8 @@ async function _buildShowcase(opts) {
   // _ROLE: semantic role → category weights. Positive rewards, negative penalises.
   // Final score = dot product of path category accumulator with role weights.
   const _ROLE = {
-    onSurface:      { FG: 3, BG: -4, VARIANT: -1, DEFAULT: 1, STRONG: 1 },
-    onSurfaceVar:   { FG: 3, BG: -4, VARIANT: 2 },
+    onSurface:      { FG: 3, BG: -4, VARIANT: -1, DEFAULT: 1, STRONG: 1, BRAND: -3, SUCCESS: -6, WARNING: -6, DANGER: -6 },
+    onSurfaceVar:   { FG: 3, BG: -4, VARIANT: 2, BRAND: -3, SUCCESS: -6, WARNING: -6, DANGER: -6 },
     surfaceDefault: { BG: 3, FG: -4, VARIANT: -1, DEFAULT: 2, BRAND: -2 },
     surfaceVariant: { BG: 3, FG: -4, VARIANT: 2 },
     surfaceBrand:   { BG: 2, FG: -4, BRAND: 3 },
@@ -2313,6 +2966,9 @@ async function _buildShowcase(opts) {
     }
     return total;
   }
+  function _isGenericTextRole(role) {
+    return role === 'onSurface' || role === 'onSurfaceVar';
+  }
 
   // Pick the best variable for a semantic role:
   //   1. Score every COLOR var by summing its path segment scores for the role.
@@ -2327,6 +2983,7 @@ async function _buildShowcase(opts) {
       var s = _scored[i];
       var seg = _segScore(s.name, role);
       if (seg <= 0) continue;
+      if (_isGenericTextRole(role) && _isIntentOrContextTextName(s.name)) continue;
       if (requiredCats) {
         var pCats = _pathCats(s.name);
         var ok = true;
@@ -2347,6 +3004,7 @@ async function _buildShowcase(opts) {
     // Functional last resort — DS has no recognisable semantic naming at all
     var funcBest = null, funcScore = 0;
     for (var j = 0; j < _scored.length; j++) {
+      if (_isGenericTextRole(role) && _isIntentOrContextTextName(_scored[j].name)) continue;
       var sc = scorer(_scored[j]);
       if (sc > funcScore) { funcScore = sc; funcBest = _scored[j]; }
     }
@@ -9017,7 +9675,7 @@ async function _applyFigmaOperations(payload) {
 
 async function _buildComponentDoc(opts) {
   const compId = opts && opts.componentId ? String(opts.componentId) : '';
-  const compName = opts && opts.componentName ? String(opts.componentName) : '';
+  let compName = opts && opts.componentName ? String(opts.componentName) : '';
   const agentDescription = (opts && typeof opts.description === 'string') ? opts.description.trim() : '';
   const usageDo = (opts && opts.usageDo && opts.usageDo.length > 0)
     ? opts.usageDo
@@ -9051,7 +9709,34 @@ async function _buildComponentDoc(opts) {
   }
   if (!_comp) return { error: 'Component not found on current page: ' + (compName || compId) };
 
-  const compSet = _comp;
+  function _componentDocTarget(component) {
+    if (component && component.type === 'COMPONENT' && component.parent && component.parent.type === 'COMPONENT_SET') {
+      return {
+        target: component.parent,
+        selectedVariantName: component.name,
+        documentedVariantSelection: true
+      };
+    }
+    return {
+      target: component,
+      selectedVariantName: '',
+      documentedVariantSelection: false
+    };
+  }
+
+  const _docTarget = _componentDocTarget(_comp);
+  const compSet = _docTarget.target;
+  const selectedVariantName = _docTarget.selectedVariantName;
+  const documentedVariantSelection = _docTarget.documentedVariantSelection;
+  if (!compSet) return { error: 'Component not found on current page: ' + (compName || compId) };
+  if (
+    compName &&
+    compSet.name !== compName &&
+    selectedVariantName !== compName
+  ) {
+    return { error: 'Figma selection does not match componentName. Selected ' + _comp.type + ' "' + _comp.name + '", resolved documentation target "' + compSet.name + '", but componentName was "' + compName + '". Select the intended component or component set.' };
+  }
+  compName = compSet.name;
   const _isSet = compSet.type === 'COMPONENT_SET';
   const _children = _isSet ? compSet.children : [compSet];
   let _defaultV = compSet;
@@ -9062,6 +9747,7 @@ async function _buildComponentDoc(opts) {
     }
     if (!_defaultV) _defaultV = _children[0];
   }
+  const _componentPropertyDefinitions = compSet.componentPropertyDefinitions || {};
 
   const compMeta = {
     type: compSet.type,
@@ -9069,7 +9755,9 @@ async function _buildComponentDoc(opts) {
     height: _defaultV.height,
     variantCount: _children.length,
     variants: _children.map(function (c) { return c.name; }),
-    componentPropertyDefinitions: compSet.componentPropertyDefinitions || {},
+    componentPropertyDefinitions: _componentPropertyDefinitions,
+    documentedVariantSelection: documentedVariantSelection,
+    selectedVariantName: selectedVariantName,
     description: compSet.description || ''
   };
 
@@ -9119,11 +9807,45 @@ async function _buildComponentDoc(opts) {
     _ds.bindVar(node, prop, variable);
   }
 
+  function _isDocPrivateNodeName(name) {
+    const s = String(name || '').trim();
+    const first = s.charAt(0);
+    return first === '_' || first === '.';
+  }
+
+  function _absoluteDocX(node) {
+    if (node && node.absoluteBoundingBox && typeof node.absoluteBoundingBox.x === 'number') return node.absoluteBoundingBox.x;
+    if (node && node.absoluteTransform && node.absoluteTransform[0]) return node.absoluteTransform[0][2] || 0;
+    return node && typeof node.x === 'number' ? node.x : 0;
+  }
+
+  function _absoluteDocY(node) {
+    if (node && node.absoluteBoundingBox && typeof node.absoluteBoundingBox.y === 'number') return node.absoluteBoundingBox.y;
+    if (node && node.absoluteTransform && node.absoluteTransform[1]) return node.absoluteTransform[1][2] || 0;
+    return node && typeof node.y === 'number' ? node.y : 0;
+  }
+
+  function _positionDocumentationSection(section, frame, target) {
+    const gap = 100;
+    const targetWidth = target && typeof target.componentWidth === 'number' ? target.componentWidth : 0;
+    section.x = (target && typeof target.componentX === 'number' ? target.componentX : 0) + targetWidth + gap;
+    section.y = target && typeof target.componentY === 'number' ? target.componentY : 0;
+    frame.x = 0;
+    frame.y = 0;
+  }
+
+  function _syncDocumentationSectionBounds(section, frame) {
+    try {
+      section.resizeWithoutConstraints(frame.width, frame.height);
+    } catch (e) {}
+  }
+
   // ── Anatomy bounds ─────────────────────────────────────────────────────────
   const _compBounds = _defaultV.absoluteBoundingBox;
   const elements = [];
   function _collectEl(node, depth) {
     if (!node.absoluteBoundingBox) return;
+    if (depth > 0 && _isDocPrivateNodeName(node.name)) return;
     if (depth > 0 && node.type !== 'INSTANCE') {
       const nb = node.absoluteBoundingBox;
       elements.push({
@@ -9132,7 +9854,7 @@ async function _buildComponentDoc(opts) {
         w: Math.round(nb.width), h: Math.round(nb.height)
       });
     }
-    if ('children' in node && node.type !== 'INSTANCE') {
+    if ('children' in node && node.type !== 'INSTANCE' && node.type !== 'SLOT') {
       for (let i = 0; i < node.children.length; i++) _collectEl(node.children[i], depth + 1);
     }
   }
@@ -9140,6 +9862,7 @@ async function _buildComponentDoc(opts) {
 
   // ── Token bindings on default variant ──────────────────────────────────────
   function _collectBind(node, acc) {
+    if (_isDocPrivateNodeName(node.name)) return acc;
     if (node.type === 'INSTANCE') return acc;
     const bv = node.boundVariables || {};
     const _props = [
@@ -9161,12 +9884,135 @@ async function _buildComponentDoc(opts) {
     if (node.type === 'TEXT' && node.textStyleId) {
       acc.push({ node: node.name, property: 'textStyle', styleId: node.textStyleId });
     }
+    if (node.type === 'SLOT') return acc;
     if ('children' in node) {
       for (let i = 0; i < node.children.length; i++) _collectBind(node.children[i], acc);
     }
     return acc;
   }
   const _rawBinds = _collectBind(_defaultV, []);
+
+  function _cleanComponentPropertyName(name) {
+    return String(name || '').replace(/#[^#]+$/, '');
+  }
+
+  function _componentKeyNameMap() {
+    const out = {};
+    try {
+      const nodes = figma.currentPage.findAll(function (n) {
+        return n.type === 'COMPONENT' || n.type === 'COMPONENT_SET';
+      });
+      for (let i = 0; i < nodes.length; i++) {
+        try {
+          if (nodes[i].key) out[nodes[i].key] = nodes[i].name;
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  const _componentNameByKey = _componentKeyNameMap();
+
+  function _slotPreferredValuesSummary(preferredValues) {
+    if (!Array.isArray(preferredValues) || preferredValues.length === 0) return 'Any component';
+    const labels = [];
+    for (let i = 0; i < preferredValues.length; i++) {
+      const pv = preferredValues[i] || {};
+      const name = pv.key && _componentNameByKey[pv.key] ? _componentNameByKey[pv.key] : pv.key;
+      labels.push((pv.type || 'COMPONENT') + (name ? ': ' + name : ''));
+    }
+    return labels.join(', ');
+  }
+
+  function _slotSettingsSummary(slotSettings) {
+    const s = slotSettings || {};
+    const parts = [];
+    if (s.minChildren !== undefined && s.minChildren !== null) parts.push('min ' + s.minChildren);
+    if (s.maxChildren !== undefined && s.maxChildren !== null) parts.push('max ' + s.maxChildren);
+    parts.push(s.allowPreferredValuesOnly ? 'preferred values only' : 'allows other components');
+    if (s.stretchChildOnInsert) parts.push('stretch child on insert');
+    if (s.displayEmptyByDefault) parts.push('display empty by default');
+    return parts.join('; ');
+  }
+
+  function _slotNodePropertyKey(node, slotDefinitions) {
+    const refs = node && node.componentPropertyReferences ? node.componentPropertyReferences : null;
+    if (refs) {
+      const fields = Object.keys(refs);
+      for (let i = 0; i < fields.length; i++) {
+        if (slotDefinitions[refs[fields[i]]]) return refs[fields[i]];
+      }
+    }
+    const nodeName = _cleanComponentPropertyName(node && node.name);
+    const keys = Object.keys(slotDefinitions);
+    for (let j = 0; j < keys.length; j++) {
+      if (_cleanComponentPropertyName(keys[j]) === nodeName) return keys[j];
+    }
+    return '';
+  }
+
+  function _slotChildSummary(node) {
+    if (!('children' in node) || !node.children || node.children.length === 0) return 'Empty';
+    const labels = [];
+    for (let i = 0; i < Math.min(node.children.length, 4); i++) {
+      const child = node.children[i];
+      if (_isDocPrivateNodeName(child.name)) continue;
+      let label = child.name + ' (' + child.type + ')';
+      if (child.componentProperties) {
+        const propKeys = Object.keys(child.componentProperties);
+        const propLabels = [];
+        for (let j = 0; j < Math.min(propKeys.length, 4); j++) {
+          const prop = child.componentProperties[propKeys[j]];
+          if (!prop) continue;
+          propLabels.push(_cleanComponentPropertyName(propKeys[j]) + '=' + prop.value);
+        }
+        if (propLabels.length) label += ' [' + propLabels.join(', ') + ']';
+      }
+      labels.push(label);
+    }
+    if (node.children.length > 4) labels.push('+' + (node.children.length - 4) + ' more');
+    return labels.length ? labels.join('; ') : 'Empty';
+  }
+
+  function _collectSlotDocs(root, propertyDefinitions) {
+    const slotDefinitions = {};
+    const defKeys = Object.keys(propertyDefinitions || {});
+    for (let i = 0; i < defKeys.length; i++) {
+      const def = propertyDefinitions[defKeys[i]];
+      if (def && def.type === 'SLOT') slotDefinitions[defKeys[i]] = def;
+    }
+    const out = [];
+    function walk(node) {
+      if (!node || _isDocPrivateNodeName(node.name)) return;
+      if (node.type === 'SLOT') {
+        const key = _slotNodePropertyKey(node, slotDefinitions);
+        const def = key ? slotDefinitions[key] : null;
+        const slotSettings = def && def.slotSettings ? def.slotSettings : {};
+        let limitViolations = [];
+        try {
+          limitViolations = Array.isArray(node.limitViolations) ? node.limitViolations.slice() : [];
+        } catch (e) {}
+        out.push({
+          name: key ? _cleanComponentPropertyName(key) : node.name,
+          nodeName: node.name,
+          description: def && def.description ? def.description : '',
+          childCount: 'children' in node && node.children ? node.children.length : 0,
+          settings: _slotSettingsSummary(slotSettings),
+          preferredValues: _slotPreferredValuesSummary(def && def.preferredValues),
+          defaultContent: _slotChildSummary(node),
+          limitViolations: limitViolations.length ? limitViolations.join(', ') : 'None',
+          slotSettings: slotSettings
+        });
+      }
+      if ('children' in node && node.children) {
+        for (let j = 0; j < node.children.length; j++) walk(node.children[j]);
+      }
+    }
+    walk(root);
+    return out;
+  }
+
+  const _slotDocs = _collectSlotDocs(_defaultV, compMeta.componentPropertyDefinitions);
 
   // Pre-fetch any varIds we don't have locally (library/remote variables).
   // figma.variables.getVariableByIdAsync resolves both local and library vars.
@@ -9307,6 +10153,9 @@ async function _buildComponentDoc(opts) {
     _docBindingWarningSet[message] = true;
     _docBindingWarnings.push(message);
   }
+  if (documentedVariantSelection) {
+    _warnBinding('Documented parent component set "' + compName + '" from selected variant "' + selectedVariantName + '".');
+  }
   function _boundPaintColorVarName(paint) {
     const bound = paint && paint.boundVariables && paint.boundVariables.color;
     const id = bound && bound.id ? bound.id : null;
@@ -9331,6 +10180,7 @@ async function _buildComponentDoc(opts) {
     if (!('children' in root) || !root.children || root.children.length === 0) return false;
     for (let i = 0; i < root.children.length; i++) {
       const c = root.children[i];
+      if (_isDocPrivateNodeName(c.name)) continue;
       if (c.type !== 'INSTANCE') return true;
     }
     return false;
@@ -9373,13 +10223,10 @@ async function _buildComponentDoc(opts) {
     figma.currentPage.appendChild(_docSec);
   }
 
-  // If we're rebuilding the same component, remember its position so the new
-  // sheet lands in place — instances and viewport stay stable for the user.
+  // If we're rebuilding the same component, replace the old sheet. Placement is
+  // recalculated from the documented component so docs stay beside their target.
   const _old = figma.currentPage.findOne(function (n) { return n.name === compName + ' · Spec'; });
-  let _rebuildX, _rebuildY;
   if (_old) {
-    _rebuildX = _old.x;
-    _rebuildY = _old.y;
     _old.remove();
   }
 
@@ -9396,34 +10243,11 @@ async function _buildComponentDoc(opts) {
   _bindVar(doc, 'paddingBottom', _docSpace.pad2XL);
   _docSec.appendChild(doc);
 
-  // Position: rebuild → reuse old coords; new component → land to the right of
-  // the rightmost existing · Spec sheet (if any) with a 100px gap.
-  if (_rebuildX !== undefined) {
-    doc.x = _rebuildX;
-    doc.y = _rebuildY;
-  } else {
-    const _SHEET_GAP = 100;
-    const _siblings = _docSec.children;
-    let _rightmost = 0;
-    let _topY = 0;
-    let _hasAny = false;
-    for (let i = 0; i < _siblings.length; i++) {
-      const s = _siblings[i];
-      if (s === doc) continue;
-      if (s.type !== 'FRAME') continue;
-      if (! / · Spec$/.test(s.name)) continue;
-      const right = s.x + s.width;
-      if (!_hasAny || right > _rightmost) {
-        _rightmost = right;
-        _topY = s.y;
-        _hasAny = true;
-      }
-    }
-    if (_hasAny) {
-      doc.x = _rightmost + _SHEET_GAP;
-      doc.y = _topY;
-    }
-  }
+  _positionDocumentationSection(_docSec, doc, {
+    componentX: _absoluteDocX(compSet),
+    componentY: _absoluteDocY(compSet),
+    componentWidth: compSet.width
+  });
 
   function _mkLabel(parent, text) {
     const t = figma.createText();
@@ -9463,7 +10287,9 @@ async function _buildComponentDoc(opts) {
     const t = figma.createFrame();
     t.name = name; t.layoutMode = 'VERTICAL';
     t.itemSpacing = 0; t.fills = []; t.cornerRadius = 6; t.clipsContent = true;
+    t.strokes = [_paint(_cBorder, _vBorder)]; t.strokeWeight = 1;
     _bindVar(t, 'cornerRadius', _docSpace.radius);
+    _bindVar(t, 'strokeWeight', _docSpace.border);
     parent.appendChild(t); t.layoutSizingHorizontal = 'FILL'; t.resize(1280, 1);
     t.primaryAxisSizingMode = 'AUTO'; t.counterAxisSizingMode = 'FIXED';
     return t;
@@ -9556,6 +10382,27 @@ async function _buildComponentDoc(opts) {
       _mkCell(r, key.replace(/#[^#]+$/, ''), 427, 'body');
       _mkCell(r, def.type, 427, 'mono');
       _mkCell(r, String(def.defaultValue !== undefined ? def.defaultValue : '—'), 426, 'body');
+    }
+  }
+
+  if (_slotDocs.length > 0) {
+    _mkLabel(doc, 'SLOTS');
+    const _tblSlots = _mkTable(doc, 'Slots Table');
+    const _slotHdr = _mkRow(_tblSlots, 1280, true);
+    _mkCell(_slotHdr, 'SLOT', 220, 'header-text');
+    _mkCell(_slotHdr, 'RULES', 360, 'header-text');
+    _mkCell(_slotHdr, 'DEFAULT CONTENT', 500, 'header-text');
+    _mkCell(_slotHdr, 'STATUS', 200, 'header-text');
+    for (let i = 0; i < _slotDocs.length; i++) {
+      const slot = _slotDocs[i];
+      const r = _mkRow(_tblSlots, 1280, false);
+      r.fills = i % 2 === 1 ? [_paint(_cSurface, _vSurface)] : [];
+      const rules = slot.settings + '\nPreferred: ' + slot.preferredValues;
+      const status = slot.childCount + (slot.childCount === 1 ? ' child' : ' children') + '\nViolations: ' + slot.limitViolations;
+      _mkCell(r, slot.name, 220, 'body');
+      _mkCell(r, rules, 360, 'body');
+      _mkCell(r, slot.defaultContent, 500, 'body');
+      _mkCell(r, status, 200, 'body');
     }
   }
 
@@ -9785,6 +10632,7 @@ async function _buildComponentDoc(opts) {
   const _anatomyMd = [];
   let _anatIdx = 1;
   function _walkAnatomy(node, depth) {
+    if (_isDocPrivateNodeName(node.name)) return;
     if (node.type === 'INSTANCE') return;
     if (depth > 0 && node.name && node.name.charAt(0) !== '_') {
       const bv = node.boundVariables || {};
@@ -9798,6 +10646,7 @@ async function _buildComponentDoc(opts) {
       }
       _anatomyMd.push({ idx: _anatIdx++, name: node.name, type: node.type, token: token, depth: depth });
     }
+    if (node.type === 'SLOT') return;
     if ('children' in node) {
       for (let i = 0; i < node.children.length; i++) _walkAnatomy(node.children[i], depth + 1);
     }
@@ -9828,6 +10677,13 @@ async function _buildComponentDoc(opts) {
   const _propsTable = _compProps.length > 0
     ? _mdTable(['Property', 'Type', 'Default', 'Description'],
         _compProps.map(function (p) { return [p.name, p.type, p.defaultValue, '']; }))
+    : '';
+
+  const _slotsTable = _slotDocs.length > 0
+    ? _mdTable(['Slot', 'Rules', 'Preferred Values', 'Default Content', 'Limit Violations'],
+        _slotDocs.map(function (s) {
+          return [s.name, s.settings, s.preferredValues, s.defaultContent, s.limitViolations];
+        }))
     : '';
 
   const _bindingsTable = resolved.length > 0
@@ -9875,6 +10731,14 @@ async function _buildComponentDoc(opts) {
     _md.push('---');
     _md.push('');
   }
+  if (_slotsTable) {
+    _md.push('## Slots');
+    _md.push('');
+    _md.push(_slotsTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
   if (_bindingsTable) {
     _md.push('## Token Bindings');
     _md.push('');
@@ -9917,6 +10781,8 @@ async function _buildComponentDoc(opts) {
   _md.push('- **ComponentSet ID:** ' + compSet.id);
   _md.push('- **Spec Frame:** Documentation · ' + compName + ' · Spec');
 
+  _syncDocumentationSectionBounds(_docSec, doc);
+
   try { figma.viewport.scrollAndZoomIntoView([doc]); } catch (e) {}
 
   return {
@@ -9928,20 +10794,31 @@ async function _buildComponentDoc(opts) {
       variantCount: compMeta.variantCount,
       width: compMeta.width,
       height: compMeta.height,
-      propertyCount: _compProps.length
+      propertyCount: _compProps.length,
+      slotCount: _slotDocs.length,
+      documentedVariantSelection: documentedVariantSelection,
+      selectedVariantName: selectedVariantName
     },
     bindingsCount: resolved.length,
     bindingWarnings: _docBindingWarnings,
     bindingDiagnostics: _docBindingDiagnostics,
     anatomyCount: _anatomyMd.length,
+    slotCount: _slotDocs.length,
+    slots: _slotDocs,
     selectionContext: {
       fileName: figma.root ? figma.root.name : '',
       pageName: figma.currentPage ? figma.currentPage.name : '',
       pageId: figma.currentPage ? figma.currentPage.id : '',
       componentName: compName,
       componentId: _comp.id,
-      componentType: _comp.type
+      componentType: _comp.type,
+      documentedComponentId: compSet.id,
+      documentedComponentType: compSet.type,
+      documentedVariantSelection: documentedVariantSelection,
+      selectedVariantName: selectedVariantName
     },
+    documentedVariantSelection: documentedVariantSelection,
+    selectedVariantName: selectedVariantName,
     specSheet: { page: figma.currentPage.name, frame: compName + ' · Spec' }
   };
 }

@@ -13,7 +13,10 @@ const inspectComponentTool = {
 };
 
 function _attemptInspect() {
-  return requestBridgePost("/request-selection", {}, { timeoutMs: 16000 }).then((response) => {
+  return requestBridgePost("/request-selection", {}, {
+    timeoutMs: 16000,
+    bridgeRetryAttempts: 3
+  }).then((response) => {
     if (response.connectionError) {
       throw new Error(response.connectionError);
     }
@@ -37,20 +40,7 @@ function _attemptInspect() {
 }
 
 function handleInspectComponent() {
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 1500;
-
-  function attempt(n) {
-    return _attemptInspect().catch((err) => {
-      const retryable = err.statusCode === 503 || err.statusCode === 504;
-      if (retryable && n < MAX_RETRIES) {
-        return new Promise((res) => setTimeout(res, RETRY_DELAY_MS)).then(() => attempt(n + 1));
-      }
-      throw err;
-    });
-  }
-
-  return attempt(1);
+  return _attemptInspect();
 }
 
 module.exports = {

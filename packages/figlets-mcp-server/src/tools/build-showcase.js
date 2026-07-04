@@ -1,7 +1,7 @@
 const fs = require("fs");
 const { getActiveFileConfigPath } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
-const { requestBridgePost } = require("../bridges/bridge-request.js");
+const { formatPluginNotListening, requestBridgePost } = require("../bridges/bridge-request.js");
 
 const buildShowcaseTool = {
   name: "build_ds_showcase",
@@ -88,7 +88,7 @@ function handleBuildShowcase(args = {}) {
     }
     if (response.statusCode === 503) {
       return {
-        content: [{ type: "text", text: "Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry." }],
+        content: [{ type: "text", text: `Error: ${formatPluginNotListening("showcase build", response.data || {}, { fallbackHint: "Open the Figlets Bridge plugin in Figma Desktop, then retry." })}` }],
         isError: true
       };
     }

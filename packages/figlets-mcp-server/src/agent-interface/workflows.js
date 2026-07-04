@@ -13,7 +13,6 @@ const MUTATING_TOOLS = new Set([
   "apply_ds_foundation_repairs",
   "apply_ds_setup_repairs",
   "apply_ds_semantic_naming_consolidation",
-  "apply_ds_variable_creations",
   "apply_ds_figma_operations",
   "build_ds_showcase",
   "generate_component_doc",
@@ -77,11 +76,11 @@ const DESIGNER_FLOW_HARD_RULES = {
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
     "inspect_ds_token_gaps.repairPlan.previewInput / repairPlan.applyInput → update_ds_tokens for config-backed non-color token dry-run preview and narrow approved apply",
-    "designer-specified exact variable list → plan_ds_variable_creations, then approved repairPlan.applyInput → apply_ds_variable_creations for creating explicit variables that are not covered by config-backed token completion",
-    "designer-specified exact Figma design-system operations → plan_ds_figma_operations, then approved repairPlan.applyInput → apply_ds_figma_operations for variables, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers; do not use this generic surface to invent semantic naming migrations from health-check conflicts",
+    "designer-specified exact Figma design-system operations → plan_ds_figma_operations, then approved repairPlan.applyInput → apply_ds_figma_operations for variable creation, variable values, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers; do not use this generic surface to invent semantic naming migrations from health-check conflicts",
     "update_ds_primitives with categories color, spacing, color-semantics, primitive-typography, and primitive-shadow for config-backed primitive values, primitive typography/shadow tokens, and Color collection semantic alias updates",
     "inspect_ds_token_gaps.repairPlan.primitiveRepairPlan → update_ds_primitives for approved primitive-typography or primitive-shadow create/update in the Primitives collection",
     "qa_binding_audit repairPlan with applyInput { fix: true } for fixableNow binding fixes only after reading byFixability",
+    "qa_binding_audit repairPlan.designerDecisionApplyInput.approved_suggestions → qa_binding_audit({ approved_suggestions }) for designer-approved role-based style or closest-token binding decisions; present QA findings as a stable numbered list using issueNumber, copy exact entries unchanged only when the designer accepts the displayed target unchanged, or preserve the audited issueNumber/node/property/raw identity and replace only suggestion when the displayed recommendation or designer-named target differs from the raw repairPlan suggestion",
   ],
   bulkRepairRouting: [
     "Inspect first. If inspect_ds_setup_gaps.repairPlan.applyInput is non-empty, ask approval and pass that exact object to repairPlan.tool / apply_ds_setup_repairs without inventing payloads.",
@@ -94,16 +93,16 @@ const DESIGNER_FLOW_HARD_RULES = {
     "For new design-system setup, if prepare_ds_config reports semantic color contrast failures with zero contrastRepairOptions, rerun prepare_ds_config once because generated setup should self-correct. If the latest result still fails with no exact options, do not ask for or approve a prose-only repair direction; ask only for an executable choice such as an exact alias, brand hex, or color scale change.",
     "When the designer says go for Figma or build it during setup, treat it as build approval only if the latest prepare_ds_config result has readyToBuild === true. If readyToBuild is false, do not call apply_ds_setup; run the available repair path or give one concise blocker instead of starting another approval loop.",
     "For health-check, run inspect_ds_token_gaps as a read-only suggestion step before summarizing the design-system audit. Surface token-gap findings by category, including missing foundation collection/mode suggestions, without forcing the designer into a separate token-gap workflow.",
+    "For health-check, if detect_design_system.emptyDesignSystem.isEmpty or inspect_ds_token_gaps.emptyDesignSystem.isEmpty is true, treat the file as empty from a design-system perspective before ordinary repair routing. Say plainly whether no foundation collections exist yet or foundation collections exist but there are no design-system variables or local styles, then ask whether the designer wants to set up or continue the design-system foundation. Do not present normal token-gap repair as the main story until the designer chooses a setup/foundation path.",
     "For health-check, do not call semantic colors clean unless inspect_ds_setup_gaps completed and the fresh result has no semantic setup gaps, contrast failures, icon contrast failures, broken aliases, apply-ready setup repairs, or unresolved naming findings. Do not call token gaps clean unless inspect_ds_token_gaps completed. Do not call visible/page layer bindings clean unless qa_binding_audit completed; otherwise say binding QA is a separate check.",
     "When health-check finds both semantic setup repairs and token-gap suggestions, the next-step prompt must offer both boundaries. Do not make semantic color repair or naming consolidation the only clean next step if inspect_ds_token_gaps found foundation modes, primitive gaps, or semantic token repairs.",
     "End health-check repair summaries with a numbered repair choice menu: one numbered option per available repair category, then a numbered all option, then a numbered specific/other option where the designer can name exact fixes. Category choices must use designer goal language such as fix, review, plan, add, or create; do not use implementation terms like dry-run in the menu label. If a selected category needs a dry-run preview before writing, say the designer will review the proposed changes and be asked for confirmation before anything changes. Category choices must preserve separate write boundaries; all must state exactly which ready safe categories it includes and which optional, designer-decision, or separate-boundary items it excludes.",
     "If a designer asks to review token repairs from health-check, use inspect_ds_token_gaps.repairPlan.reviewOptions as a submenu and run only the selected preview option. Do not run repairPlan.previewInput plus primitiveRepairPlan.previewInput as one combined token preview. Token review options must stay separated: foundation modes, primitive typography, exact semantic spacing aliases, radius/border tokens, typography variables/styles, and full semantic spacing token completion when present.",
     "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps and dry-run previews. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs, then sync and reinspect, then stop before primitive or semantic token writes. Never ask for one approval that covers foundation repair and token apply.",
-    "If the designer asks to add an exact set of variables that is not covered by config-backed token completion, call plan_ds_variable_creations with the exact names, collections, types, and mode values/aliases. Show the dry-run proposedChanges and blocked entries, then after approval pass repairPlan.applyInput unchanged to apply_ds_variable_creations. If collection, type, mode, value, or alias details are missing, ask for those details instead of inventing them.",
-    "If the designer asks to make, update, rename, or delete exact variables, variable values, collections, collection modes, local text/effect styles, exact node bindings, variable metadata, collection metadata, or token lifecycle operations outside a narrower Figlets repair flow, call plan_ds_figma_operations. Show all proposedChanges and warnings, especially destructive delete/replace/move operations, and after approval pass repairPlan.applyInput unchanged to apply_ds_figma_operations. If exact names, values, collections, modes, aliases, style names/properties, node IDs, binding properties, or lifecycle targets are missing, ask for those details instead of claiming Figlets cannot do it.",
+    "If the designer asks to make, create, update, rename, or delete exact variables, variable values, collections, collection modes, local text/effect styles, exact node bindings, variable metadata, collection metadata, or token lifecycle operations outside a narrower Figlets repair flow, call plan_ds_figma_operations. For exact variable creation, use create_variable operations with exact names, collections, types, and mode values/aliases. Show all proposedChanges and warnings, especially destructive delete/replace/move operations, and after approval pass repairPlan.applyInput unchanged to apply_ds_figma_operations. If exact names, values, collections, modes, aliases, style names/properties, node IDs, binding properties, or lifecycle targets are missing, ask for those details instead of claiming Figlets cannot do it.",
     "For exact semantic spacing alias repairs, copy inspect_ds_token_gaps.repairPlan.applyInput.spacing_semantic_repairs unchanged into update_ds_tokens. Preserve each repair's updates array with modeName/modeId and toAliasName/toAliasId. Do not replace the exact entries with token names, counts, summary rows, or a broad spacing-semantics category. If update_ds_tokens rejects the exact payload, stop, rerun inspect_ds_token_gaps, and copy/filter the fresh spacing_semantic_repairs entries; do not redirect a Mobile-only approval into foundation mode creation.",
     "After any write inside health-check, rerun the full read-only health-check verification sequence before reporting clean or remaining findings: sync_figma_data, detect_design_system, audit_tokens, inspect_ds_setup_gaps, and inspect_ds_token_gaps. Do not summarize remaining setup, contrast, naming, or token-gap findings from the apply result or from a narrow token-only reinspection. Reconcile remaining items against the fresh results: if detect_design_system or inspect_ds_token_gaps no longer reports missing foundation modes, do not repeat a stale missing Tablet/Desktop modes item; if audit_tokens and inspect_ds_token_gaps report spacing aliases clear, say that boundary is cleared. Refer to the applied repair by its named boundary or token list, not by a drifting menu number such as 'option 5'.",
-    "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability; call qa_binding_audit({ fix: true }) only for fixableNow after approval.",
+    "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability. Present violations as a stable numbered list using issueNumber so the designer can reply with issue numbers. Before asking to apply fixableNow bindings, show every fixableNow item as raw value → exact target token/style, including color candidate facts such as rawFill, top candidates, roleCandidate, and textDescendants when present; never collapse color fixes into a count like 'safe bindings'. For needsDesignerDecision color and typography findings, do not merely repeat the first suggestion: interpret the layer name, textDescendants, rawFill, roleCandidate, top candidates, and raw typography, then show a visible recommended target. If that visible recommendation differs from the raw repairPlan suggestion, distinguish it clearly and treat shorthand approval like ok, good, good on suggestion, or approving the issue number as approval of the visible recommendation. call qa_binding_audit({ fix: true }) only after fixableNow approval. For needsDesignerDecision suggestions such as role-based text styles or closest spacing/radius/border tokens, ask approval and then pass exact entries from repairPlan.designerDecisionApplyInput.approved_suggestions to qa_binding_audit({ approved_suggestions }) only when the displayed target is unchanged. If the designer approves a visible alternate recommendation or gives an exact alternate token/style for one of those audited findings, do not refuse because it was not the first suggestion: keep issueNumber, nodeId, property, rawValue/expectedRawValue, fillIndex/strokeIndex from the audit entry and replace only suggestion with the approved displayed target token/style.",
     "Do not create tokens from qa_binding_audit findings unless a Figlets token-completion planner provides the payload.",
     "If no specialized Figlets repair payload exists, first check whether the request is an exact designer-specified variable, collection, mode, style, binding, metadata, or lifecycle edit that plan_ds_figma_operations can represent. Do not convert product-specific health-check findings into invented generic operations. Only product-specific planning/decision gaps should be reported as Figlets product/tool gaps.",
   ],
@@ -273,7 +272,7 @@ const WORKFLOWS = [
         id: "detect",
         kind: "read",
         tool: "detect_design_system",
-        designerMessage: "I'll check what design-system pieces this file exposes.",
+        designerMessage: "I'll check what design-system pieces this file exposes. If it has no variable collections, variables, local text styles, or local effect styles, I'll say the file looks empty as a design system and ask whether you want to set up a new foundation.",
       },
       {
         id: "audit",
@@ -291,7 +290,7 @@ const WORKFLOWS = [
         id: "token-gap-suggestions",
         kind: "read",
         tool: "inspect_ds_token_gaps",
-        designerMessage: "I'll also inspect config-backed token gaps, including missing foundation collections or modes, and summarize them by category without changing Figma.",
+        designerMessage: "I'll also inspect config-backed token gaps, including missing foundation collections or modes, and summarize them by category without changing Figma. If the file is empty as a design-system file, I'll lead with that empty-state setup choice instead of treating it as an ordinary token-gap repair menu.",
       },
       {
         id: "binding-audit-handoff",
@@ -635,7 +634,16 @@ const WORKFLOWS = [
     id: "component-docs",
     title: "Component Documentation",
     summary: "Inspect a selected component, craft human usage guidance, and generate a Figma spec sheet plus markdown handoff.",
-    intents: ["document component", "spec sheet", "component docs", "document this button", "generate docs"],
+    intents: [
+      "document component",
+      "document this component",
+      "document selected component",
+      "document the selected component",
+      "spec sheet",
+      "component docs",
+      "document this button",
+      "generate docs",
+    ],
     prerequisites: ["Target component is selected in Figma", "Figlets Bridge plugin is open"],
     steps: [
       {
@@ -674,7 +682,20 @@ const WORKFLOWS = [
     id: "qa-binding-audit",
     title: "QA Binding Audit",
     summary: "Inspect selected layers for raw values and apply safe binding fixes only after approval.",
-    intents: ["binding audit", "raw values", "fix bindings", "check this frame", "unbound values"],
+    intents: [
+      "binding audit",
+      "raw values",
+      "fix bindings",
+      "check this frame",
+      "check this component",
+      "check selected component",
+      "check the selected component",
+      "qa this component",
+      "qa selected component",
+      "audit this component",
+      "audit selected component",
+      "unbound values",
+    ],
     prerequisites: ["Target frame/component is selected in Figma", "Figlets Bridge plugin is open"],
     steps: [
       {
@@ -687,12 +708,12 @@ const WORKFLOWS = [
         kind: "read",
         tool: "qa_binding_audit",
         options: { fix: false },
-        designerMessage: "I'll report raw or unbound values with fixability (fixableNow, needsExistingToken, needsDesignerDecision) and repairPlan counts.",
+        designerMessage: "I'll report raw or unbound values as a stable numbered list with fixability (fixableNow, needsExistingToken, needsDesignerDecision), then list each fixableNow binding as raw value → exact target token/style before asking to apply anything.",
       },
       {
         id: "approve-fixes",
         kind: "confirmation",
-        designerMessage: "I'll explain which violations are fixableNow, which need new tokens first, and which need your design decision before any binding apply.",
+        designerMessage: "I'll explain which violations are fixableNow, which need new tokens first, and which need your design decision before any binding apply. For color and typography decision items I will interpret the layer name, textDescendants, rawFill, raw typography, roleCandidate, and top candidates, then show a visible recommended target instead of blindly repeating the first suggestion. If I recommend a target that differs from the raw repairPlan suggestion, shorthand approval by issue number means the visible recommendation, and the apply payload must preserve the same audited finding while changing only the approved suggestion target.",
       },
       {
         id: "fix",
@@ -700,13 +721,21 @@ const WORKFLOWS = [
         tool: "qa_binding_audit:fix",
         options: { fix: true },
         requiresApproval: true,
-        designerMessage: "I'll call qa_binding_audit({ fix: true }) to apply only fixableNow bindings from repairPlan.",
+        designerMessage: "After approval, I'll call qa_binding_audit({ fix: true }) to apply only the fixableNow bindings already listed with their exact target tokens/styles.",
+      },
+      {
+        id: "apply-approved-suggestions",
+        kind: "write",
+        tool: "qa_binding_audit",
+        options: { approved_suggestions: "repairPlan.designerDecisionApplyInput.approved_suggestions" },
+        requiresApproval: true,
+        designerMessage: "If you approve suggested styles or closest tokens by issue number, I'll call qa_binding_audit with approved_suggestions from the audit when the displayed target matches the audit suggestion. If the visible recommendation or your named exact existing token/style differs, I'll keep the audit issueNumber/node/property/raw-value identity and use that displayed/approved target as the suggestion.",
       },
     ],
     next: ["component-docs", "health-check", "token-gap-completion"],
     errors: [
       "If byFixability.needsExistingToken is non-zero, route to inspect_ds_token_gaps instead of forcing fix:true.",
-      "If there is no suggestion, say the design system lacks a matching variable or style rather than inventing one.",
+      "If there is no audited finding identity (nodeId/property/rawValue) for the requested binding, rerun qa_binding_audit before applying; if the named target token/style does not exist or is the wrong type for the property, say that exact target cannot be applied.",
     ],
   },
   {
@@ -747,6 +776,58 @@ function normalizeText(value) {
 }
 
 const ROUTE_STOPWORDS = new Set(["what", "this", "that", "with", "using", "help", "figlets", "design", "system"]);
+
+function _hasAnyWord(text, words) {
+  return words.some(word => new RegExp(`\\b${word}\\b`).test(text));
+}
+
+function _semanticWorkflowOverride(text) {
+  if (
+    _hasAnyWord(text, ["file"]) &&
+    _hasAnyWord(text, ["check", "review", "audit", "inspect", "empty"])
+  ) {
+    return {
+      workflowId: "health-check",
+      reason: "The request asks to check the file, so use the file-level design-system health check instead of selected-layer QA.",
+      matchedIntents: ["file-level health check"],
+    };
+  }
+
+  if (
+    _hasAnyWord(text, ["setup", "set", "foundation", "foundations"]) &&
+    _hasAnyWord(text, ["foundation", "foundations", "system", "ds"])
+  ) {
+    return {
+      workflowId: "new-ds-setup",
+      reason: "The request asks to set up a design-system foundation.",
+      matchedIntents: ["foundation setup"],
+    };
+  }
+
+  const targetScoped =
+    _hasAnyWord(text, ["selected", "selection", "current", "this", "these"]) &&
+    _hasAnyWord(text, ["component", "components", "frame", "frames", "layer", "layers", "node", "nodes", "instance", "instances"]);
+
+  if (!targetScoped) return null;
+
+  if (_hasAnyWord(text, ["document", "docs", "documentation", "spec", "handoff"])) {
+    return {
+      workflowId: "component-docs",
+      reason: "The request is scoped to a selected component and asks for documentation/spec output.",
+      matchedIntents: ["selected component documentation"],
+    };
+  }
+
+  if (_hasAnyWord(text, ["check", "review", "qa", "audit", "bindings", "binding", "bound", "unbound", "raw"])) {
+    return {
+      workflowId: "qa-binding-audit",
+      reason: "The request is scoped to the current selection and asks to check/QA it, so start with read-only binding QA.",
+      matchedIntents: ["selection-scoped QA"],
+    };
+  }
+
+  return null;
+}
 
 function _workflowStartResponse(workflow) {
   if (!workflow || workflow.id === "start") return null;
@@ -857,6 +938,7 @@ function _selectionPrompt(candidates, capabilityMenu) {
 
 function routeIntent(intent) {
   const text = normalizeText(intent);
+  const semanticOverride = _semanticWorkflowOverride(text);
   const candidates = WORKFLOWS
     .filter(workflow => workflow.id !== "start")
     .map(workflow => {
@@ -881,14 +963,22 @@ function routeIntent(intent) {
     .filter(candidate => candidate.score > 0)
     .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
 
-  const best = candidates[0] || {
-    workflowId: "start",
-    title: "Start / Help",
-    score: 0,
-    matchedIntents: [],
-  };
+  const best = semanticOverride
+    ? {
+      workflowId: semanticOverride.workflowId,
+      title: getWorkflowGuide(semanticOverride.workflowId).title,
+      score: Number.MAX_SAFE_INTEGER,
+      matchedIntents: semanticOverride.matchedIntents,
+      semanticReason: semanticOverride.reason,
+    }
+    : candidates[0] || {
+      workflowId: "start",
+      title: "Start / Help",
+      score: 0,
+      matchedIntents: [],
+    };
   const bestWorkflow = getWorkflowGuide(best.workflowId);
-  const ambiguous = candidates.length > 1 && candidates[0].score === candidates[1].score;
+  const ambiguous = !semanticOverride && candidates.length > 1 && candidates[0].score === candidates[1].score;
   const fallbackChoices = [
     {
       label: "Check my design system",
@@ -934,6 +1024,13 @@ function _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, int
   };
   if (best.workflowId === "new-ds-setup") {
     result.intakeContract = clone(NEW_DS_SETUP_INTAKE_CONTRACT);
+  }
+  if (best.semanticReason) {
+    result.intentInterpretation = {
+      kind: "semantic",
+      reason: best.semanticReason,
+      selectedWorkflow: best.workflowId,
+    };
   }
   return result;
 }
@@ -1008,7 +1105,7 @@ function getStartGuide() {
       doNotAddCapabilitiesOutside: "capabilityMenu",
       doNotOfferMenuItems: "forbiddenDesignerMenuItems",
       designSystemReviewRule: "Use Figlets workflow tools/scripts only. Do not write custom scripts or inspect local snapshots/tool-results unless the designer explicitly asks to go out of bounds.",
-      bulkUpdateRule: "Bulk design-system updates are in Figlets scope when they are represented as structured, designer-approved tool payloads. Use repairPlan.applyInput with the named tool; present repairPlan.optionalApplyInput separately. Token gaps use inspect_ds_token_gaps → update_ds_tokens; binding gaps use qa_binding_audit fixableNow only. Exact designer-specified variable, collection, mode, local style, binding, metadata, and token lifecycle edits use plan_ds_figma_operations → apply_ds_figma_operations, with warnings shown before approval. Do not use the generic operations surface to invent semantic naming migrations from health-check conflicts. Only product-specific planning or designer-decision gaps should be reported as future Figlets planner scope.",
+      bulkUpdateRule: "Bulk design-system updates are in Figlets scope when they are represented as structured, designer-approved tool payloads. Use repairPlan.applyInput with the named tool; present repairPlan.optionalApplyInput separately. Token gaps use inspect_ds_token_gaps → update_ds_tokens; binding gaps use qa_binding_audit fixableNow or qa_binding_audit approved_suggestions after explicit designer approval, including exact alternate token/style targets for the same audited finding. Exact designer-specified variable, collection, mode, local style, binding, metadata, and token lifecycle edits outside the current QA findings use plan_ds_figma_operations → apply_ds_figma_operations, with warnings shown before approval. Do not use the generic operations surface to invent semantic naming migrations from health-check conflicts. Only product-specific planning or designer-decision gaps should be reported as future Figlets planner scope.",
       mode: "designer-facing",
       nextAction: "For a concrete initial goal, route it before replying. For ambiguous routing, use selectionPrompt. For generic help, show designerResponse.",
     },

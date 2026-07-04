@@ -98,7 +98,7 @@ try {
 const repairRoot = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-version-repair-"));
 try {
   const pluginPaths = copyProductVersionFixtures(repairRoot);
-  const targetVersion = "1.0.0";
+  const targetVersion = bumpVersion(version, "patch");
 
   const serverPkgPath = path.join(repairRoot, "packages", "figlets-mcp-server", "package.json");
   const serverPkg = JSON.parse(fs.readFileSync(serverPkgPath, "utf-8"));

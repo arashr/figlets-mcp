@@ -93,9 +93,14 @@ module.exports = (() => {
       emptyPlan.agentInstruction.includes("Do not invent repairs"),
       "empty repair plans should explicitly tell agents not to invent repairs"
     );
+    assert.strictEqual(emptyResult.summary.emptyDesignSystem, true);
     assert.ok(
-      emptyPlan.designerPresentation.sayToDesigner[0].includes("semantic color setup looks clean"),
-      "empty repair plans should still include a designer-facing presentation"
+      emptyPlan.designerPresentation.sayToDesigner[0].includes("no design-system variables or local styles"),
+      "empty repair plans should say there is no semantic color layer yet"
+    );
+    assert.ok(
+      emptyPlan.designerPresentation.sections.some(section => section.title === "Empty design-system file"),
+      "empty repair plans should include empty-file guidance"
     );
   }
 

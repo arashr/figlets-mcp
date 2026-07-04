@@ -55,7 +55,23 @@ async function runTests() {
                 rawValue: "rgb(255,255,255)",
                 type: "color",
                 fixability: "fixableNow",
-                suggestion: { kind: "variable", name: "color/surface/default", confidence: "high", id: "var-1" }
+                suggestion: {
+                  kind: "variable",
+                  name: "color/surface/default",
+                  confidence: "high",
+                  id: "var-1",
+                  facts: {
+                    name: "Button",
+                    type: "FRAME",
+                    role: "surface",
+                    rawFill: { text: "rgb(255,255,255)" },
+                    textDescendants: ["Buy now"]
+                  },
+                  candidates: [
+                    { token: "color/surface/default", id: "var-1", kind: "surface", distance: 0 },
+                    { token: "color/bg/muted", id: "var-2", kind: "surface", distance: 0.14 }
+                  ]
+                }
               }
             ]
           }
@@ -73,6 +89,8 @@ async function runTests() {
       assert.strictEqual(data.violationCount, 2);
       assert.deepStrictEqual(data.byType, { color: 1, spacing: 1 });
       assert.strictEqual(data.violations[0].suggestion.name, "color/surface/default");
+      assert.strictEqual(data.violations[0].suggestion.facts.rawFill.text, "rgb(255,255,255)");
+      assert.strictEqual(data.violations[0].suggestion.candidates[1].token, "color/bg/muted");
       assert.strictEqual(data.violations[0].fixability, "fixableNow");
       assert.strictEqual(data.repairPlan.tool, "qa_binding_audit");
       assert.strictEqual(data.byFixability.fixableNow, 1);
@@ -124,6 +142,62 @@ async function runTests() {
     }
 
     {
+      const approved = [{
+        nodeId: "1:4",
+        nodeName: "Title",
+        property: "Text style",
+        type: "typography",
+        rawValue: "18px",
+        expectedRawValue: "18px",
+        suggestion: {
+          kind: "textStyle",
+          name: "type/headline/md",
+          id: "style-1",
+          confidence: "medium"
+        }
+      }];
+      const capturePath = path.join(tmp, "qa-audit-approved-capture.json");
+      setBridgeHookRoute(hookPath, "/request-qa-audit", {
+        capturePath,
+        json: {
+          success: true,
+          result: {
+            scope: "selection",
+            violationCount: 1,
+            fixApplied: true,
+            fixedCount: 1,
+            failedCount: 0,
+            fixed: [{ nodeId: "1:4", property: "Text style", boundTo: "type/headline/md", approval: true }],
+            byFixability: { fixableNow: 0, needsExistingToken: 0, needsDesignerDecision: 1, unsupported: 0 },
+            repairPlan: {
+              tool: "qa_binding_audit",
+              approvalRequired: true,
+              applyInput: { fix: true },
+              designerDecisionApplyInput: { approved_suggestions: approved },
+              counts: { fixableNow: 0, needsExistingToken: 0, needsDesignerDecision: 1, unsupported: 0 }
+            },
+            violations: [
+              {
+                nodeId: "1:4",
+                property: "Text style",
+                type: "typography",
+                fixability: "needsDesignerDecision",
+                suggestion: { kind: "textStyle", name: "type/headline/md", confidence: "medium", id: "style-1" }
+              }
+            ]
+          }
+        }
+      });
+      const handleQaBindingAudit = loadTool();
+      const result = await handleQaBindingAudit({ approved_suggestions: approved });
+      assert.deepStrictEqual(readBridgeHookCapture(capturePath), { fix: false, approvedSuggestions: approved });
+      const data = JSON.parse(result.content[0].text);
+      assert.strictEqual(data.fixApplied, true);
+      assert.strictEqual(data.fixed[0].approval, true);
+      assert.strictEqual(data.repairPlan.designerDecisionApplyInput.approved_suggestions[0].suggestion.name, "type/headline/md");
+    }
+
+    {
       const capturePath = path.join(tmp, "qa-audit-limits-capture.json");
       setBridgeHookRoute(hookPath, "/request-qa-audit", {
         capturePath,
@@ -152,12 +226,71 @@ async function runTests() {
     }
 
     {
+      let attempts = 0;
+      const approved = [{
+        issueNumber: 1,
+        nodeId: "1:2",
+        nodeName: "Sold Out Badge",
+        property: "Fill color",
+        type: "color",
+        rawValue: "rgb(229,33,33)",
+        expectedRawValue: "rgb(229,33,33)",
+        suggestion: { kind: "variable", name: "color/fill/warning" }
+      }];
+      const handleQaBindingAudit = loadTool();
+      const result = await handleQaBindingAudit({
+        approved_suggestions: approved,
+        bridgeRetryDelayMs: 0,
+        bridgeTransport: ({ path: routePath, body }) => {
+          attempts += 1;
+          assert.strictEqual(routePath, "/request-qa-audit");
+          assert.deepStrictEqual(body, { fix: false, approvedSuggestions: approved });
+          if (attempts < 3) {
+            return {
+              statusCode: 503,
+              data: {
+                error: "Figma plugin was connected recently but is not listening for a new command yet.",
+                activeSessionId: "figlets-qa-session",
+                pluginRecentlySeen: true
+              },
+              raw: ""
+            };
+          }
+          return {
+            statusCode: 200,
+            data: {
+              success: true,
+              result: {
+                scope: "selection",
+                violationCount: 0,
+                fixApplied: true,
+                fixedCount: 1,
+                failedCount: 0,
+                fixed: [{ issueNumber: 1, nodeId: "1:2", property: "Fill color", boundTo: "color/fill/warning", approval: true }],
+                byType: {},
+                byFixability: { fixableNow: 0, needsExistingToken: 0, needsDesignerDecision: 0, unsupported: 0 },
+                repairPlan: { tool: "qa_binding_audit", counts: { fixableNow: 0, needsExistingToken: 0, needsDesignerDecision: 0, unsupported: 0 } },
+                violations: []
+              }
+            },
+            raw: ""
+          };
+        }
+      });
+      assert.strictEqual(attempts, 3);
+      assert.ok(!result.isError, "retryable 503 should recover");
+      const data = JSON.parse(result.content[0].text);
+      assert.strictEqual(data.fixApplied, true);
+      assert.strictEqual(data.fixed[0].boundTo, "color/fill/warning");
+    }
+
+    {
       setBridgeHookRoute(hookPath, "/request-qa-audit", {
         statusCode: 503,
         json: { error: "Figma plugin is not connected or listening.", activeSessionId: "figlets-test" }
       });
       const handleQaBindingAudit = loadTool();
-      const result = await handleQaBindingAudit();
+      const result = await handleQaBindingAudit({ bridgeRetryAttempts: 1, bridgeRetryDelayMs: 0 });
       assert.ok(result.isError, "should error");
       assert.ok(result.content[0].text.includes("figlets-test"), "should surface active session id");
     }

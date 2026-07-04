@@ -84,6 +84,7 @@ try {
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("suggestedBackground") && item.includes("suggestedText")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("prose-only repair direction")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("go for Figma")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("empty from a design-system perspective")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Do not replace the exact entries with token names")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("do not redirect a Mobile-only approval into foundation mode creation")));
@@ -136,6 +137,26 @@ try {
   }
 
   {
+    const route = routeIntent("check my file");
+    assert.strictEqual(route.workflow.id, "health-check");
+    assert.strictEqual(route.selectionPrompt, null);
+    assert.strictEqual(route.intentInterpretation.kind, "semantic");
+    assert.ok(route.intentInterpretation.reason.includes("file-level"));
+  }
+
+  {
+    const route = routeIntent("is this file empty as a design system?");
+    assert.strictEqual(route.workflow.id, "health-check");
+    assert.strictEqual(route.selectionPrompt, null);
+  }
+
+  {
+    const route = routeIntent("set up a foundation");
+    assert.strictEqual(route.workflow.id, "new-ds-setup");
+    assert.strictEqual(route.selectionPrompt, null);
+  }
+
+  {
     const route = routeIntent("help me choose what to do");
     assert.ok(route.selectionPrompt, "ambiguous or generic requests should expose a structured selection prompt");
     assert.strictEqual(route.selectionPrompt.type, "single-choice");
@@ -149,6 +170,40 @@ try {
   {
     const route = routeIntent("Please generate docs for this Button component.");
     assert.strictEqual(route.workflow.id, "component-docs");
+  }
+
+  {
+    const qaSelectionIntents = [
+      "check the selected component",
+      "check selected component",
+      "review this frame",
+      "audit the current layer",
+      "QA these components",
+    ];
+    for (const intent of qaSelectionIntents) {
+      const route = routeIntent(intent);
+      assert.strictEqual(route.workflow.id, "qa-binding-audit", intent);
+      assert.strictEqual(route.selectionPrompt, null, intent);
+      assert.ok(route.designerResponse.includes("qa binding audit"), intent);
+      assert.ok(route.designerResponse.includes("I'll start read-only"), intent);
+      assert.strictEqual(route.intentInterpretation.kind, "semantic", intent);
+      assert.ok(route.intentInterpretation.reason.includes("current selection"), intent);
+    }
+  }
+
+  {
+    const docSelectionIntents = [
+      "document the selected component",
+      "generate a spec for this component",
+      "make docs for the current component",
+    ];
+    for (const intent of docSelectionIntents) {
+      const route = routeIntent(intent);
+      assert.strictEqual(route.workflow.id, "component-docs", intent);
+      assert.strictEqual(route.selectionPrompt, null, intent);
+      assert.strictEqual(route.intentInterpretation.kind, "semantic", intent);
+      assert.ok(route.intentInterpretation.reason.includes("documentation"), intent);
+    }
   }
 
   {
@@ -301,10 +356,24 @@ try {
   {
     const qaGuide = getWorkflowGuide("qa-binding-audit");
     assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("fixableNow")));
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("stable numbered list")));
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("issue number")));
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("raw value → exact target token/style")));
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("rawFill")));
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("same audited finding")));
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("visible recommended target")));
+    assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("shorthand approval by issue number means the visible recommendation")));
+    assert.ok(qaGuide.steps.some(step => step.options && step.options.approved_suggestions === "repairPlan.designerDecisionApplyInput.approved_suggestions"));
     assert.ok(qaGuide.errors.some(item => item.includes("needsExistingToken")));
+    assert.ok(qaGuide.errors.some(item => item.includes("wrong type")));
     const handled = handleFigletsWorkflowGuide({ workflow_id: "qa-binding-audit" });
     assert.ok(handled.bulkRepairRouting.length >= 4);
     assert.ok(handled.presentationRule.includes("byFixability"));
+    assert.ok(handled.bulkRepairRouting.some(item => item.includes("never collapse color fixes into a count")));
+    assert.ok(handled.bulkRepairRouting.some(item => item.includes("do not merely repeat the first suggestion")));
+    assert.ok(handled.bulkRepairRouting.some(item => item.includes("stable numbered list")));
+    assert.ok(handled.bulkRepairRouting.some(item => item.includes("approval of the visible recommendation")));
+    assert.ok(handled.bulkRepairRouting.some(item => item.includes("replace only suggestion")));
   }
 
   {
@@ -330,8 +399,10 @@ try {
     assert.deepStrictEqual(verifyStep.tools, ["sync_figma_data", "detect_design_system", "audit_tokens", "inspect_ds_setup_gaps", "inspect_ds_token_gaps"]);
     assert.ok(guide.summary.includes("semantic setup plus token-gap suggestions"));
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
+    assert.ok(guide.steps.some(step => step.id === "detect" && step.designerMessage.includes("looks empty as a design system")));
     assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.kind === "read" && step.tool === "inspect_ds_token_gaps"));
     assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("missing foundation collections or modes")));
+    assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("empty-state setup choice")));
     assert.ok(guide.steps.some(step => step.id === "binding-audit-handoff" && step.kind === "read" && step.tool === "qa_binding_audit" && step.optional === true));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("semantic setup repairs separate from token-gap")));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("summarized by category")));
@@ -389,6 +460,7 @@ try {
     assert.ok(handled.presentationRule.includes("Do not use implementation terms like dry-run in menu labels"));
     assert.ok(handled.presentationRule.includes("confirmation happens before changes"));
     assert.ok(handled.presentationRule.includes("Avoid technical verification matrices"));
+    assert.ok(handled.bulkRepairRouting.some(item => item.includes("emptyDesignSystem.isEmpty")));
   }
 
   {

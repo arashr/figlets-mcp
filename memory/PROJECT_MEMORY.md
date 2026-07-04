@@ -4,6 +4,36 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-06-24 — pruning checkpoint; receiver special sync routes]
+
+**Status:** Continued the cautious pruning plan with tests-first coverage for receiver `/request-sync` + `/sync` and `/request-selection` + `/sync-selection` special routes.
+
+**Shipped behavior:** Added a dedicated receiver special-route contract test for sync/selection command dispatch, plugin-wait behavior, scoped file-key persistence, active-file updates, persisted `figma-data.json` / `figma-selection.json` writes, and pending request response shapes. Then extracted shared `_handlePersistedPluginSync` receiver plumbing for persisted plugin callbacks while preserving the special-route request behavior and response payloads.
+
+**Verification:** The new special-route test passed before and after refactor. Focused receiver syntax, route inventory, route matrix, lifecycle, and legacy receiver tests passed. Full `npm test` passed **108/108** and `git diff --check` passed.
+
+---
+
+### [2026-06-24 — pruning checkpoint; plugin command dispatcher cleanup]
+
+**Status:** Continued the cautious pruning plan with tests-first coverage for bridge/plugin command dispatch.
+
+**Shipped behavior:** Added a static dispatch contract test that pins each bridge-backed plugin command to its response message type, handler, log strings, and notification text. The plugin command branches in `packages/figma-bridge-plugin/code.js` now share one `_runPluginBridgeCommand` helper for execute/post/log/notify/error handling while keeping the visible `msg.type` branches and existing command-specific payload quirks intact.
+
+**Verification:** New dispatch contract test passed before and after refactor. Focused syntax, route inventory, route matrix, QA policy, and update-token policy checks passed. Full `npm test` passed **107/107** and `git diff --check` passed.
+
+---
+
+### [2026-06-24 — pruning checkpoint; shared inventory and QA approval helpers]
+
+**Status:** Follow-up cleanup after manual smoke exposed empty-file and empty-foundation-shell health-check nuance.
+
+**Shipped behavior:** Empty design-system inventory is now classified through one shared core helper (`empty-file`, `empty-foundation-shell`, `has-token-artifacts`) and reused by core token audit plus server health-check tools. QA binding approved-suggestion matching in the bridge plugin now uses shared target/match/metadata helpers instead of repeating id/name/candidate matching logic. Designer-facing behavior and approval payload shapes stay unchanged.
+
+**Verification:** Focused inventory, health-check, audit-token, Agent Interface, and QA binding tests passed before full-suite verification.
+
+---
+
 ### [2026-06-20 — BNN-58 follow-up; generated setup aliases type size and fine radius values]
 
 **Status:** Manual testing found a newly generated setup still left raw semantic typography size values such as `45` and `57`, plus fine spacing/radius/border values, in Figma variable tables. Line-height raw values were explicitly accepted because px line-height should not be forced through ratio primitives.
@@ -3023,3 +3053,46 @@ Fixes shipped:
 - Extended `tests/server/prepare-ds-config-tool.test.js` to cover the no-foreground-only state, combined repair payload, apply, and reprepare build-ready path.
 - Updated Agent Interface/doc regressions for paired `suggestedBackground` + `suggestedText` options and no untested single-axis examples.
 - Full supported-runtime suite passed: `npm test` → `104/104`.
+
+### [2026-06-24 — Generic Figma operations is the only exact variable-creation path]
+
+**Decision:** Remove the public `plan_ds_variable_creations` / `apply_ds_variable_creations` wrapper. Exact variable creation now routes through `plan_ds_figma_operations` / `apply_ds_figma_operations` using `create_variable` operations.
+
+**Why:** The high-level operations surface was introduced as the broader, more forgiving path for exact Figma design-system edits. Keeping a narrow variable-only wrapper risked steering agents into a special-case path and creating dead ends when the designer's request expanded into adjacent operations such as modes, values, collections, metadata, bindings, or lifecycle edits.
+
+**Implementation:** MCP registration, adapter guidance, and Agent Interface workflow guidance now point exact variable creation at `plan_ds_figma_operations`. The old wrapper implementation and direct test were removed. Existing bridge/plugin policy already forbids a parallel variable-creation command/capability and keeps all basic exact edits behind `/request-figma-operations`.
+
+**Verification:** `figma-operations` coverage remains the behavioral safety net for `create_variable` planning and apply payloads. Tool-list tests now assert the narrow tools are not exposed.
+
+### [2026-06-25 — Component docs promote selected variants to the parent set]
+
+**Decision:** A selected variant component should be treated as a request to document its parent component set. Component documentation is for the whole component, not a single variant.
+
+**Implementation:** `generate_component_doc` keeps an explicit parent `component_name` when the live selection is a `COMPONENT`, and the bridge resolves selected variant components to `component.parent` when that parent is a `COMPONENT_SET`. The response now includes `documentedVariantSelection` and `selectedVariantName` metadata, plus a binding warning that names the selected variant and documented parent set.
+
+**Verification:** Added server and bridge-policy regressions for optional `component_name` and selected-variant promotion. Full suite passed: `npm test` -> `108/108`.
+
+### [2026-06-25 — Component docs placement, private layers, section fit, and slot coverage]
+
+**Decision:** Component documentation should stay spatially attached to the documented component and avoid exposing internal/private construction layers. Figma `SLOT` component properties deserve a dedicated docs section instead of being flattened into normal anatomy.
+
+**Implementation:** The bridge doc generator now positions the Documentation section to the right of the documented component, places the spec frame at `0,0` inside that section, and resizes the section to the auto-grown frame. Anatomy and binding walks ignore nodes whose names start with `_` or `.`, and slot nodes stop anatomy traversal so default slot content does not flood the anatomy table. A new Slots section in both the Figma spec and markdown reports slot settings, preferred values, default content, child count, and current limit violations.
+
+**Slot API facts:** Figma exposes `SLOT` as a component property type with `slotSettings` (`minChildren`, `maxChildren`, `allowPreferredValuesOnly`, `stretchChildOnInsert`, `displayEmptyByDefault`), `preferredValues`, and per-slot-node `limitViolations` (`BELOW_MIN`, `ABOVE_MAX`, `HAS_NON_PREFERRED`). `InstanceNode.setProperties` does not support `SLOT` properties, so documentation can inspect slot rules but should not imply ordinary instance property writes can set slot content.
+
+**Verification:** Added static bridge-policy coverage for doc placement/private-layer filtering/section fitting and slot docs. Full suite passed: `npm test` -> `108/108`.
+
+### [2026-07-04 — v1.0.0 release-prep checkpoint]
+
+**Status:** Arash signed off manual v1.0 RC smoke as release-ready; remaining notes are not large enough to delay. Linear BNN-26 was marked Done and BNN-42 was started.
+
+**Release prep completed locally:**
+
+- `npm run release:prepare -- 1.0.0` synced product version surfaces to `1.0.0`.
+- `npm run build:server-tarball` produced `dist/figlets-mcp-server-1.0.0.tgz`.
+- `npm run release:prepare -- --check`, `npm run verify:release`, `npm run smoke:plugins`, `git diff --check`, and full `npm test` all passed.
+- `tests/scripts/product-version.test.js` was made release-version-agnostic by using `bumpVersion(version, "patch")` for its partial-bump drift fixture instead of hard-coding `1.0.0`.
+
+**Environment note:** Plain shell still resolves old Node v10.1.0. Release commands were run through interactive zsh/nvm with Node v24.14.0. The global npm cache had permission issues, so tarball/release verification commands used `npm_config_cache=/Users/arash/Projects/figlets-mcp/.local/npm-cache`.
+
+**Remaining release ops:** commit the intentional release/product changes, tag `v1.0.0`, publish the GitHub release with `dist/figlets-mcp-server-1.0.0.tgz`, and re-check the install path after the asset is available.

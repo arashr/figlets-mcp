@@ -32,12 +32,6 @@ const {
   handleApplySemanticNamingConsolidation,
 } = require("./tools/semantic-naming-consolidation.js");
 const {
-  planDsVariableCreationsTool,
-  applyDsVariableCreationsTool,
-  handlePlanDsVariableCreations,
-  handleApplyDsVariableCreations,
-} = require("./tools/variable-creations.js");
-const {
   planDsFigmaOperationsTool,
   applyDsFigmaOperationsTool,
   handlePlanDsFigmaOperations,
@@ -843,78 +837,6 @@ server.tool(
   }
 );
 
-// --- plan_ds_variable_creations ---
-server.tool(
-  planDsVariableCreationsTool.name,
-  planDsVariableCreationsTool.description,
-  {
-    variables: z.array(z.object({
-      name: z.string().describe("Exact variable name to create."),
-      collection: z.string().describe("Existing Figma variable collection name."),
-      type: z.enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"]).describe("Figma variable type."),
-      values: z.record(z.string(), z.any()).describe("Mode-name map. Use { alias: variableName }, { value: literal }, a number, boolean, string, or color hex string.")
-    })).describe("Exact designer-requested variables to validate and preview."),
-    figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
-  },
-  async (args) => {
-    try {
-      const result = handlePlanDsVariableCreations(args || {});
-      if (result && result.error) {
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          isError: true
-        };
-      }
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    } catch (err) {
-      return {
-        content: [{ type: "text", text: `Error: ${err.message}` }],
-        isError: true
-      };
-    }
-  }
-);
-
-// --- apply_ds_variable_creations ---
-server.tool(
-  applyDsVariableCreationsTool.name,
-  applyDsVariableCreationsTool.description,
-  {
-    variableCreations: z.array(z.object({
-      name: z.string(),
-      collection: z.string(),
-      collectionId: z.string(),
-      type: z.enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"]),
-      modeValues: z.array(z.object({
-        mode: z.string(),
-        modeId: z.string(),
-        kind: z.enum(["alias", "literal"]),
-        targetName: z.string().optional(),
-        targetId: z.string().optional(),
-        value: z.any().optional()
-      }))
-    })).describe("Approved variable creations copied or filtered from plan_ds_variable_creations.repairPlan.applyInput.variableCreations."),
-    figmaDataPath: z.string().optional().describe("Optional snapshot path used for stale approval validation before apply.")
-  },
-  async (args) => {
-    try {
-      const result = await handleApplyDsVariableCreations(args || {});
-      if (result && result.error) {
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          isError: true
-        };
-      }
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    } catch (err) {
-      return {
-        content: [{ type: "text", text: `Error: ${err.message}` }],
-        isError: true
-      };
-    }
-  }
-);
-
 // --- plan_ds_figma_operations ---
 server.tool(
   planDsFigmaOperationsTool.name,
@@ -974,7 +896,7 @@ server.tool(
   generateComponentDocTool.name,
   generateComponentDocTool.description,
   {
-    component_name: z.string().describe("Name of the COMPONENT or COMPONENT_SET on the current Figma page."),
+    component_name: z.string().optional().describe("Optional name of the COMPONENT or COMPONENT_SET on the current Figma page. Omit to document the selected component or selected variant's parent component set."),
     description: z.string().optional().describe("Human-readable description (1-2 sentences) shown under the title on the spec sheet. Agent should craft this after inspecting the component."),
     usage_do: z.array(z.string()).optional().describe("Do rules for the usage panel. Agent should ground these in the component's actual purpose, not pass generic placeholders."),
     usage_dont: z.array(z.string()).optional().describe("Don't rules for the usage panel. Agent should ground these in the component's actual purpose."),
@@ -997,7 +919,10 @@ server.tool(
   qaBindingAuditTool.name,
   qaBindingAuditTool.description,
   {
-    fix: z.boolean().optional().describe("When true, apply all high-confidence variable/style suggestions in Figma. Defaults to false.")
+    fix: z.boolean().optional().describe("When true, apply all high-confidence variable/style suggestions in Figma. Defaults to false."),
+    max_nodes: z.number().optional().describe("Optional safety cap for page-scope audits. Defaults to 2500 nodes."),
+    deadline_ms: z.number().optional().describe("Optional audit time budget in milliseconds. Defaults to 45000."),
+    approved_suggestions: z.array(z.record(z.string(), z.any())).optional().describe("Designer-approved decision bindings for numbered audited QA findings. Copy repairPlan entries unchanged only when the displayed target is unchanged, or preserve issueNumber/node/property/raw identity and replace suggestion with the visible recommendation or exact existing designer-named token/style.")
   },
   async (args) => {
     try {

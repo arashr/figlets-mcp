@@ -6,6 +6,7 @@ const path = require("path");
 
 const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-receiver-life-"));
 process.env.FIGLETS_LOCAL_DIR = TEMP_DIR;
+process.env.FIGLETS_RECEIVER_POLL_WAIT_MS = "25";
 
 const receiverPath = "../../packages/figma-bridge-plugin/src/receiver.js";
 delete require.cache[require.resolve(receiverPath)];
@@ -166,6 +167,40 @@ module.exports = (async () => {
     assert.strictEqual(selectionResult.statusCode, 200);
     assert.strictEqual(JSON.parse(selectionResult.body).success, true);
 
+    const qaWaitPromise = request(port, "POST", "/request-qa-audit", JSON.stringify({
+      fix: false,
+      approvedSuggestions: [{ issueNumber: 1, nodeId: "34:2", property: "Fill color" }]
+    }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const qaWaitPollPromise = request(
+      port,
+      "GET",
+      "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives,update-tokens"
+    );
+    const qaWaitPoll = await qaWaitPollPromise;
+    assert.deepStrictEqual(JSON.parse(qaWaitPoll.body), {
+      command: "qa-audit",
+      data: {
+        fix: false,
+        approvedSuggestions: [{ issueNumber: 1, nodeId: "34:2", property: "Fill color" }]
+      }
+    });
+
+    const qaWaitAck = await request(port, "POST", "/sync-qa-audit", JSON.stringify({
+      result: {
+        scope: "selection",
+        violationCount: 0,
+        fixedCount: 1,
+        fixed: [{ issueNumber: 1, boundTo: "color/fill/warning" }]
+      }
+    }));
+    assert.strictEqual(qaWaitAck.statusCode, 200);
+
+    const qaWaitResult = await qaWaitPromise;
+    assert.strictEqual(qaWaitResult.statusCode, 200);
+    assert.strictEqual(JSON.parse(qaWaitResult.body).success, true);
+
     const docPromise = request(port, "POST", "/request-doc-build", JSON.stringify({
       componentId: "34:2",
       componentName: "Raw card target - BNN-37"
@@ -200,5 +235,6 @@ module.exports = (async () => {
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(TEMP_DIR, { recursive: true, force: true });
     delete process.env.FIGLETS_LOCAL_DIR;
+    delete process.env.FIGLETS_RECEIVER_POLL_WAIT_MS;
   }
 })();

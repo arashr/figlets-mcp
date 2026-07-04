@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { requestBridgePost } = require("../bridges/bridge-request.js");
+const { bridgeStatusError, requestBridgePost } = require("../bridges/bridge-request.js");
 const { getActiveFileConfigPath, getActiveFilePaths, getConfigPathGuardError } = require("../utils/paths.js");
 const {
   computePlannedAliases,
@@ -398,9 +398,6 @@ function handleApplyDsSetupRepairs(args = {}) {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
   }).then((response) => {
-    if (response.connectionError) {
-      return { error: response.connectionError };
-    }
     const parsed = response.data || {};
     const statusCode = response.statusCode;
     if (statusCode === 200) {
@@ -427,20 +424,12 @@ function handleApplyDsSetupRepairs(args = {}) {
         error: result.error,
       };
     }
-    if (statusCode === 409) {
-      return {
-        error: parsed.error || "The connected plugin does not advertise setup repairs. Reload the Figlets Bridge plugin.",
-        activeSessionId: parsed.activeSessionId || null,
-        pluginCapabilities: parsed.pluginCapabilities || [],
-      };
-    }
-    if (statusCode === 503) {
-      return { error: "Figma plugin is not listening for setup repairs. Open the Figlets Bridge plugin in Figma Desktop and try again." };
-    }
-    if (statusCode === 504) {
-      return { error: "Setup repair timed out." };
-    }
-    return { error: `Unexpected status ${statusCode}` };
+    return bridgeStatusError(response, {
+      action: "setup repairs",
+      includeActiveSession: false,
+      timeoutError: "Setup repair timed out.",
+      conflictError: "The connected plugin does not advertise setup repairs. Reload the Figlets Bridge plugin.",
+    });
   });
 }
 

@@ -1,4 +1,4 @@
-const { requestBridgePost } = require("../bridges/bridge-request.js");
+const { bridgeStatusError, requestBridgePost } = require("../bridges/bridge-request.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 
 const VARIABLE_TYPES = new Set(["COLOR", "FLOAT", "STRING", "BOOLEAN"]);
@@ -302,6 +302,7 @@ function _findAliasRefs(ctx, sourceId) {
 function _parseModeValues(values, type, collection, ctx, variable) {
   const errors = [];
   const modeValues = [];
+  values = _coerceModeValuesInput(values);
   if (!values || typeof values !== "object" || Array.isArray(values) || !Object.keys(values).length) {
     return { errors: ["Mode values are required."], modeValues: [] };
   }
@@ -355,6 +356,33 @@ function _parseModeValues(values, type, collection, ctx, variable) {
   }
   if (!modeValues.length) errors.push("No mode values were usable.");
   return { errors, modeValues };
+}
+
+function _coerceModeValuesInput(values) {
+  if (!Array.isArray(values)) return values;
+  const out = {};
+  for (const entry of values) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const modeName = entry.mode || entry.modeName || entry.name;
+    if (!modeName) continue;
+    if (Object.prototype.hasOwnProperty.call(entry, "value")) {
+      out[String(modeName)] = entry.value;
+      continue;
+    }
+    if (entry.alias || entry.targetName || entry.variable) {
+      out[String(modeName)] = {
+        alias: entry.alias || entry.targetName || entry.variable,
+      };
+    }
+  }
+  return out;
+}
+
+function _modeValueInput(input) {
+  if (input && Object.prototype.hasOwnProperty.call(input, "values")) return input.values;
+  if (input && Object.prototype.hasOwnProperty.call(input, "modeValues")) return input.modeValues;
+  if (input && Object.prototype.hasOwnProperty.call(input, "mode_values")) return input.mode_values;
+  return undefined;
 }
 
 function _blocked(input, errors) {
@@ -498,7 +526,7 @@ function _planOperation(input, ctx) {
     if (targetCollectionName && !targetCollection) errors.push(`Collection ${targetCollectionName} was not found.`);
     if (!VARIABLE_TYPES.has(type)) errors.push(`Unsupported variable type ${type || "(missing)"}.`);
     if (errors.length) return _blocked(input, errors);
-    const parsed = _parseModeValues(input.values, type, targetCollection, ctx, null);
+    const parsed = _parseModeValues(_modeValueInput(input), type, targetCollection, ctx, null);
     if (parsed.errors.length) return _blocked(input, parsed.errors);
     const operation = { kind, name, collection: targetCollection.name, collectionId: targetCollection.id, type, modeValues: parsed.modeValues };
     return _ready(input, operation, `Create ${type} variable ${name} in ${targetCollection.name}.`);
@@ -513,7 +541,7 @@ function _planOperation(input, ctx) {
   if (kind === "update_variable") {
     const collection = _collectionForVariable(variable, ctx);
     if (!collection) return _blocked(input, [`Collection for ${variable.name} was not found.`]);
-    const parsed = _parseModeValues(input.values, variable.resolvedType, collection, ctx, variable);
+    const parsed = _parseModeValues(_modeValueInput(input), variable.resolvedType, collection, ctx, variable);
     if (parsed.errors.length) return _blocked(input, parsed.errors);
     const operation = {
       kind,
@@ -957,7 +985,6 @@ function handleApplyDsFigmaOperations(args = {}) {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
   }).then(response => {
-    if (response.connectionError) return { error: response.connectionError };
     const parsed = response.data || {};
     const statusCode = response.statusCode;
     if (statusCode === 200) {
@@ -971,16 +998,12 @@ function handleApplyDsFigmaOperations(args = {}) {
         error: result.error,
       };
     }
-    if (statusCode === 409) {
-      return {
-        error: parsed.error || "The connected plugin does not advertise Figma operations. Reload the Figlets Bridge plugin.",
-        activeSessionId: parsed.activeSessionId || null,
-        pluginCapabilities: parsed.pluginCapabilities || [],
-      };
-    }
-    if (statusCode === 503) return { error: "Figma plugin is not listening for Figma operations. Open the Figlets Bridge plugin in Figma Desktop and try again." };
-    if (statusCode === 504) return { error: "Figma operations timed out." };
-    return { error: `Unexpected status ${statusCode}` };
+    return bridgeStatusError(response, {
+      action: "Figma operations",
+      includeActiveSession: false,
+      timeoutError: "Figma operations timed out.",
+      conflictError: "The connected plugin does not advertise Figma operations. Reload the Figlets Bridge plugin.",
+    });
   });
 }
 

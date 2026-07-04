@@ -23,7 +23,45 @@ try {
     // inline figmaData: compact result, no snapshot key
     const result = handleDetectDesignSystem({ figmaData: exampleFigmaData });
     assert.strictEqual(result.summary.collections, 2);
+    assert.strictEqual(result.emptyDesignSystem.isEmpty, false);
     assert.ok(!result.snapshot, "compact result should not include snapshot");
+  }
+
+  {
+    const result = handleDetectDesignSystem({
+      figmaData: {
+        collections: [],
+        variables: [],
+        textStyles: [],
+        effectStyles: [],
+      },
+    });
+    assert.strictEqual(result.emptyDesignSystem.isEmpty, true);
+    assert.strictEqual(result.emptyDesignSystem.designSystemArtifactCount, 0);
+    assert.strictEqual(result.emptyDesignSystem.state, "empty-file");
+    assert.strictEqual(result.emptyDesignSystem.recommendedWorkflow, "new-ds-setup");
+    assert.ok(
+      result.emptyDesignSystem.recommendedDesignerPrompt.includes("set up a new design-system foundation"),
+      "empty files should carry a designer-facing setup prompt"
+    );
+  }
+
+  {
+    const result = handleDetectDesignSystem({
+      figmaData: {
+        collections: [{ id: "spacing", name: "4. Spacing", variableIds: [] }],
+        variables: [],
+        textStyles: [],
+        effectStyles: [],
+      },
+    });
+    assert.strictEqual(result.emptyDesignSystem.isEmpty, true);
+    assert.strictEqual(result.emptyDesignSystem.state, "empty-foundation-shell");
+    assert.strictEqual(result.emptyDesignSystem.foundationCollectionCount, 1);
+    assert.ok(
+      result.emptyDesignSystem.recommendedDesignerPrompt.includes("foundation collections but no design-system variables"),
+      "empty foundation shells should still prompt setup continuation"
+    );
   }
 
   {

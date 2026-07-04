@@ -202,6 +202,296 @@ function _flushPendingPollWait() {
   return true;
 }
 
+function _readJsonBody(req, callback) {
+  let body = '';
+  req.on('data', chunk => { body += chunk.toString(); });
+  req.on('end', () => {
+    let parsed;
+    try { parsed = body ? JSON.parse(body) : {}; } catch { parsed = {}; }
+    callback(parsed, body);
+  });
+}
+
+function _sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
+
+function _setPendingTimeout(route, res) {
+  const timer = setTimeout(() => {
+    if (route.getPending() === res) {
+      _sendJson(res, 504, { error: route.timeoutError });
+      route.setPending(null);
+    }
+  }, route.timeoutMs);
+  if (timer.unref) timer.unref();
+}
+
+function _sendCapabilityMissing(res, route) {
+  _sendJson(res, 409, {
+    error: route.capabilityError,
+    activeSessionId: pendingPollSessionId || null,
+    pluginCapabilities: activePluginCapabilities
+  });
+}
+
+function _sendDevBridgeDisabled(res, route, sync) {
+  const payload = { error: sync ? route.devSyncError : route.devRequestError };
+  if (!sync && route.devHint) payload.hint = route.devHint;
+  _sendJson(res, 404, payload);
+}
+
+function _dispatchBridgeCommand(route, res, payload) {
+  const dispatch = () => {
+    if (route.capability && !_pluginHasCapability(route.capability)) {
+      _sendCapabilityMissing(res, route);
+      return;
+    }
+
+    route.setPending(res);
+    _setPendingTimeout(route, res);
+
+    pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+    pendingPollResponse.end(JSON.stringify({ command: route.command, data: payload }));
+    _clearPendingPoll();
+  };
+
+  if (route.waitForPoll) {
+    if (_dispatchOrWaitForPoll(res, dispatch)) return;
+    _sendNotConnected(res);
+    return;
+  }
+
+  if (pendingPollResponse) {
+    dispatch();
+  } else {
+    _sendNotConnected(res);
+  }
+}
+
+function _handleBridgeCommandRequest(route, req, res) {
+  if (route.devOnly && !_devBridgeCommandsEnabled()) {
+    _sendDevBridgeDisabled(res, route, false);
+    return;
+  }
+
+  _readJsonBody(req, payload => {
+    if (route.validatePayload && !route.validatePayload(payload, res)) return;
+    _dispatchBridgeCommand(route, res, payload);
+  });
+}
+
+function _handleBridgeCommandSync(route, req, res) {
+  if (route.devOnly && !_devBridgeCommandsEnabled()) {
+    _sendDevBridgeDisabled(res, route, true);
+    return;
+  }
+
+  _readJsonBody(req, parsed => {
+    if (route.persistFileKey) _persistSessionFileKey(req, parsed);
+    _sendJson(res, 200, { success: true });
+
+    const pending = route.getPending();
+    if (pending) {
+      parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
+      pending.writeHead(200, { 'Content-Type': 'application/json' });
+      pending.end(JSON.stringify({ success: true, result: parsed }));
+      route.setPending(null);
+    }
+  });
+}
+
+function _handlePersistedPluginSync(req, res, options) {
+  let body = '';
+  req.on('data', chunk => {
+    body += chunk.toString();
+  });
+  req.on('end', () => {
+    let parsedBody = null;
+    try { parsedBody = body ? JSON.parse(body) : null; } catch (_) { parsedBody = null; }
+    const fileKey = _persistSessionFileKey(req, parsedBody);
+    const fp = _filePaths(fileKey);
+    const writePath = fp[options.pathKey];
+    try {
+      fs.mkdirSync(fp.dir, { recursive: true });
+      fs.writeFileSync(writePath, body);
+      console.log('[success] Wrote ' + options.logLabel + ' to ' + writePath);
+
+      if (fileKey) _writeActiveFile(fileKey);
+
+      _sendJson(res, 200, options.ackPayload(fileKey, fp));
+
+      const pending = options.getPending();
+      if (pending) {
+        pending.writeHead(200, { 'Content-Type': 'application/json' });
+        pending.end(JSON.stringify(options.pendingPayload(req, fileKey, fp)));
+        options.clearPending();
+      }
+    } catch (err) {
+      console.error('[error] Failed to write file:', err);
+      _sendJson(res, 500, { error: err.message });
+
+      const pending = options.getPending();
+      if (pending) {
+        pending.writeHead(500, { 'Content-Type': 'application/json' });
+        pending.end(JSON.stringify({ error: err.message }));
+        options.clearPending();
+      }
+    }
+  });
+}
+
+function _pendingAccessors(getter, setter) {
+  return { getPending: getter, setPending: setter };
+}
+
+const DEV_BRIDGE_HINT = 'Set FIGLETS_DEV_BRIDGE=1 on the bridge receiver process for local validation scripts only.';
+const BRIDGE_COMMAND_ROUTES = [
+  Object.assign({
+    requestPath: '/request-showcase',
+    syncPath: '/sync-showcase',
+    command: 'build-showcase',
+    timeoutMs: 120000,
+    timeoutError: 'Showcase build timed out',
+  }, _pendingAccessors(() => pendingShowcaseRequest, value => { pendingShowcaseRequest = value; })),
+  Object.assign({
+    requestPath: '/request-doc-build',
+    syncPath: '/sync-doc-build',
+    command: 'build-doc',
+    waitForPoll: true,
+    timeoutMs: 120000,
+    timeoutError: 'Doc build timed out',
+  }, _pendingAccessors(() => pendingDocBuildRequest, value => { pendingDocBuildRequest = value; })),
+  Object.assign({
+    requestPath: '/request-qa-audit',
+    syncPath: '/sync-qa-audit',
+    command: 'qa-audit',
+    waitForPoll: true,
+    timeoutMs: 120000,
+    timeoutError: 'QA audit timed out',
+  }, _pendingAccessors(() => pendingQaAuditRequest, value => { pendingQaAuditRequest = value; })),
+  Object.assign({
+    requestPath: '/request-ds-setup',
+    syncPath: '/sync-ds-setup',
+    command: 'apply-ds-setup',
+    timeoutMs: 180000,
+    timeoutError: 'DS setup timed out — building variables can take up to 3 minutes for large systems.',
+  }, _pendingAccessors(() => pendingDsSetupRequest, value => { pendingDsSetupRequest = value; })),
+  Object.assign({
+    requestPath: '/request-update-primitives',
+    syncPath: '/sync-update-primitives',
+    command: 'update-primitives',
+    capability: 'update-primitives',
+    capabilityError: 'The Figlets Bridge plugin is connected but does not advertise the primitive-update command. If you are developing Figlets, reload the plugin from Figma Desktop so it loads the latest local code.',
+    timeoutMs: 60000,
+    timeoutError: 'Primitive update timed out.',
+  }, _pendingAccessors(() => pendingUpdatePrimitivesRequest, value => { pendingUpdatePrimitivesRequest = value; })),
+  Object.assign({
+    requestPath: '/request-update-tokens',
+    syncPath: '/sync-update-tokens',
+    command: 'update-tokens',
+    capability: 'update-tokens',
+    capabilityError: 'The Figlets Bridge plugin is connected but does not advertise the token-update command. Reload the plugin in Figma Desktop so it loads the latest local code.',
+    timeoutMs: 60000,
+    timeoutError: 'Token update timed out.',
+  }, _pendingAccessors(() => pendingUpdateTokensRequest, value => { pendingUpdateTokensRequest = value; })),
+  Object.assign({
+    requestPath: '/request-foundation-repairs',
+    syncPath: '/sync-foundation-repairs',
+    command: 'apply-foundation-repairs',
+    capability: 'foundation-repairs',
+    capabilityError: 'The Figlets Bridge plugin is connected but does not advertise the foundation-repairs command. Reload the plugin in Figma Desktop so it loads the latest local code.',
+    timeoutMs: 60000,
+    timeoutError: 'Foundation repair timed out.',
+  }, _pendingAccessors(() => pendingFoundationRepairsRequest, value => { pendingFoundationRepairsRequest = value; })),
+  Object.assign({
+    requestPath: '/request-setup-repairs',
+    syncPath: '/sync-setup-repairs',
+    command: 'apply-setup-repairs',
+    capability: 'setup-repairs',
+    capabilityError: 'The Figlets Bridge plugin is connected but does not advertise the setup-repairs command. Reload the plugin in Figma Desktop so it loads the latest local code.',
+    persistFileKey: true,
+    timeoutMs: 60000,
+    timeoutError: 'Setup repair timed out.',
+  }, _pendingAccessors(() => pendingSetupRepairsRequest, value => { pendingSetupRepairsRequest = value; })),
+  Object.assign({
+    requestPath: '/request-semantic-naming-consolidation',
+    syncPath: '/sync-semantic-naming-consolidation',
+    command: 'apply-semantic-naming-consolidation',
+    capability: 'semantic-naming-consolidation',
+    capabilityError: 'The Figlets Bridge plugin is connected but does not advertise semantic naming consolidation. Reload the plugin in Figma Desktop so it loads the latest local code.',
+    persistFileKey: true,
+    timeoutMs: 60000,
+    timeoutError: 'Semantic naming consolidation timed out.',
+  }, _pendingAccessors(() => pendingSemanticNamingConsolidationRequest, value => { pendingSemanticNamingConsolidationRequest = value; })),
+  Object.assign({
+    requestPath: '/request-figma-operations',
+    syncPath: '/sync-figma-operations',
+    command: 'apply-figma-operations',
+    capability: 'figma-operations',
+    capabilityError: 'The Figlets Bridge plugin is connected but does not advertise high-level Figma operations. Reload the plugin in Figma Desktop so it loads the latest local code.',
+    persistFileKey: true,
+    timeoutMs: 60000,
+    timeoutError: 'Figma operations timed out.',
+  }, _pendingAccessors(() => pendingFigmaOperationsRequest, value => { pendingFigmaOperationsRequest = value; })),
+  Object.assign({
+    requestPath: '/request-reset-figlets-file',
+    syncPath: '/sync-reset-figlets-file',
+    command: 'reset-figlets-file',
+    timeoutMs: 60000,
+    timeoutError: 'Reset timed out.',
+  }, _pendingAccessors(() => pendingResetRequest, value => { pendingResetRequest = value; })),
+  Object.assign({
+    requestPath: '/request-remove-text-styles',
+    syncPath: '/sync-remove-text-styles',
+    command: 'remove-text-styles',
+    devOnly: true,
+    devRequestError: 'remove-text-styles is a developer-only bridge command and is disabled for designer flows.',
+    devSyncError: 'remove-text-styles sync is disabled outside developer bridge mode.',
+    devHint: DEV_BRIDGE_HINT,
+    timeoutMs: 30000,
+    timeoutError: 'Text-style removal timed out.',
+  }, _pendingAccessors(() => pendingRemoveTextStylesRequest, value => { pendingRemoveTextStylesRequest = value; })),
+  Object.assign({
+    requestPath: '/request-trim-collection-modes',
+    syncPath: '/sync-trim-collection-modes',
+    command: 'trim-collection-modes',
+    devOnly: true,
+    devRequestError: 'trim-collection-modes is a developer-only bridge command and is disabled for designer flows.',
+    devSyncError: 'trim-collection-modes sync is disabled outside developer bridge mode.',
+    devHint: DEV_BRIDGE_HINT,
+    timeoutMs: 30000,
+    timeoutError: 'Collection mode trim timed out.',
+  }, _pendingAccessors(() => pendingTrimCollectionModesRequest, value => { pendingTrimCollectionModesRequest = value; })),
+  Object.assign({
+    requestPath: '/request-prepare-broken-ds-fixture',
+    syncPath: '/sync-prepare-broken-ds-fixture',
+    command: 'prepare-broken-ds-fixture',
+    devOnly: true,
+    devRequestError: 'prepare-broken-ds-fixture is a developer-only bridge command and is disabled for designer flows.',
+    devSyncError: 'prepare-broken-ds-fixture sync is disabled outside developer bridge mode.',
+    devHint: DEV_BRIDGE_HINT,
+    timeoutMs: 185000,
+    timeoutError: 'Broken fixture prep timed out.',
+    validatePayload(payload, res) {
+      if (payload.confirmation === 'RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE') return true;
+      _sendJson(res, 400, {
+        error: 'Explicit confirmation is required before preparing a broken fixture.',
+        requiredConfirmation: 'RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE',
+      });
+      return false;
+    }
+  }, _pendingAccessors(() => pendingBrokenDsFixtureRequest, value => { pendingBrokenDsFixtureRequest = value; })),
+];
+
+function _bridgeRouteForRequest(pathname) {
+  return BRIDGE_COMMAND_ROUTES.find(route => route.requestPath === pathname) || null;
+}
+
+function _bridgeRouteForSync(pathname) {
+  return BRIDGE_COMMAND_ROUTES.find(route => route.syncPath === pathname) || null;
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
@@ -319,907 +609,58 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 4. MCP Agent calls this to trigger a showcase build
-  if (req.method === 'POST' && pathname === '/request-showcase') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      let parsed;
-      try { parsed = body ? JSON.parse(body) : {}; } catch { parsed = {}; }
-
-      if (pendingPollResponse) {
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'build-showcase', data: parsed }));
-        _clearPendingPoll();
-
-        pendingShowcaseRequest = res;
-
-        const showcaseTimer = setTimeout(() => {
-          if (pendingShowcaseRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Showcase build timed out' }));
-            pendingShowcaseRequest = null;
-          }
-        }, 120000); // Showcase can take a while
-        if (showcaseTimer.unref) showcaseTimer.unref();
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(_notConnectedPayload()));
-      }
-    });
+  const bridgeRequestRoute = _bridgeRouteForRequest(pathname);
+  if (req.method === 'POST' && bridgeRequestRoute) {
+    _handleBridgeCommandRequest(bridgeRequestRoute, req, res);
     return;
   }
 
-  // 5. Figma Plugin posts the showcase result here
-  if (req.method === 'POST' && pathname === '/sync-showcase') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingShowcaseRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingShowcaseRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingShowcaseRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingShowcaseRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 5b. MCP Agent calls this to trigger a component doc build
-  if (req.method === 'POST' && pathname === '/request-doc-build') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      let docPayload;
-      try { docPayload = JSON.parse(body); } catch { docPayload = {}; }
-
-      if (_dispatchOrWaitForPoll(res, () => {
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'build-doc', data: docPayload }));
-        _clearPendingPoll();
-
-        pendingDocBuildRequest = res;
-
-        const docTimer = setTimeout(() => {
-          if (pendingDocBuildRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Doc build timed out' }));
-            pendingDocBuildRequest = null;
-          }
-        }, 120000);
-        if (docTimer.unref) docTimer.unref();
-      })) return;
-      _sendNotConnected(res);
-    });
-    return;
-  }
-
-  // 5c. Figma Plugin posts the doc build result here
-  if (req.method === 'POST' && pathname === '/sync-doc-build') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingDocBuildRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingDocBuildRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingDocBuildRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingDocBuildRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 5d. MCP Agent calls this to trigger a QA binding audit
-  if (req.method === 'POST' && pathname === '/request-qa-audit') {
-    if (pendingPollResponse) {
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let qaPayload;
-        try { qaPayload = JSON.parse(body); } catch { qaPayload = {}; }
-
-        pendingQaAuditRequest = res;
-
-        const qaTimer = setTimeout(() => {
-          if (pendingQaAuditRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'QA audit timed out' }));
-            pendingQaAuditRequest = null;
-          }
-        }, 120000);
-        if (qaTimer.unref) qaTimer.unref();
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'qa-audit', data: qaPayload }));
-        _clearPendingPoll();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  // 5e. Figma Plugin posts the QA audit result here
-  if (req.method === 'POST' && pathname === '/sync-qa-audit') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingQaAuditRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingQaAuditRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingQaAuditRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingQaAuditRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 6. MCP Agent calls this to trigger DS setup (creates all variable collections)
-  if (req.method === 'POST' && pathname === '/request-ds-setup') {
-    if (pendingPollResponse) {
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let dsPayload;
-        try { dsPayload = JSON.parse(body); } catch { dsPayload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'apply-ds-setup', data: dsPayload }));
-        _clearPendingPoll();
-
-        pendingDsSetupRequest = res;
-
-        const dsSetupTimer = setTimeout(() => {
-          if (pendingDsSetupRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'DS setup timed out — building variables can take up to 3 minutes for large systems.' }));
-            pendingDsSetupRequest = null;
-          }
-        }, 180000); // 3 minutes for large systems
-        if (dsSetupTimer.unref) dsSetupTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  // 6b. Figma Plugin posts the DS setup result here
-  if (req.method === 'POST' && pathname === '/sync-ds-setup') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingDsSetupRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingDsSetupRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingDsSetupRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingDsSetupRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 6c. MCP Agent calls this to update specific primitive categories in place
-  // (e.g. only color values, only spacing). Variable IDs are preserved so all
-  // aliases from higher-level collections continue to resolve.
-  if (req.method === 'POST' && pathname === '/request-update-primitives') {
-    if (pendingPollResponse) {
-      if (!_pluginHasCapability('update-primitives')) {
-        res.writeHead(409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          error: 'The Figlets Bridge plugin is connected but does not advertise the primitive-update command. If you are developing Figlets, reload the plugin from Figma Desktop so it loads the latest local code.',
-          activeSessionId: pendingPollSessionId || null,
-          pluginCapabilities: activePluginCapabilities
-        }));
-        return;
-      }
-
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = JSON.parse(body); } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'update-primitives', data: payload }));
-        _clearPendingPoll();
-
-        pendingUpdatePrimitivesRequest = res;
-
-        const updatePrimitivesTimer = setTimeout(() => {
-          if (pendingUpdatePrimitivesRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Primitive update timed out.' }));
-            pendingUpdatePrimitivesRequest = null;
-          }
-        }, 60000);
-        if (updatePrimitivesTimer.unref) updatePrimitivesTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  // 6d. MCP Agent calls this to apply approved narrow token updates in place.
-  if (req.method === 'POST' && pathname === '/request-update-tokens') {
-    if (pendingPollResponse) {
-      if (!_pluginHasCapability('update-tokens')) {
-        res.writeHead(409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          error: 'The Figlets Bridge plugin is connected but does not advertise the token-update command. Reload the plugin in Figma Desktop so it loads the latest local code.',
-          activeSessionId: pendingPollSessionId || null,
-          pluginCapabilities: activePluginCapabilities
-        }));
-        return;
-      }
-
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = JSON.parse(body); } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'update-tokens', data: payload }));
-        _clearPendingPoll();
-
-        pendingUpdateTokensRequest = res;
-
-        const updateTokensTimer = setTimeout(() => {
-          if (pendingUpdateTokensRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Token update timed out.' }));
-            pendingUpdateTokensRequest = null;
-          }
-        }, 60000);
-        if (updateTokensTimer.unref) updateTokensTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  // 6e. MCP Agent calls this to apply designer-approved setup repairs.
-  if (req.method === 'POST' && pathname === '/request-foundation-repairs') {
-    if (pendingPollResponse) {
-      if (!_pluginHasCapability('foundation-repairs')) {
-        res.writeHead(409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          error: 'The Figlets Bridge plugin is connected but does not advertise the foundation-repairs command. Reload the plugin in Figma Desktop so it loads the latest local code.',
-          activeSessionId: pendingPollSessionId || null,
-          pluginCapabilities: activePluginCapabilities
-        }));
-        return;
-      }
-
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'apply-foundation-repairs', data: payload }));
-        _clearPendingPoll();
-
-        pendingFoundationRepairsRequest = res;
-
-        const foundationRepairTimer = setTimeout(() => {
-          if (pendingFoundationRepairsRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Foundation repair timed out.' }));
-            pendingFoundationRepairsRequest = null;
-          }
-        }, 60000);
-        if (foundationRepairTimer.unref) foundationRepairTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-foundation-repairs') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingFoundationRepairsRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingFoundationRepairsRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingFoundationRepairsRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingFoundationRepairsRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 6f. MCP Agent calls this to apply designer-approved setup repairs.
-  if (req.method === 'POST' && pathname === '/request-setup-repairs') {
-    if (pendingPollResponse) {
-      if (!_pluginHasCapability('setup-repairs')) {
-        res.writeHead(409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          error: 'The Figlets Bridge plugin is connected but does not advertise the setup-repairs command. Reload the plugin in Figma Desktop so it loads the latest local code.',
-          activeSessionId: pendingPollSessionId || null,
-          pluginCapabilities: activePluginCapabilities
-        }));
-        return;
-      }
-
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'apply-setup-repairs', data: payload }));
-        _clearPendingPoll();
-
-        pendingSetupRepairsRequest = res;
-
-        const setupRepairTimer = setTimeout(() => {
-          if (pendingSetupRepairsRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Setup repair timed out.' }));
-            pendingSetupRepairsRequest = null;
-          }
-        }, 60000);
-        if (setupRepairTimer.unref) setupRepairTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-setup-repairs') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      let parsed;
-      try { parsed = JSON.parse(body); } catch { parsed = {}; }
-      _persistSessionFileKey(req, parsed);
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingSetupRepairsRequest) {
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingSetupRepairsRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingSetupRepairsRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingSetupRepairsRequest = null;
-      }
-    });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/request-semantic-naming-consolidation') {
-    if (pendingPollResponse) {
-      if (!_pluginHasCapability('semantic-naming-consolidation')) {
-        res.writeHead(409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          error: 'The Figlets Bridge plugin is connected but does not advertise semantic naming consolidation. Reload the plugin in Figma Desktop so it loads the latest local code.',
-          activeSessionId: pendingPollSessionId || null,
-          pluginCapabilities: activePluginCapabilities
-        }));
-        return;
-      }
-
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'apply-semantic-naming-consolidation', data: payload }));
-        _clearPendingPoll();
-
-        pendingSemanticNamingConsolidationRequest = res;
-
-        const semanticNamingTimer = setTimeout(() => {
-          if (pendingSemanticNamingConsolidationRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Semantic naming consolidation timed out.' }));
-            pendingSemanticNamingConsolidationRequest = null;
-          }
-        }, 60000);
-        if (semanticNamingTimer.unref) semanticNamingTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-semantic-naming-consolidation') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      let parsed;
-      try { parsed = JSON.parse(body); } catch { parsed = {}; }
-      _persistSessionFileKey(req, parsed);
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingSemanticNamingConsolidationRequest) {
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingSemanticNamingConsolidationRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingSemanticNamingConsolidationRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingSemanticNamingConsolidationRequest = null;
-      }
-    });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/request-figma-operations') {
-    if (pendingPollResponse) {
-      if (!_pluginHasCapability('figma-operations')) {
-        res.writeHead(409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          error: 'The Figlets Bridge plugin is connected but does not advertise high-level Figma operations. Reload the plugin in Figma Desktop so it loads the latest local code.',
-          activeSessionId: pendingPollSessionId || null,
-          pluginCapabilities: activePluginCapabilities
-        }));
-        return;
-      }
-
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'apply-figma-operations', data: payload }));
-        _clearPendingPoll();
-
-        pendingFigmaOperationsRequest = res;
-
-        const figmaOperationsTimer = setTimeout(() => {
-          if (pendingFigmaOperationsRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Figma operations timed out.' }));
-            pendingFigmaOperationsRequest = null;
-          }
-        }, 60000);
-        if (figmaOperationsTimer.unref) figmaOperationsTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-figma-operations') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      let parsed;
-      try { parsed = JSON.parse(body); } catch { parsed = {}; }
-      _persistSessionFileKey(req, parsed);
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingFigmaOperationsRequest) {
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingFigmaOperationsRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingFigmaOperationsRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingFigmaOperationsRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 6g. MCP Agent calls this to reset local Figlets-created file content.
-  if (req.method === 'POST' && pathname === '/request-reset-figlets-file') {
-    if (pendingPollResponse) {
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'reset-figlets-file', data: payload }));
-        _clearPendingPoll();
-
-        pendingResetRequest = res;
-
-        const resetTimer = setTimeout(() => {
-          if (pendingResetRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Reset timed out.' }));
-            pendingResetRequest = null;
-          }
-        }, 60000);
-        if (resetTimer.unref) resetTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-reset-figlets-file') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingResetRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingResetRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingResetRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingResetRequest = null;
-      }
-    });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/request-remove-text-styles') {
-    if (!_devBridgeCommandsEnabled()) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        error: 'remove-text-styles is a developer-only bridge command and is disabled for designer flows.',
-        hint: 'Set FIGLETS_DEV_BRIDGE=1 on the bridge receiver process for local validation scripts only.',
-      }));
-      return;
-    }
-    if (pendingPollResponse) {
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'remove-text-styles', data: payload }));
-        _clearPendingPoll();
-
-        pendingRemoveTextStylesRequest = res;
-
-        const removeTimer = setTimeout(() => {
-          if (pendingRemoveTextStylesRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Text-style removal timed out.' }));
-            pendingRemoveTextStylesRequest = null;
-          }
-        }, 30000);
-        if (removeTimer.unref) removeTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-remove-text-styles') {
-    if (!_devBridgeCommandsEnabled()) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'remove-text-styles sync is disabled outside developer bridge mode.' }));
-      return;
-    }
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingRemoveTextStylesRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingRemoveTextStylesRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingRemoveTextStylesRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingRemoveTextStylesRequest = null;
-      }
-    });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/request-trim-collection-modes') {
-    if (!_devBridgeCommandsEnabled()) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        error: 'trim-collection-modes is a developer-only bridge command and is disabled for designer flows.',
-        hint: 'Set FIGLETS_DEV_BRIDGE=1 on the bridge receiver process for local validation scripts only.',
-      }));
-      return;
-    }
-    if (pendingPollResponse) {
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'trim-collection-modes', data: payload }));
-        _clearPendingPoll();
-
-        pendingTrimCollectionModesRequest = res;
-
-        const trimTimer = setTimeout(() => {
-          if (pendingTrimCollectionModesRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Collection mode trim timed out.' }));
-            pendingTrimCollectionModesRequest = null;
-          }
-        }, 30000);
-        if (trimTimer.unref) trimTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-trim-collection-modes') {
-    if (!_devBridgeCommandsEnabled()) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'trim-collection-modes sync is disabled outside developer bridge mode.' }));
-      return;
-    }
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingTrimCollectionModesRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingTrimCollectionModesRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingTrimCollectionModesRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingTrimCollectionModesRequest = null;
-      }
-    });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/request-prepare-broken-ds-fixture') {
-    if (!_devBridgeCommandsEnabled()) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        error: 'prepare-broken-ds-fixture is a developer-only bridge command and is disabled for designer flows.',
-        hint: 'Set FIGLETS_DEV_BRIDGE=1 on the bridge receiver process for local validation scripts only.',
-      }));
-      return;
-    }
-    if (pendingPollResponse) {
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      req.on('end', () => {
-        let payload;
-        try { payload = body ? JSON.parse(body) : {}; } catch { payload = {}; }
-        if (payload.confirmation !== 'RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE') {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            error: 'Explicit confirmation is required before preparing a broken fixture.',
-            requiredConfirmation: 'RESET_AND_BREAK_DISPOSABLE_FIGMA_FILE',
-          }));
-          return;
-        }
-
-        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingPollResponse.end(JSON.stringify({ command: 'prepare-broken-ds-fixture', data: payload }));
-        _clearPendingPoll();
-
-        pendingBrokenDsFixtureRequest = res;
-
-        const fixtureTimer = setTimeout(() => {
-          if (pendingBrokenDsFixtureRequest === res) {
-            res.writeHead(504, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Broken fixture prep timed out.' }));
-            pendingBrokenDsFixtureRequest = null;
-          }
-        }, 185000);
-        if (fixtureTimer.unref) fixtureTimer.unref();
-      });
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/sync-prepare-broken-ds-fixture') {
-    if (!_devBridgeCommandsEnabled()) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'prepare-broken-ds-fixture sync is disabled outside developer bridge mode.' }));
-      return;
-    }
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingBrokenDsFixtureRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingBrokenDsFixtureRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingBrokenDsFixtureRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingBrokenDsFixtureRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 6d. Figma Plugin posts the primitive update result here
-  if (req.method === 'POST' && pathname === '/sync-update-primitives') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingUpdatePrimitivesRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingUpdatePrimitivesRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingUpdatePrimitivesRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingUpdatePrimitivesRequest = null;
-      }
-    });
-    return;
-  }
-
-  // 6f. Figma Plugin posts the token update result here
-  if (req.method === 'POST' && pathname === '/sync-update-tokens') {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
-
-      if (pendingUpdateTokensRequest) {
-        let parsed;
-        try { parsed = JSON.parse(body); } catch { parsed = {}; }
-        parsed.sessionId = parsed.sessionId || _getSessionId(req) || null;
-        pendingUpdateTokensRequest.writeHead(200, { 'Content-Type': 'application/json' });
-        pendingUpdateTokensRequest.end(JSON.stringify({ success: true, result: parsed }));
-        pendingUpdateTokensRequest = null;
-      }
-    });
+  const bridgeSyncRoute = _bridgeRouteForSync(pathname);
+  if (req.method === 'POST' && bridgeSyncRoute) {
+    _handleBridgeCommandSync(bridgeSyncRoute, req, res);
     return;
   }
 
   // 7. Figma Plugin posts the global extracted data here
   if (req.method === 'POST' && pathname === '/sync') {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      let parsedBody = null;
-      try { parsedBody = body ? JSON.parse(body) : null; } catch (_) { parsedBody = null; }
-      const fileKey = _persistSessionFileKey(req, parsedBody);
-      const fp = _filePaths(fileKey);
-      try {
-        fs.mkdirSync(fp.dir, { recursive: true });
-        fs.writeFileSync(fp.data, body);
-        console.log('[success] Wrote payload to ' + fp.data);
-
-        if (fileKey) _writeActiveFile(fileKey);
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, fileKey: fileKey || null, dataPath: fp.data }));
-
-        if (pendingSyncRequest) {
-          pendingSyncRequest.writeHead(200, { 'Content-Type': 'application/json' });
-          pendingSyncRequest.end(JSON.stringify({
-            success: true,
-            message: 'Sync complete',
-            sessionId: _getSessionId(req) || null,
-            fileKey: fileKey || null,
-            previousFileKey: pendingSyncPreviousFileKey || null,
-            activeFileChanged: Boolean(pendingSyncPreviousFileKey && fileKey && pendingSyncPreviousFileKey !== fileKey),
-            dataPath: fp.data
-          }));
-          pendingSyncRequest = null;
-          pendingSyncPreviousFileKey = null;
-        }
-      } catch (err) {
-        console.error('[error] Failed to write file:', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-
-        if (pendingSyncRequest) {
-          pendingSyncRequest.writeHead(500, { 'Content-Type': 'application/json' });
-          pendingSyncRequest.end(JSON.stringify({ error: err.message }));
-          pendingSyncRequest = null;
-          pendingSyncPreviousFileKey = null;
-        }
-      }
+    _handlePersistedPluginSync(req, res, {
+      pathKey: 'data',
+      logLabel: 'payload',
+      getPending: () => pendingSyncRequest,
+      clearPending: () => {
+        pendingSyncRequest = null;
+        pendingSyncPreviousFileKey = null;
+      },
+      ackPayload: (fileKey, fp) => ({ success: true, fileKey: fileKey || null, dataPath: fp.data }),
+      pendingPayload: (syncReq, fileKey, fp) => ({
+        success: true,
+        message: 'Sync complete',
+        sessionId: _getSessionId(syncReq) || null,
+        fileKey: fileKey || null,
+        previousFileKey: pendingSyncPreviousFileKey || null,
+        activeFileChanged: Boolean(pendingSyncPreviousFileKey && fileKey && pendingSyncPreviousFileKey !== fileKey),
+        dataPath: fp.data
+      })
     });
     return;
   }
 
   // 8. Figma Plugin posts the selection data here
   if (req.method === 'POST' && pathname === '/sync-selection') {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      let parsedBody = null;
-      try { parsedBody = body ? JSON.parse(body) : null; } catch (_) { parsedBody = null; }
-      const fileKey = _persistSessionFileKey(req, parsedBody);
-      const fp = _filePaths(fileKey);
-      try {
-        fs.mkdirSync(fp.dir, { recursive: true });
-        fs.writeFileSync(fp.selection, body);
-        console.log('[success] Wrote selection to ' + fp.selection);
-        if (fileKey) _writeActiveFile(fileKey);
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true }));
-
-        if (pendingSelectionRequest) {
-          pendingSelectionRequest.writeHead(200, { 'Content-Type': 'application/json' });
-          pendingSelectionRequest.end(JSON.stringify({ success: true, message: 'Selection synced', path: fp.selection, sessionId: _getSessionId(req) || null }));
-          pendingSelectionRequest = null;
-        }
-      } catch (err) {
-        console.error('[error] Failed to write file:', err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-
-        if (pendingSelectionRequest) {
-          pendingSelectionRequest.writeHead(500, { 'Content-Type': 'application/json' });
-          pendingSelectionRequest.end(JSON.stringify({ error: err.message }));
-          pendingSelectionRequest = null;
-        }
-      }
+    _handlePersistedPluginSync(req, res, {
+      pathKey: 'selection',
+      logLabel: 'selection',
+      getPending: () => pendingSelectionRequest,
+      clearPending: () => {
+        pendingSelectionRequest = null;
+      },
+      ackPayload: () => ({ success: true }),
+      pendingPayload: (syncReq, fileKey, fp) => ({
+        success: true,
+        message: 'Selection synced',
+        path: fp.selection,
+        sessionId: _getSessionId(syncReq) || null
+      })
     });
     return;
   }

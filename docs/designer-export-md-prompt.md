@@ -18,12 +18,12 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 >
 > You're connected to the Figlets MCP. From this chat you **can**:
 > - Pull a fresh snapshot from my Figma file.
-> - Refresh `design-system.config.js` from that snapshot.
-> - Write a portable `DESIGN.md` next to the config (or to a path I pick).
+> - Refresh `design-system.config.js` from that snapshot, or create a local snapshot-derived config if this file does not have one yet.
+> - Write a portable `DESIGN.md` to the opened project's `specs/DESIGN.md` path, falling back to the Figlets local config folder if that project path is not writable.
 >
 > You **can't** from this chat:
-> - Create a `design-system.config.js` if I don't have one yet — that's the setup flow.
-> - Change my Figma variables. The export reads, it doesn't write to Figma.
+> - Fill in context Figma does not encode, such as implementation platform or exact CSS breakpoint widths, unless I answer those gap questions.
+> - Change my Figma variables. The export reads Figma and writes local files only; it doesn't write to Figma.
 >
 > Tell me this once so I know what's possible. Don't promise anything outside that list.
 >
@@ -52,8 +52,11 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 >
 > After it returns, summarize in one short paragraph:
 > - Where `DESIGN.md` landed (full absolute path).
+> - Whether it used the project `specs/` path or fell back to the Figlets local/config folder.
 > - Whether any config values were refreshed from Figma, and roughly how many.
+> - Whether Figlets had to create a local snapshot-derived config because none existed.
 > - The snapshot timestamp so I know how fresh the export is.
+> - Any `needsDesignerInput` gaps, phrased as optional follow-up questions rather than blockers.
 >
 > Example:
 >
@@ -68,15 +71,15 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 > ### Important boundaries
 >
 > - **Don't apply anything to Figma.** The export is read-only; it only writes my local config and DESIGN.md.
-> - **Don't run setup tools** (`prepare_ds_config` / `apply_ds_setup`) unless I ask. If the export complains that my config is missing, tell me — don't try to bootstrap one silently.
+> - **Don't run setup tools** (`prepare_ds_config` / `apply_ds_setup`) unless I ask. If no config exists, let `export_design_md` bootstrap from the Figma snapshot; don't create a generic intake config from defaults.
 > - **Don't dump raw JSON.** Always translate to plain language.
-> - **If anything fails** (bridge down, plugin not open, snapshot stale, config missing), say what failed in one sentence and what I should do about it. Don't paste error stacks.
+> - **If anything fails** (bridge down, plugin not open, snapshot stale, unreadable snapshot), say what failed in one sentence and what I should do about it. Don't paste error stacks.
 
 ---
 
 ## Notes for the agent author (you, reading this in the future)
 
-- `export_design_md` chains `sync_figma_data` → `refresh_ds_config_from_figma` → `writeDesignMdFromDsConfig`. By default it syncs and refreshes. `skip_sync` and `figmaDataPath` short-circuit the sync; `dry_run` short-circuits both writes.
+- `export_design_md` chains `sync_figma_data` → config refresh or snapshot bootstrap → `writeDesignMdFromDsConfig`. By default it syncs and refreshes. `skip_sync` and `figmaDataPath` short-circuit the sync; `dry_run` short-circuits both writes.
 - DESIGN.md remains an **interchange artifact**, not a source of truth. The prepared config and Figma variables stay authoritative. See `DECISIONS.md` for the rationale (entry dated 2026-05-08).
 - The CLI fallback `npm run figlets:export-design-md` calls the same handler. Use it when the MCP server isn't connected. Supports `--config`, `--output`, `--figma-data`, `--skip-sync`, `--dry-run`, `--json`.
-- For new files (no config yet), point the designer at the setup flow first — `export_design_md` returns a "config not found" error with a hint, do not try to bootstrap a config from this prompt.
+- For new files (no config yet), `export_design_md` should create a local snapshot-derived config from existing Figma variables and return `needsDesignerInput` for context it cannot infer. Report the export first, then ask only those gap questions if the designer wants a more complete handoff.

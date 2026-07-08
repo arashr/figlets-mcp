@@ -23,6 +23,68 @@ function _resolveLiteralRgb(variable, varsById, depth) {
   return null;
 }
 
+function _modeNameForId(collection, modeId) {
+  const modes = collection && Array.isArray(collection.modes) ? collection.modes : [];
+  const match = modes.find(mode => mode.modeId === modeId);
+  return match ? match.name : null;
+}
+
+function _modeIdByName(collection, modeName) {
+  if (!collection || !Array.isArray(collection.modes)) return null;
+  const wanted = String(modeName || "").toLowerCase();
+  const match = collection.modes.find(mode => String(mode.name || "").toLowerCase() === wanted);
+  return match ? match.modeId : null;
+}
+
+function _resolveLiteralValue(variable, varsById, collections, modeId, modeName, depth) {
+  if (!variable || (depth || 0) > 8) return null;
+  const values = variable.valuesByMode || {};
+  const valueModeIds = Object.keys(values);
+  const ownCollection = _collectionFor(variable, collections || []);
+  let selectedModeId = modeId && values[modeId] !== undefined ? modeId : null;
+  if (!selectedModeId && modeName) {
+    const namedModeId = _modeIdByName(ownCollection, modeName);
+    if (namedModeId && values[namedModeId] !== undefined) selectedModeId = namedModeId;
+  }
+  if (!selectedModeId && valueModeIds.length === 1) selectedModeId = valueModeIds[0];
+  if (!selectedModeId && valueModeIds.length) selectedModeId = valueModeIds[0];
+  if (!selectedModeId) return null;
+  const val = values[selectedModeId];
+  if (val && typeof val === "object" && val.type === "VARIABLE_ALIAS") {
+    const carriedModeName = modeName || _modeNameForId(ownCollection, selectedModeId);
+    return _resolveLiteralValue(varsById.get(val.id), varsById, collections, null, carriedModeName, (depth || 0) + 1);
+  }
+  return val;
+}
+
+function _literalValuesByMode(variable, varsById, collections) {
+  const collection = _collectionFor(variable, collections || []);
+  const modes = collection && Array.isArray(collection.modes) && collection.modes.length
+    ? collection.modes
+    : Object.keys(variable.valuesByMode || {}).map(modeId => ({ modeId, name: modeId }));
+  const values = [];
+  for (const mode of modes) {
+    const value = _resolveLiteralValue(variable, varsById, collections, mode.modeId, mode.name, 0);
+    values.push(value);
+  }
+  return values;
+}
+
+function _numericValuesByMode(variable, varsById, collections) {
+  const values = _literalValuesByMode(variable, varsById, collections).filter(value => typeof value === "number" && isFinite(value));
+  return values.length ? values : null;
+}
+
+function _firstNumericValue(variable, varsById, collections) {
+  const values = _numericValuesByMode(variable, varsById, collections);
+  return values && values.length ? values[values.length - 1] : null;
+}
+
+function _firstStringValue(variable, varsById, collections) {
+  const values = _literalValuesByMode(variable, varsById, collections).filter(value => typeof value === "string" && value.trim());
+  return values.length ? values[values.length - 1] : null;
+}
+
 function buildRampsFromSnapshot(figmaData) {
   const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
   const colorVars = variables.filter(v => v && v.resolvedType === "COLOR" && typeof v.name === "string");
@@ -104,12 +166,12 @@ function inferCollectionsFromSnapshot(figmaData) {
     }
     if (role === "spacing") {
       return (name.includes("spacing") ? 100 : 0)
-        + vars.filter(v => /^spacing\//i.test(v.name || "")).length * 5
+        + vars.filter(v => /^(?:space|spacing)\//i.test(v.name || "")).length * 5
         + floatCount;
     }
     if (role === "typography") {
       return (name.includes("typography") || name.includes("type") ? 100 : 0)
-        + vars.filter(v => /^type|^typography\//i.test(v.name || "")).length * 5
+        + vars.filter(v => /^(?:type|typography|font)\//i.test(v.name || "")).length * 5
         + stringCount;
     }
     return 0;
@@ -138,6 +200,170 @@ function inferBreakpointsFromSnapshot(figmaData) {
     .sort((a, b) => b.score - a.score)[0];
   const modes = responsive ? responsive.modes : ["Mobile", "Tablet", "Desktop"];
   return { modes, tier: modes.length };
+}
+
+function inferSpacingFromSnapshot(figmaData) {
+  const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
+  const collections = Array.isArray(figmaData && figmaData.collections) ? figmaData.collections : [];
+  const varsById = new Map(variables.filter(v => v && v.id).map(v => [v.id, v]));
+  const semantic = {};
+  const radius = {};
+  const border = {};
+  const primitiveValues = [];
+
+  for (const variable of variables) {
+    if (!variable || variable.resolvedType !== "FLOAT" || typeof variable.name !== "string") continue;
+    const name = variable.name;
+    const values = _numericValuesByMode(variable, varsById, collections);
+    if (!values) continue;
+    const scalar = values[values.length - 1];
+    if (/^(?:space|spacing)\/(?:\d|0|full\b)/i.test(name)) {
+      if (scalar > 0 && scalar <= 32) primitiveValues.push(Math.round(scalar));
+      continue;
+    }
+    let match = name.match(/^(?:space|spacing)\/radius\/(.+)$/i) || name.match(/^radius\/(.+)$/i);
+    if (match) {
+      radius[match[1]] = scalar;
+      continue;
+    }
+    match = name.match(/^(?:space|spacing)\/border\/(.+)$/i) || name.match(/^border\/(?:width\/)?(.+)$/i);
+    if (match) {
+      border[match[1]] = scalar;
+      continue;
+    }
+    match = name.match(/^space\/(.+)$/i) || name.match(/^spacing\/(.+)$/i);
+    if (match && match[1].split("/").length >= 2) {
+      semantic[match[1]] = values;
+    }
+  }
+
+  const out = {
+    responsiveModeValidation: {
+      allowSameValueModes: {
+        categories: ["component", "stack", "touch"],
+      },
+    },
+  };
+  if (Object.keys(semantic).length) out.semantic = semantic;
+  if (Object.keys(radius).length) out.radius = radius;
+  if (Object.keys(border).length) out.border = border;
+
+  return { spacing: out, primitiveValues };
+}
+
+function inferTypographyFromSnapshot(figmaData) {
+  const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
+  const collections = Array.isArray(figmaData && figmaData.collections) ? figmaData.collections : [];
+  const textStyles = Array.isArray(figmaData && figmaData.textStyles) ? figmaData.textStyles : [];
+  const varsById = new Map(variables.filter(v => v && v.id).map(v => [v.id, v]));
+  const groups = {};
+  const families = {};
+  const familyCounts = {};
+
+  function groupFor(role) {
+    if (!groups[role]) groups[role] = {};
+    return groups[role];
+  }
+
+  for (const variable of variables) {
+    if (!variable || typeof variable.name !== "string") continue;
+    let match = variable.name.match(/^type\/(.+?)\/(.+?)\/(size|line-height|weight|tracking|letter-spacing)$/i);
+    if (match && variable.resolvedType === "FLOAT") {
+      const role = match[1] + "/" + match[2];
+      const prop = match[3].toLowerCase();
+      const values = _numericValuesByMode(variable, varsById, collections);
+      if (!values) continue;
+      const group = groupFor(role);
+      if (prop === "size") group.sizes = values;
+      else if (prop === "line-height") group.lineHeights = values;
+      else if (prop === "weight") group.weight = values[values.length - 1];
+      else if (prop === "tracking" || prop === "letter-spacing") group.tracking = values[values.length - 1];
+      continue;
+    }
+    match = variable.name.match(/^font\/(.+)$/i);
+    if (match && variable.resolvedType === "STRING") {
+      const value = _firstStringValue(variable, varsById, collections);
+      if (value) families[match[1]] = value;
+    }
+  }
+
+  for (const style of textStyles) {
+    if (!style || !style.name) continue;
+    const parts = String(style.name).replace(/^type\//, "").split("/");
+    if (parts.length < 2) continue;
+    const role = parts.slice(0, 2).join("/");
+    const group = groupFor(role);
+    if (!group.sizes && typeof style.fontSize === "number") group.sizes = [style.fontSize, style.fontSize, style.fontSize];
+    if (!group.lineHeights) {
+      const lh = style.lineHeight && typeof style.lineHeight === "object" && typeof style.lineHeight.value === "number"
+        ? style.lineHeight.value
+        : null;
+      if (lh) group.lineHeights = [lh, lh, lh];
+    }
+    if (group.tracking == null && style.letterSpacing && typeof style.letterSpacing === "object" && typeof style.letterSpacing.value === "number") {
+      group.tracking = style.letterSpacing.value;
+    }
+    if (style.fontName && style.fontName.family) {
+      familyCounts[style.fontName.family] = (familyCounts[style.fontName.family] || 0) + 1;
+    }
+  }
+
+  const scale = {};
+  for (const role of Object.keys(groups).sort()) {
+    const group = groups[role];
+    if (!group.sizes || !group.sizes.length) continue;
+    scale[role] = {
+      sizes: group.sizes,
+      lineHeights: group.lineHeights || group.sizes.map(size => Math.round(size * 1.4)),
+      weight: group.weight || 400,
+      tracking: group.tracking || 0,
+    };
+  }
+
+  if (!families.sans) {
+    let bestFamily = null;
+    for (const family of Object.keys(familyCounts)) {
+      if (!bestFamily || familyCounts[family] > familyCounts[bestFamily]) bestFamily = family;
+    }
+    if (bestFamily) families.sans = bestFamily;
+  }
+
+  const out = { scalePreset: Object.keys(scale).length ? "custom" : "material3" };
+  if (Object.keys(scale).length) out.scale = scale;
+  if (Object.keys(families).length) out.families = families;
+  return out;
+}
+
+function inferElevationFromSnapshot(figmaData) {
+  const effectStyles = Array.isArray(figmaData && figmaData.effectStyles) ? figmaData.effectStyles : [];
+  const elevation = {};
+  for (const style of effectStyles) {
+    if (!style || !style.name || !Array.isArray(style.effects)) continue;
+    if (!/(?:^|\/)(?:elevation|shadow)(?:\/|$)/i.test(style.name)) continue;
+    const key = style.name.replace(/^(?:elevation|shadow)\//i, "");
+    elevation[key || style.name] = style.effects.map(effect => ({
+      type: effect.type,
+      color: effect.color || null,
+      offset: effect.offset || null,
+      radius: effect.radius,
+      spread: effect.spread,
+      blendMode: effect.blendMode,
+      visible: effect.visible !== false,
+    }));
+  }
+  return elevation;
+}
+
+function inferGridBaseFromSnapshot(figmaData, primitiveValues) {
+  const candidates = Array.isArray(primitiveValues) ? primitiveValues.slice() : [];
+  const spacing = inferSpacingFromSnapshot(figmaData).spacing;
+  if (spacing && spacing.semantic) {
+    for (const values of Object.values(spacing.semantic)) {
+      for (const value of values) if (value > 0 && value <= 32) candidates.push(Math.round(value));
+    }
+  }
+  if (!candidates.length) return 8;
+  return candidates.some(value => value % 8 !== 0 && value % 4 === 0) ? 4 : 8;
 }
 
 function _nameSet(figmaData) {
@@ -342,6 +568,10 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
   const ramps = buildRampsFromSnapshot(figmaData);
   const brand = detectBrand(ramps);
   const breakpoints = inferBreakpointsFromSnapshot(figmaData);
+  const spacingInfo = inferSpacingFromSnapshot(figmaData);
+  const typography = inferTypographyFromSnapshot(figmaData);
+  const elevation = inferElevationFromSnapshot(figmaData);
+  const gridBase = inferGridBaseFromSnapshot(figmaData, spacingInfo.primitiveValues);
   const templateSemantics = _templateSemanticsFromSnapshot(figmaData, ramps, brand, opts);
   const inferredSemantics = inferSemanticsFromSnapshot(figmaData);
   const semantics = templateSemantics && templateSemantics.pairs && templateSemantics.pairs.length
@@ -357,22 +587,17 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
       name: (figmaData && figmaData.fileName) || "Imported Figma design system",
     },
     collections: inferCollectionsFromSnapshot(figmaData),
-    grid: { base: 8 },
+    grid: { base: gridBase },
     breakpoints,
-    spacing: {
-      responsiveModeValidation: {
-        allowSameValueModes: {
-          categories: ["component", "stack", "touch"],
-        },
-      },
-    },
-    typography: { scalePreset: "material3" },
+    spacing: spacingInfo.spacing,
+    typography,
     color: {
       ramps: ramps,
       brand: brand,
       contrastAlgorithm: opts.algorithm === "apca" ? "apca" : "wcag",
       semantics,
     },
+    ...(Object.keys(elevation).length ? { elevation } : {}),
     figlets: {
       source: "figma-snapshot-bootstrap",
       createdBy: "figlets-mcp",
@@ -389,5 +614,8 @@ module.exports = {
   detectBrand,
   inferBreakpointsFromSnapshot,
   inferCollectionsFromSnapshot,
+  inferElevationFromSnapshot,
   inferSemanticsFromSnapshot,
+  inferSpacingFromSnapshot,
+  inferTypographyFromSnapshot,
 };

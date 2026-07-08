@@ -5,9 +5,11 @@ const path = require("path");
 
 const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-agent-interface-test-"));
 process.env.FIGLETS_LOCAL_DIR = TEMP_DIR;
+process.env.FIGLETS_DISABLE_UPDATE_CHECK = "1";
 
 const toClear = [
   "../../packages/figlets-mcp-server/src/utils/paths.js",
+  "../../packages/figlets-mcp-server/src/utils/version-check.js",
   "../../packages/figlets-mcp-server/src/agent-interface/workflows.js",
   "../../packages/figlets-mcp-server/src/tools/agent-interface.js"
 ];
@@ -32,6 +34,7 @@ const {
   handleFigletsWorkflowGuide,
   handleFigletsHealthCheck,
 } = require("../../packages/figlets-mcp-server/src/tools/agent-interface.js");
+const { version: serverVersion } = require("../../packages/figlets-mcp-server/package.json");
 
 function allSteps() {
   return WORKFLOWS.flatMap(workflow => (workflow.steps || []).map(step => ({ workflow, step })));
@@ -51,6 +54,10 @@ try {
     assert.strictEqual(start.environment.command, "figlets-mcp");
     assert.strictEqual(start.environment.localDir, TEMP_DIR);
     assert.strictEqual(start.environment.activeFileKnown, false);
+    assert.strictEqual(start.environment.runtime.version, serverVersion);
+    assert.ok(start.environment.runtime.packagePath.endsWith("packages/figlets-mcp-server/package.json"));
+    assert.strictEqual(start.environment.updateCheck.currentVersion, serverVersion);
+    assert.ok(["current", "update-available", "unavailable", "disabled"].includes(start.environment.updateCheck.status));
     assert.strictEqual(start.responseContract.openingFormat, "capability-menu");
     assert.ok(start.responseContract.useVerbatimWhenPossible.includes("generic help"));
     assert.strictEqual(start.responseContract.mode, "designer-facing");
@@ -104,6 +111,7 @@ try {
     assert.ok(start.safety.some(item => item.includes("bulk design-system repairs")));
     assert.ok(start.designerResponse.startsWith("# Figlets"));
     assert.ok(start.designerResponse.includes("A focused toolkit for checking, repairing, showcasing, documenting, and exporting Figma design systems."));
+    assert.ok(start.designerResponse.includes("Running Figlets MCP v" + serverVersion));
     assert.ok(!start.designerResponse.includes("Hi, I'm Figlets"));
     assert.ok(start.designerResponse.includes("| What you can ask for | What I'll do |"));
     assert.ok(start.designerResponse.includes("Check my design system"));

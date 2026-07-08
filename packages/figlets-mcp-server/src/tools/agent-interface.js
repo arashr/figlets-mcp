@@ -13,7 +13,7 @@ const {
 const figletsStartTool = {
   name: "figlets_start",
   description:
-    "Read-only Agent Interface entrypoint. Returns the Figlets intro, safety contract, bulk design-system update posture, runtime environment hints, capability menu, and first designer-facing question. Designer reviews must use Figlets workflows/tools, not custom scripts. Does not inspect or mutate Figma.",
+    "Read-only Agent Interface entrypoint. Returns the Figlets intro, running Figlets MCP version, update status, safety contract, bulk design-system update posture, runtime environment hints, capability menu, and first designer-facing question. Designer reviews must use Figlets workflows/tools, not custom scripts. Does not inspect or mutate Figma.",
   inputSchema: {
     type: "object",
     properties: {},

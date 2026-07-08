@@ -368,11 +368,11 @@ server.tool(
   exportDesignMdTool.name,
   exportDesignMdTool.description,
   {
-    config_path: z.string().optional().describe("Optional absolute path to design-system.config.js. Defaults to the active file config."),
-    output_path: z.string().optional().describe("Optional absolute path for the DESIGN.md output. Defaults to DESIGN.md next to the config."),
+    config_path: z.string().optional().describe("Optional absolute path to design-system.config.js. Defaults to the active file config. If the file is missing, export_design_md can create a local snapshot-derived config from Figma variables."),
+    output_path: z.string().optional().describe("Optional absolute path for the DESIGN.md output. Defaults to specs/DESIGN.md in the opened project directory, with a config-folder fallback."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. When provided, sync is skipped."),
     skip_sync: z.boolean().optional().describe("When true, skip the sync_figma_data step and use whatever snapshot is already on disk."),
-    dry_run: z.boolean().optional().describe("When true, do not write design-system.config.js or DESIGN.md; report what would change.")
+    dry_run: z.boolean().optional().describe("When true, do not write design-system.config.js or DESIGN.md; report what would change, including any snapshot bootstrap that would be possible.")
   },
   async (args) => {
     try {

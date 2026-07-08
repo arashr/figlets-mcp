@@ -3,8 +3,11 @@ const {
   bootstrapDsFromSnapshot,
   buildRampsFromSnapshot,
   detectBrand,
+  inferElevationFromSnapshot,
   inferCollectionsFromSnapshot,
+  inferSpacingFromSnapshot,
   inferSemanticsFromSnapshot,
+  inferTypographyFromSnapshot,
 } = require("../../packages/figlets-mcp-server/src/utils/bootstrap-ds-from-figma.js");
 const {
   inspectDsSetupGapsFromFigmaData,
@@ -91,6 +94,82 @@ module.exports = (async () => {
     assert.deepStrictEqual(detectBrand(ramps), [{ name: "teal", role: "primary", step: 300 }]);
   }
   assert.deepStrictEqual(detectBrand([]), []);
+
+  // ── spacing / typography / elevation inference ─────────────────────────
+  {
+    const snapshot = {
+      fileName: "Token Rich DS",
+      collections: [
+        {
+          id: "spacing",
+          name: "Spacing",
+          modes: [
+            { modeId: "mobile", name: "Mobile" },
+            { modeId: "tablet", name: "Tablet" },
+            { modeId: "desktop", name: "Desktop" },
+          ],
+          variableIds: ["space-100", "space-component-lg", "radius-md", "border-default"],
+        },
+        {
+          id: "typography",
+          name: "Typography",
+          modes: [
+            { modeId: "mobile", name: "Mobile" },
+            { modeId: "tablet", name: "Tablet" },
+            { modeId: "desktop", name: "Desktop" },
+          ],
+          variableIds: ["body-size", "body-line", "body-weight", "body-tracking", "font-sans"],
+        },
+      ],
+      variables: [
+        { id: "space-100", name: "space/100", resolvedType: "FLOAT", variableCollectionId: "spacing", valuesByMode: { mobile: 8, tablet: 8, desktop: 8 } },
+        { id: "space-component-lg", name: "space/component/lg", resolvedType: "FLOAT", variableCollectionId: "spacing", valuesByMode: { mobile: 16, tablet: 20, desktop: 24 } },
+        { id: "radius-md", name: "space/radius/md", resolvedType: "FLOAT", variableCollectionId: "spacing", valuesByMode: { mobile: 8, tablet: 8, desktop: 8 } },
+        { id: "border-default", name: "space/border/default", resolvedType: "FLOAT", variableCollectionId: "spacing", valuesByMode: { mobile: 1, tablet: 1, desktop: 1 } },
+        { id: "body-size", name: "type/body/md/size", resolvedType: "FLOAT", variableCollectionId: "typography", valuesByMode: { mobile: 14, tablet: 14, desktop: 16 } },
+        { id: "body-line", name: "type/body/md/line-height", resolvedType: "FLOAT", variableCollectionId: "typography", valuesByMode: { mobile: 20, tablet: 20, desktop: 24 } },
+        { id: "body-weight", name: "type/body/md/weight", resolvedType: "FLOAT", variableCollectionId: "typography", valuesByMode: { mobile: 400, tablet: 400, desktop: 400 } },
+        { id: "body-tracking", name: "type/body/md/tracking", resolvedType: "FLOAT", variableCollectionId: "typography", valuesByMode: { mobile: 0, tablet: 0, desktop: 0 } },
+        { id: "font-sans", name: "font/sans", resolvedType: "STRING", variableCollectionId: "typography", valuesByMode: { mobile: "Inter", tablet: "Inter", desktop: "Inter" } },
+      ],
+      effectStyles: [
+        {
+          name: "elevation/1",
+          effects: [
+            {
+              type: "DROP_SHADOW",
+              color: { r: 0, g: 0, b: 0, a: 0.16 },
+              offset: { x: 0, y: 2 },
+              radius: 8,
+              spread: 0,
+            },
+          ],
+        },
+      ],
+    };
+    const spacing = inferSpacingFromSnapshot(snapshot);
+    assert.deepStrictEqual(spacing.spacing.semantic["component/lg"], [16, 20, 24]);
+    assert.strictEqual(spacing.spacing.radius.md, 8);
+    assert.strictEqual(spacing.spacing.border.default, 1);
+
+    const typography = inferTypographyFromSnapshot(snapshot);
+    assert.deepStrictEqual(typography.scale["body/md"].sizes, [14, 14, 16]);
+    assert.deepStrictEqual(typography.scale["body/md"].lineHeights, [20, 20, 24]);
+    assert.strictEqual(typography.scale["body/md"].weight, 400);
+    assert.strictEqual(typography.families.sans, "Inter");
+
+    const elevation = inferElevationFromSnapshot(snapshot);
+    assert.strictEqual(elevation["1"][0].color.a, 0.16);
+
+    const ds = bootstrapDsFromSnapshot(snapshot);
+    assert.strictEqual(ds.grid.base, 4);
+    assert.deepStrictEqual(ds.spacing.semantic["component/lg"], [16, 20, 24]);
+    assert.strictEqual(ds.spacing.radius.md, 8);
+    assert.strictEqual(ds.spacing.border.default, 1);
+    assert.deepStrictEqual(ds.typography.scale["body/md"].sizes, [14, 14, 16]);
+    assert.strictEqual(ds.typography.families.sans, "Inter");
+    assert.strictEqual(ds.elevation["1"][0].offset.y, 2);
+  }
 
   // ── bootstrapDsFromSnapshot ─────────────────────────────────────────────
   {

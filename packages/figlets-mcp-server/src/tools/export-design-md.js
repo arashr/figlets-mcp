@@ -6,12 +6,14 @@ const {
   getActiveFileConfigPath,
   getConfigPathGuardError,
 } = require('../utils/paths.js');
+const { bootstrapDsFromSnapshot } = require('../utils/bootstrap-ds-from-figma.js');
+const { loadActiveFigmaDataSource, loadFigmaDataSource } = require('../bridges/figma-data-source.js');
 const { handleSyncFigmaData } = require('./sync-figma-data.js');
 const { handleRefreshDsConfigFromFigma } = require('./refresh-ds-config-from-figma.js');
 
 const exportDesignMdTool = {
   name: 'export_design_md',
-  description: 'Export a portable DESIGN.md describing the current design system. By default syncs the Figma file, refreshes design-system.config.js from the latest snapshot, then writes DESIGN.md next to the config. Pass dry_run to preview without writing.',
+  description: 'Export a portable DESIGN.md describing the current design system. By default syncs the Figma file, refreshes design-system.config.js from the latest snapshot, then writes specs/DESIGN.md in the opened project directory, falling back to DESIGN.md next to the config when the project path is not writable. If no config exists yet, creates a local snapshot-derived config from Figma variables before exporting. Pass dry_run to preview without writing.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -21,7 +23,7 @@ const exportDesignMdTool = {
       },
       output_path: {
         type: 'string',
-        description: 'Optional absolute path for the DESIGN.md output. Defaults to DESIGN.md next to the config.'
+        description: 'Optional absolute path for the DESIGN.md output. Defaults to specs/DESIGN.md in the opened project directory, with a config-folder fallback.'
       },
       figmaDataPath: {
         type: 'string',
@@ -48,6 +50,14 @@ function _loadDesignMdIntake() {
   }
 }
 
+function _loadDsConfigCore() {
+  try {
+    return require("../figlets-core.js").dsConfig;
+  } catch (_) {
+    return require("../figlets-core.js").dsConfig;
+  }
+}
+
 function _statSyncedAt(filePath) {
   if (!filePath) return null;
   try {
@@ -58,10 +68,158 @@ function _statSyncedAt(filePath) {
   }
 }
 
+function _writeDsConfig(configPath, ds) {
+  const core = _loadDsConfigCore();
+  if (!core || typeof core.writeDsConfig !== 'function') {
+    throw new Error('DS config writer not available in figlets-core.');
+  }
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  core.writeDsConfig(configPath, ds);
+}
+
 function _siblingSnapshotPath(configPath) {
   if (!configPath) return null;
   const candidate = path.join(path.dirname(configPath), 'figma-data.json');
   return fs.existsSync(candidate) ? candidate : null;
+}
+
+function _defaultProjectDesignMdPath() {
+  return path.resolve(process.cwd(), 'specs', 'DESIGN.md');
+}
+
+function _fallbackDesignMdPath(configPath) {
+  return path.join(path.dirname(configPath), 'DESIGN.md');
+}
+
+function _resolveOutputTarget(args, configPath) {
+  if (args.output_path) {
+    return {
+      path: path.resolve(args.output_path),
+      requestedPath: path.resolve(args.output_path),
+      fallbackPath: null,
+      defaultKind: 'explicit',
+    };
+  }
+  const requestedPath = _defaultProjectDesignMdPath();
+  return {
+    path: requestedPath,
+    requestedPath,
+    fallbackPath: _fallbackDesignMdPath(configPath),
+    defaultKind: 'project-specs',
+  };
+}
+
+function _countObjectKeys(value) {
+  return value && typeof value === 'object' ? Object.keys(value).length : 0;
+}
+
+function _snapshotPathFromSource(dataSource) {
+  return dataSource && dataSource.meta && dataSource.meta.path ? dataSource.meta.path : null;
+}
+
+function _loadSnapshotForBootstrap(configPath, snapshotPathForRefresh) {
+  if (snapshotPathForRefresh) {
+    return loadFigmaDataSource({ figmaDataPath: snapshotPathForRefresh });
+  }
+  if (configPath) {
+    const sibling = _siblingSnapshotPath(configPath);
+    if (sibling) return loadFigmaDataSource({ figmaDataPath: sibling });
+  }
+  return loadActiveFigmaDataSource() || loadFigmaDataSource();
+}
+
+function _bootstrapSummary(ds) {
+  const spacing = ds.spacing || {};
+  const typeScale = ds.typography && ds.typography.scale ? ds.typography.scale : {};
+  const semantics = ds.color && ds.color.semantics ? ds.color.semantics : {};
+  return {
+    collections: ds.collections || {},
+    colorRamps: Array.isArray(ds.color && ds.color.ramps) ? ds.color.ramps.length : 0,
+    brandRoles: Array.isArray(ds.color && ds.color.brand) ? ds.color.brand.length : 0,
+    semanticPairs: Array.isArray(semantics.pairs) ? semantics.pairs.length : 0,
+    spacingTokens: _countObjectKeys(spacing.semantic),
+    radiusTokens: _countObjectKeys(spacing.radius),
+    borderTokens: _countObjectKeys(spacing.border),
+    typographyRoles: _countObjectKeys(typeScale),
+    elevationStyles: _countObjectKeys(ds.elevation),
+  };
+}
+
+function _needsDesignerInput(ds) {
+  const items = [];
+  const modes = ds.breakpoints && Array.isArray(ds.breakpoints.modes) ? ds.breakpoints.modes : [];
+  items.push({
+    field: 'project.platform',
+    question: 'What platform or implementation target should this DESIGN.md speak to?',
+    reason: 'Figma snapshots expose tokens and modes, but not the intended code platform.',
+  });
+  if (modes.length > 1) {
+    items.push({
+      field: 'breakpoints.widths',
+      question: 'What pixel widths define these responsive modes: ' + modes.join(', ') + '?',
+      reason: 'Figma variable modes provide names, not CSS breakpoint thresholds.',
+    });
+  }
+  if (!ds.color || !ds.color.semantics || !Array.isArray(ds.color.semantics.pairs) || ds.color.semantics.pairs.length === 0) {
+    items.push({
+      field: 'color.semanticPairs',
+      question: 'Which background/text/icon/border color roles should be treated as paired usage contexts?',
+      reason: 'Existing variables were preserved, but reliable semantic pairings were not obvious from names alone.',
+    });
+  } else {
+    items.push({
+      field: 'color.semanticNaming',
+      question: 'Does the inferred semantic color pairing grammar match how this system should be documented?',
+      reason: 'Pairing was inferred from token names and aliases and should be confirmed before treating it as policy.',
+    });
+  }
+  if (!ds.typography || !ds.typography.families || !Object.keys(ds.typography.families).length) {
+    items.push({
+      field: 'typography.families',
+      question: 'What primary and monospace font families should the handoff name?',
+      reason: 'No explicit font-family variables or text styles were available in the snapshot.',
+    });
+  }
+  return items;
+}
+
+function _refreshResultForBootstrap() {
+  return {
+    dryRun: false,
+    changes: [],
+    skipped: [],
+    summary: { changedCount: 0, skippedCount: 0 },
+  };
+}
+
+function _writeDesignMdFromConfig(intake, configPath, outputTarget) {
+  const attempts = [outputTarget.path];
+  if (
+    outputTarget.fallbackPath &&
+    path.resolve(outputTarget.fallbackPath) !== path.resolve(outputTarget.path)
+  ) {
+    attempts.push(outputTarget.fallbackPath);
+  }
+
+  let firstError = null;
+  for (let i = 0; i < attempts.length; i++) {
+    const attemptPath = attempts[i];
+    try {
+      fs.mkdirSync(path.dirname(attemptPath), { recursive: true });
+      const writtenPath = intake.writeDesignMdFromDsConfig(configPath, attemptPath);
+      return {
+        path: writtenPath,
+        fallbackUsed: i > 0,
+        requestedPath: outputTarget.requestedPath,
+        fallbackPath: outputTarget.fallbackPath,
+        writeError: i > 0 && firstError ? firstError.message : null,
+      };
+    } catch (err) {
+      if (!firstError) firstError = err;
+      if (!outputTarget.fallbackPath || i === attempts.length - 1) throw err;
+    }
+  }
+  throw firstError || new Error('Failed to write DESIGN.md.');
 }
 
 async function handleExportDesignMd(args) {
@@ -79,13 +237,6 @@ async function handleExportDesignMd(args) {
   }
   const guardError = getConfigPathGuardError(configPath);
   if (guardError) return guardError;
-  if (!fs.existsSync(configPath)) {
-    return {
-      error: 'design-system.config.js not found: ' + configPath,
-      hint: 'Run setup (prepare_ds_config / apply_ds_setup) for this Figma file first, or create one from DESIGN.md with create_ds_config_from_design_md.'
-    };
-  }
-
   const explicitSnapshotPath = typeof args.figmaDataPath === 'string' && args.figmaDataPath.length > 0
     ? path.resolve(args.figmaDataPath)
     : null;
@@ -111,42 +262,95 @@ async function handleExportDesignMd(args) {
     }
   }
 
-  const refreshArgs = {
-    config_path: configPath,
-    dry_run: dryRun,
-  };
-  if (snapshotPathForRefresh) refreshArgs.figmaDataPath = snapshotPathForRefresh;
+  const outputTarget = _resolveOutputTarget(args, configPath);
 
-  const refresh = handleRefreshDsConfigFromFigma(refreshArgs);
-  if (refresh && refresh.error) {
-    return {
-      error: 'Config refresh failed before export: ' + refresh.error,
-      hint: refresh.hint || 'Verify the synced snapshot is current and the config matches.'
+  let bootstrap = null;
+  let needsDesignerInput = [];
+  let refresh = null;
+
+  if (!fs.existsSync(configPath)) {
+    let dataSource = null;
+    try {
+      dataSource = _loadSnapshotForBootstrap(configPath, snapshotPathForRefresh);
+    } catch (err) {
+      return {
+        error: 'Unable to load Figma snapshot for missing config: ' + err.message,
+        hint: 'Open the Figlets Bridge plugin and retry, or pass figmaDataPath to a synced figma-data.json snapshot.',
+      };
+    }
+    if (!dataSource || !dataSource.figmaData) {
+      return {
+        error: 'design-system.config.js not found and no Figma snapshot was available: ' + configPath,
+        hint: 'Open the Figlets Bridge plugin and retry, or pass figmaDataPath to a synced figma-data.json snapshot.',
+      };
+    }
+
+    const ds = bootstrapDsFromSnapshot(dataSource.figmaData);
+    if (!dryRun) {
+      try {
+        _writeDsConfig(configPath, ds);
+      } catch (err) {
+        return { error: 'Failed to write snapshot-derived design-system.config.js: ' + err.message };
+      }
+    }
+    bootstrap = {
+      created: !dryRun,
+      configPath,
+      source: 'figma-snapshot-bootstrap',
+      reason: 'missing-config',
+      snapshotPath: _snapshotPathFromSource(dataSource),
+      summary: _bootstrapSummary(ds),
     };
+    needsDesignerInput = _needsDesignerInput(ds);
+    refresh = _refreshResultForBootstrap();
   }
 
-  const outputPath = args.output_path
-    ? path.resolve(args.output_path)
-    : path.join(path.dirname(configPath), 'DESIGN.md');
+  if (!refresh) {
+    const refreshArgs = {
+      config_path: configPath,
+      dry_run: dryRun,
+    };
+    if (snapshotPathForRefresh) refreshArgs.figmaDataPath = snapshotPathForRefresh;
+
+    refresh = handleRefreshDsConfigFromFigma(refreshArgs);
+    if (refresh && refresh.error) {
+      return {
+        error: 'Config refresh failed before export: ' + refresh.error,
+        hint: refresh.hint || 'Verify the synced snapshot is current and the config matches.'
+      };
+    }
+  }
 
   let designMdPath = null;
   let written = false;
+  let output = {
+    requestedPath: outputTarget.requestedPath,
+    fallbackPath: outputTarget.fallbackPath,
+    fallbackUsed: false,
+    defaultKind: outputTarget.defaultKind,
+    writeError: null,
+  };
   if (!dryRun) {
     const intake = _loadDesignMdIntake();
     if (!intake || typeof intake.writeDesignMdFromDsConfig !== 'function') {
       return { error: 'DESIGN.md exporter not available in figlets-core.' };
     }
     try {
-      designMdPath = intake.writeDesignMdFromDsConfig(configPath, outputPath);
+      const writeResult = _writeDesignMdFromConfig(intake, configPath, outputTarget);
+      designMdPath = writeResult.path;
+      output = Object.assign(output, writeResult);
       written = true;
     } catch (err) {
       return { error: 'Failed to write DESIGN.md: ' + err.message };
     }
   } else {
-    designMdPath = outputPath;
+    designMdPath = outputTarget.path;
   }
 
-  const snapshotPath = refresh.source && refresh.source.path ? refresh.source.path : null;
+  const snapshotPath = (refresh.source && refresh.source.path ? refresh.source.path : null)
+    || (bootstrap && bootstrap.snapshotPath)
+    || snapshotPathForRefresh
+    || null;
   const syncedAt = _statSyncedAt(snapshotPath);
 
   return {
@@ -155,6 +359,7 @@ async function handleExportDesignMd(args) {
     designMd: {
       path: designMdPath,
       written,
+      output,
     },
     sync: {
       attempted: shouldSync,
@@ -168,10 +373,16 @@ async function handleExportDesignMd(args) {
       skipped: refresh.skipped || [],
       summary: refresh.summary || { changedCount: 0, skippedCount: 0 },
     },
+    bootstrap,
+    needsDesignerInput,
     message: dryRun
-      ? 'Export dry run complete. No files were written.'
+      ? (bootstrap
+        ? 'Export dry run complete. No files were written; Figlets found enough snapshot data to create a local config and DESIGN.md.'
+        : 'Export dry run complete. No files were written.')
       : (written
-        ? 'DESIGN.md exported to ' + designMdPath
+        ? (bootstrap
+          ? 'Snapshot-derived design-system.config.js created and DESIGN.md exported to ' + designMdPath
+          : 'DESIGN.md exported to ' + designMdPath)
         : 'DESIGN.md export did not run.')
   };
 }

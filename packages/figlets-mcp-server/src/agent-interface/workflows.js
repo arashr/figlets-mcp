@@ -6,6 +6,7 @@ const {
   getActiveFileConfigPath,
 } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
+const { checkForUpdate, getRuntimeVersionInfo } = require("../utils/version-check.js");
 
 const MUTATING_TOOLS = new Set([
   "apply_ds_setup",
@@ -741,7 +742,7 @@ const WORKFLOWS = [
   {
     id: "export-design-md",
     title: "Export DESIGN.md",
-    summary: "Refresh from Figma and write a portable DESIGN.md handoff artifact.",
+    summary: "Refresh from Figma and write a portable DESIGN.md handoff artifact. If no local config exists, bootstrap one from the Figma snapshot so existing variables are preserved before asking for optional gap-filling context.",
     intents: ["export design.md", "handoff file", "give this to a coding agent", "developer handoff", "make design md"],
     prerequisites: ["Figma Desktop is open for fresh export", "Figlets Bridge plugin is open for fresh export"],
     steps: [
@@ -761,7 +762,7 @@ const WORKFLOWS = [
       },
     ],
     next: ["component-docs", "health-check"],
-    errors: ["If no config exists, point the designer to setup instead of bootstrapping silently."],
+    errors: ["If export_design_md returns needsDesignerInput, report the inferred export first, then ask only the returned gap questions if the designer wants to refine the local config/markdown."],
   },
 ];
 
@@ -1041,6 +1042,8 @@ function getWorkflowGuide(workflowId) {
 }
 
 function getStartGuide() {
+  const runtime = getRuntimeVersionInfo();
+  const updateCheck = checkForUpdate();
   const activeFileKey = getActiveFileKey();
   const configStatus = activeFileKey
     ? ensureActiveDsConfig({ reason: "figlets-start", refreshGenerated: true })
@@ -1090,9 +1093,12 @@ function getStartGuide() {
     "",
     "A focused toolkit for checking, repairing, showcasing, documenting, and exporting Figma design systems.",
     "",
+    `Running Figlets MCP v${runtime.version}.`,
+    updateCheck.updateAvailable ? `Update available: v${updateCheck.latestVersion}. Run \`${updateCheck.updateCommand}\` and restart this agent host.` : null,
+    "",
     "| What you can ask for | What I'll do |",
     "|---|---|",
-  ].concat(capabilityMenu.map(item => `| ${item.label} | ${item.description} |`)).concat([
+  ].filter(Boolean).concat(capabilityMenu.map(item => `| ${item.label} | ${item.description} |`)).concat([
     "",
     "I'll inspect first, explain results in plain language, and ask before changing Figma.",
   ]).join("\n");
@@ -1149,6 +1155,8 @@ function getStartGuide() {
       configCreated: Boolean(configStatus.created),
       configRefreshed: Boolean(configStatus.refreshed),
       configMessage: configStatus.message || null,
+      runtime,
+      updateCheck,
     },
     capabilities,
     nextQuestion: "What are you trying to do today?",

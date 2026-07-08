@@ -633,7 +633,7 @@ const WORKFLOWS = [
   {
     id: "component-docs",
     title: "Component Documentation",
-    summary: "Inspect a selected component, craft human usage guidance, and generate a Figma spec sheet plus markdown handoff.",
+    summary: "Inspect a selected component, craft human usage guidance, and generate a Figma spec sheet plus written markdown handoff.",
     intents: [
       "document component",
       "document this component",
@@ -660,19 +660,19 @@ const WORKFLOWS = [
       {
         id: "draft-copy",
         kind: "read",
-        designerMessage: "I'll draft component-specific description, usage rules, and variant descriptions.",
+        designerMessage: "I'll draft component-specific description, usage rules, accessibility maintenance notes, and variant descriptions.",
       },
       {
         id: "approve-doc",
         kind: "confirmation",
-        designerMessage: "Ready for me to render the spec sheet and markdown handoff?",
+        designerMessage: "Ready for me to render the spec sheet and write the markdown handoff?",
       },
       {
         id: "generate",
         kind: "write",
         tool: "generate_component_doc",
         requiresApproval: true,
-        designerMessage: "I'll render the spec sheet in Figma and return the markdown handoff.",
+        designerMessage: "I'll render the spec sheet in Figma and write the markdown handoff locally.",
       },
     ],
     next: ["qa-binding-audit", "export-design-md", "component-docs"],
@@ -1068,7 +1068,7 @@ function getStartGuide() {
     {
       label: "Document a component",
       workflowId: "component-docs",
-      description: "Inspect a selected component and generate a Figma spec sheet plus markdown handoff.",
+      description: "Inspect a selected component and generate a Figma spec sheet plus written markdown handoff.",
     },
     {
       label: "Export DESIGN.md",

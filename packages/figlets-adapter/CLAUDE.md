@@ -44,7 +44,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `apply_ds_config_contrast_repairs` | Applies only designer-approved `prepare_ds_config` contrast repair options to the local `design-system.config.js`; never mutates Figma | After showing `semanticPairs.contrastRepairOptions` and receiving approval, then rerun `prepare_ds_config` before build |
 | `apply_ds_setup` | Creates all 5 variable collections in Figma from the prepared config (Primitives, Color, Typography, Spacing, Elevation) | After `prepare_ds_config` confirms `readyToBuild === true` |
 | `update_ds_primitives` | Updates config-backed primitive color, spacing, typography, and shadow values, plus Color collection semantic aliases, preserving variable IDs. Categories: `color`, `spacing`, `color-semantics`, `primitive-typography`, `primitive-shadow`. | After tweaking the config or when `inspect_ds_token_gaps.repairPlan.primitiveRepairPlan` applies; use `prepare_ds_config` first for value pushes without recreating collections. |
-| `generate_component_doc` | Renders a complete spec sheet for a component inside Figma (preview, variants, properties, sizing, anatomy, usage) AND returns the markdown body for `component-specs/[Name].md`. Also writes a `[SPEC]` block to the component description for MCP handover. | When the user wants to document a component for design + LLM code handover. The component must be on the current Figma page. |
+| `generate_component_doc` | Renders a complete spec sheet for a component inside Figma (preview, variants, properties, sizing, anatomy, usage, accessibility), writes `component-specs/[Name].md`, and returns the markdown body plus written path. Also writes a `[SPEC]` block to the component description for MCP handover. | When the user wants to document a component for design + LLM code handover. The component must be on the current Figma page. |
 
 ---
 
@@ -172,10 +172,11 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
    - `description` — 1–2 sentences: what the component is and when to use it
    - `usage_do` — 2–3 rules grounded in this specific component's purpose (not generic "ensure 44px touch target" boilerplate unless that's actually the key concern here)
    - `usage_dont` — 2–3 rules grounded in misuse risks specific to this component
+   - `accessibility_notes` — 2–4 maintenance notes for implementation handoff. These are not suggestions to improve the design; they preserve accessible behavior when an agent or developer rebuilds it. Deduce component-specific notes from inspection when possible: alt text for image/artwork/media slots, captions/transcripts for video, semantic labels/roles, keyboard and focus behavior for interactive states, readable text, and preserving DS tokens that carry contrast/sizing/focus affordances. If no design system is detected, include generic maintenance notes for semantic structure, accessible names, keyboard behavior, contrast, and text scaling.
    - `variant_descriptions` — map of exact variant name → ≤10-word purpose
-5. Call `generate_component_doc` with `component_name` plus all four content inputs.
-6. Use the Write tool to save the returned `markdown` to the returned `path` (e.g. `component-specs/Button.md`). Confirm the path with the user first if it's a new directory.
-7. Tell the user: spec sheet rendered in the Documentation section, markdown saved locally, `[SPEC]` block written to the component description for MCP handover.
+5. Call `generate_component_doc` with `component_name` plus the content inputs.
+6. Confirm the returned `pathWritten` / `writtenPath`. Do not ask the user where the file is unless the tool reports a write error.
+7. Tell the user: spec sheet rendered in the Documentation section, markdown saved locally at the returned path, `[SPEC]` block written to the component description for MCP handover.
 
 ### Full design system health check
 1. Call `sync_figma_data`

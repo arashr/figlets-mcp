@@ -900,6 +900,7 @@ server.tool(
     description: z.string().optional().describe("Human-readable description (1-2 sentences) shown under the title on the spec sheet. Agent should craft this after inspecting the component."),
     usage_do: z.array(z.string()).optional().describe("Do rules for the usage panel. Agent should ground these in the component's actual purpose, not pass generic placeholders."),
     usage_dont: z.array(z.string()).optional().describe("Don't rules for the usage panel. Agent should ground these in the component's actual purpose."),
+    accessibility_notes: z.array(z.string()).optional().describe("Accessibility maintenance notes for implementation handoff. Preserve accessible behavior such as alt text, captions/transcripts, semantic roles/labels, keyboard/focus behavior, contrast, text scaling, and design-token usage."),
     variant_descriptions: z.record(z.string(), z.string()).optional().describe("Map of exact variant name to short purpose (<=10 words).")
   },
   async (args) => {

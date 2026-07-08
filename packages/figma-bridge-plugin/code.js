@@ -500,7 +500,7 @@ figma.ui.onmessage = async (msg) => {
 
   // ─────────────────────────────────────────────────────────────────────────
   // build-doc — generates a component spec sheet inside Figma and returns
-  // markdown for the agent to write to component-specs/[Name].md.
+  // markdown for the MCP server to write to component-specs/[Name].md.
   // Equivalent of figlets fig-document skill.
   // ─────────────────────────────────────────────────────────────────────────
   if (msg.type === 'build-doc') {
@@ -9804,6 +9804,261 @@ function _classifyComponentDocAnatomyNode(node, depth) {
   return result;
 }
 
+function _docFormatNumber(value) {
+  if (typeof value !== 'number' || !isFinite(value)) return String(value);
+  return Math.round(value * 1000) / 1000;
+}
+
+function _docFormatUnitValue(value, defaultUnit) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') return String(_docFormatNumber(value)) + (defaultUnit || '');
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    if (value.unit === 'AUTO') return 'auto';
+    if (value.value === undefined || value.value === null) return '';
+    const suffix = value.unit === 'PERCENT' ? '%' : (value.unit === 'PIXELS' ? 'px' : (defaultUnit || ''));
+    const scalar = typeof value.value === 'number' ? _docFormatNumber(value.value) : String(value.value);
+    return String(scalar) + suffix;
+  }
+  return String(value);
+}
+
+function _docFormatTextStyleResolvedValue(style) {
+  if (!style) return '—';
+  const parts = [];
+  if (style.fontName && style.fontName.family) parts.push('Family: ' + style.fontName.family);
+  if (style.fontName && style.fontName.style) parts.push('Style: ' + style.fontName.style);
+  if (style.fontSize !== undefined && style.fontSize !== null) parts.push('Size: ' + _docFormatUnitValue(style.fontSize, 'px'));
+  const lineHeight = _docFormatUnitValue(style.lineHeight, 'px');
+  if (lineHeight) parts.push('Line height: ' + lineHeight);
+  const letterSpacing = _docFormatUnitValue(style.letterSpacing, 'px');
+  if (letterSpacing) parts.push('Letter spacing: ' + letterSpacing);
+  return parts.length ? parts.join('; ') : '—';
+}
+
+function _docFormatResolvedVariableValue(property, res, colorFormatter) {
+  if (!res) return '—';
+  if (res.type === 'COLOR') return colorFormatter(res.val.r, res.val.g, res.val.b, res.val.a);
+  if (res.type === 'STRING') return String(res.val);
+  if (res.type !== 'FLOAT') return '—';
+  const prop = String(property || '').toLowerCase();
+  if (prop === 'fontweight' || prop === 'font weight') return String(_docFormatNumber(res.val));
+  if (prop === 'fontfamily' || prop === 'font family') return String(res.val);
+  return String(_docFormatNumber(res.val)) + 'px';
+}
+
+function _docFormatLayoutDirection(layoutMode) {
+  if (layoutMode === 'VERTICAL') return 'Vertical';
+  if (layoutMode === 'HORIZONTAL') return 'Horizontal';
+  return 'None';
+}
+
+function _docFormatSizingBehavior(mode) {
+  if (mode === 'FILL') return 'Fill parent';
+  if (mode === 'HUG' || mode === 'AUTO') return 'Hug content';
+  if (mode === 'FIXED') return 'Fixed';
+  return mode ? String(mode) : 'Fixed';
+}
+
+function _docAxisValue(node, axis) {
+  const value = axis === 'width' ? node && node.width : node && node.height;
+  return typeof value === 'number' ? Math.round(value) + 'px' : '—';
+}
+
+function _docAutoLayoutAxisSizing(node, axis) {
+  const mode = node && node.layoutMode;
+  if (mode !== 'VERTICAL' && mode !== 'HORIZONTAL') return 'Fixed';
+  const isPrimaryAxis = (mode === 'HORIZONTAL' && axis === 'width') || (mode === 'VERTICAL' && axis === 'height');
+  const sizingMode = isPrimaryAxis ? node.primaryAxisSizingMode : node.counterAxisSizingMode;
+  return _docFormatSizingBehavior(sizingMode || 'FIXED');
+}
+
+function _docNodeSizingBehavior(node, axis, isRoot) {
+  const value = axis === 'width' ? node && node.layoutSizingHorizontal : node && node.layoutSizingVertical;
+  if (value && value !== 'FIXED') return _docFormatSizingBehavior(value);
+  if (isRoot) return _docAutoLayoutAxisSizing(node, axis);
+  return _docFormatSizingBehavior(value || 'FIXED');
+}
+
+function _docAxisConstraintSummary(node, axis) {
+  if (!node) return '—';
+  const minKey = axis === 'width' ? 'minWidth' : 'minHeight';
+  const maxKey = axis === 'width' ? 'maxWidth' : 'maxHeight';
+  const parts = [];
+  if (typeof node[minKey] === 'number') parts.push('min ' + _docFormatNumber(node[minKey]) + 'px');
+  if (typeof node[maxKey] === 'number') parts.push('max ' + _docFormatNumber(node[maxKey]) + 'px');
+  return parts.length ? parts.join('; ') : '—';
+}
+
+function _docAxisSizeSummary(node, axis, isRoot) {
+  const parts = [_docNodeSizingBehavior(node, axis, isRoot)];
+  const constraints = _docAxisConstraintSummary(node, axis);
+  if (constraints !== '—') parts.push(constraints);
+  parts.push('current ' + _docAxisValue(node, axis));
+  return parts.join('; ');
+}
+
+function _docFormatNodeSize(node, isRoot) {
+  return 'width ' + _docAxisSizeSummary(node, 'width', isRoot) + '; height ' + _docAxisSizeSummary(node, 'height', isRoot);
+}
+
+function _docFormatPadding(node) {
+  const top = typeof node.paddingTop === 'number' ? _docFormatNumber(node.paddingTop) : 0;
+  const right = typeof node.paddingRight === 'number' ? _docFormatNumber(node.paddingRight) : 0;
+  const bottom = typeof node.paddingBottom === 'number' ? _docFormatNumber(node.paddingBottom) : 0;
+  const left = typeof node.paddingLeft === 'number' ? _docFormatNumber(node.paddingLeft) : 0;
+  if (top === 0 && right === 0 && bottom === 0 && left === 0) return '0';
+  if (top === right && top === bottom && top === left) return top + 'px';
+  return top + '/' + right + '/' + bottom + '/' + left + 'px';
+}
+
+function _docFormatLayoutSpacing(node) {
+  const parts = [];
+  if (node && node.layoutMode && node.layoutMode !== 'NONE') {
+    parts.push('padding ' + _docFormatPadding(node));
+    if (typeof node.itemSpacing === 'number') parts.push('gap ' + _docFormatNumber(node.itemSpacing) + 'px');
+  }
+  if (node && node.clipsContent === true) parts.push('clips content');
+  return parts.length ? parts.join('; ') : '—';
+}
+
+function _docFormatLayoutAlignment(node) {
+  if (!node || !node.layoutMode || node.layoutMode === 'NONE') return '—';
+  const parts = [];
+  if (node.primaryAxisAlignItems) parts.push('primary ' + node.primaryAxisAlignItems);
+  if (node.counterAxisAlignItems) parts.push('counter ' + node.counterAxisAlignItems);
+  return parts.length ? parts.join('; ') : '—';
+}
+
+function _docHasLayoutFacts(node) {
+  if (!node) return false;
+  if (node.layoutMode && node.layoutMode !== 'NONE') return true;
+  if (node.clipsContent === true) return true;
+  if (node.layoutSizingHorizontal && node.layoutSizingHorizontal !== 'FIXED') return true;
+  if (node.layoutSizingVertical && node.layoutSizingVertical !== 'FIXED') return true;
+  return false;
+}
+
+function _docImageFillSummary(node) {
+  const fills = node && Array.isArray(node.fills) ? node.fills : [];
+  for (let i = 0; i < fills.length; i++) {
+    const fill = fills[i];
+    if (fill && fill.visible !== false && fill.type === 'IMAGE') {
+      let mode = fill.scaleMode ? String(fill.scaleMode) : '';
+      if (mode === 'FILL') mode += ' (fills frame; crop/cover behavior)';
+      else if (mode === 'FIT') mode += ' (fits inside frame)';
+      else if (mode === 'CROP') mode += ' (cropped)';
+      else if (mode === 'TILE') mode += ' (tiled)';
+      return 'Image fill' + (mode ? ': ' + mode : '');
+    }
+  }
+  return '';
+}
+
+function _docCornerRadiusSummary(node) {
+  if (!node) return '';
+  if (typeof node.cornerRadius === 'number') return _docFormatNumber(node.cornerRadius) + 'px radius';
+  const corners = ['topLeftRadius', 'topRightRadius', 'bottomRightRadius', 'bottomLeftRadius'];
+  const vals = [];
+  for (let i = 0; i < corners.length; i++) {
+    if (typeof node[corners[i]] !== 'number') return '';
+    vals.push(_docFormatNumber(node[corners[i]]));
+  }
+  return vals.join('/') + 'px radius';
+}
+
+function _docVisiblePaintCount(paints) {
+  const list = Array.isArray(paints) ? paints : [];
+  let count = 0;
+  for (let i = 0; i < list.length; i++) if (list[i] && list[i].visible !== false) count++;
+  return count;
+}
+
+function _docVisibleEffectCount(effects) {
+  const list = Array.isArray(effects) ? effects : [];
+  let count = 0;
+  for (let i = 0; i < list.length; i++) if (list[i] && list[i].visible !== false) count++;
+  return count;
+}
+
+function _docStrokeSummary(node) {
+  if (!node || _docVisiblePaintCount(node.strokes) === 0) return 'No stroke';
+  return 'Stroke count: ' + _docVisiblePaintCount(node.strokes);
+}
+
+function _docColorSummary(color) {
+  if (!color || typeof color.r !== 'number' || typeof color.g !== 'number' || typeof color.b !== 'number') return '';
+  function channel(v) { return Math.round(Math.max(0, Math.min(1, v)) * 255); }
+  const r = channel(color.r);
+  const g = channel(color.g);
+  const b = channel(color.b);
+  const alpha = typeof color.a === 'number' ? _docFormatNumber(color.a) : 1;
+  if (alpha !== 1) return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
+  function hex(v) {
+    const s = v.toString(16);
+    return s.length === 1 ? '0' + s : s;
+  }
+  return '#' + hex(r) + hex(g) + hex(b);
+}
+
+function _docEffectDetailSummary(effect) {
+  if (!effect || effect.visible === false) return '';
+  const parts = [effect.type || 'Effect'];
+  const metrics = [];
+  if (effect.color) {
+    const color = _docColorSummary(effect.color);
+    if (color) metrics.push('color ' + color);
+    if (typeof effect.color.a === 'number') metrics.push('alpha ' + _docFormatNumber(effect.color.a));
+  }
+  if (typeof effect.offset === 'object' && effect.offset) {
+    if (typeof effect.offset.x === 'number') metrics.push('offset-x ' + _docFormatNumber(effect.offset.x) + 'px');
+    if (typeof effect.offset.y === 'number') metrics.push('offset-y ' + _docFormatNumber(effect.offset.y) + 'px');
+  }
+  if (typeof effect.radius === 'number') metrics.push('blur ' + _docFormatNumber(effect.radius) + 'px');
+  if (typeof effect.spread === 'number') metrics.push('spread ' + _docFormatNumber(effect.spread) + 'px');
+  if (effect.blendMode) metrics.push('blend ' + effect.blendMode);
+  if (metrics.length) parts.push(metrics.join(', '));
+  return parts.join(' ');
+}
+
+function _docEffectsDetailSummary(effects) {
+  const list = Array.isArray(effects) ? effects : [];
+  const parts = [];
+  for (let i = 0; i < list.length; i++) {
+    const detail = _docEffectDetailSummary(list[i]);
+    if (detail) parts.push(detail);
+  }
+  return parts.join(' | ');
+}
+
+function _docEffectSummary(node, effectStyleById) {
+  if (!node) return 'No effects';
+  if (node.effectStyleId && effectStyleById && effectStyleById[node.effectStyleId]) {
+    const style = effectStyleById[node.effectStyleId];
+    const details = _docEffectsDetailSummary(style.effects);
+    return 'Effect style: ' + style.name + (details ? '; ' + details : '');
+  }
+  const count = _docVisibleEffectCount(node.effects);
+  if (count > 0) {
+    const details = _docEffectsDetailSummary(node.effects);
+    return details ? 'Effects: ' + details : 'Effects: ' + count;
+  }
+  return 'No effects';
+}
+
+function _docFormatReactionPart(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value !== 'object') return String(value);
+  const parts = [];
+  if (value.type) parts.push(value.type);
+  if (value.destinationId) parts.push('to ' + value.destinationId);
+  if (value.navigation) parts.push(value.navigation);
+  if (value.easing) parts.push('easing ' + (value.easing.type || value.easing));
+  if (value.duration !== undefined) parts.push('duration ' + value.duration + 's');
+  return parts.join('; ');
+}
+
 async function _buildComponentDoc(opts) {
   const compId = opts && opts.componentId ? String(opts.componentId) : '';
   let compName = opts && opts.componentName ? String(opts.componentName) : '';
@@ -9813,6 +10068,9 @@ async function _buildComponentDoc(opts) {
     : [];
   const usageDont = (opts && opts.usageDont && opts.usageDont.length > 0)
     ? opts.usageDont
+    : [];
+  const agentAccessibilityNotes = (opts && opts.accessibilityNotes && opts.accessibilityNotes.length > 0)
+    ? opts.accessibilityNotes
     : [];
   const variantDesc = (opts && opts.variantDescriptions) ? opts.variantDescriptions : {};
 
@@ -9896,10 +10154,19 @@ async function _buildComponentDoc(opts) {
   const _ds = await _createDsBindingContext();
   const _allVars = _ds.allVars;
   const _allTextStyles = _ds.textStyles;
+  const _allEffectStyles = _ds.effectStyles || [];
   const varById = {};
   for (let i = 0; i < _allVars.length; i++) varById[_allVars[i].id] = _allVars[i];
   const textStyleById = {};
   for (let i = 0; i < _allTextStyles.length; i++) textStyleById[_allTextStyles[i].id] = _allTextStyles[i];
+  const effectStyleById = {};
+  for (let i = 0; i < _allEffectStyles.length; i++) effectStyleById[_allEffectStyles[i].id] = _allEffectStyles[i];
+  const collectionByVarId = {};
+  for (let i = 0; i < (_ds.allColls || []).length; i++) {
+    const coll = _ds.allColls[i];
+    const ids = coll.variableIds || [];
+    for (let j = 0; j < ids.length; j++) collectionByVarId[ids[j]] = coll;
+  }
 
   function _resolveAlias(varId) {
     let depth = 0;
@@ -9915,18 +10182,58 @@ async function _buildComponentDoc(opts) {
       }
       if (raw && typeof raw === 'object' && raw.r !== undefined) return { type: 'COLOR', val: raw };
       if (typeof raw === 'number') return { type: 'FLOAT', val: raw };
+      if (typeof raw === 'string') return { type: 'STRING', val: raw };
       return null;
     }
     return null;
   }
 
+  function _resolveAliasForMode(varId, modeId, depth) {
+    const cur = varById[varId];
+    if (!cur || depth > 8) return null;
+    const raw = cur.valuesByMode ? cur.valuesByMode[modeId] : undefined;
+    const fallbackModes = Object.keys(cur.valuesByMode || {});
+    const val = raw !== undefined ? raw : (fallbackModes.length ? cur.valuesByMode[fallbackModes[0]] : undefined);
+    if (val && val.type === 'VARIABLE_ALIAS') return _resolveAliasForMode(val.id, modeId, depth + 1);
+    if (val && typeof val === 'object' && val.r !== undefined) return { type: 'COLOR', val: val };
+    if (typeof val === 'number') return { type: 'FLOAT', val: val };
+    if (typeof val === 'string') return { type: 'STRING', val: val };
+    return null;
+  }
+
+  function _variableContext(varId) {
+    const coll = collectionByVarId[varId];
+    if (!coll) return '—';
+    const modeNames = (coll.modes || []).map(function (m) { return m.name; }).join(', ');
+    return coll.name + (modeNames ? ' · ' + modeNames : '');
+  }
+
   function _toHex(r, g, b) {
+    if (typeof arguments[3] === 'number' && arguments[3] < 1) return _docColorSummary({ r: r, g: g, b: b, a: arguments[3] });
     function _h(c) {
       const i = Math.round(Math.max(0, Math.min(1, c)) * 255);
       const s = i.toString(16);
       return s.length === 1 ? '0' + s : s;
     }
     return '#' + _h(r) + _h(g) + _h(b);
+  }
+
+  function _resolvedVariableValueSummary(varId, property) {
+    const coll = collectionByVarId[varId];
+    if (!coll || !Array.isArray(coll.modes) || coll.modes.length <= 1) {
+      return _docFormatResolvedVariableValue(property, _resolveAlias(varId), _toHex);
+    }
+    const parts = [];
+    const seen = {};
+    for (let i = 0; i < coll.modes.length; i++) {
+      const mode = coll.modes[i];
+      const val = _docFormatResolvedVariableValue(property, _resolveAliasForMode(varId, mode.modeId, 0), _toHex);
+      parts.push(mode.name + ': ' + val);
+      seen[val] = true;
+    }
+    const uniqueValues = Object.keys(seen);
+    if (uniqueValues.length === 1) return uniqueValues[0];
+    return parts.join('; ');
   }
 
   function _paint(fallbackRGB, varOrNull) {
@@ -10013,6 +10320,18 @@ async function _buildComponentDoc(opts) {
   _collectEl(_defaultV, 0);
 
   // ── Token bindings on default variant ──────────────────────────────────────
+  function _collectEffectBindRows(effects, nodeName, acc) {
+    const list = Array.isArray(effects) ? effects : [];
+    for (let i = 0; i < list.length; i++) {
+      const effect = list[i];
+      const effectBv = effect && effect.boundVariables ? effect.boundVariables : {};
+      const fields = Object.keys(effectBv);
+      for (let j = 0; j < fields.length; j++) {
+        const e = effectBv[fields[j]];
+        if (e && e.id) acc.push({ node: nodeName, property: 'Effect ' + (effect.type || '') + ' ' + fields[j], varId: e.id });
+      }
+    }
+  }
   function _collectBind(node, acc) {
     if (_isDocPrivateNodeName(node.name)) return acc;
     if (node.type === 'INSTANCE') return acc;
@@ -10022,7 +10341,8 @@ async function _buildComponentDoc(opts) {
       ['paddingTop', 'paddingTop'], ['paddingBottom', 'paddingBottom'],
       ['paddingLeft', 'paddingLeft'], ['paddingRight', 'paddingRight'],
       ['itemSpacing', 'itemSpacing'], ['counterAxisSpacing', 'counterAxisSpacing'],
-      ['fontSize', 'fontSize'],
+      ['fontFamily', 'fontFamily'], ['fontSize', 'fontSize'], ['fontWeight', 'fontWeight'],
+      ['lineHeight', 'lineHeight'], ['letterSpacing', 'letterSpacing'],
       ['topLeftRadius', 'cornerRadius'],
       ['strokeTopWeight', 'strokeWeight']
     ];
@@ -10036,6 +10356,11 @@ async function _buildComponentDoc(opts) {
     if (node.type === 'TEXT' && node.textStyleId) {
       acc.push({ node: node.name, property: 'textStyle', styleId: node.textStyleId });
     }
+    if (node.effectStyleId) {
+      acc.push({ node: node.name, property: 'Effect style', styleId: node.effectStyleId, styleKind: 'effect' });
+      if (effectStyleById[node.effectStyleId]) _collectEffectBindRows(effectStyleById[node.effectStyleId].effects, node.name, acc);
+    }
+    _collectEffectBindRows(node.effects, node.name, acc);
     if (node.type === 'SLOT') return acc;
     if ('children' in node) {
       for (let i = 0; i < node.children.length; i++) _collectBind(node.children[i], acc);
@@ -10166,6 +10491,66 @@ async function _buildComponentDoc(opts) {
 
   const _slotDocs = _collectSlotDocs(_defaultV, compMeta.componentPropertyDefinitions);
 
+  function _componentDocFeatureSignals(root) {
+    const out = {
+      hasImage: false,
+      hasMedia: false,
+      hasText: false,
+      hasControl: false,
+      hasSlot: false,
+      hasInteractiveState: false
+    };
+    function walk(node) {
+      if (!node || _isDocPrivateNodeName(node.name)) return;
+      const name = _docNormalizePartName(node.name);
+      if (node.type === 'TEXT') out.hasText = true;
+      if (node.type === 'SLOT' || name.indexOf('slot') >= 0) out.hasSlot = true;
+      if (_docPaintsVisible(node.fills)) {
+        for (let i = 0; i < node.fills.length; i++) {
+          if (node.fills[i] && node.fills[i].type === 'IMAGE') out.hasImage = true;
+        }
+      }
+      if (name.indexOf('image') >= 0 || name.indexOf('artwork') >= 0 || name.indexOf('thumbnail') >= 0 || name.indexOf('avatar') >= 0) out.hasImage = true;
+      if (name.indexOf('video') >= 0 || name.indexOf('media') >= 0) out.hasMedia = true;
+      if (name.indexOf('button') >= 0 || name.indexOf('link') >= 0 || name.indexOf('input') >= 0 || name.indexOf('control') >= 0 || name.indexOf('action') >= 0) out.hasControl = true;
+      if (name.indexOf('hover') >= 0 || name.indexOf('focus') >= 0 || name.indexOf('pressed') >= 0 || name.indexOf('active') >= 0 || name.indexOf('disabled') >= 0) out.hasInteractiveState = true;
+      if ('children' in node && node.children && node.type !== 'INSTANCE') {
+        for (let i = 0; i < node.children.length; i++) walk(node.children[i]);
+      }
+    }
+    walk(root);
+    return out;
+  }
+
+  function _defaultAccessibilityNotes(root, slotDocs, hasDesignSystemBindings) {
+    const signals = _componentDocFeatureSignals(root);
+    const notes = [];
+    function add(note) {
+      if (note && notes.indexOf(note) === -1) notes.push(note);
+    }
+    if (signals.hasImage) add('Provide meaningful alt text for informative images and mark decorative imagery as decorative in implementation.');
+    if (signals.hasMedia) add('Provide captions, transcripts, or equivalent text alternatives for video or time-based media placed in this component.');
+    if (signals.hasSlot || slotDocs.length) add('When filling slots, preserve the slot semantics and provide accessible names for inserted interactive or media content.');
+    if (signals.hasControl || signals.hasInteractiveState) add('Preserve keyboard access, visible focus states, disabled semantics, and accessible names for interactive states.');
+    if (signals.hasText) add('Keep text content programmatic text, preserve heading/label semantics where applicable, and avoid replacing readable text with images.');
+    if (hasDesignSystemBindings) add('Preserve the documented design-system text, color, spacing, and radius tokens so contrast, sizing, and focus affordances stay consistent.');
+    else add('Maintain sufficient contrast, text scalability, and spacing in implementation when no design-system tokens are available.');
+    if (notes.length < 2) add('Preserve semantic roles, accessible names, reading order, and keyboard behavior when implementing this component.');
+    return notes.slice(0, 5);
+  }
+
+  function _mergedAccessibilityNotes(agentNotes, fallbackNotes) {
+    const out = [];
+    function add(note) {
+      const s = String(note || '').trim();
+      if (!s || out.indexOf(s) !== -1) return;
+      out.push(s);
+    }
+    for (let i = 0; i < agentNotes.length; i++) add(agentNotes[i]);
+    for (let j = 0; j < fallbackNotes.length && out.length < 5; j++) add(fallbackNotes[j]);
+    return out;
+  }
+
   // Pre-fetch any varIds we don't have locally (library/remote variables).
   // figma.variables.getVariableByIdAsync resolves both local and library vars.
   const _missingIds = {};
@@ -10180,35 +10565,63 @@ async function _buildComponentDoc(opts) {
       if (remote) varById[_missingIdList[i]] = remote;
     } catch (e) {}
   }
-
-  const resolved = [];
+  const _missingStyleIds = {};
   for (let i = 0; i < _rawBinds.length; i++) {
-    const b = _rawBinds[i];
-    if (b.varId) {
-      const v = varById[b.varId];
-      const tokenName = v ? v.name : b.varId;
-      let resolvedVal = '—';
-      const res = _resolveAlias(b.varId);
-      if (res && res.type === 'COLOR') resolvedVal = _toHex(res.val.r, res.val.g, res.val.b);
-      else if (res && res.type === 'FLOAT') resolvedVal = res.val + 'px';
-      resolved.push({ node: b.node, property: b.property, token: tokenName, resolvedVal: resolvedVal });
-    } else if (b.styleId) {
-      const style = textStyleById[b.styleId];
-      let lh = '';
-      if (style) {
-        if (typeof style.lineHeight === 'object') {
-          lh = (style.lineHeight && style.lineHeight.value !== undefined) ? style.lineHeight.value : '?';
-        } else {
-          lh = style.lineHeight;
-        }
-      }
-      resolved.push({
-        node: b.node, property: 'Text style',
-        token: style ? style.name : b.styleId,
-        resolvedVal: style ? (style.fontSize + 'px / ' + lh) : '—'
-      });
+    const id = _rawBinds[i].styleId;
+    if (id && !textStyleById[id]) _missingStyleIds[id] = true;
+  }
+  const _missingStyleIdList = Object.keys(_missingStyleIds);
+  if (typeof figma.getStyleByIdAsync === 'function') {
+    for (let i = 0; i < _missingStyleIdList.length; i++) {
+      try {
+        const remoteStyle = await figma.getStyleByIdAsync(_missingStyleIdList[i]);
+        if (remoteStyle && remoteStyle.type === 'TEXT') textStyleById[_missingStyleIdList[i]] = remoteStyle;
+        else if (remoteStyle && remoteStyle.type === 'EFFECT') effectStyleById[_missingStyleIdList[i]] = remoteStyle;
+      } catch (e) {}
     }
   }
+
+  function _resolveBindingRows(rawBinds) {
+    const out = [];
+    for (let i = 0; i < rawBinds.length; i++) {
+      const b = rawBinds[i];
+      if (b.varId) {
+        const v = varById[b.varId];
+        const tokenName = v ? v.name : b.varId;
+        out.push({
+          node: b.node,
+          property: b.property,
+          token: tokenName,
+          context: _variableContext(b.varId),
+          resolvedVal: _resolvedVariableValueSummary(b.varId, b.property)
+        });
+      } else if (b.styleId && b.styleKind === 'effect') {
+        const style = effectStyleById[b.styleId];
+        out.push({
+          node: b.node,
+          property: 'Effect style',
+          token: style ? style.name : b.styleId,
+          context: 'Effect style',
+          resolvedVal: style ? _docEffectSummary({ effectStyleId: style.id }, effectStyleById) : '—'
+        });
+      } else if (b.styleId) {
+        const style = textStyleById[b.styleId];
+        out.push({
+          node: b.node,
+          property: 'Text style',
+          token: style ? style.name : b.styleId,
+          context: 'Text style',
+          resolvedVal: _docFormatTextStyleResolvedValue(style)
+        });
+      }
+    }
+    return out;
+  }
+  const resolved = _resolveBindingRows(_rawBinds);
+  const _accessibilityNotes = _mergedAccessibilityNotes(
+    agentAccessibilityNotes,
+    _defaultAccessibilityNotes(_defaultV, _slotDocs, resolved.length > 0)
+  );
 
   // ── Fonts ──────────────────────────────────────────────────────────────────
   let _fam = 'Inter', _fReg = 'Regular', _fSemi = 'Semi Bold', _fBold = 'Bold';
@@ -10714,6 +11127,33 @@ async function _buildComponentDoc(opts) {
   _mkUsagePanel(_secH, 'Do', usageDo, _cDo);
   _mkUsagePanel(_secH, "Don't", usageDont, _cDont);
 
+  // Section I — Accessibility maintenance notes
+  if (_accessibilityNotes.length > 0) {
+    _mkLabel(doc, 'ACCESSIBILITY');
+    const _secI = figma.createFrame();
+    _secI.name = 'Section I · Accessibility'; _secI.layoutMode = 'VERTICAL';
+    _secI.primaryAxisSizingMode = 'AUTO'; _secI.counterAxisSizingMode = 'FIXED';
+    _secI.itemSpacing = 12;
+    _secI.paddingTop = 24; _secI.paddingBottom = 24; _secI.paddingLeft = 24; _secI.paddingRight = 24;
+    _secI.fills = [];
+    _secI.cornerRadius = 8;
+    _secI.strokes = [_paint(_cBorder, _vBorder)]; _secI.strokeWeight = 1;
+    _bindVar(_secI, 'paddingTop', _docSpace.padXL);
+    _bindVar(_secI, 'paddingBottom', _docSpace.padXL);
+    _bindVar(_secI, 'paddingLeft', _docSpace.padXL);
+    _bindVar(_secI, 'paddingRight', _docSpace.padXL);
+    _bindVar(_secI, 'itemSpacing', _docSpace.padM);
+    _bindVar(_secI, 'cornerRadius', _docSpace.radius);
+    _bindVar(_secI, 'strokeWeight', _docSpace.border);
+    doc.appendChild(_secI); _secI.layoutSizingHorizontal = 'FILL';
+    for (let i = 0; i < _accessibilityNotes.length; i++) {
+      const note = figma.createText();
+      note.characters = '• ' + _accessibilityNotes[i];
+      _applyTextRole(note, 'body', 12, _fReg, _cInk, _vInk);
+      _secI.appendChild(note); note.layoutSizingHorizontal = 'FILL'; note.textAutoResize = 'HEIGHT';
+    }
+  }
+
   // ── Update component description with [SPEC] block ─────────────────────────
   let _propsForSpec = '';
   for (let i = 0; i < _propKeys.length; i++) {
@@ -10726,12 +11166,14 @@ async function _buildComponentDoc(opts) {
     if (i > 0) _tokensForSpec += ', ';
     _tokensForSpec += resolved[i].property + '=' + resolved[i].token;
   }
+  const _accessibilityForSpec = _accessibilityNotes.length ? _accessibilityNotes.join(' | ') : 'none';
   const _specBlock =
     '[SPEC]\n' +
     'component: ' + compName + '\n' +
     'variants: ' + compMeta.variants.join(' | ') + '\n' +
     'properties: ' + _propsForSpec + '\n' +
     'tokens: ' + _tokensForSpec + '\n' +
+    'accessibility: ' + _accessibilityForSpec + '\n' +
     'spec-file: component-specs/' + compName + '.md\n' +
     '[/SPEC]\n\n';
   const _humanDesc = agentDescription ? agentDescription + '\n\n' : '';
@@ -10767,15 +11209,20 @@ async function _buildComponentDoc(opts) {
   for (let i = 0; i < _propKeys.length; i++) {
     const k = _propKeys[i];
     const d = compMeta.componentPropertyDefinitions[k];
-    _compProps.push({ name: k, type: d.type, defaultValue: d.defaultValue !== undefined ? String(d.defaultValue) : '—' });
+    _compProps.push({ name: k, type: d.type, defaultValue: d.defaultValue !== undefined ? String(d.defaultValue) : '—', description: d.description || '' });
   }
 
   const _sizing = [];
   for (let i = 0; i < Math.min(_children.length, 10); i++) {
-    _sizing.push({ name: _children[i].name, width: Math.round(_children[i].width), height: Math.round(_children[i].height) });
+    _sizing.push({
+      name: _children[i].name,
+      width: _docAxisSizeSummary(_children[i], 'width', true),
+      height: _docAxisSizeSummary(_children[i], 'height', true)
+    });
   }
 
   const _anatomyMd = [];
+  const _layoutMd = [];
   let _anatIdx = 1;
   function _primaryAnatomyToken(node) {
     if (!node) return '—';
@@ -10790,6 +11237,60 @@ async function _buildComponentDoc(opts) {
     }
     return '—';
   }
+  function _visibleFillSummary(node) {
+    if (!node) return 'None';
+    const bv = node.boundVariables || {};
+    if (bv.fills && bv.fills[0] && bv.fills[0].id) {
+      const v = varById[bv.fills[0].id];
+      if (v) return v.name;
+    }
+    const fills = Array.isArray(node.fills) ? node.fills : [];
+    for (let i = 0; i < fills.length; i++) {
+      const fill = fills[i];
+      if (!fill || fill.visible === false) continue;
+      if (fill.type === 'IMAGE') return _docImageFillSummary(node) || 'Image fill';
+      if (fill.type === 'SOLID' && fill.color) return _toHex(fill.color.r, fill.color.g, fill.color.b);
+      return fill.type || 'Paint';
+    }
+    return 'None';
+  }
+  function _rootVisualState(node) {
+    const opacity = typeof node.opacity === 'number' ? _docFormatNumber(node.opacity) : 1;
+    return {
+      Fill: _visibleFillSummary(node),
+      Stroke: _docStrokeSummary(node),
+      Effects: _docEffectSummary(node, effectStyleById),
+      Opacity: String(opacity)
+    };
+  }
+  function _bindingKey(row) {
+    return row.node + '|' + row.property;
+  }
+  function _bindingValue(row) {
+    return row.token + ' (' + row.resolvedVal + ')';
+  }
+  function _pushLayoutMd(label, node, isRoot) {
+    if (!node) return;
+    const notes = [];
+    const imageFill = _docImageFillSummary(node);
+    const radius = _docCornerRadiusSummary(node);
+    if (isRoot) {
+      notes.push(_docStrokeSummary(node));
+      notes.push(_docEffectSummary(node, effectStyleById));
+    }
+    if (imageFill) notes.push(imageFill);
+    if (radius) notes.push(radius);
+    if (!_docHasLayoutFacts(node) && notes.length === 0 && !isRoot) return;
+    _layoutMd.push({
+      element: label || node.name || 'Root',
+      direction: _docFormatLayoutDirection(node.layoutMode),
+      size: _docFormatNodeSize(node, isRoot),
+      spacing: _docFormatLayoutSpacing(node),
+      alignment: _docFormatLayoutAlignment(node),
+      notes: notes.length ? notes.join('; ') : '—'
+    });
+  }
+  _pushLayoutMd('Root variant', _defaultV, true);
   for (let i = 0; i < _docAnatomyNodes.length; i++) {
     const item = _docAnatomyNodes[i];
     const node = item.node;
@@ -10801,8 +11302,56 @@ async function _buildComponentDoc(opts) {
         token: _primaryAnatomyToken(node),
         depth: item.depth
       });
+      _pushLayoutMd(node.name, node, false);
     }
   }
+
+  const _variantChangeRows = [];
+  const _defaultVisualState = _rootVisualState(_defaultV);
+  const _defaultBindingRows = resolved;
+  const _defaultBindingMap = {};
+  for (let i = 0; i < _defaultBindingRows.length; i++) _defaultBindingMap[_bindingKey(_defaultBindingRows[i])] = _defaultBindingRows[i];
+  for (let i = 0; i < _children.length; i++) {
+    const variant = _children[i];
+    if (variant === _defaultV) continue;
+    const visualState = _rootVisualState(variant);
+    const visualKeys = Object.keys(visualState);
+    for (let j = 0; j < visualKeys.length; j++) {
+      const key = visualKeys[j];
+      if (visualState[key] !== _defaultVisualState[key]) {
+        _variantChangeRows.push({ variant: variant.name, target: 'Root variant', property: key, value: visualState[key], defaultValue: _defaultVisualState[key] });
+      }
+    }
+    const rows = _resolveBindingRows(_collectBind(variant, []));
+    for (let j = 0; j < rows.length; j++) {
+      const row = rows[j];
+      const base = _defaultBindingMap[_bindingKey(row)];
+      const value = _bindingValue(row);
+      const defaultValue = base ? _bindingValue(base) : '—';
+      if (!base || value !== defaultValue) {
+        _variantChangeRows.push({ variant: variant.name, target: row.node, property: row.property, value: value, defaultValue: defaultValue });
+      }
+    }
+  }
+  const _interactionRows = [];
+  function _collectReactionDocs(node, variantName) {
+    if (!node || _isDocPrivateNodeName(node.name)) return;
+    const reactions = Array.isArray(node.reactions) ? node.reactions : [];
+    for (let i = 0; i < reactions.length; i++) {
+      const reaction = reactions[i] || {};
+      _interactionRows.push({
+        variant: variantName,
+        element: node.name || 'Root',
+        trigger: _docFormatReactionPart(reaction.trigger) || '—',
+        action: _docFormatReactionPart(reaction.action) || '—',
+        transition: _docFormatReactionPart(reaction.action && reaction.action.transition) || '—'
+      });
+    }
+    if ('children' in node && node.children && node.type !== 'INSTANCE' && node.type !== 'SLOT') {
+      for (let j = 0; j < node.children.length; j++) _collectReactionDocs(node.children[j], variantName);
+    }
+  }
+  for (let i = 0; i < _children.length; i++) _collectReactionDocs(_children[i], _children[i].name);
 
   function _mdRow(cells) { return '| ' + cells.join(' | ') + ' |'; }
   function _mdTable(header, rows) {
@@ -10825,26 +11374,54 @@ async function _buildComponentDoc(opts) {
     ? _mdTable(['Variant', 'Purpose'], _vdKeys.map(function (k) { return [k, variantDesc[k]]; }))
     : '';
 
+  const _variantChangesTable = _variantChangeRows.length > 0
+    ? _mdTable(['Variant', 'Target', 'Property', 'Value', 'Default'],
+        _variantChangeRows.map(function (r) { return [r.variant, r.target, r.property, r.value, r.defaultValue]; }))
+    : '';
+
+  const _interactionsTable = _interactionRows.length > 0
+    ? _mdTable(['Variant', 'Element', 'Trigger', 'Action', 'Transition'],
+        _interactionRows.map(function (r) { return [r.variant, r.element, r.trigger, r.action, r.transition]; }))
+    : '';
+
   const _propsTable = _compProps.length > 0
     ? _mdTable(['Property', 'Type', 'Default', 'Description'],
-        _compProps.map(function (p) { return [p.name, p.type, p.defaultValue, '']; }))
+        _compProps.map(function (p) { return [p.name, p.type, p.defaultValue, p.description]; }))
     : '';
 
   const _slotsTable = _slotDocs.length > 0
-    ? _mdTable(['Slot', 'Rules', 'Preferred Values', 'Default Content', 'Limit Violations'],
+    ? _mdTable(['Slot', 'Min', 'Max', 'Preferred Only', 'Stretch Child', 'Preferred Values', 'Default Content', 'Limit Violations'],
         _slotDocs.map(function (s) {
-          return [s.name, s.settings, s.preferredValues, s.defaultContent, s.limitViolations];
+          const settings = s.slotSettings || {};
+          return [
+            s.name,
+            settings.minChildren !== undefined && settings.minChildren !== null ? settings.minChildren : '—',
+            settings.maxChildren !== undefined && settings.maxChildren !== null ? settings.maxChildren : '—',
+            settings.allowPreferredValuesOnly ? 'Yes' : 'No',
+            settings.stretchChildOnInsert ? 'Yes' : 'No',
+            s.preferredValues,
+            s.defaultContent,
+            s.limitViolations
+          ];
         }))
     : '';
 
   const _bindingsTable = resolved.length > 0
-    ? _mdTable(['Node', 'Property', 'Token', 'Resolved Value'],
-        resolved.map(function (b) { return [b.node, b.property, b.token, b.resolvedVal]; }))
+    ? _mdTable(['Node', 'Property', 'Token', 'Collection / Modes', 'Resolved Value'],
+        resolved.map(function (b) { return [b.node, b.property, b.token, b.context || '—', b.resolvedVal]; }))
     : '';
+  const _hasMultiModeTokenBindings = resolved.some(function (b) {
+    return b.context && b.context.indexOf(',') >= 0;
+  });
 
   const _sizingTable = _sizing.length > 0
     ? _mdTable(['Variant', 'Width', 'Height'],
-        _sizing.map(function (s) { return [s.name, s.width + 'px', s.height + 'px']; }))
+        _sizing.map(function (s) { return [s.name, s.width, s.height]; }))
+    : '';
+
+  const _layoutTable = _layoutMd.length > 0
+    ? _mdTable(['Element', 'Direction', 'Size', 'Spacing / Clipping', 'Alignment', 'Notes'],
+        _layoutMd.map(function (l) { return [l.element, l.direction, l.size, l.spacing, l.alignment, l.notes]; }))
     : '';
 
   const _anatomyTable = (_hasMeaningfulAnatomy(_defaultV) && _anatomyMd.length > 0)
@@ -10872,6 +11449,18 @@ async function _buildComponentDoc(opts) {
     _md.push(_variantDescTable);
     _md.push('');
   }
+  if (_variantChangesTable) {
+    _md.push('### Variant changes');
+    _md.push('');
+    _md.push(_variantChangesTable);
+    _md.push('');
+  }
+  if (_interactionsTable) {
+    _md.push('### Prototype interactions');
+    _md.push('');
+    _md.push(_interactionsTable);
+    _md.push('');
+  }
   _md.push('---');
   _md.push('');
   if (_propsTable) {
@@ -10895,6 +11484,10 @@ async function _buildComponentDoc(opts) {
     _md.push('');
     _md.push(_bindingsTable);
     _md.push('');
+    if (_hasMultiModeTokenBindings) {
+      _md.push('_Figma exposes the variable mode names above, but not breakpoint pixel thresholds. Use the design-system config or docs for the actual Mobile/Tablet/Desktop widths._');
+      _md.push('');
+    }
     _md.push('---');
     _md.push('');
   }
@@ -10902,6 +11495,14 @@ async function _buildComponentDoc(opts) {
     _md.push('## Sizing');
     _md.push('');
     _md.push(_sizingTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
+  if (_layoutTable) {
+    _md.push('## Layout');
+    _md.push('');
+    _md.push(_layoutTable);
     _md.push('');
     _md.push('---');
     _md.push('');
@@ -10924,6 +11525,14 @@ async function _buildComponentDoc(opts) {
   _md.push('');
   _md.push('---');
   _md.push('');
+  if (_accessibilityNotes.length > 0) {
+    _md.push('## Accessibility');
+    _md.push('');
+    for (let i = 0; i < _accessibilityNotes.length; i++) _md.push('- ' + _accessibilityNotes[i]);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
   _md.push('## Figma');
   _md.push('');
   _md.push('- **File:** ' + figma.root.name);
@@ -10953,6 +11562,7 @@ async function _buildComponentDoc(opts) {
     bindingsCount: resolved.length,
     bindingWarnings: _docBindingWarnings,
     bindingDiagnostics: _docBindingDiagnostics,
+    accessibilityNotes: _accessibilityNotes,
     anatomyCount: _anatomyMd.length,
     ignoredStructureNodes: _ignoredStructureNodes,
     slotCount: _slotDocs.length,

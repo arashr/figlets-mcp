@@ -280,6 +280,21 @@ assert.ok(
 );
 
 assert.ok(
+  code.includes("agentAccessibilityNotes") &&
+    code.includes("function _defaultAccessibilityNotes(root, slotDocs, hasDesignSystemBindings)") &&
+    code.includes("_mkLabel(doc, 'ACCESSIBILITY')") &&
+    code.includes("_secI.fills = [];") &&
+    code.includes("_secI.paddingTop = 24; _secI.paddingBottom = 24; _secI.paddingLeft = 24; _secI.paddingRight = 24;") &&
+    code.includes("_secI.strokes = [_paint(_cBorder, _vBorder)]; _secI.strokeWeight = 1;") &&
+    code.includes("## Accessibility") &&
+    code.includes("accessibility: ") &&
+    code.includes("accessibilityNotes: _accessibilityNotes") &&
+    code.includes("Provide meaningful alt text") &&
+    code.includes("Preserve the documented design-system text, color, spacing, and radius tokens"),
+  "Component docs must include accessibility maintenance notes in the Figma sheet, markdown, and SPEC handoff"
+);
+
+assert.ok(
   code.includes("function _mkTable(parent, name)") &&
     code.includes("t.strokes = [_paint(_cBorder, _vBorder)]; t.strokeWeight = 1;") &&
     code.includes("_bindVar(t, 'strokeWeight', _docSpace.border);"),

@@ -23,8 +23,10 @@ toClear.forEach(m => { try { delete require.cache[require.resolve(m)]; } catch (
 
 const receiver = require("../../packages/figma-bridge-plugin/src/receiver.js");
 const { handleGenerateComponentDoc } = require("../../packages/figlets-mcp-server/src/tools/generate-component-doc.js");
+const ORIGINAL_CWD = process.cwd();
 
 function cleanup(server, done) {
+  try { process.chdir(ORIGINAL_CWD); } catch (_) {}
   server.close(() => {
     fs.rmSync(TEMP_DIR, { recursive: true, force: true });
     delete process.env.FIGLETS_LOCAL_DIR;
@@ -108,6 +110,7 @@ module.exports = new Promise((resolve, reject) => {
     const port = receiver.address().port;
     const baseUrl = "http://localhost:" + port;
     process.env.FIGLETS_RECEIVER_URL = baseUrl;
+    process.chdir(TEMP_DIR);
     const captured = {};
 
     // Start the plugin simulator first so its GET /poll registers as
@@ -142,7 +145,14 @@ module.exports = new Promise((resolve, reject) => {
         const parsed = JSON.parse(toolResult.content[0].text);
         assert.strictEqual(parsed.componentName, "Button");
         assert.strictEqual(parsed.path, "component-specs/Button.md");
+        assert.strictEqual(parsed.pathWritten, true);
+        const expectedWrittenPath = path.join(fs.realpathSync(TEMP_DIR), "component-specs", "Button.md");
+        assert.strictEqual(parsed.writtenPath, expectedWrittenPath);
         assert.ok(parsed.markdown.startsWith("# Button"));
+        assert.strictEqual(
+          fs.readFileSync(expectedWrittenPath, "utf8"),
+          FAKE_DOC_RESULT.markdown
+        );
         assert.strictEqual(parsed.bindingsCount, 12);
         assert.strictEqual(parsed.anatomyCount, 3);
         assert.deepStrictEqual(parsed.specSheet, { page: "Components", frame: "Button · Spec" });

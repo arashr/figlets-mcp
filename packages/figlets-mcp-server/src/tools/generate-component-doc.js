@@ -7,11 +7,12 @@
  * Sends the component name + optional usage rules and variant descriptions to
  * the bridge plugin via /request-doc-build. The plugin renders a spec sheet
  * inside Figma, writes a [SPEC] block to the component description, and
- * returns the markdown body for component-specs/[Name].md so the agent can
- * write it via the Write tool.
+ * returns the markdown body for component-specs/[Name].md after writing the
+ * local markdown handoff file.
  */
 
 const fs = require('fs');
+const path = require('path');
 const {
   bridgeActiveSessionText,
   formatPluginNotListening,
@@ -22,7 +23,7 @@ const {
 const generateComponentDocTool = {
   name: 'generate_component_doc',
   description:
-    'Generate a complete component spec sheet inside Figma (Documentation section) AND return the markdown body for component-specs/[Name].md. The spec sheet includes preview, variant showcase, properties table, sizing, anatomy diagram with badges, and Do/Don\'t usage panels. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
+    'Generate a complete component spec sheet inside Figma (Documentation section), write the local markdown handoff file at component-specs/[Name].md, and return the markdown body plus written path. The spec sheet includes preview, variant showcase, properties table, sizing, anatomy diagram with badges, Do/Don\'t usage panels, and accessibility maintenance notes. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -43,6 +44,11 @@ const generateComponentDocTool = {
         type: 'array',
         items: { type: 'string' },
         description: 'List of Don\'t rules (2-3 short sentences) grounded in misuse risks specific to this component.'
+      },
+      accessibility_notes: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'List of 2-4 accessibility maintenance notes for implementation handoff. These should preserve accessible behavior when rebuilding the component, such as alt text for images, captions/transcripts for video, keyboard/focus behavior, semantic roles/labels, touch target requirements, and contrast/token preservation. Use component-specific notes when inspection reveals images, slots, controls, text, or interactive states; otherwise provide generic accessibility maintenance notes. Do not frame these as visual improvement suggestions.'
       },
       variant_descriptions: {
         type: 'object',
@@ -92,6 +98,7 @@ function handleGenerateComponentDoc(args) {
     const description = typeof args.description === 'string' ? args.description.trim() : '';
     const usageDo = Array.isArray(args.usage_do) ? args.usage_do.map((s) => String(s).trim()).filter(Boolean) : [];
     const usageDont = Array.isArray(args.usage_dont) ? args.usage_dont.map((s) => String(s).trim()).filter(Boolean) : [];
+    const accessibilityNotes = Array.isArray(args.accessibility_notes) ? args.accessibility_notes.map((s) => String(s).trim()).filter(Boolean) : [];
 
     if (!description) {
       return {
@@ -118,6 +125,7 @@ function handleGenerateComponentDoc(args) {
       description: description,
       usageDo: usageDo,
       usageDont: usageDont,
+      accessibilityNotes: accessibilityNotes,
       variantDescriptions: (args.variant_descriptions && typeof args.variant_descriptions === 'object')
         ? args.variant_descriptions
         : {}
@@ -132,6 +140,18 @@ function handleGenerateComponentDoc(args) {
             isError: true
           };
         }
+        let writtenMarkdown = null;
+        try {
+          writtenMarkdown = _writeMarkdownHandoff(result.path, result.markdown);
+        } catch (writeErr) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Error: Spec sheet rendered in Figma, but Figlets could not write the markdown handoff file: ${writeErr.message}`
+            }],
+            isError: true
+          };
+        }
         return {
           content: [{
             type: 'text',
@@ -143,10 +163,13 @@ function handleGenerateComponentDoc(args) {
               bindingsCount: result.bindingsCount || 0,
               bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
               bindingDiagnostics: result.bindingDiagnostics || {},
+              accessibilityNotes: Array.isArray(result.accessibilityNotes) ? result.accessibilityNotes : [],
               anatomyCount: result.anatomyCount || 0,
+              writtenPath: writtenMarkdown.absolutePath,
+              pathWritten: true,
               selectionContext: result.selectionContext || selectionContext,
               specSheet: result.specSheet || {},
-              message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Write the 'markdown' field to '${result.path}' via the Write tool.`
+              message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Markdown handoff written to '${writtenMarkdown.relativePath}'.`
             }, null, 2)
           }]
         };
@@ -248,4 +271,33 @@ function _formatPluginConnectionError(parsed) {
   return `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${bridgeActiveSessionText(parsed)}${recentlySeenText}${capabilitiesText}${receiverErrorText}`;
 }
 
-module.exports = { generateComponentDocTool, handleGenerateComponentDoc };
+function _writeMarkdownHandoff(relativePath, markdown) {
+  const rel = typeof relativePath === 'string' && relativePath.trim()
+    ? relativePath.trim()
+    : 'component-specs/component.md';
+  if (path.isAbsolute(rel)) {
+    throw new Error('Refusing to write an absolute component spec path.');
+  }
+  const normalized = path.normalize(rel);
+  if (
+    normalized === '..' ||
+    normalized.indexOf('..' + path.sep) === 0 ||
+    normalized.split(path.sep).indexOf('..') !== -1
+  ) {
+    throw new Error('Refusing to write a component spec path outside the project directory.');
+  }
+  const cwd = process.cwd();
+  const absolutePath = path.resolve(cwd, normalized);
+  const relativeFromCwd = path.relative(cwd, absolutePath);
+  if (relativeFromCwd.indexOf('..') === 0 || path.isAbsolute(relativeFromCwd)) {
+    throw new Error('Refusing to write a component spec path outside the project directory.');
+  }
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, String(markdown || ''), 'utf8');
+  return {
+    relativePath: normalized,
+    absolutePath: absolutePath
+  };
+}
+
+module.exports = { generateComponentDocTool, handleGenerateComponentDoc, _writeMarkdownHandoff };

@@ -4,6 +4,60 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-08 — component markdown includes variant and effect facts]
+
+**Status:** Follow-up polish after implementation agents missed Hover-state visuals and responsiveness from generated component markdown.
+
+**Shipped behavior:** Component markdown now includes Figma-backed variant changes: root fill/stroke/effect/opacity deltas and token/style binding deltas relative to the default variant. Effect styles and effect variable bindings are collected in token bindings. Token rows include collection/mode context, and resolved values list per-mode values when modes differ. Prototype reactions are documented when Figma exposes them. Slot tables now split min/max, preferred-only enforcement, and stretch-child flags into explicit columns. Component property descriptions are copied from Figma definitions when present.
+
+**Follow-up detail:** Effect summaries include raw Figma shadow details when available: color with alpha, offset-x/y, blur radius, spread, and blend mode. Zero values such as ambient `offset-y 0px` are preserved so agents do not guess them. Token mode names are documented, but the markdown explicitly notes that Figma variable modes do not provide breakpoint pixel thresholds.
+
+**Boundary:** The markdown still does not invent semantic HTML, API shape, missing focus/active/disabled states, separate specs for preferred slot components, text truncation rules, demo scaffold, CSS implementation properties, or responsive breakpoint widths.
+
+**Verification:** Added `tests/bridge/component-doc-variant-facts.test.js`; focused component-doc bridge/server/integration tests passed.
+
+---
+
+### [2026-07-08 — component markdown includes Figma-backed layout mechanics]
+
+**Status:** Follow-up polish after an implementation agent reported it had to improvise layout mechanics from the generated component markdown.
+
+**Shipped behavior:** Component markdown now includes only Figma-backed layout facts that reduce implementation guessing: variant width/height behavior (`Fixed`, `Hug content`, `Fill parent`), min/max constraints when Figma exposes them, current measured size as a fallback, root and documented anatomy layout direction, auto-layout padding/gap, clipping, alignment, image fill scale mode, and radius when present. Sizing summaries intentionally prioritize behavior first, then min/max constraints, then current pixel measurements so `Hug content` is not contradicted by a measured frame size. Figma image `FILL` is documented as fills-frame crop/cover behavior without prescribing a CSS property. The handoff intentionally does not invent markup, CSS class naming, API surface, sample content, or demo scaffolding.
+
+**Verification:** Added `tests/bridge/component-doc-layout-facts.test.js`; focused component-doc layout/typography tests passed.
+
+---
+
+### [2026-07-08 — component markdown resolves full typography values]
+
+**Status:** Follow-up polish for generated component markdown handoffs after low-agent testing showed token bindings were useful but text style resolved values degraded to only font size/line height when the agent lacked design-system context.
+
+**Shipped behavior:** Component docs now format text-style bindings with font family, font style/weight, size, line height, and letter spacing. The doc generator also attempts to resolve non-local text style IDs through Figma before falling back to the raw style id. The token-binding collector includes typography variable bindings beyond `fontSize` (`fontFamily`, `fontWeight`, `lineHeight`, and `letterSpacing`), and resolved variable values handle string typography tokens plus numeric font weights without adding incorrect `px` units.
+
+**Verification:** Added `tests/bridge/component-doc-typography-resolved-values.test.js`; focused bridge/server/integration component-doc tests passed.
+
+---
+
+### [2026-07-08 — component doc tool writes markdown handoff itself]
+
+**Status:** Bug fix after low-agent documentation flow reported a generated `component-specs/Card.md` path, but no local markdown file was actually written because the old contract required the agent to perform a separate Write step.
+
+**Shipped behavior:** `generate_component_doc` now writes the returned markdown body to the returned relative path under the current project directory, creates `component-specs/` when needed, rejects absolute or parent-traversal paths, and returns `pathWritten: true` plus `writtenPath`. Agent guidance now tells hosts to report the written path instead of asking the user where the file is or promising a separate Write step.
+
+**Verification:** Focused component-doc server/integration/schema/policy tests passed, and full `npm test` passed **109/109**.
+
+---
+
+### [2026-07-08 — component docs include accessibility maintenance notes]
+
+**Status:** Product-polish follow-up for component documentation handoff quality.
+
+**Shipped behavior:** `generate_component_doc` now accepts optional `accessibility_notes` from the agent. The bridge merges agent-authored notes with component-aware fallbacks inferred from the documented component: image/artwork/media signals, slots, text, interactive/state names, and whether token bindings exist. The generated Figma spec sheet renders an Accessibility section under Usage, the returned markdown includes `## Accessibility`, and the `[SPEC]` block includes an `accessibility:` line for MCP/agent handoff. These notes are framed as accessibility maintenance requirements for implementation, not design-improvement suggestions.
+
+**Verification:** Focused component-doc/schema/policy tests passed, and full `npm test` passed **109/109**.
+
+---
+
 ### [2026-07-08 — component docs filter layout-only wrapper anatomy]
 
 **Status:** Product-polish fix after documentation smoke showed generated component docs listing wrapper frames that made anatomy output noisy.

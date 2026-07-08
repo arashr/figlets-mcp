@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-08 — shared bridge reconnect grace for live workflows]
+
+**Status:** Developer fix after low-agent documentation testing surfaced repeated "bridge/plugin not connected" errors that resolved when the designer simply asked the agent to retry.
+
+**Finding:** The bridge already had a poll-wait/retry model, but some live requests could still leak a transient reconnect gap. A cold or restarted receiver with the Figma Bridge plugin open but not yet repolled could return "not connected" immediately, and overlapping requests could surface the "another command is already waiting" response instead of backing off.
+
+**Shipped behavior:** The receiver now uses the shared wait-for-plugin-poll path for all bridge command routes and `/request-sync`, including cold reconnects where `pluginRecentlySeen` is not yet available. The MCP-side bridge request helper also treats the receiver's "another command is already waiting for the plugin to listen again" response as retryable. A true disconnected plugin still becomes a user-facing error after the wait/retry window is exhausted.
+
+**Verification:** Focused receiver/helper/doc tests passed, and full `npm test` passed **108/108** with `git diff --check`.
+
+---
+
 ### [2026-07-04 — README bridge source ZIP clarification]
 
 **Status:** Follow-up docs fix after v1.0.1 release testing.

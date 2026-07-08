@@ -73,6 +73,37 @@ module.exports = (async () => {
     assert.strictEqual(retryResponse.statusCode, 200);
     assert.strictEqual(retryResponse.data.result.message, "retried");
 
+    let waitAttempts = 0;
+    const pendingWaitResponse = await requestBridgePost("/request-update-tokens", {
+      categories: ["spacing"],
+      dryRun: false,
+    }, {
+      bridgeRetryAttempts: 3,
+      bridgeRetryDelayMs: 0,
+      transport: () => {
+        waitAttempts += 1;
+        if (waitAttempts < 2) {
+          return {
+            statusCode: 409,
+            data: {
+              error: "Figma plugin was connected recently, and another command is already waiting for the plugin to listen again.",
+              pluginRecentlySeen: false,
+              activeSessionId: null,
+            },
+            raw: "",
+          };
+        }
+        return {
+          statusCode: 200,
+          data: { success: true, result: { message: "queued after wait" } },
+          raw: "",
+        };
+      }
+    });
+    assert.strictEqual(waitAttempts, 2);
+    assert.strictEqual(pendingWaitResponse.statusCode, 200);
+    assert.strictEqual(pendingWaitResponse.data.result.message, "queued after wait");
+
     let nonRetryAttempts = 0;
     const nonRetryResponse = await requestBridgePost("/request-update-tokens", {}, {
       bridgeRetryAttempts: 3,

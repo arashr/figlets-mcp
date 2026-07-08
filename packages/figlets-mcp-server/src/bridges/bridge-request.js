@@ -136,9 +136,12 @@ function _requestBridgePostOnce(routePath, body, options) {
 }
 
 function _isRetryablePluginListeningGap(response) {
-  if (!response || response.statusCode !== 503) return false;
+  if (!response) return false;
   const parsed = response.data || {};
-  return Boolean(parsed.pluginRecentlySeen);
+  if (response.statusCode === 503) return Boolean(parsed.pluginRecentlySeen);
+  if (response.statusCode !== 409) return false;
+  const message = String(parsed.error || "").toLowerCase();
+  return message.includes("another command is already waiting for the plugin to listen again");
 }
 
 function bridgeActiveSessionText(parsed) {

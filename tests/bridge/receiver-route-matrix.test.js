@@ -99,6 +99,39 @@ module.exports = (async () => {
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const port = server.address().port;
 
+    const coldSyncRequestPromise = request(port, "POST", "/request-sync", "{}");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const coldSyncPoll = await pollForCommand(port, []);
+    assert.deepStrictEqual(coldSyncPoll.json, { command: "extract-all" });
+    const coldSyncAck = await request(port, "POST", "/sync", JSON.stringify({ ok: true, fileKey: "cold_sync_file" }));
+    assert.strictEqual(coldSyncAck.statusCode, 200);
+    const coldSyncResult = await coldSyncRequestPromise;
+    assert.strictEqual(coldSyncResult.statusCode, 200);
+    assert.strictEqual(coldSyncResult.json.success, true);
+    assert.strictEqual(coldSyncResult.json.fileKey, "cold_sync_file");
+
+    const coldDocPayload = { marker: "cold-doc-build" };
+    const coldDocRequestPromise = request(port, "POST", "/request-doc-build", JSON.stringify(coldDocPayload));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const coldDocPoll = await pollForCommand(port, []);
+    assert.deepStrictEqual(coldDocPoll.json, { command: "build-doc", data: coldDocPayload });
+    const coldDocAck = await request(port, "POST", "/sync-doc-build", JSON.stringify({ ok: true, route: "build-doc" }));
+    assert.strictEqual(coldDocAck.statusCode, 200);
+    const coldDocResult = await coldDocRequestPromise;
+    assert.strictEqual(coldDocResult.statusCode, 200);
+    assert.strictEqual(coldDocResult.json.success, true);
+
+    const coldTokenPayload = { marker: "cold-update-tokens" };
+    const coldTokenRequestPromise = request(port, "POST", "/request-update-tokens", JSON.stringify(coldTokenPayload));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const coldTokenPoll = await pollForCommand(port, ["update-tokens"]);
+    assert.deepStrictEqual(coldTokenPoll.json, { command: "update-tokens", data: coldTokenPayload });
+    const coldTokenAck = await request(port, "POST", "/sync-update-tokens", JSON.stringify({ ok: true, route: "update-tokens" }));
+    assert.strictEqual(coldTokenAck.statusCode, 200);
+    const coldTokenResult = await coldTokenRequestPromise;
+    assert.strictEqual(coldTokenResult.statusCode, 200);
+    assert.strictEqual(coldTokenResult.json.success, true);
+
     const syncPollPromise = pollForCommand(port, []);
     const syncRequestPromise = request(port, "POST", "/request-sync", "{}");
     const syncPoll = await syncPollPromise;

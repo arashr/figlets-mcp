@@ -165,17 +165,13 @@ function _dispatchOrWaitForPoll(res, dispatch) {
     return true;
   }
 
-  if (!_pluginRecentlySeen()) {
-    return false;
-  }
-
   if (pendingPollWait) {
     res.writeHead(409, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      error: 'Figma plugin was connected recently, and another command is already waiting for the plugin to listen again.',
+      error: 'Another command is already waiting for the plugin to listen again.',
       activeSessionId: pendingPollSessionId || lastPluginSessionId || null,
       lastPluginSeenAt: lastPluginSeenAt || null,
-      pluginRecentlySeen: true,
+      pluginRecentlySeen: Boolean(_pluginRecentlySeen()),
       pluginCapabilities: activePluginCapabilities
     }));
     return true;
@@ -256,17 +252,7 @@ function _dispatchBridgeCommand(route, res, payload) {
     _clearPendingPoll();
   };
 
-  if (route.waitForPoll) {
-    if (_dispatchOrWaitForPoll(res, dispatch)) return;
-    _sendNotConnected(res);
-    return;
-  }
-
-  if (pendingPollResponse) {
-    dispatch();
-  } else {
-    _sendNotConnected(res);
-  }
+  _dispatchOrWaitForPoll(res, dispatch);
 }
 
 function _handleBridgeCommandRequest(route, req, res) {
@@ -561,7 +547,7 @@ const server = http.createServer((req, res) => {
 
   // 2. MCP Agent calls this to trigger a global sync
   if (req.method === 'POST' && pathname === '/request-sync') {
-    if (pendingPollResponse) {
+    if (_dispatchOrWaitForPoll(res, () => {
       pendingSyncPreviousFileKey = lastFileKey || '';
       // Tell Figma to wake up and extract everything
       pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
@@ -580,10 +566,8 @@ const server = http.createServer((req, res) => {
         }
       }, 60000);
       if (syncTimer.unref) syncTimer.unref();
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(_notConnectedPayload()));
-    }
+    })) return;
+    _sendNotConnected(res);
     return;
   }
 

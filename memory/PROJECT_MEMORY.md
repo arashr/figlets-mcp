@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-08 — component docs filter layout-only wrapper anatomy]
+
+**Status:** Product-polish fix after documentation smoke showed generated component docs listing wrapper frames that made anatomy output noisy.
+
+**Shipped behavior:** Component documentation now classifies anatomy nodes with a mixed heuristic: private/hidden nodes are skipped, native or named slots stay meaningful, visibly styled surfaces stay documented, meaningful part names stay documented, and layout-only wrapper/container/content/root/frame/group shells are promoted through instead of rendered as anatomy rows. Single-child unstyled layout shells are also skipped so their child becomes the documented part. The same filtered anatomy list drives both Figma badge/legend output and returned markdown, and the bridge result includes `ignoredStructureNodes` for debugging without rendering skipped wrappers prominently.
+
+**Verification:** Added `tests/bridge/component-doc-anatomy-filter.test.js`; focused component-doc tests and full `npm test` passed **109/109**.
+
+---
+
 ### [2026-07-08 — shared bridge reconnect grace for live workflows]
 
 **Status:** Developer fix after low-agent documentation testing surfaced repeated "bridge/plugin not connected" errors that resolved when the designer simply asked the agent to retry.

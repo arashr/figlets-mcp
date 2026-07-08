@@ -9673,6 +9673,137 @@ async function _applyFigmaOperations(payload) {
 //
 // ES6-era only: no `??`, `?.`, `**`. Figma plugin sandbox does not support them.
 
+function _docNormalizePartName(name) {
+  return String(name || '').trim().toLowerCase().replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ');
+}
+
+function _docIsSlotLike(node) {
+  if (!node) return false;
+  if (node.type === 'SLOT') return true;
+  return _docNormalizePartName(node.name).indexOf('slot') >= 0;
+}
+
+function _docPaintsVisible(paints) {
+  if (!Array.isArray(paints)) return false;
+  for (let i = 0; i < paints.length; i++) {
+    const p = paints[i];
+    if (!p || p.visible === false) continue;
+    if (p.opacity !== undefined && p.opacity <= 0) continue;
+    return true;
+  }
+  return false;
+}
+
+function _docNodeHasVisiblePaint(node) {
+  return _docPaintsVisible(node && node.fills) || _docPaintsVisible(node && node.strokes);
+}
+
+function _docNodeHasEffect(node) {
+  const effects = node && Array.isArray(node.effects) ? node.effects : [];
+  for (let i = 0; i < effects.length; i++) {
+    const e = effects[i];
+    if (e && e.visible !== false) return true;
+  }
+  return false;
+}
+
+function _docNodeHasTextContent(node) {
+  return Boolean(node && node.type === 'TEXT' && String(node.characters || '').trim());
+}
+
+function _docPublicChildCount(node) {
+  if (!node || !('children' in node) || !node.children) return 0;
+  let count = 0;
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    if (!child || child.visible === false) continue;
+    const name = String(child.name || '').trim();
+    const first = name.charAt(0);
+    if (first === '_' || first === '.') continue;
+    count++;
+  }
+  return count;
+}
+
+function _docMeaningfulPartName(node) {
+  if (_docIsSlotLike(node)) return true;
+  const name = _docNormalizePartName(node && node.name);
+  if (!name) return false;
+  const roles = [
+    'label', 'text', 'title', 'subtitle', 'caption', 'icon', 'glyph',
+    'surface', 'background', 'media', 'image', 'avatar', 'badge', 'chip',
+    'button', 'control', 'input', 'field', 'value', 'action', 'indicator'
+  ];
+  for (let i = 0; i < roles.length; i++) {
+    if (name === roles[i] || name.indexOf(roles[i] + ' ') === 0 || name.indexOf(' ' + roles[i]) >= 0) return true;
+  }
+  return false;
+}
+
+function _docWrapperishPartName(node) {
+  if (_docIsSlotLike(node)) return false;
+  const name = _docNormalizePartName(node && node.name);
+  if (!name) return false;
+  const wrappers = [
+    'wrapper', 'container', 'content', 'contents', 'root', 'frame', 'group',
+    'auto layout', 'autolayout', 'inner', 'outer', 'stack'
+  ];
+  for (let i = 0; i < wrappers.length; i++) {
+    if (name === wrappers[i]) return true;
+    if (name.indexOf(wrappers[i] + ' ') === 0) return true;
+    if (name.indexOf(' ' + wrappers[i]) >= 0) return true;
+  }
+  return /^frame\s*\d*$/.test(name) || /^group\s*\d*$/.test(name);
+}
+
+function _classifyComponentDocAnatomyNode(node, depth) {
+  const result = { document: false, traverse: false, reason: '' };
+  if (!node) return result;
+  const name = String(node.name || '').trim();
+  const first = name.charAt(0);
+  if (first === '_' || first === '.') {
+    result.reason = 'private';
+    return result;
+  }
+  if (node.visible === false) {
+    result.reason = 'hidden';
+    return result;
+  }
+  const hasChildren = Boolean('children' in node && node.children && node.children.length);
+  result.traverse = hasChildren && node.type !== 'INSTANCE' && node.type !== 'SLOT';
+  if (depth <= 0) return result;
+  if (node.type === 'INSTANCE') {
+    result.traverse = false;
+    result.reason = 'instance';
+    return result;
+  }
+  if (_docIsSlotLike(node)) {
+    result.document = true;
+    result.reason = 'slot';
+    return result;
+  }
+  if (_docNodeHasTextContent(node) || _docNodeHasVisiblePaint(node) || _docNodeHasEffect(node)) {
+    result.document = true;
+    result.reason = 'visible';
+    return result;
+  }
+  if (_docMeaningfulPartName(node)) {
+    result.document = true;
+    result.reason = 'named part';
+    return result;
+  }
+  const publicChildren = _docPublicChildCount(node);
+  const isLayoutNode = node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'SECTION';
+  if (isLayoutNode && (_docWrapperishPartName(node) || publicChildren === 1)) {
+    result.document = false;
+    result.reason = publicChildren === 1 ? 'single-child layout wrapper' : 'layout wrapper name';
+    return result;
+  }
+  result.document = true;
+  result.reason = 'structure';
+  return result;
+}
+
 async function _buildComponentDoc(opts) {
   const compId = opts && opts.componentId ? String(opts.componentId) : '';
   let compName = opts && opts.componentName ? String(opts.componentName) : '';
@@ -9843,18 +9974,39 @@ async function _buildComponentDoc(opts) {
   // ── Anatomy bounds ─────────────────────────────────────────────────────────
   const _compBounds = _defaultV.absoluteBoundingBox;
   const elements = [];
+  const _docAnatomyNodes = [];
+  const _ignoredStructureNodes = [];
+  const _ignoredStructureNodeKeys = {};
+  function _rememberIgnoredStructureNode(node, depth, reason) {
+    if (!node || !reason || reason === 'private' || reason === 'hidden' || reason === 'instance') return;
+    const key = (node.id || node.name || '') + ':' + depth + ':' + reason;
+    if (_ignoredStructureNodeKeys[key]) return;
+    _ignoredStructureNodeKeys[key] = true;
+    if (_ignoredStructureNodes.length < 30) {
+      _ignoredStructureNodes.push({
+        name: node.name || '',
+        type: node.type || '',
+        depth: depth,
+        reason: reason
+      });
+    }
+  }
   function _collectEl(node, depth) {
     if (!node.absoluteBoundingBox) return;
-    if (depth > 0 && _isDocPrivateNodeName(node.name)) return;
-    if (depth > 0 && node.type !== 'INSTANCE') {
+    const decision = _classifyComponentDocAnatomyNode(node, depth);
+    if (depth > 0 && !decision.document) _rememberIgnoredStructureNode(node, depth, decision.reason);
+    if (depth > 0 && decision.document) {
       const nb = node.absoluteBoundingBox;
-      elements.push({
+      const item = {
+        node: node,
         name: node.name, type: node.type, depth: depth,
         x: Math.round(nb.x - _compBounds.x), y: Math.round(nb.y - _compBounds.y),
         w: Math.round(nb.width), h: Math.round(nb.height)
-      });
+      };
+      _docAnatomyNodes.push(item);
+      elements.push(item);
     }
-    if ('children' in node && node.type !== 'INSTANCE' && node.type !== 'SLOT') {
+    if (decision.traverse && 'children' in node && node.children) {
       for (let i = 0; i < node.children.length; i++) _collectEl(node.children[i], depth + 1);
     }
   }
@@ -10177,13 +10329,7 @@ async function _buildComponentDoc(opts) {
   });
 
   function _hasMeaningfulAnatomy(root) {
-    if (!('children' in root) || !root.children || root.children.length === 0) return false;
-    for (let i = 0; i < root.children.length; i++) {
-      const c = root.children[i];
-      if (_isDocPrivateNodeName(c.name)) continue;
-      if (c.type !== 'INSTANCE') return true;
-    }
-    return false;
+    return _docAnatomyNodes.length > 0;
   }
 
   function _applyTextRole(t, role, fallbackSize, fallbackStyle, fallbackColor, colorVar) {
@@ -10631,27 +10777,32 @@ async function _buildComponentDoc(opts) {
 
   const _anatomyMd = [];
   let _anatIdx = 1;
-  function _walkAnatomy(node, depth) {
-    if (_isDocPrivateNodeName(node.name)) return;
-    if (node.type === 'INSTANCE') return;
-    if (depth > 0 && node.name && node.name.charAt(0) !== '_') {
-      const bv = node.boundVariables || {};
-      let token = '—';
-      if (bv.fills && bv.fills[0] && bv.fills[0].id) {
-        const v = varById[bv.fills[0].id];
-        if (v) token = v.name;
-      } else if (node.type === 'TEXT' && node.textStyleId) {
-        const s = textStyleById[node.textStyleId];
-        if (s) token = s.name;
-      }
-      _anatomyMd.push({ idx: _anatIdx++, name: node.name, type: node.type, token: token, depth: depth });
+  function _primaryAnatomyToken(node) {
+    if (!node) return '—';
+    const bv = node.boundVariables || {};
+    if (bv.fills && bv.fills[0] && bv.fills[0].id) {
+      const v = varById[bv.fills[0].id];
+      if (v) return v.name;
     }
-    if (node.type === 'SLOT') return;
-    if ('children' in node) {
-      for (let i = 0; i < node.children.length; i++) _walkAnatomy(node.children[i], depth + 1);
+    if (node.type === 'TEXT' && node.textStyleId) {
+      const s = textStyleById[node.textStyleId];
+      if (s) return s.name;
+    }
+    return '—';
+  }
+  for (let i = 0; i < _docAnatomyNodes.length; i++) {
+    const item = _docAnatomyNodes[i];
+    const node = item.node;
+    if (node && item.depth > 0) {
+      _anatomyMd.push({
+        idx: _anatIdx++,
+        name: node.name,
+        type: node.type,
+        token: _primaryAnatomyToken(node),
+        depth: item.depth
+      });
     }
   }
-  _walkAnatomy(_defaultV, 0);
 
   function _mdRow(cells) { return '| ' + cells.join(' | ') + ' |'; }
   function _mdTable(header, rows) {
@@ -10803,6 +10954,7 @@ async function _buildComponentDoc(opts) {
     bindingWarnings: _docBindingWarnings,
     bindingDiagnostics: _docBindingDiagnostics,
     anatomyCount: _anatomyMd.length,
+    ignoredStructureNodes: _ignoredStructureNodes,
     slotCount: _slotDocs.length,
     slots: _slotDocs,
     selectionContext: {

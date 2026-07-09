@@ -12,7 +12,7 @@ Figlets is built around a simple split: **your AI assistant is the interface; Fi
 
 When you sync, inspect, plan repairs, or apply approved fixes, the repeatable work happens in **local Figlets tools**. That includes token audits, gap planning, contrast checks, showcase builds, and structured Figma updates through Figlets Bridge. The agent understands what you want, runs the right workflow, explains results in plain language, and asks before anything changes.
 
-**Local-first by design.** Figlets does not run a cloud backend that stores your design system. The Figlets MCP server and bridge receiver run on your machine. Synced snapshots and working files are saved **locally on your computer** (by default under a `.local/` folder next to where Figlets runs). Approved Figma changes go through the bridge plugin in Figma Desktop, not through a Figlets-hosted service.
+**Local-first by design.** Figlets does not run a cloud backend that stores your design system. The Figlets MCP server and bridge receiver run on your machine. Synced snapshots and working files are saved **locally on your computer**. Approved Figma changes go through the bridge plugin in Figma Desktop, not through a Figlets-hosted service.
 
 That is the core idea of this project: keep deterministic Figma logic local, reserve the model for ambiguity and orchestration, and avoid shipping your file through extra cloud pipelines when Figlets can compute the answer on your machine.
 

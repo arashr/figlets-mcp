@@ -1,6 +1,6 @@
 {
   "name": "@figlets/adapter",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Agent orchestration prompts for figlets-mcp — works with Claude Code, Codex CLI, and any MCP-compatible agent",
   "private": true
 }

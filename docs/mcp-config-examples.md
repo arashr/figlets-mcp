@@ -41,9 +41,9 @@ To let Figlets patch supported MCP configs after reviewing the dry run:
 figlets-mcp setup --yes
 ```
 
-### Claude Code (recommended path)
+### Claude Code plugin path
 
-For Claude Code, the recommended install is the Figlets plugin — it registers the MCP server, adds a `/figlets:start` slash command, and ships an auto-trigger `figlets-designer` skill so designer phrases route into Designer Mode automatically:
+For Claude Code, the Figlets plugin registers the MCP server, adds a `/figlets:start` slash command, and ships an auto-trigger `figlets-designer` skill so designer phrases route into Designer Mode automatically:
 
 ```bash
 figlets-mcp setup --hosts=claude-code-plugin --yes
@@ -146,9 +146,9 @@ File: `.vscode/mcp.json` in your project root:
 
 ## Codex CLI (OpenAI)
 
-### Codex plugin (recommended local-marketplace path)
+### Codex plugin path
 
-For Codex, the recommended Figlets path is the Codex plugin package. It registers the Figlets MCP server through the plugin's `.mcp.json` and ships the `figlets-designer` skill so designer phrases route into the Figlets-curated capability menu.
+For Codex, the Codex plugin package registers the Figlets MCP server through the plugin's `.mcp.json` and ships the `figlets-designer` skill so designer phrases route into the Figlets-curated capability menu.
 
 This path currently uses a local Codex plugin marketplace, so run it from a `figlets-mcp` repo checkout or set `FIGLETS_CODEX_MARKETPLACE_SOURCE` to that checkout:
 

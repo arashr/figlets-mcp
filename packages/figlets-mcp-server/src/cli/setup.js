@@ -144,7 +144,7 @@ function getKnownTargets(options) {
       pluginName: FIGLETS_PLUGIN_NAME,
       pluginSpec: FIGLETS_PLUGIN_SPEC,
       scope: "user",
-      description: "Installs the Figlets Claude Code plugin (MCP server + /figlets:start command + designer skill) via claude plugin marketplace add and claude plugin install. This is the recommended path for Claude Code.",
+      description: "Installs the Figlets Claude Code plugin (MCP server + /figlets:start command + designer skill) via claude plugin marketplace add and claude plugin install.",
     },
     {
       id: "claude-desktop",

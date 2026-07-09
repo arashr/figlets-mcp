@@ -4,7 +4,7 @@
 
 You stay in Figma and conversation. Figlets inspects first, explains what it found, and **asks before changing anything** in your file.
 
-Figlets currently works best in **Claude Code** through the Figlets plugin. It also supports OpenAI Codex, Cursor, Claude Desktop, Windsurf, VS Code/GitHub Copilot, Gemini CLI, and Google Antigravity through MCP setup paths.
+Figlets works with MCP-capable AI apps, including Claude Code, OpenAI Codex, Cursor, Claude Desktop, Windsurf, VS Code/GitHub Copilot, Gemini CLI, and Google Antigravity.
 
 ## About Figlets
 
@@ -41,7 +41,7 @@ Ask your assistant to help with any of these:
 
 - **Figma Desktop.** The browser version of Figma cannot run the local bridge plugin.
 - **Node.js 18 or newer.** The repo development suite uses Node 22+, but the released Figlets MCP server supports Node 18+.
-- **An MCP-capable AI app.** Claude Code is the most polished path today.
+- **An MCP-capable AI app.** Figlets exposes the same workflows through MCP across supported hosts.
 
 ### 1. Install the Figlets command
 
@@ -65,9 +65,9 @@ You can also run setup from a local checkout with `npm link --workspace=@figlets
 
 Pick the section for the assistant you use. Each path is a one-time setup, then **restart that app**.
 
-#### Claude Code Recommended
+#### Claude Code
 
-The Claude Code plugin is the recommended setup. It installs the Figlets MCP server entry, a `/figlets:start` command, and a designer skill so normal phrases route into Figlets automatically:
+The Claude Code plugin installs the Figlets MCP server entry, a `/figlets:start` command, and a designer skill so normal phrases route into Figlets automatically:
 
 ```bash
 figlets-mcp setup --hosts=claude-code-plugin --yes

@@ -369,7 +369,8 @@ server.tool(
   exportDesignMdTool.description,
   {
     config_path: z.string().optional().describe("Optional absolute path to design-system.config.js. Defaults to the active file config. If the file is missing, export_design_md can create a local snapshot-derived config from Figma variables."),
-    output_path: z.string().optional().describe("Optional absolute path for the DESIGN.md output. Defaults to specs/DESIGN.md in the opened project directory, with a config-folder fallback."),
+    output_path: z.string().optional().describe("Optional absolute path for the DESIGN.md output. Overrides project_path and the working-directory default."),
+    project_path: z.string().optional().describe("Optional absolute path to the active code workspace/project root. Used for the default specs/DESIGN.md output when output_path is omitted."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. When provided, sync is skipped."),
     skip_sync: z.boolean().optional().describe("When true, skip the sync_figma_data step and use whatever snapshot is already on disk."),
     dry_run: z.boolean().optional().describe("When true, do not write design-system.config.js or DESIGN.md; report what would change, including any snapshot bootstrap that would be possible.")
@@ -902,7 +903,8 @@ server.tool(
     usage_do: z.array(z.string()).optional().describe("Do rules for the usage panel. Agent should ground these in the component's actual purpose, not pass generic placeholders."),
     usage_dont: z.array(z.string()).optional().describe("Don't rules for the usage panel. Agent should ground these in the component's actual purpose."),
     accessibility_notes: z.array(z.string()).optional().describe("Accessibility maintenance notes for implementation handoff. Preserve accessible behavior such as alt text, captions/transcripts, semantic roles/labels, keyboard/focus behavior, contrast, text scaling, and design-token usage."),
-    variant_descriptions: z.record(z.string(), z.string()).optional().describe("Map of exact variant name to short purpose (<=10 words).")
+    variant_descriptions: z.record(z.string(), z.string()).optional().describe("Map of exact variant name to short purpose (<=10 words)."),
+    project_path: z.string().optional().describe("Optional absolute path to the active code workspace/project root. Used as the base for the component-specs markdown handoff file.")
   },
   async (args) => {
     try {

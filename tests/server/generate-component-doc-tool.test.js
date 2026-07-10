@@ -215,6 +215,57 @@ module.exports = (async () => {
     }
   }
 
+  // --- project_path chooses the markdown handoff root instead of the MCP server cwd ---
+  {
+    const originalCwd = process.cwd();
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-doc-cwd-"));
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-doc-project-"));
+    const selection = writeSelectionFile("Input");
+    const server = await startMockReceiver((req, res) => {
+      if (req.url === "/request-selection") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, path: selection.filePath }));
+        return;
+      }
+      req.on("data", () => {});
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          success: true,
+          result: {
+            componentName: "Input",
+            markdown: "# Input\n\n> stub",
+            path: "component-specs/Input.md"
+          }
+        }));
+      });
+    });
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${server.address().port}`;
+    process.chdir(cwdDir);
+    try {
+      const result = await handleGenerateComponentDoc({
+        component_name: "Input",
+        description: "A text input used to collect short form values.",
+        usage_do: ["Use for short text values", "Pair labels with every input"],
+        usage_dont: ["Don't use for long-form content", "Don't omit validation states"],
+        project_path: projectDir
+      });
+      assert.ok(!result.isError, `expected success, got: ${JSON.stringify(result)}`);
+      const parsed = JSON.parse(result.content[0].text);
+      const expectedWrittenPath = path.join(path.resolve(projectDir), "component-specs", "Input.md");
+      assert.strictEqual(parsed.writtenPath, expectedWrittenPath);
+      assert.strictEqual(fs.readFileSync(expectedWrittenPath, "utf8"), "# Input\n\n> stub");
+      assert.ok(!fs.existsSync(path.join(path.resolve(cwdDir), "component-specs", "Input.md")), "component spec should not be written under cwd when project_path is provided");
+    } finally {
+      process.chdir(originalCwd);
+      server.close();
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+      fs.rmSync(projectDir, { recursive: true, force: true });
+      fs.rmSync(selection.dir, { recursive: true, force: true });
+      delete process.env.FIGLETS_RECEIVER_URL;
+    }
+  }
+
   // --- Plugin error path: result.error → isError true with message ---
   {
     const selection = writeSelectionFile("Foo");

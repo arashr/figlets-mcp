@@ -23,7 +23,7 @@ const {
 const generateComponentDocTool = {
   name: 'generate_component_doc',
   description:
-    'Generate a complete component spec sheet inside Figma (Documentation section), write the local markdown handoff file at component-specs/[Name].md, and return the markdown body plus written path. The spec sheet includes preview, variant showcase, properties table, sizing, anatomy diagram with badges, Do/Don\'t usage panels, and accessibility maintenance notes. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
+    'Generate a complete component spec sheet inside Figma (Documentation section), write the local markdown handoff file at component-specs/[Name].md under project_path when provided, otherwise under the MCP server working directory, and return the markdown body plus written path. The spec sheet includes preview, variant showcase, properties table, sizing, anatomy diagram with badges, Do/Don\'t usage panels, and accessibility maintenance notes. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -54,6 +54,10 @@ const generateComponentDocTool = {
         type: 'object',
         additionalProperties: { type: 'string' },
         description: 'Optional map of exact variant name (e.g. "Type=Primary, Size=Default") to <=10-word purpose. Used in the variant showcase and the markdown handover file.'
+      },
+      project_path: {
+        type: 'string',
+        description: 'Optional absolute path to the active code workspace/project root. Used as the base for the component-specs markdown handoff file.'
       }
     },
     required: ['description', 'usage_do', 'usage_dont'],
@@ -142,7 +146,9 @@ function handleGenerateComponentDoc(args) {
         }
         let writtenMarkdown = null;
         try {
-          writtenMarkdown = _writeMarkdownHandoff(result.path, result.markdown);
+          writtenMarkdown = _writeMarkdownHandoff(result.path, result.markdown, {
+            projectPath: args.project_path
+          });
         } catch (writeErr) {
           return {
             content: [{
@@ -271,7 +277,11 @@ function _formatPluginConnectionError(parsed) {
   return `Error: Figma plugin is not connected. Open the Figlets Bridge plugin in Figma Desktop, then retry.${bridgeActiveSessionText(parsed)}${recentlySeenText}${capabilitiesText}${receiverErrorText}`;
 }
 
-function _writeMarkdownHandoff(relativePath, markdown) {
+function _resolveMarkdownRoot(projectPath) {
+  return projectPath ? path.resolve(projectPath) : process.cwd();
+}
+
+function _writeMarkdownHandoff(relativePath, markdown, options) {
   const rel = typeof relativePath === 'string' && relativePath.trim()
     ? relativePath.trim()
     : 'component-specs/component.md';
@@ -286,10 +296,10 @@ function _writeMarkdownHandoff(relativePath, markdown) {
   ) {
     throw new Error('Refusing to write a component spec path outside the project directory.');
   }
-  const cwd = process.cwd();
-  const absolutePath = path.resolve(cwd, normalized);
-  const relativeFromCwd = path.relative(cwd, absolutePath);
-  if (relativeFromCwd.indexOf('..') === 0 || path.isAbsolute(relativeFromCwd)) {
+  const root = _resolveMarkdownRoot(options && options.projectPath);
+  const absolutePath = path.resolve(root, normalized);
+  const relativeFromRoot = path.relative(root, absolutePath);
+  if (relativeFromRoot.indexOf('..') === 0 || path.isAbsolute(relativeFromRoot)) {
     throw new Error('Refusing to write a component spec path outside the project directory.');
   }
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });

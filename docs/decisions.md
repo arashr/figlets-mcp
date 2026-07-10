@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-07-10] Markdown handoff paths accept an explicit project root
+
+**Decision:** Markdown-writing tools keep their existing MCP working-directory fallback, but they also accept `project_path` as the active code workspace root. `export_design_md` uses it for the default `specs/DESIGN.md` path when `output_path` is omitted. `generate_component_doc` uses it as the base for `component-specs/[Name].md`.
+
+**Why:** Some hosts, including Cursor-style global MCP launches, can start the Figlets server from a home directory instead of the code workspace the user has open. A cwd-only default can therefore write `/Users/arash/specs/DESIGN.md` or `/Users/arash/component-specs/...` while the intended project is elsewhere. The designer should not need to understand MCP launch directories; agents should pass the workspace root when the host exposes it.
+
+**Consequence:** Existing flows that rely on cwd continue to work. Hosts that know the active project can avoid misplaced markdown without requiring a custom absolute `output_path` for every export. Tool descriptions and adapter guidance now avoid promising that Figlets can infer the "opened project" from cwd alone.
+
+---
+
 ## [2026-07-10] Figma sync refreshes compatible local DS context
 
 **Decision:** `sync_figma_data` is the product-level freshness boundary. It must refresh Figlets' local Figma snapshot and then silently refresh existing local config entries when `refresh_ds_config_from_figma({ compatible_only: true })` can apply without skipped configured rows. The sync result reports `activeFile.configRefresh` so downstream workflows can warn in designer language when incompatible/skipped rows need a decision.

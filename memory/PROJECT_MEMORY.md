@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-10 — markdown handoffs can target explicit project root]
+
+**Status:** Cursor/global-MCP path fix after `export_design_md` wrote `/Users/arash/specs/DESIGN.md` instead of the user's active `Components Test` workspace because Figlets only used the MCP server `process.cwd()`.
+
+**Shipped behavior:** `export_design_md` now accepts optional `project_path` and uses it for the default `specs/DESIGN.md` output when no `output_path` is provided. `generate_component_doc` accepts the same `project_path` and writes returned `component-specs/[Name].md` under that root. Existing cwd fallback remains for compatibility, and `output_path` still wins for explicit DESIGN.md destinations.
+
+**Boundary:** Figlets still does not infer editor workspace roots by magic. Agents/hosts should pass `project_path` when they know the active code workspace; otherwise the tools fall back to the MCP server working directory.
+
+---
+
 ### [2026-07-10 — sync refreshes compatible local DS context]
 
 **Status:** Product-contract fix after a designer documented a component immediately after manually adding link/hover color variables in Figma, and the agent log showed stale local DS context risk.

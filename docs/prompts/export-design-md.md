@@ -19,7 +19,7 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 > You're connected to the Figlets MCP. From this chat you **can**:
 > - Pull a fresh snapshot from my Figma file.
 > - Refresh `design-system.config.js` from that snapshot, or create a local snapshot-derived config if this file does not have one yet.
-> - Write a portable `DESIGN.md` to the opened project's `specs/DESIGN.md` path, falling back to the Figlets local config folder if that project path is not writable.
+> - Write a portable `DESIGN.md` to the active code workspace's `specs/DESIGN.md` path when the host exposes that workspace root, falling back to the MCP server working directory or Figlets local config folder if needed.
 >
 > You **can't** from this chat:
 > - Fill in context Figma does not encode, such as implementation platform or exact CSS breakpoint widths, unless I answer those gap questions.
@@ -45,6 +45,7 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 > ### Step 3 — Run the export
 >
 > Call `export_design_md` with no special arguments unless I asked you to:
+> - Save inside the active code workspace and the host exposes its root → pass `project_path`.
 > - Save to a custom path → pass `output_path`.
 > - Skip syncing (e.g. I want yesterday's snapshot) → pass `skip_sync: true`.
 >

@@ -181,6 +181,30 @@ module.exports = (async () => {
     }
   }
 
+  // --- project_path override lands the default DESIGN.md under the active workspace root
+  {
+    const ws = makeWorkspace('project-path');
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figlets-export-cwd-'));
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figlets-export-project-'));
+    try {
+      const result = await withCwd(cwdDir, () => handleExportDesignMd({
+        config_path: ws.configPath,
+        figmaDataPath: ws.snapshotPath,
+        project_path: projectDir,
+      }));
+      const expectedPath = path.join(path.resolve(projectDir), 'specs', 'DESIGN.md');
+      assert.ok(!result.error, 'expected success, got error: ' + JSON.stringify(result));
+      assert.strictEqual(result.designMd.path, expectedPath);
+      assert.strictEqual(result.designMd.output.requestedPath, expectedPath);
+      assert.ok(fs.existsSync(expectedPath), 'DESIGN.md should be written under project_path');
+      assert.ok(!fs.existsSync(path.join(path.resolve(cwdDir), 'specs', 'DESIGN.md')), 'DESIGN.md should not be written under cwd when project_path is provided');
+    } finally {
+      fs.rmSync(ws.tmp, { recursive: true, force: true });
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+  }
+
   // --- Existing config export includes newly synced local effect styles in prose without promoting config
   {
     const ws = makeWorkspace('observed-effects');

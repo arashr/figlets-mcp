@@ -13,7 +13,7 @@ const { handleRefreshDsConfigFromFigma } = require('./refresh-ds-config-from-fig
 
 const exportDesignMdTool = {
   name: 'export_design_md',
-  description: 'Export a portable DESIGN.md describing the current design system. By default syncs the Figma file, refreshes design-system.config.js from the latest snapshot, then writes specs/DESIGN.md in the opened project directory, falling back to DESIGN.md next to the config when the project path is not writable. If no config exists yet, creates a local snapshot-derived config from Figma variables before exporting. Pass dry_run to preview without writing.',
+  description: 'Export a portable DESIGN.md describing the current design system. By default syncs the Figma file, refreshes design-system.config.js from the latest snapshot, then writes specs/DESIGN.md under project_path when provided, otherwise under the MCP server working directory. Falls back to DESIGN.md next to the config when that path is not writable. If no config exists yet, creates a local snapshot-derived config from Figma variables before exporting. Pass dry_run to preview without writing.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -23,7 +23,11 @@ const exportDesignMdTool = {
       },
       output_path: {
         type: 'string',
-        description: 'Optional absolute path for the DESIGN.md output. Defaults to specs/DESIGN.md in the opened project directory, with a config-folder fallback.'
+        description: 'Optional absolute path for the DESIGN.md output. Overrides project_path and the working-directory default.'
+      },
+      project_path: {
+        type: 'string',
+        description: 'Optional absolute path to the active code workspace/project root. Used for the default specs/DESIGN.md output when output_path is omitted.'
       },
       figmaDataPath: {
         type: 'string',
@@ -83,8 +87,12 @@ function _siblingSnapshotPath(configPath) {
   return fs.existsSync(candidate) ? candidate : null;
 }
 
-function _defaultProjectDesignMdPath() {
-  return path.resolve(process.cwd(), 'specs', 'DESIGN.md');
+function _resolveProjectRoot(projectPath) {
+  return projectPath ? path.resolve(projectPath) : process.cwd();
+}
+
+function _defaultProjectDesignMdPath(projectPath) {
+  return path.resolve(_resolveProjectRoot(projectPath), 'specs', 'DESIGN.md');
 }
 
 function _fallbackDesignMdPath(configPath) {
@@ -100,7 +108,7 @@ function _resolveOutputTarget(args, configPath) {
       defaultKind: 'explicit',
     };
   }
-  const requestedPath = _defaultProjectDesignMdPath();
+  const requestedPath = _defaultProjectDesignMdPath(args.project_path);
   return {
     path: requestedPath,
     requestedPath,

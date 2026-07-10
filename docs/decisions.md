@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-07-10] Repository operating docs are grouped by audience
+
+**Decision:** Keep public/product docs, maintainer decisions, prompt artifacts, and agent continuity notes in distinct places. Stable architectural/product decisions live in `docs/decisions.md`; active implementation memory stays in `memory/PROJECT_MEMORY.md` with `memory/README.md` explaining the boundary; paste-ready designer prompt artifacts live under `docs/prompts/`.
+
+**Why:** The repo is public, and top-level file lists should look intentional to people browsing GitHub. At the same time, developer agents need durable project context and Designer Mode guardrails. Grouping by audience keeps root cleaner without hiding the working process.
+
+**Consequence:** Root agent entrypoints and developer onboarding point developer agents to `memory/PROJECT_MEMORY.md` plus `docs/decisions.md`. Designer-facing agents still must start with `figlets_start` and must not read project memory or decision logs before the first designer response.
+
+---
+
 ## [2026-06-22] Setup intake questions must use designer-readable examples
 
 **Decision:** New design-system setup questions should stay one-at-a-time, but they must not be cryptic. Semantic color naming grammar prompts must include concrete examples for paired context, element-first, intent/emphasis, component-scoped, and custom. Color scale prompts must ask for concrete labels such as `100-900`, `50-950`, or `0-100`, not abstract labels like compact/standard/expanded. If the designer says any/default/reasonable monospace, Figlets treats that as permission to choose a concrete platform default before config creation.
@@ -737,7 +747,7 @@ The exporter writes the full DS (minus environment-dependent fields like `source
 
 ## [2026-05-13] DESIGN.md export is a first-class flow, not a side effect of setup
 
-**Decision:** `export_design_md` is now a standalone MCP tool (plus matching CLI `npm run figlets:export-design-md` and designer prompt at [docs/designer-export-md-prompt.md](docs/designer-export-md-prompt.md)). It chains `sync_figma_data` → `refresh_ds_config_from_figma` → `writeDesignMdFromDsConfig` in one call. Sync + refresh are bundled by default; `figmaDataPath`, `skip_sync`, and `dry_run` short-circuit specific steps. The CLI mirrors the handler one-to-one for no-MCP fallback.
+**Decision:** `export_design_md` is now a standalone MCP tool (plus matching CLI `npm run figlets:export-design-md` and designer prompt at [docs/prompts/export-design-md.md](prompts/export-design-md.md)). It chains `sync_figma_data` → `refresh_ds_config_from_figma` → `writeDesignMdFromDsConfig` in one call. Sync + refresh are bundled by default; `figmaDataPath`, `skip_sync`, and `dry_run` short-circuit specific steps. The CLI mirrors the handler one-to-one for no-MCP fallback.
 
 **Why:** DESIGN.md export already existed inside `prepare_ds_config` and `apply_ds_setup` as a side effect — designers couldn't refresh the markdown without re-running setup, and there was no designer-facing entry point for "give me a portable DESIGN.md right now." The export is a high-value, read-only handoff artifact (coding agents, code repos, cross-team share). Hiding it inside setup conflated two intents.
 
@@ -1495,7 +1505,7 @@ The contrast picker stays inside `validateSemanticPairs` / `accessible-repair-al
 - Repo-local memory survives context window loss and makes onboarding future contributors easier.
 - Decisions become reviewable artifacts instead of implicit history.
 
-**Consequence:** Maintain both `DECISIONS.md` for stable architectural decisions and `memory/PROJECT_MEMORY.md` for active context, session notes, and next steps.
+**Consequence:** Maintain both `docs/decisions.md` for stable architectural decisions and `memory/PROJECT_MEMORY.md` for active context, session notes, and next steps.
 
 ---
 

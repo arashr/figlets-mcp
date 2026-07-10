@@ -57,5 +57,5 @@ Agent-specific prompting and orchestration:
 
 Architectural decisions and ongoing project context are intentionally stored in-repo:
 
-- `DECISIONS.md` for stable choices and rationale
+- `docs/decisions.md` for stable choices and rationale
 - `memory/PROJECT_MEMORY.md` for session continuity and open questions

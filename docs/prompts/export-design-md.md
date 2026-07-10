@@ -80,6 +80,6 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 ## Notes for the agent author (you, reading this in the future)
 
 - `export_design_md` chains `sync_figma_data` → config refresh or snapshot bootstrap → `writeDesignMdFromDsConfig`. By default it syncs and refreshes. `skip_sync` and `figmaDataPath` short-circuit the sync; `dry_run` short-circuits both writes.
-- DESIGN.md remains an **interchange artifact**, not a source of truth. The prepared config and Figma variables stay authoritative. See `DECISIONS.md` for the rationale (entry dated 2026-05-08).
+- DESIGN.md remains an **interchange artifact**, not a source of truth. The prepared config and Figma variables stay authoritative. See `docs/decisions.md` for the rationale (entry dated 2026-05-08).
 - The CLI fallback `npm run figlets:export-design-md` calls the same handler. Use it when the MCP server isn't connected. Supports `--config`, `--output`, `--figma-data`, `--skip-sync`, `--dry-run`, `--json`.
 - For new files (no config yet), `export_design_md` should create a local snapshot-derived config from existing Figma variables and return `needsDesignerInput` for context it cannot infer. Report the export first, then ask only those gap questions if the designer wants a more complete handoff.

@@ -20,10 +20,10 @@ An agent-agnostic MCP toolkit for Figma design-system workflows. Deterministic F
 - `packages/figlets-mcp-server/src/cli/export-design-md.js` — CLI wrapper
 - `packages/figlets-mcp-server/src/cli/lint-design-md.js` — wraps `@google/design.md`'s linter
 - `tests/integration/design-md-google-lint.test.js` — the round-trip + lint compliance test
-- `docs/designer-export-md-prompt.md` — designer-facing prompt for the export flow
-- `DECISIONS.md` and `memory/PROJECT_MEMORY.md` — durable choices and session history
+- `docs/prompts/export-design-md.md` — designer-facing prompt for the export flow
+- `docs/decisions.md` and `memory/PROJECT_MEMORY.md` — durable choices and session history
 
-**Read these first** if you're picking up cold: this doc → `memory/PROJECT_MEMORY.md` (top-most three entries) → `DECISIONS.md` (top-most two entries) → `docs/productization-research.md` (for the broader product framing).
+**Read these first** if you're picking up cold: this doc → `memory/PROJECT_MEMORY.md` (top-most three entries) → `docs/decisions.md` (top-most two entries) → `docs/productization-research.md` (for the broader product framing).
 
 ---
 
@@ -254,7 +254,7 @@ Land in this order. Each step is independently testable.
    - `--no-components` flag.
    - `--component-specs <glob>` for override.
 
-8. **Extend the designer prompt** in `docs/designer-export-md-prompt.md` to mention "I'll also include any component specs in `component-specs/`."
+8. **Extend the designer prompt** in `docs/prompts/export-design-md.md` to mention "I'll also include any component specs in `component-specs/`."
 
 ---
 
@@ -300,5 +300,5 @@ Land in this order. Each step is independently testable.
 - Our exporter: `packages/figlets-core/src/ds-config/design-md-intake.js`
 - Our component doc tool: `packages/figlets-mcp-server/src/tools/generate-component-doc.js`
 - Example component spec: `component-specs/Button 1.0.0.md`
-- Decision: `DECISIONS.md` entry "[2026-05-13] DESIGN.md export is spec-compliant with a `figlets-extended` round-trip block"
+- Decision: `docs/decisions.md` entry "[2026-05-13] DESIGN.md export is spec-compliant with a `figlets-extended` round-trip block"
 - Session history: `memory/PROJECT_MEMORY.md` entries dated 2026-05-13

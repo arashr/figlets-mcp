@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-10 — repo operating docs grouped by audience]
+
+**Status:** Documentation organization polish to make the public repo feel more deliberate while preserving agent recovery.
+
+**Shipped behavior:** Stable decisions moved from root `DECISIONS.md` to `docs/decisions.md`. Paste-ready designer prompt artifacts moved from loose `docs/*-prompt.md` files into `docs/prompts/`. `memory/PROJECT_MEMORY.md` stays in `memory/`, and `memory/README.md` now explains that this folder is for agent continuity rather than public product docs. `docs/prompts/README.md` explains that prompt artifacts are secondary to the Figlets Agent Interface flow.
+
+**Agent boundary:** Root `AGENTS.md` / `CLAUDE.md` and `docs/developer-guide.md` now point Developer Mode agents to `memory/PROJECT_MEMORY.md` plus `docs/decisions.md`. Designer Mode still starts with `figlets_start` and must not read memory, decisions, source files, or package docs before the first designer response.
+
+---
+
 ### [2026-07-08 — component markdown includes variant and effect facts]
 
 **Status:** Follow-up polish after implementation agents missed Hover-state visuals and responsiveness from generated component markdown.

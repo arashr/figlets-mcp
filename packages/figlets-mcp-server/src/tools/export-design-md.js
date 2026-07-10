@@ -192,7 +192,7 @@ function _refreshResultForBootstrap() {
   };
 }
 
-function _writeDesignMdFromConfig(intake, configPath, outputTarget) {
+function _writeDesignMdFromConfig(intake, configPath, outputTarget, options) {
   const attempts = [outputTarget.path];
   if (
     outputTarget.fallbackPath &&
@@ -206,7 +206,7 @@ function _writeDesignMdFromConfig(intake, configPath, outputTarget) {
     const attemptPath = attempts[i];
     try {
       fs.mkdirSync(path.dirname(attemptPath), { recursive: true });
-      const writtenPath = intake.writeDesignMdFromDsConfig(configPath, attemptPath);
+      const writtenPath = intake.writeDesignMdFromDsConfig(configPath, attemptPath, options);
       return {
         path: writtenPath,
         fallbackUsed: i > 0,
@@ -267,6 +267,7 @@ async function handleExportDesignMd(args) {
   let bootstrap = null;
   let needsDesignerInput = [];
   let refresh = null;
+  let latestFigmaData = null;
 
   if (!fs.existsSync(configPath)) {
     let dataSource = null;
@@ -284,6 +285,7 @@ async function handleExportDesignMd(args) {
         hint: 'Open the Figlets Bridge plugin and retry, or pass figmaDataPath to a synced figma-data.json snapshot.',
       };
     }
+    latestFigmaData = dataSource.figmaData;
 
     const ds = bootstrapDsFromSnapshot(dataSource.figmaData);
     if (!dryRun) {
@@ -321,6 +323,18 @@ async function handleExportDesignMd(args) {
     }
   }
 
+  const snapshotPath = (refresh.source && refresh.source.path ? refresh.source.path : null)
+    || (bootstrap && bootstrap.snapshotPath)
+    || snapshotPathForRefresh
+    || null;
+  const syncedAt = _statSyncedAt(snapshotPath);
+  if (!latestFigmaData && snapshotPath) {
+    try {
+      const dataSource = loadFigmaDataSource({ figmaDataPath: snapshotPath });
+      latestFigmaData = dataSource && dataSource.figmaData ? dataSource.figmaData : null;
+    } catch (_) {}
+  }
+
   let designMdPath = null;
   let written = false;
   let output = {
@@ -336,7 +350,12 @@ async function handleExportDesignMd(args) {
       return { error: 'DESIGN.md exporter not available in figlets-core.' };
     }
     try {
-      const writeResult = _writeDesignMdFromConfig(intake, configPath, outputTarget);
+      const writeResult = _writeDesignMdFromConfig(
+        intake,
+        configPath,
+        outputTarget,
+        latestFigmaData ? { figmaData: latestFigmaData } : null
+      );
       designMdPath = writeResult.path;
       output = Object.assign(output, writeResult);
       written = true;
@@ -346,12 +365,6 @@ async function handleExportDesignMd(args) {
   } else {
     designMdPath = outputTarget.path;
   }
-
-  const snapshotPath = (refresh.source && refresh.source.path ? refresh.source.path : null)
-    || (bootstrap && bootstrap.snapshotPath)
-    || snapshotPathForRefresh
-    || null;
-  const syncedAt = _statSyncedAt(snapshotPath);
 
   return {
     dryRun,

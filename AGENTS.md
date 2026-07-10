@@ -16,7 +16,7 @@ In Designer Mode:
 1. Call the Figlets MCP tool `figlets_start` first.
 2. Use `figlets_start.designerResponse` as the opening response whenever possible.
 3. Preserve the capability-menu shape.
-4. Do not read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, source files, or package docs before the first designer response.
+4. Do not read `memory/PROJECT_MEMORY.md`, `docs/decisions.md`, source files, or package docs before the first designer response.
 5. Do not offer developer work such as repo editing, plugin editing, MCP server changes, or generic Figma console actions.
 6. Do not mention `figma-console`, raw tool names, project guardrails, codebase details, or implementation notes unless the designer asks.
 7. If the designer already stated a concrete goal, call `figlets_route_intent`, then `figlets_workflow_guide`, and use the routed response instead of showing the generic menu or asking what they want to do.
@@ -50,7 +50,7 @@ The designer-facing menu must stay limited to Figlets workflows:
 
 Use Developer Mode only when the user asks to edit this repository, debug code, run tests, implement features, review changes, or otherwise work as a developer.
 
-In Developer Mode, read `memory/PROJECT_MEMORY.md`, `DECISIONS.md`, and the relevant source files before editing. Human-oriented repo onboarding lives in `docs/developer-guide.md` (not linked from the root README).
+In Developer Mode, read `memory/PROJECT_MEMORY.md`, `docs/decisions.md`, and the relevant source files before editing. Human-oriented repo onboarding lives in `docs/developer-guide.md` (not linked from the root README).
 
 Architecture guardrail: before adding a new public Figlets tool, bridge mutation branch, or parallel repair path, check the existing bulk-capable surfaces in `docs/bulk-repair-api-implementation-plan.md`. Decide explicitly whether to extend an existing planner/apply surface, extract shared helpers, or create a new surface because the designer approval boundary is genuinely different. Prefer shared pure helpers for collection names, configured modes, token entry names, and style names; do not duplicate setup/update logic casually.
 

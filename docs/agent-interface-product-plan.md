@@ -26,7 +26,7 @@ Figlets already has the lower-level pieces:
 
 - deterministic MCP tools for sync, setup, QA, repair, showcase, docs, and export
 - adapter docs in `packages/figlets-adapter/AGENTS.md` and `packages/figlets-adapter/CLAUDE.md`
-- paste-ready designer prompts in `docs/designer-fix-flow-prompt.md` and `docs/designer-export-md-prompt.md`
+- paste-ready designer prompts in `docs/prompts/setup-gap-repair.md` and `docs/prompts/export-design-md.md`
 - MCP tool descriptions that include some safety boundaries
 
 The problem is that the interface is scattered. A capable agent can piece it together, but a random MCP-speaking agent may not know:
@@ -597,8 +597,8 @@ Then update:
 
 - `packages/figlets-adapter/AGENTS.md`
 - `packages/figlets-adapter/CLAUDE.md`
-- `docs/designer-fix-flow-prompt.md`
-- `docs/designer-export-md-prompt.md`
+- `docs/prompts/setup-gap-repair.md`
+- `docs/prompts/export-design-md.md`
 
 Those files should point to the Agent Interface as the source of truth.
 

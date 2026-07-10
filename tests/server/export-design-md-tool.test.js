@@ -181,6 +181,44 @@ module.exports = (async () => {
     }
   }
 
+  // --- Existing config export includes newly synced local effect styles in prose without promoting config
+  {
+    const ws = makeWorkspace('observed-effects');
+    try {
+      const snapshot = JSON.parse(fs.readFileSync(ws.snapshotPath, 'utf8'));
+      snapshot.effectStyles = [
+        {
+          name: 'Focus Ring',
+          effects: [
+            {
+              type: 'DROP_SHADOW',
+              color: { r: 0.2, g: 0.45, b: 1, a: 0.8 },
+              offset: { x: 0, y: 0 },
+              radius: 0,
+              spread: 3,
+              visible: true,
+            },
+          ],
+        },
+      ];
+      fs.writeFileSync(ws.snapshotPath, JSON.stringify(snapshot), 'utf8');
+
+      const result = await withCwd(ws.tmp, () => handleExportDesignMd({
+        config_path: ws.configPath,
+        figmaDataPath: ws.snapshotPath,
+      }));
+      assert.ok(!result.error, 'expected observed effect export, got error: ' + JSON.stringify(result));
+      const md = fs.readFileSync(result.designMd.path, 'utf8');
+      assert.ok(md.includes('## Additional Effect Styles'), 'DESIGN.md should include synced non-elevation effect styles');
+      assert.ok(md.includes('| Focus Ring |'), 'DESIGN.md should name the observed effect style');
+      assert.ok(md.includes('DROP_SHADOW'), 'DESIGN.md should include implementation-relevant effect facts');
+      const refreshedConfig = fs.readFileSync(ws.configPath, 'utf8');
+      assert.ok(!refreshedConfig.includes('Focus Ring'), 'export refresh must not promote observed effect styles into config');
+    } finally {
+      fs.rmSync(ws.tmp, { recursive: true, force: true });
+    }
+  }
+
   // --- Dry run: no DESIGN.md, no config rewrite, refresh marked dryRun
   {
     const ws = makeWorkspace('dry');

@@ -7,7 +7,7 @@ This document is for people working on the **figlets-mcp** repository: MCP serve
 | Mode | When | Entry |
 | --- | --- | --- |
 | **Designer** | Helping someone use Figlets in Figma through an agent | Root [README.md](../README.md), [mcp-config-examples.md](./mcp-config-examples.md) |
-| **Developer** | Editing this repo, debugging tools, release work | This file, [memory/PROJECT_MEMORY.md](../memory/PROJECT_MEMORY.md), [DECISIONS.md](../DECISIONS.md) |
+| **Developer** | Editing this repo, debugging tools, release work | This file, [memory/PROJECT_MEMORY.md](../memory/PROJECT_MEMORY.md), [docs/decisions.md](./decisions.md) |
 
 Agent hosts should follow **[AGENTS.md](../AGENTS.md)** / **[CLAUDE.md](../CLAUDE.md)** for Designer Mode vs Developer Mode behavior.
 
@@ -162,7 +162,7 @@ npm run check:pr-protocol
 ## Roadmap and decisions
 
 - **Linear** (team Minions, project Figlets MCP): operational source of truth for active work. Developer agents should leave additive task comments on active issues (start, checkpoint, blocker, review, completion) using the template in **[AGENTS.md](../AGENTS.md)** / **[CLAUDE.md](../CLAUDE.md)** Developer Mode; issue descriptions stay stable scope, comments are execution history.
-- **[DECISIONS.md](../DECISIONS.md):** durable architectural choices.
+- **[docs/decisions.md](./decisions.md):** durable architectural choices.
 - **[memory/PROJECT_MEMORY.md](../memory/PROJECT_MEMORY.md):** active implementation context.
 - **[future-figlets-gap-register.md](./future-figlets-gap-register.md):** future gaps and risks (e.g. G-001 workflow readiness — v1 `figlets_health_check` shipped; v2 audit orchestration remains open).
 

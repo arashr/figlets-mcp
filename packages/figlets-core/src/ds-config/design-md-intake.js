@@ -1000,6 +1000,82 @@ function _bodyElevation(DS) {
   return lines.join('\n');
 }
 
+function _tableCell(value) {
+  return String(value == null ? '' : value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function _formatNumber(value) {
+  if (typeof value !== 'number' || !isFinite(value)) return null;
+  return Number.isInteger(value) ? String(value) : String(Math.round(value * 1000) / 1000);
+}
+
+function _formatColor(color) {
+  if (!color || typeof color !== 'object' || !('r' in color) || !('g' in color) || !('b' in color)) return null;
+  const r = Math.round(Math.max(0, Math.min(1, color.r)) * 255);
+  const g = Math.round(Math.max(0, Math.min(1, color.g)) * 255);
+  const b = Math.round(Math.max(0, Math.min(1, color.b)) * 255);
+  const a = color.a == null ? 1 : Math.max(0, Math.min(1, color.a));
+  return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + _formatNumber(a) + ')';
+}
+
+function _formatEffect(effect) {
+  if (!effect || typeof effect !== 'object') return '';
+  const parts = [effect.type || 'EFFECT'];
+  const color = _formatColor(effect.color);
+  if (color) parts.push('color ' + color);
+  if (effect.offset && typeof effect.offset === 'object') {
+    const x = _formatNumber(effect.offset.x);
+    const y = _formatNumber(effect.offset.y);
+    if (x != null) parts.push('offset-x ' + x + 'px');
+    if (y != null) parts.push('offset-y ' + y + 'px');
+  }
+  const radius = _formatNumber(effect.radius);
+  if (radius != null) parts.push('blur ' + radius + 'px');
+  const spread = _formatNumber(effect.spread);
+  if (spread != null) parts.push('spread ' + spread + 'px');
+  if (effect.blendMode) parts.push('blend ' + effect.blendMode);
+  if (effect.visible === false) parts.push('hidden');
+  return parts.join(', ');
+}
+
+function _configuredEffectStyleNames(DS) {
+  const names = new Set();
+  const elevation = DS && DS.elevation && typeof DS.elevation === 'object' ? DS.elevation : null;
+  if (!elevation) return names;
+  for (const key of Object.keys(elevation)) {
+    names.add(key);
+    names.add('elevation/' + key);
+    names.add('shadow/' + key);
+  }
+  return names;
+}
+
+function _bodyObservedEffectStyles(DS, options) {
+  const figmaData = options && options.figmaData ? options.figmaData : null;
+  const effectStyles = Array.isArray(figmaData && figmaData.effectStyles) ? figmaData.effectStyles : [];
+  if (!effectStyles.length) return null;
+  const configuredNames = _configuredEffectStyleNames(DS);
+  const observed = effectStyles
+    .filter(style => style && style.name && !configuredNames.has(style.name))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  if (!observed.length) return null;
+
+  const lines = [
+    'These local Figma effect styles were present in the latest synced snapshot and are included for implementation handoff.',
+    '',
+    '| Style | Definition |',
+    '|---|---|',
+  ];
+  for (const style of observed) {
+    const effects = Array.isArray(style.effects) ? style.effects : [];
+    const summary = effects.length
+      ? effects.map(_formatEffect).filter(Boolean).join(' | ')
+      : 'No visible effects recorded.';
+    lines.push('| ' + _tableCell(style.name) + ' | ' + _tableCell(summary) + ' |');
+  }
+  return lines.join('\n');
+}
+
 function _bodyShapes(DS) {
   const radius = DS.spacing && DS.spacing.radius ? DS.spacing.radius : null;
   if (!radius || !Object.keys(radius).length) return null;
@@ -1113,6 +1189,7 @@ function dsConfigToDesignMd(ds, options) {
   pushSection('Typography', _bodyTypography(DS));
   pushSection('Layout', _bodyLayout(DS));
   pushSection('Elevation & Depth', _bodyElevation(DS));
+  pushSection('Additional Effect Styles', _bodyObservedEffectStyles(DS, options));
   pushSection('Shapes', _bodyShapes(DS));
   pushSection('Components', _bodyComponents(DS));
 
@@ -1130,7 +1207,7 @@ function dsConfigToDesignMd(ds, options) {
   return lines.join('\n');
 }
 
-function writeDesignMdFromDsConfig(configPath, outputPath) {
+function writeDesignMdFromDsConfig(configPath, outputPath, options) {
   const resolvedConfig = path.resolve(configPath);
   const resolvedOutput = path.resolve(outputPath || path.join(path.dirname(resolvedConfig), 'DESIGN.md'));
   const src = fs.readFileSync(resolvedConfig, 'utf8')
@@ -1140,7 +1217,7 @@ function writeDesignMdFromDsConfig(configPath, outputPath) {
   vm.runInNewContext(src, ctx);
   if (!ctx.DS) throw new Error('Config must export a DS object');
   const ds = ctx.DS;
-  const markdown = dsConfigToDesignMd(ds, { sourcePath: resolvedConfig });
+  const markdown = dsConfigToDesignMd(ds, Object.assign({}, options || {}, { sourcePath: resolvedConfig }));
   fs.writeFileSync(resolvedOutput, markdown, 'utf8');
   return resolvedOutput;
 }

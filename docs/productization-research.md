@@ -65,18 +65,18 @@ packages/
 - `618ebdf` Reshape setup-gap inspector as semantic-layer QA report
 - `c275c1d` Plumb contrast re-alias through the existing apply tool
 
-Memory + decisions log are up to date in [`memory/PROJECT_MEMORY.md`](../memory/PROJECT_MEMORY.md) and [`DECISIONS.md`](../DECISIONS.md). Read those first if you need deeper context on why the current code looks the way it does.
+Memory + decisions log are up to date in [`memory/PROJECT_MEMORY.md`](../memory/PROJECT_MEMORY.md) and [`docs/decisions.md`](./decisions.md). Read those first if you need deeper context on why the current code looks the way it does.
 
 ### What just shipped in the QA→Fix work
 
 1. **Inspector** reports six finding kinds against the semantic color layer: missing-fg companions, missing-bg companions, incomplete modes, contrast failures (with hex + resolved primitives + near-miss tag), broken aliases (semantic-layer only), companion advisories (with DS-wide role suppression when applicable). Findings are severity-ordered. Snapshot freshness is in the response.
 2. **Contrast picker is reused** from `validateSemanticPairs` via `accessible-repair-aliases.computePlannedAliases`. Each contrast failure carries `plannedReAlias: { token, mode, from, to }` when the picker can find an upgrade — no parallel contrast math.
 3. **`apply_ds_setup_repairs` accepts two repair kinds** in one call: `repairs[]` (create new fg) and `aliasUpdates[]` (re-alias existing). One bridge round-trip. Both wired through `_applyDsSetupRepairs` in the plugin.
-4. **Designer prompt** at [`docs/designer-fix-flow-prompt.md`](./designer-fix-flow-prompt.md) captures the full conversation script. Front-loads capability boundaries, severity-ordered walkthrough, plain-language translation rules, cluster-level approval pattern.
+4. **Designer prompt** at [`docs/prompts/setup-gap-repair.md`](./prompts/setup-gap-repair.md) captures the full conversation script. Front-loads capability boundaries, severity-ordered walkthrough, plain-language translation rules, cluster-level approval pattern.
 
 ### What's deferred (intentional, per recent decisions)
 
-- **Component-collection breakage detection.** A previous session expanded the inspector with broken-alias-with-setup-vs-component-scope classification. That direction was wrong — component breakage is a downstream rebinding problem outside the setup flow's scope. Decision logged in [`DECISIONS.md`](../DECISIONS.md). Don't reintroduce it.
+- **Component-collection breakage detection.** A previous session expanded the inspector with broken-alias-with-setup-vs-component-scope classification. That direction was wrong — component breakage is a downstream rebinding problem outside the setup flow's scope. Decision logged in [`docs/decisions.md`](./decisions.md). Don't reintroduce it.
 - **Non-color semantic categories** (typography roles, spacing semantics, radius semantics) — color-only QA for now.
 - **Auto-update config on re-alias.** The new `aliasUpdates` path doesn't touch `design-system.config.js`; designers run `refresh_ds_config_from_figma` separately if they want config to follow.
 - **Borders auto-picker.** Border colors are added via the existing apply tool today, but with explicit `aliases` per mode supplied by the agent (no automated picker like there is for fg). A border picker would be a real feature, not a refactor.
@@ -85,7 +85,7 @@ Memory + decisions log are up to date in [`memory/PROJECT_MEMORY.md`](../memory/
 
 Pulled from `memory/MEMORY.md`:
 
-- Update `PROJECT_MEMORY.md` and `DECISIONS.md` before merging or ending any significant session.
+- Update `PROJECT_MEMORY.md` and `docs/decisions.md` before merging or ending any significant session.
 - No `Co-Authored-By` or AI attribution in commit messages.
 - Plugin code (`packages/figma-bridge-plugin/code.js`) is ES6-era only — no `??`, `?.`, `**` operators. Figma's sandbox doesn't support them. `node --check` passes but does NOT catch this.
 - Test artifacts go to `/tmp`, never the project tree. `component-specs/` is gitignored.
@@ -103,7 +103,7 @@ The user's framing:
 Decomposed into four layers of friction for a non-technical designer today:
 
 1. **Install** — clone repo, `npm install`, edit JSON for their agent, import a Figma plugin via developer-import flow, set `.env` token, etc.
-2. **Command** — designer must know what to type. The current designer prompt at [`docs/designer-fix-flow-prompt.md`](./designer-fix-flow-prompt.md) is ~100 lines of engineer-grade instructions.
+2. **Command** — designer must know what to type. The current designer prompt at [`docs/prompts/setup-gap-repair.md`](./prompts/setup-gap-repair.md) is ~100 lines of engineer-grade instructions.
 3. **Navigate / discover** — no surface tells the designer what's possible. They have to read docs.
 4. **Recover from errors** — error messages today often surface implementation details (`ECONNREFUSED on 127.0.0.1:17337`, etc.).
 
@@ -165,7 +165,7 @@ So **for Claude Code specifically**, we don't need the `npx`-based install at al
 
 - The MCP server config
 - Slash commands (`/figlets-check`, `/figlets-fix`, `/figlets-showcase`, `/figlets-help`)
-- The agent skills (the long prompt at `docs/designer-fix-flow-prompt.md` becomes a skill file)
+- The agent skills (the long prompt at `docs/prompts/setup-gap-repair.md` becomes a skill file)
 - Optional hooks
 
 User runs `/plugin install figlets` once. Done. **This is significantly cleaner than the npx path for Claude Code users.**
@@ -242,7 +242,7 @@ These come from past sessions that drifted in the wrong direction:
 
 - **Don't expand scope to component-collection breakage.** Setup-vs-component-scope detection was added in a previous commit (`1504b5d`) and reverted. Component breakage is downstream of setup; out of scope.
 - **Don't duplicate contrast math.** The setup flow's `validateSemanticPairs` + `accessible-repair-aliases.computePlannedAliases` is the single owner. Anything that needs ramp-walking should reuse it.
-- **Don't auto-apply fixes without designer approval.** Per-cluster approval is the contract. Reading `DECISIONS.md` will give the rationale.
+- **Don't auto-apply fixes without designer approval.** Per-cluster approval is the contract. Reading `docs/decisions.md` will give the rationale.
 - **Don't add "ready to repair" framing to QA output.** Recent work specifically removed that to avoid biasing the agent toward apply before the designer decides.
 - **Don't introduce `??`, `?.`, or `**` in plugin code.** Figma sandbox is ES6-era. `node --check` passes them but the runtime fails silently.
 - **Don't add or modify CLI scripts where an MCP tool would do.** The QA CLI exists as a no-MCP fallback per a 2026-05-11 decision; new functionality should expose itself as MCP tools, not new shell scripts.
@@ -257,9 +257,9 @@ These come from past sessions that drifted in the wrong direction:
 - [`docs/tool-contracts.md`](./tool-contracts.md) — MCP tool contracts
 - [`docs/migration-plan.md`](./migration-plan.md) — original migration plan from `figlets` to `figlets-mcp`
 - [`docs/mcp-config-examples.md`](./mcp-config-examples.md) — sample MCP configurations
-- [`docs/designer-fix-flow-prompt.md`](./designer-fix-flow-prompt.md) — current designer-facing prompt (the artifact `npx figlets setup` would distribute as a slash command / skill)
+- [`docs/prompts/setup-gap-repair.md`](./prompts/setup-gap-repair.md) — current designer-facing prompt (the artifact `npx figlets setup` would distribute as a slash command / skill)
 - [`memory/PROJECT_MEMORY.md`](../memory/PROJECT_MEMORY.md) — session-level history; read top-down for recent context
-- [`DECISIONS.md`](../DECISIONS.md) — durable architectural decisions with rationale
+- [`docs/decisions.md`](./decisions.md) — durable architectural decisions with rationale
 - [`packages/figma-bridge-plugin/manifest.json`](../packages/figma-bridge-plugin/manifest.json) — plugin manifest (currently no `networkAccess` declared; uses dev-import default)
 - [`packages/figma-bridge-plugin/ui.html`](../packages/figma-bridge-plugin/ui.html) — plugin UI; lines 630–917 contain the localhost fetches that block Community publication
 - [`packages/figlets-mcp-server/src/cli/check-setup-gaps.js`](../packages/figlets-mcp-server/src/cli/check-setup-gaps.js) — the no-MCP fallback CLI

@@ -830,27 +830,28 @@ function _buildComponentsMap(DS, colorsMap) {
   const pairs = DS.color && DS.color.semantics && Array.isArray(DS.color.semantics.pairs)
     ? DS.color.semantics.pairs
     : [];
+
+  function addPairEntry(slug, modeAlias) {
+    if (!slug || !modeAlias) return;
+    const bgKey = modeAlias.bg ? _aliasToColorsKey(modeAlias.bg, colorsMap) : null;
+    const textKey = modeAlias.text ? _aliasToColorsKey(modeAlias.text, colorsMap) : null;
+    const entry = {};
+    if (bgKey) entry.backgroundColor = '{colors.' + bgKey + '}';
+    if (textKey) entry.textColor = '{colors.' + textKey + '}';
+    if (Object.keys(entry).length) components[slug] = entry;
+  }
+
   for (const pair of pairs) {
     if (!pair || (!pair.bg && !pair.text)) continue;
     const bgName = pair.bg || '';
     const textName = pair.text || '';
     const slug = _slugForToken(String(bgName || textName).replace(/^color\//, ''));
     if (!slug) continue;
-    // Prefer Light mode aliases when present; fall back to the only mode given.
-    const modes = ['Light', 'Dark'];
-    let modeAlias = null;
-    for (const mode of modes) {
-      if (pair[mode] && (pair[mode].bg || pair[mode].text)) {
-        modeAlias = pair[mode];
-        break;
-      }
-    }
-    const bgKey = modeAlias && modeAlias.bg ? _aliasToColorsKey(modeAlias.bg, colorsMap) : null;
-    const textKey = modeAlias && modeAlias.text ? _aliasToColorsKey(modeAlias.text, colorsMap) : null;
-    const entry = {};
-    if (bgKey) entry.backgroundColor = '{colors.' + bgKey + '}';
-    if (textKey) entry.textColor = '{colors.' + textKey + '}';
-    if (Object.keys(entry).length) components[slug] = entry;
+
+    const lightAlias = pair.Light && (pair.Light.bg || pair.Light.text) ? pair.Light : null;
+    const darkAlias = pair.Dark && (pair.Dark.bg || pair.Dark.text) ? pair.Dark : null;
+    addPairEntry(slug, lightAlias || darkAlias);
+    if (darkAlias) addPairEntry(slug + '-dark', darkAlias);
   }
   return components;
 }
@@ -898,6 +899,17 @@ function _formatHex(hex) {
   return _hex(hex) || hex;
 }
 
+function _rampName(ramp) {
+  return String((ramp && ramp.folder) || '').replace(/^color\//, '');
+}
+
+function _formatAliasWithValue(alias, colorsMap) {
+  if (!alias) return '-';
+  const key = _aliasToColorsKey(alias, colorsMap);
+  const value = key && colorsMap ? colorsMap[key] : null;
+  return value ? alias + ' (' + value + ')' : alias;
+}
+
 function _bodyOverview(DS) {
   if (DS.project && DS.project.description) return DS.project.description;
   const name = (DS.project && DS.project.name) || 'This design system';
@@ -907,22 +919,62 @@ function _bodyOverview(DS) {
 function _bodyColors(DS, colorsMap) {
   const lines = [];
   const brand = DS.color && Array.isArray(DS.color.brand) ? DS.color.brand : [];
+  const ramps = DS.color && Array.isArray(DS.color.ramps) ? DS.color.ramps : [];
+  const pairs = DS.color && DS.color.semantics && Array.isArray(DS.color.semantics.pairs)
+    ? DS.color.semantics.pairs
+    : [];
+  const algo = DS.color && DS.color.contrastAlgorithm ? String(DS.color.contrastAlgorithm).toUpperCase() : null;
+
   if (brand.length) {
-    lines.push('The palette is rooted in the following key colors:');
+    lines.push('The palette is rooted in source colors that generate the primitive ramp tokens in the front matter.');
     lines.push('');
+    lines.push('| Source | Role | Hex | Anchor step |');
+    lines.push('|---|---|---|---|');
     for (const entry of brand) {
       if (!entry || !entry.name) continue;
       const hex = _formatHex(entry.hex);
-      const role = entry.role && entry.role !== entry.name ? ' (' + entry.role + ')' : '';
-      lines.push('- **' + entry.name + role + ':** ' + (hex || 'no hex'));
+      lines.push('| ' + _tableCell(entry.name) + ' | ' + _tableCell(entry.role || '-') + ' | ' + _tableCell(hex || 'no hex') + ' | ' + _tableCell(entry.step != null ? entry.step : '-') + ' |');
     }
   } else {
     lines.push('The palette is exported from the prepared Figlets ramps.');
   }
-  const ramps = DS.color && Array.isArray(DS.color.ramps) ? DS.color.ramps : [];
+
   if (ramps.length) {
     lines.push('');
-    lines.push('Each palette is exported as a contrast-aware ramp. Step tokens follow the pattern `<ramp>-<step>` (for example `primary-500`).');
+    lines.push('Primitive ramp tokens follow the standard DESIGN.md `colors.<ramp>-<step>` naming pattern. Figlets aliases use the corresponding Figma-style path `color/<ramp>/<step>`.');
+    if (algo) lines.push('Contrast-sensitive semantic pairs are evaluated with ' + algo + '.');
+    lines.push('');
+    lines.push('| Ramp | Steps | Range | Tokens |');
+    lines.push('|---|---|---|---|');
+    for (const ramp of ramps) {
+      const rampName = _rampName(ramp);
+      if (!rampName) continue;
+      const rows = Array.isArray(ramp.steps) ? ramp.steps.filter(row => Array.isArray(row) && row.length >= 4) : [];
+      if (!rows.length) continue;
+      const tokens = rows.map(row => '`' + rampName + '-' + row[0] + '` ' + _hexFromRgb(row[1], row[2], row[3]));
+      const range = _hexFromRgb(rows[0][1], rows[0][2], rows[0][3]) + ' to ' + _hexFromRgb(rows[rows.length - 1][1], rows[rows.length - 1][2], rows[rows.length - 1][3]);
+      lines.push('| ' + _tableCell(rampName) + ' | ' + _tableCell(rows.map(row => row[0]).join(', ')) + ' | ' + _tableCell(range) + ' | ' + _tableCell(tokens.join('; ')) + ' |');
+    }
+  }
+
+  if (pairs.length) {
+    lines.push('');
+    lines.push('Semantic background/text pairs are listed with their resolved primitive aliases. Light-mode pairs are also represented in the standard `components` front matter; Dark-mode variants are emitted as matching `*-dark` component entries when they resolve to standard color tokens.');
+    lines.push('');
+    lines.push('| Pair | Light background | Light text | Dark background | Dark text |');
+    lines.push('|---|---|---|---|---|');
+    for (const pair of pairs) {
+      if (!pair || (!pair.bg && !pair.text)) continue;
+      const name = (pair.bg || pair.text || '').replace(/^color\//, '');
+      const light = pair.Light || {};
+      const dark = pair.Dark || {};
+      lines.push('| ' + _tableCell(name || '-') + ' | ' + _tableCell(_formatAliasWithValue(light.bg, colorsMap)) + ' | ' + _tableCell(_formatAliasWithValue(light.text, colorsMap)) + ' | ' + _tableCell(_formatAliasWithValue(dark.bg, colorsMap)) + ' | ' + _tableCell(_formatAliasWithValue(dark.text, colorsMap)) + ' |');
+    }
+  }
+
+  if (Object.keys(colorsMap || {}).length) {
+    lines.push('');
+    lines.push('Exact hex values are normative in the YAML `colors` map. The prose above is implementation guidance for selecting the right token family and semantic pair.');
   }
   return lines.join('\n');
 }
@@ -1100,7 +1152,7 @@ function _bodyComponents(DS) {
   if (!pairs.length) return null;
   const algo = DS.color && DS.color.contrastAlgorithm ? DS.color.contrastAlgorithm.toUpperCase() : 'APCA/WCAG';
   const lines = [
-    'Semantic background + text pairs validated against ' + algo + ' contrast. The `components` block in the front matter encodes the Light-mode relationship; Dark-mode aliases are recorded in the `figlets-extended` block below for round-trip fidelity.',
+    'Semantic background + text pairs validated against ' + algo + ' contrast. The `components` block in the front matter encodes the Light-mode relationship plus compatible `*-dark` variants when those aliases resolve to standard color tokens. The `figlets-extended` block below remains the lossless source for all Figlets-specific mode data.',
     ''
   ];
   lines.push('| Pair | Light bg / text | Dark bg / text |');

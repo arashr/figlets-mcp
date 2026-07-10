@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-07-10] DESIGN.md color prose should be detailed while staying spec-compatible
+
+**Decision:** `dsConfigToDesignMd` keeps Google DESIGN.md-compatible front matter (`colors`, `typography`, `rounded`, `spacing`, `components`) and expands human-readable color guidance in the canonical `## Colors` section. The color body now includes source color roles, primitive ramp tokens with resolved hex values, contrast algorithm context, and Light/Dark semantic background/text aliases. Standard-compatible Dark-mode semantic aliases are also emitted as `*-dark` entries in `components` when they resolve to `colors.*` references.
+
+**Why:** The previous export was technically valid but the `## Colors` prose was too bare for implementation handoff; important design-system information only appeared in YAML or the `figlets-extended` block. DESIGN.md is meant to combine exact tokens with human rationale, so agents should not have to mine Figlets-specific JSON to understand the palette.
+
+**Consequence:** Google lint remains the compatibility gate. Figlets-specific or lossless data that the Google schema cannot express still stays in the fenced `figlets-extended` block. The standard body/front matter should expose as much resolved implementation context as possible without adding unsupported YAML keys.
+
+---
+
 ## [2026-07-10] Markdown handoff paths accept an explicit project root
 
 **Decision:** Markdown-writing tools keep their existing MCP working-directory fallback, but they also accept `project_path` as the active code workspace root. `export_design_md` uses it for the default `specs/DESIGN.md` path when `output_path` is omitted. `generate_component_doc` uses it as the base for `component-specs/[Name].md`.
@@ -742,12 +752,12 @@ Final QA reported: `Semantic-layer QA: clean — no findings`.
 1. **Bare brand role colors.** `colors:` now emits `primary`, `secondary`, `tertiary`, `neutral` from `DS.color.brand` alongside the existing `<ramp>-<step>` keys. Clears the linter's "no primary defined" warning.
 2. **`fontWeight` as a bare number.** Spec accepts either, but bare numbers are the example form and match `Number` typing in downstream tools.
 3. **Canonical section order.** Overview → Colors → Typography → Layout → Elevation & Depth (when present) → Shapes (radii) → Components (semantic pairs). Matches the spec's section ordering rule exactly.
-4. **`components:` front-matter section.** `DS.color.semantics.pairs` are rendered as components with `{colors.<step>}` references on `backgroundColor` / `textColor`, using Light-mode aliases. Maps semantic pairs into the spec's first-class compositional slot rather than into an unknown key.
+4. **`components:` front-matter section.** `DS.color.semantics.pairs` are rendered as components with `{colors.<step>}` references on `backgroundColor` / `textColor`, using Light-mode aliases plus compatible `*-dark` variants when Dark-mode aliases resolve to standard color tokens. Maps semantic pairs into the spec's first-class compositional slot rather than into an unknown key.
 5. **Rich body content.** Every section carries readable prose plus tables (typography sizes per breakpoint, spacing responsive triples, radius scale, semantic pair Light/Dark aliases) — the YAML is for tools, the body is for humans and agents reading the markdown.
 
 **The `figlets-extended` block:**
 
-The exporter writes the full DS (minus environment-dependent fields like `source` and `primitives`) as JSON inside a fenced ```figlets-extended``` code block in the body. Google's linter ignores it (unknown info-string fenced blocks pass through). Our intake parser detects the block and uses it as the DS — so reading our own export is lossless (Dark-mode aliases, responsive triples, contrast algorithm choice, breakpoints, naming conventions all round-trip).
+The exporter writes the full DS (minus environment-dependent fields like `source` and `primitives`) as JSON inside a fenced ```figlets-extended``` code block in the body. Google's linter ignores it (unknown info-string fenced blocks pass through). Our intake parser detects the block and uses it as the DS — so reading our own export is lossless (all mode aliases, responsive triples, contrast algorithm choice, breakpoints, naming conventions all round-trip).
 
 **Why a fenced block, not extra YAML keys:** Strict zod-based validators (which `@google/design.md` uses) may reject unknown front-matter keys. A fenced code block is unambiguous markdown content and never violates the schema. Tools that don't know about `figlets-extended` simply render it as a code block.
 

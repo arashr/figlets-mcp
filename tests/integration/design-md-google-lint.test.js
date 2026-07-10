@@ -74,6 +74,18 @@ module.exports = (async () => {
     /colors:\n(?:  .+\n)*  primary: "#6633CC"/.test(markdown),
     'Brand role should emit a bare `primary` color even when the ramp/name is `brand`.'
   );
+  assert.ok(
+    markdown.includes('surface-brand-dark:'),
+    'Dark-mode semantic pairs should be represented as standard component variants.'
+  );
+  assert.ok(
+    markdown.includes('| Ramp | Steps | Range | Tokens |'),
+    'Colors prose should include a detailed primitive ramp table.'
+  );
+  assert.ok(
+    markdown.includes('| surface/brand | color/brand/500 (#6633CC) | color/brand/100 (#EBE0FA) | color/brand/900 (#1F0F3D) | color/brand/100 (#EBE0FA) |'),
+    'Colors prose should include resolved Light/Dark semantic color aliases.'
+  );
   const report = lint(markdown);
 
   assert.strictEqual(

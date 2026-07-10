@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-10 — sync refreshes compatible local DS context]
+
+**Status:** Product-contract fix after a designer documented a component immediately after manually adding link/hover color variables in Figma, and the agent log showed stale local DS context risk.
+
+**Shipped behavior:** `sync_figma_data` now owns freshness for both the Figma snapshot and compatible local Figlets config updates. After a sync, existing config entries are refreshed silently when `refresh_ds_config_from_figma({ compatible_only: true })` can apply without skipped configured rows. The sync payload reports `activeFile.configRefresh` so agents can warn in designer language when incompatible/skipped rows need a decision. Component docs and QA binding audit now start with sync; new-DS setup remains separate.
+
+**Boundary:** Sync does not mutate Figma. The compatible config refresh updates existing local config values/aliases only and does not invent new config tokens/styles from Figma-only additions. New exact additions or incompatible/skipped rows still route through Figlets planning/update flows or an explicit designer override.
+
+---
+
 ### [2026-07-10 — repo operating docs grouped by audience]
 
 **Status:** Documentation organization polish to make the public repo feel more deliberate while preserving agent recovery.

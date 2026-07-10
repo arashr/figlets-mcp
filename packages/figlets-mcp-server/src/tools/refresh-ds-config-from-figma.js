@@ -24,6 +24,10 @@ const refreshDsConfigFromFigmaTool = {
       dry_run: {
         type: "boolean",
         description: "When true, report changes without writing design-system.config.js."
+      },
+      compatible_only: {
+        type: "boolean",
+        description: "When true, write only if the refresh has no skipped configured rows. Use for silent compatible refreshes before downstream workflows."
       }
     },
     additionalProperties: false
@@ -266,10 +270,33 @@ function handleRefreshDsConfigFromFigma(args = {}) {
 
   const result = refreshDsConfigFromFigmaData(loaded.ds, dataSource.figmaData);
   const dryRun = !!args.dry_run;
+  const compatible = result.skipped.length === 0;
+  if (!dryRun && args.compatible_only && !compatible) {
+    return {
+      error: "Config refresh is not compatible enough to apply silently.",
+      dryRun,
+      compatible,
+      configPath,
+      source: {
+        kind: dataSource.kind,
+        target: dataSource.target,
+        path: dataSource.meta && dataSource.meta.path ? dataSource.meta.path : null,
+      },
+      changes: result.changes,
+      skipped: result.skipped,
+      summary: {
+        changedCount: result.changes.length,
+        skippedCount: result.skipped.length,
+        compatible,
+      },
+      message: "Refresh found skipped configured rows. Summarize them and ask the designer before changing the local config.",
+    };
+  }
   if (!dryRun && result.changes.length) loaded.writeDsConfig(configPath, result.ds);
 
   return {
     dryRun,
+    compatible,
     configPath,
     source: {
       kind: dataSource.kind,
@@ -281,6 +308,7 @@ function handleRefreshDsConfigFromFigma(args = {}) {
     summary: {
       changedCount: result.changes.length,
       skippedCount: result.skipped.length,
+      compatible,
     },
     message: dryRun
       ? "Config refresh dry run complete. No files were written."

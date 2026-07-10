@@ -10,12 +10,51 @@ function freshSyncFigmaData() {
   [
     "../../packages/figlets-mcp-server/src/utils/receiver-url.js",
     "../../packages/figlets-mcp-server/src/utils/ensure-receiver.js",
+    "../../packages/figlets-mcp-server/src/utils/ensure-ds-config.js",
+    "../../packages/figlets-mcp-server/src/bridges/figma-data-source.js",
     "../../packages/figlets-mcp-server/src/bridges/bridge-request.js",
+    "../../packages/figlets-mcp-server/src/tools/refresh-ds-config-from-figma.js",
     "../../packages/figlets-mcp-server/src/tools/sync-figma-data.js",
   ].forEach((modulePath) => {
     try { delete require.cache[require.resolve(modulePath)]; } catch (_) {}
   });
   return require("../../packages/figlets-mcp-server/src/tools/sync-figma-data.js");
+}
+
+function writeConfig(configPath, extraRampRows) {
+  const rows = [[500, 0, 0, 0]].concat(extraRampRows || []);
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, "const DS = " + JSON.stringify({
+    color: {
+      brand: [{ name: "primary", hex: "#000000", role: "primary", step: 500 }],
+      ramps: [{ folder: "color/primary", steps: rows }],
+      semantics: { pairs: [] },
+    },
+  }, null, 2) + ";\n", "utf8");
+}
+
+function writeSnapshot(snapshotPath) {
+  fs.mkdirSync(path.dirname(snapshotPath), { recursive: true });
+  fs.writeFileSync(snapshotPath, JSON.stringify({
+    fileKey: "local_refresh_file",
+    collections: [
+      {
+        id: "primitives",
+        name: "Primitives",
+        variableIds: ["primary-500"],
+        modes: [{ modeId: "default", name: "Default" }],
+      },
+    ],
+    variables: [
+      {
+        id: "primary-500",
+        name: "color/primary/500",
+        resolvedType: "COLOR",
+        variableCollectionId: "primitives",
+        valuesByMode: { default: { r: 0.5, g: 0.2, b: 0.8 } },
+      },
+    ],
+  }), "utf8");
 }
 
 function startMockReceiver(statusCode, responseBody) {
@@ -89,6 +128,94 @@ module.exports = (async () => {
       assert.strictEqual(payload.sessionId, "test-session");
       const activeOnDisk = JSON.parse(fs.readFileSync(path.join(syncLocalDir, "active-file.json"), "utf8"));
       assert.strictEqual(activeOnDisk.fileKey, "local_active_file");
+    } finally {
+      server.close();
+      delete process.env.FIGLETS_RECEIVER_URL;
+      if (previousLocalDir === undefined) delete process.env.FIGLETS_LOCAL_DIR;
+      else process.env.FIGLETS_LOCAL_DIR = previousLocalDir;
+      fs.rmSync(syncLocalDir, { recursive: true, force: true });
+      freshSyncFigmaData();
+    }
+  }
+
+  // Test 2b: compatible existing config refreshes silently during sync
+  {
+    const syncLocalDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-sync-refresh-ok-"));
+    const previousLocalDir = process.env.FIGLETS_LOCAL_DIR;
+    const fileKey = "local_refresh_file";
+    const fileDir = path.join(syncLocalDir, fileKey);
+    const configPath = path.join(fileDir, "design-system.config.js");
+    const snapshotPath = path.join(fileDir, "figma-data.json");
+    process.env.FIGLETS_LOCAL_DIR = syncLocalDir;
+    delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/utils/paths.js")];
+    freshSyncFigmaData();
+    writeConfig(configPath);
+    writeSnapshot(snapshotPath);
+
+    const server = await startMockReceiver(200, JSON.stringify({
+      ok: true,
+      fileKey,
+      dataPath: snapshotPath,
+      sessionId: "refresh-ok"
+    }));
+    const port = server.address().port;
+    process.env.FIGLETS_RECEIVER_URL = `http://127.0.0.1:${port}`;
+    try {
+      const { handleSyncFigmaData } = freshSyncFigmaData();
+      const result = await handleSyncFigmaData();
+      const payload = JSON.parse(result.content[0].text);
+      assert.strictEqual(payload.activeFile.fileKey, fileKey);
+      assert.strictEqual(payload.activeFile.configRefresh.attempted, true);
+      assert.strictEqual(payload.activeFile.configRefresh.compatible, true);
+      assert.strictEqual(payload.activeFile.configRefresh.applied, true);
+      assert.ok(payload.activeFile.configRefresh.changedCount >= 1, "sync should report compatible config changes");
+      const updated = fs.readFileSync(configPath, "utf8");
+      assert.ok(updated.includes("#8033CC"), "compatible sync refresh should update brand hex");
+      assert.ok(updated.includes("0.5"), "compatible sync refresh should update ramp row");
+    } finally {
+      server.close();
+      delete process.env.FIGLETS_RECEIVER_URL;
+      if (previousLocalDir === undefined) delete process.env.FIGLETS_LOCAL_DIR;
+      else process.env.FIGLETS_LOCAL_DIR = previousLocalDir;
+      fs.rmSync(syncLocalDir, { recursive: true, force: true });
+      freshSyncFigmaData();
+    }
+  }
+
+  // Test 2c: incompatible/skipped refresh is reported but does not fail sync or write config
+  {
+    const syncLocalDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-sync-refresh-skip-"));
+    const previousLocalDir = process.env.FIGLETS_LOCAL_DIR;
+    const fileKey = "local_refresh_file";
+    const fileDir = path.join(syncLocalDir, fileKey);
+    const configPath = path.join(fileDir, "design-system.config.js");
+    const snapshotPath = path.join(fileDir, "figma-data.json");
+    process.env.FIGLETS_LOCAL_DIR = syncLocalDir;
+    delete require.cache[require.resolve("../../packages/figlets-mcp-server/src/utils/paths.js")];
+    freshSyncFigmaData();
+    writeConfig(configPath, [[900, 0, 0, 0]]);
+    writeSnapshot(snapshotPath);
+
+    const before = fs.readFileSync(configPath, "utf8");
+    const server = await startMockReceiver(200, JSON.stringify({
+      ok: true,
+      fileKey,
+      dataPath: snapshotPath,
+      sessionId: "refresh-skip"
+    }));
+    const port = server.address().port;
+    process.env.FIGLETS_RECEIVER_URL = `http://127.0.0.1:${port}`;
+    try {
+      const { handleSyncFigmaData } = freshSyncFigmaData();
+      const result = await handleSyncFigmaData();
+      const payload = JSON.parse(result.content[0].text);
+      assert.strictEqual(payload.activeFile.fileKey, fileKey);
+      assert.strictEqual(payload.activeFile.configRefresh.attempted, true);
+      assert.strictEqual(payload.activeFile.configRefresh.compatible, false);
+      assert.strictEqual(payload.activeFile.configRefresh.applied, false);
+      assert.ok(payload.activeFile.configRefresh.skippedCount >= 1, "sync should report skipped config rows");
+      assert.ok(payload.activeFile.configRefresh.message.includes("skipped configured rows"));
+      assert.strictEqual(fs.readFileSync(configPath, "utf8"), before, "incompatible sync refresh should not write config");
     } finally {
       server.close();
       delete process.env.FIGLETS_RECEIVER_URL;

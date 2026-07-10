@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-07-10] Figma sync refreshes compatible local DS context
+
+**Decision:** `sync_figma_data` is the product-level freshness boundary. It must refresh Figlets' local Figma snapshot and then silently refresh existing local config entries when `refresh_ds_config_from_figma({ compatible_only: true })` can apply without skipped configured rows. The sync result reports `activeFile.configRefresh` so downstream workflows can warn in designer language when incompatible/skipped rows need a decision.
+
+**Why:** Designers often add or edit variables/styles in Figma, then ask for any Figlets workflow without saying the design system changed. The designer should not need to know Figlets has a separate snapshot/config layer. Centralizing compatible refresh in sync keeps health checks, component docs, QA binding audit, token workflows, showcase, and export paths from drifting independently.
+
+**Consequence:** Any workflow that starts with `sync_figma_data` gets fresh snapshot data plus compatible local Figlets context. Sync never mutates Figma and never creates new config tokens/styles. Compatible local config refreshes do not require a designer-facing "update the JS?" prompt because the JS config is Figlets' interpretation layer; incompatible/skipped rows and exact new config additions remain separate Figlets planning/update or explicit override flows. New design-system setup stays separate because its config is created from intake rather than refreshed from an existing Figma system.
+
+---
+
 ## [2026-07-10] Repository operating docs are grouped by audience
 
 **Decision:** Keep public/product docs, maintainer decisions, prompt artifacts, and agent continuity notes in distinct places. Stable architectural/product decisions live in `docs/decisions.md`; active implementation memory stays in `memory/PROJECT_MEMORY.md` with `memory/README.md` explaining the boundary; paste-ready designer prompt artifacts live under `docs/prompts/`.

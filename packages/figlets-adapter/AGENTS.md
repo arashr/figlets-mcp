@@ -20,7 +20,7 @@ All deterministic Figma analysis happens inside the MCP tools — this file defi
 | `figlets_route_intent` | Maps the designer's natural-language request to the most likely Figlets workflow | After the designer says what they want, especially when the wording is broad or ambiguous |
 | `figlets_workflow_guide` | Returns the step-by-step contract for a workflow, including read/write steps, confirmation points, error recovery, and next flows | Before running a workflow that could lead to Figma writes or local file writes |
 | `figlets_health_check` | Returns read-only, host-neutral workflow readiness feedback: entrypoint/routing status, approval-boundary checks, repair-payload guidance, stale-host warnings, and next action | When an agent needs to verify it is following the Figlets workflow safely; not a designer menu item and not a Figma audit runner |
-| `sync_figma_data` | Triggers the bridge plugin to extract the full DS snapshot and save it to `.local/figma-data.json` | Before any analysis when the user wants fresh data from Figma |
+| `sync_figma_data` | Triggers the bridge plugin to extract the full DS snapshot, save it locally, and silently refresh compatible local Figlets config values | Before any analysis when the user wants fresh data from Figma |
 | `detect_design_system` | Analyzes the snapshot: collections, variables, styles, inferred capabilities | After syncing, or when a snapshot already exists on disk |
 | `inspect_component` | Extracts layout, variants, and properties of the currently selected Figma node | When the user wants to inspect a specific component or frame |
 | `audit_tokens` | Reports token inventory plus real raw-value, duplicate, and naming issues in the snapshot. Primitive values are inventory, not defects. | When the user wants token hygiene checked as part of broader DS QA |
@@ -59,7 +59,7 @@ Designers should be able to ask in natural language. Route their intent to MCP t
 | "QA this frame/component" | Ask them to select the target in Figma, run `qa_binding_audit` without fixes, then summarize raw/unbound values. |
 | "Fix the binding gaps" | Confirm they want automatic safe fixes, then run `qa_binding_audit` with `fix: true`. |
 | "Set up a design system" | Walk through setup intake in plain language. Treat the prompt as direction, not a complete spec. Ask missing choices before `prepare_ds_config`, show previews, then use `apply_ds_setup` only after approval. |
-| "Document this component" | Ask them to select the component, inspect it, craft human usage copy, then call `generate_component_doc`. |
+| "Document this component" | Ask them to select the component, sync the current Figma snapshot, preview any local config refresh, inspect it, craft human usage copy, then call `generate_component_doc`. |
 
 Keep the designer-facing language non-technical. Say "I'll check what's available in the file" rather than "I'll call `sync_figma_data` and `detect_design_system`." Tool names are for internal clarity and debugging, not the default user experience.
 
@@ -159,8 +159,9 @@ When the designer flips `DS.color.contrastAlgorithm`, expect `failCount` to chan
 The Figma spec sheet is for **humans**; the markdown handover is for **agents**. The plugin renders structure and tangible data (variants, sizing, anatomy, token names). The agent must supply the human-readable content — never rely on generic defaults.
 
 1. Ask the user to navigate to the Figma page containing the target component (it must be on the current page), select the component or component set, and keep the Figlets Bridge plugin open.
-2. **Inspect first.** Call `inspect_component` (after asking the user to select the component) or read the existing `figma-data.json` snapshot to understand: what the component is, its variants, properties, anatomy, and likely use cases.
-3. **Pre-flight readiness check.** Before generating, evaluate the inspection result for two issues that degrade spec quality. Report any findings to the user clearly and ask whether they'd like to fix them in Figma first or proceed as-is:
+2. **Refresh DS context first.** Call `sync_figma_data` before inspecting the component. Sync keeps manually added variables, styles, and component bindings visible to Figlets and silently refreshes compatible local Figlets config values without writing Figma. If sync reports `activeFile.configRefresh.compatible: false`, skipped rows, or Figma-only variables/styles that do not fit the current config, explain the mismatch in designer language and ask before any override; route exact additions through the relevant Figlets planning flow if the designer wants them in config.
+3. **Inspect after freshness.** Call `inspect_component` (after asking the user to select the component) to understand what the component is, its variants, properties, anatomy, and likely use cases.
+4. **Pre-flight readiness check.** Before generating, evaluate the inspection result for two issues that degrade spec quality. Report any findings to the user clearly and ask whether they'd like to fix them in Figma first or proceed as-is:
 
    **a. Generic layer names** — scan all direct and shallow children for Figma default names: `Frame NNN`, `Group NNN`, `Rectangle NNN`, `Ellipse NNN`, `Vector NNN`, `Component NNN`. These appear as-is in the Anatomy section. Renamed layers produce a readable anatomy; default names produce noise. Example message: _"I noticed 3 layers still have default Figma names (Frame 12, Rectangle 7, Group 3). Renaming them will make the Anatomy section readable for developers. Fix first, or proceed?"_
 
@@ -168,15 +169,15 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 
    If both issues are present, report them together. If the user chooses to fix in Figma: wait for confirmation, then re-inspect before proceeding. If the user proceeds as-is: continue without further prompting.
 
-4. **Craft the content** based on what you learned. If the user supplied any of these, use their wording verbatim; otherwise generate them yourself as a UX expert would:
+5. **Craft the content** based on what you learned. If the user supplied any of these, use their wording verbatim; otherwise generate them yourself as a UX expert would:
    - `description` — 1–2 sentences: what the component is and when to use it
    - `usage_do` — 2–3 rules grounded in this specific component's purpose
    - `usage_dont` — 2–3 rules grounded in misuse risks specific to this component
    - `accessibility_notes` — 2–4 maintenance notes for implementation handoff. These are not suggestions to improve the design; they preserve accessible behavior when an agent or developer rebuilds it. Deduce component-specific notes from inspection when possible: alt text for image/artwork/media slots, captions/transcripts for video, semantic labels/roles, keyboard and focus behavior for interactive states, readable text, and preserving DS tokens that carry contrast/sizing/focus affordances. If no design system is detected, include generic maintenance notes for semantic structure, accessible names, keyboard behavior, contrast, and text scaling.
    - `variant_descriptions` — map of exact variant name → ≤10-word purpose
-5. Call `generate_component_doc` with `component_name` plus the content inputs.
-6. Confirm the returned `pathWritten` / `writtenPath`. Do not ask the user where the file is unless the tool reports a write error.
-7. Tell the user: spec sheet rendered in the Documentation section, markdown saved locally at the returned path, `[SPEC]` block written to the component description for MCP handover.
+6. Call `generate_component_doc` with `component_name` plus the content inputs.
+7. Confirm the returned `pathWritten` / `writtenPath`. Do not ask the user where the file is unless the tool reports a write error.
+8. Tell the user: spec sheet rendered in the Documentation section, markdown saved locally at the returned path, `[SPEC]` block written to the component description for MCP handover.
 
 ### Full design system health check
 1. Call `sync_figma_data`

@@ -516,7 +516,8 @@ server.tool(
   {
     config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path. Defaults to the active file config."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
-    dry_run: z.boolean().optional().describe("When true, report changes without writing design-system.config.js.")
+    dry_run: z.boolean().optional().describe("When true, report changes without writing design-system.config.js."),
+    compatible_only: z.boolean().optional().describe("When true, write only if the refresh has no skipped configured rows. Use for silent compatible refreshes before downstream workflows.")
   },
   async (args) => {
     try {

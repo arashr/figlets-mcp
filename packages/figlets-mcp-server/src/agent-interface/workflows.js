@@ -634,7 +634,7 @@ const WORKFLOWS = [
   {
     id: "component-docs",
     title: "Component Documentation",
-    summary: "Inspect a selected component, craft human usage guidance, and generate a Figma spec sheet plus written markdown handoff.",
+    summary: "Sync the current Figma design-system snapshot, inspect a selected component, craft human usage guidance, and generate a Figma spec sheet plus written markdown handoff.",
     intents: [
       "document component",
       "document this component",
@@ -653,10 +653,16 @@ const WORKFLOWS = [
         designerMessage: "Select the component in Figma, then tell me when you're ready.",
       },
       {
+        id: "sync-design-system-context",
+        kind: "read",
+        tool: "sync_figma_data",
+        designerMessage: "I'll pull a fresh read-only snapshot from Figma first. Sync also silently refreshes compatible local Figlets context so variables, styles, and component bindings added since the last run are visible before documentation.",
+      },
+      {
         id: "inspect",
         kind: "read",
         tool: "inspect_component",
-        designerMessage: "I'll inspect the selected component before writing guidance.",
+        designerMessage: "I'll inspect the selected component after the sync freshness check before writing guidance.",
       },
       {
         id: "draft-copy",
@@ -677,7 +683,11 @@ const WORKFLOWS = [
       },
     ],
     next: ["qa-binding-audit", "export-design-md", "component-docs"],
-    errors: ["If the component has generic layer names or missing properties, ask whether the designer wants to fix those first."],
+    errors: [
+      "If sync_figma_data cannot run, ask the designer to open the Figlets Bridge plugin in Figma Desktop; do not continue from a stale snapshot unless they explicitly choose to proceed without freshness.",
+      "If sync_figma_data returns activeFile.configRefresh.compatible === false or skipped rows, summarize the mismatch in designer language and ask before any override or route exact additions through the relevant Figlets planning flow. Do not ask the designer about updating a local JS config when sync already applied a compatible refresh.",
+      "If the component has generic layer names or missing properties, ask whether the designer wants to fix those first.",
+    ],
   },
   {
     id: "qa-binding-audit",
@@ -703,6 +713,12 @@ const WORKFLOWS = [
         id: "select-scope",
         kind: "confirmation",
         designerMessage: "Select the frame or component to audit, or confirm that the current page is the intended scope.",
+      },
+      {
+        id: "sync-design-system-context",
+        kind: "read",
+        tool: "sync_figma_data",
+        designerMessage: "I'll sync the current Figma file first so the binding audit uses fresh variables/styles and compatible local Figlets context.",
       },
       {
         id: "audit",

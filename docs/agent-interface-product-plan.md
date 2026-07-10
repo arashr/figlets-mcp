@@ -418,14 +418,17 @@ Designer intent examples:
 Tools:
 
 1. Ask designer to select the component in Figma.
-2. `inspect_component`
-3. Agent writes component-specific description, usage rules, and variant descriptions.
-4. `generate_component_doc`
-5. Agent writes returned markdown to the returned path after confirming new directories when needed.
+2. `sync_figma_data`
+3. If sync reports `activeFile.configRefresh.compatible: false` or skipped rows, summarize the mismatch in designer language and ask before any override or route exact additions through the relevant planning flow.
+4. `inspect_component`
+5. Agent writes component-specific description, usage rules, and variant descriptions.
+6. `generate_component_doc`
+7. Agent reports the returned markdown path; the tool writes the file.
 
 Confirmation boundary:
 
 - `inspect_component` is read-only.
+- Sync does not mutate Figma. It may update existing local config entries silently when the refresh is compatible because that local JS file is Figlets' interpretation cache, not a designer-facing Figma write. Incompatible or skipped rows require a warning/decision before override; sync does not create new config tokens/styles.
 - `generate_component_doc` writes a Figma spec sheet and component description metadata.
 - The agent must not generate generic filler content without inspecting the component.
 

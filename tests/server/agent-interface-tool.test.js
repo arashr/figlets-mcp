@@ -363,6 +363,14 @@ try {
 
   {
     const qaGuide = getWorkflowGuide("qa-binding-audit");
+    const qaTools = qaGuide.steps.map(step => step.tool).filter(Boolean);
+    assert.deepStrictEqual(qaTools, [
+      "sync_figma_data",
+      "qa_binding_audit",
+      "qa_binding_audit:fix",
+      "qa_binding_audit",
+    ]);
+    assert.ok(qaGuide.steps.some(step => step.id === "sync-design-system-context" && step.kind === "read" && step.tool === "sync_figma_data"));
     assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("fixableNow")));
     assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("stable numbered list")));
     assert.ok(qaGuide.steps.some(step => step.designerMessage.includes("issue number")));
@@ -434,6 +442,23 @@ try {
     assert.ok(verifyStep.designerMessage.includes("sync_figma_data, detect_design_system, audit_tokens, inspect_ds_setup_gaps, then inspect_ds_token_gaps"));
     assert.ok(verifyStep.designerMessage.includes("will not call the file clean"));
     assert.ok(!guide.next.includes("setup-gap-qa"));
+  }
+
+  {
+    const guide = getWorkflowGuide("component-docs");
+    assert.ok(guide.summary.includes("Sync the current Figma design-system snapshot"));
+    const tools = guide.steps.map(step => step.tool).filter(Boolean);
+    assert.deepStrictEqual(tools, [
+      "sync_figma_data",
+      "inspect_component",
+      "generate_component_doc",
+    ]);
+    assert.ok(guide.steps.some(step => step.id === "sync-design-system-context" && step.kind === "read" && step.tool === "sync_figma_data"));
+    assert.ok(guide.steps.some(step => step.id === "sync-design-system-context" && step.designerMessage.includes("silently refreshes compatible local Figlets context")));
+    assert.ok(guide.steps.some(step => step.id === "inspect" && step.designerMessage.includes("after the sync freshness check")));
+    assert.ok(guide.errors.some(item => item.includes("stale snapshot")));
+    assert.ok(guide.errors.some(item => item.includes("activeFile.configRefresh.compatible === false")));
+    assert.ok(guide.errors.some(item => item.includes("route exact additions through the relevant Figlets planning flow")));
   }
 
   {

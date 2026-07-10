@@ -214,15 +214,28 @@ module.exports = (() => {
   try {
     const dryRun = handleRefreshDsConfigFromFigma({ config_path: configPath, figmaDataPath: snapshotPath, dry_run: true });
     assert.strictEqual(dryRun.dryRun, true);
+    assert.strictEqual(dryRun.compatible, true);
+    assert.strictEqual(dryRun.summary.compatible, true);
     assert.strictEqual(dryRun.summary.changedCount, 9);
     assert.ok(fs.readFileSync(configPath, "utf8").includes("#000000"), "dry run should not write config");
 
-    const applied = handleRefreshDsConfigFromFigma({ config_path: configPath, figmaDataPath: snapshotPath });
+    const applied = handleRefreshDsConfigFromFigma({ config_path: configPath, figmaDataPath: snapshotPath, compatible_only: true });
     assert.strictEqual(applied.dryRun, false);
+    assert.strictEqual(applied.compatible, true);
     assert.strictEqual(applied.summary.changedCount, 9);
     const updated = fs.readFileSync(configPath, "utf8");
     assert.ok(updated.includes("#1A334D"), "apply should write refreshed brand hex");
     assert.ok(updated.includes("color/blue/800"), "apply should write refreshed semantic alias refs");
+
+    const incompatibleDs = makeDs();
+    incompatibleDs.color.ramps[0].steps.push([800, 0, 0, 0]);
+    fs.writeFileSync(configPath, "const DS = " + JSON.stringify(incompatibleDs, null, 2) + ";\n", "utf8");
+    const blocked = handleRefreshDsConfigFromFigma({ config_path: configPath, figmaDataPath: snapshotPath, compatible_only: true });
+    assert.ok(blocked.error && blocked.error.includes("not compatible"), "compatible_only should block skipped rows");
+    assert.strictEqual(blocked.compatible, false);
+    assert.strictEqual(blocked.summary.skippedCount, 1);
+    const blockedText = fs.readFileSync(configPath, "utf8");
+    assert.ok(blockedText.includes("[800,0,0,0]") || blockedText.includes("800"), "blocked compatible refresh should not rewrite config");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

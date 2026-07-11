@@ -10021,12 +10021,18 @@ function _docPaintStopSummary(stop) {
   return color || pos;
 }
 
+function _docPaintOpacitySummary(paint) {
+  if (!paint || typeof paint.opacity !== 'number' || paint.opacity >= 1) return '';
+  return ' opacity ' + _docFormatNumber(paint.opacity * 100) + '%';
+}
+
 function _docPaintDetailSummary(paint) {
   if (!paint || paint.visible === false) return '';
   const type = paint.type || 'Paint';
+  const opacity = _docPaintOpacitySummary(paint);
   if (type === 'SOLID') {
     const color = _docColorSummary(paint.color);
-    return color ? 'SOLID ' + color : 'SOLID';
+    return (color ? 'SOLID ' + color : 'SOLID') + opacity;
   }
   if (String(type).indexOf('GRADIENT_') === 0) {
     const stops = [];
@@ -10035,10 +10041,10 @@ function _docPaintDetailSummary(paint) {
       const stop = _docPaintStopSummary(gradientStops[i]);
       if (stop) stops.push(stop);
     }
-    return type + (stops.length ? ' stops ' + stops.join(' -> ') : '');
+    return type + (stops.length ? ' stops ' + stops.join(' -> ') : '') + opacity;
   }
-  if (type === 'IMAGE') return 'IMAGE ' + (paint.scaleMode || '');
-  return type;
+  if (type === 'IMAGE') return ('IMAGE ' + (paint.scaleMode || '')).trim() + opacity;
+  return type + opacity;
 }
 
 function _docPaintsDetailSummary(paints) {
@@ -10055,6 +10061,78 @@ function _docPaintStyleSummary(style) {
   if (!style) return '—';
   const details = _docPaintsDetailSummary(style.paints);
   return 'Paint style: ' + style.name + (details ? '; ' + details : '');
+}
+
+function _docBooleanVisibleWhen(defaultValue, nodeVisible) {
+  const def = defaultValue === true || defaultValue === 'true';
+  const visible = nodeVisible !== false;
+  return visible ? def : !def;
+}
+
+function _docBooleanVisibilitySummary(defaultValue, nodeVisible) {
+  const visibleWhen = _docBooleanVisibleWhen(defaultValue, nodeVisible);
+  return visibleWhen ? 'false: hidden; true: visible' : 'false: visible; true: hidden';
+}
+
+function _docRelativeBoundsSummary(node, root) {
+  const nb = node && node.absoluteBoundingBox;
+  const rb = root && root.absoluteBoundingBox;
+  if (!nb || !rb) return '—';
+  const x = _docFormatNumber(nb.x - rb.x);
+  const y = _docFormatNumber(nb.y - rb.y);
+  return 'x ' + x + 'px, y ' + y + 'px, w ' + _docFormatNumber(nb.width) + 'px, h ' + _docFormatNumber(nb.height) + 'px';
+}
+
+function _docBoundsArea(bounds) {
+  if (!bounds || typeof bounds.width !== 'number' || typeof bounds.height !== 'number') return 0;
+  return Math.max(0, bounds.width) * Math.max(0, bounds.height);
+}
+
+function _docBoundsIntersectionArea(a, b) {
+  if (!a || !b) return 0;
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  return Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+}
+
+function _docPlacementSummary(node, root, anatomyItems) {
+  const nb = node && node.absoluteBoundingBox;
+  const rb = root && root.absoluteBoundingBox;
+  if (!nb || !rb) return '—';
+  const nodeArea = _docBoundsArea(nb);
+  const rootArea = _docBoundsArea(rb);
+  if (rootArea > 0 && nodeArea >= rootArea * 0.95) return 'covers root card';
+
+  let containing = '';
+  let covering = '';
+  const items = Array.isArray(anatomyItems) ? anatomyItems : [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const target = item && item.node && item.node.absoluteBoundingBox;
+    if (!target) continue;
+    const targetArea = _docBoundsArea(target);
+    const intersection = _docBoundsIntersectionArea(nb, target);
+    if (!covering && targetArea > 0 && intersection >= targetArea * 0.95 && nodeArea >= targetArea * 0.8) {
+      covering = item.name || (item.node && item.node.name) || '';
+    }
+    if (!containing && nodeArea > 0 && intersection >= nodeArea * 0.5) {
+      containing = item.name || (item.node && item.node.name) || '';
+    }
+  }
+  if (covering) return 'covers ' + covering;
+
+  const cx = nb.x + nb.width / 2;
+  const cy = nb.y + nb.height / 2;
+  const relX = rb.width ? (cx - rb.x) / rb.width : 0.5;
+  const relY = rb.height ? (cy - rb.y) / rb.height : 0.5;
+  const xLabel = relX < 0.33 ? 'left' : (relX > 0.67 ? 'right' : 'center');
+  const yLabel = relY < 0.33 ? 'top' : (relY > 0.67 ? 'bottom' : 'middle');
+  let placement = yLabel === 'middle' && xLabel === 'center' ? 'center' : yLabel + '-' + xLabel;
+  if (containing) placement += ' within ' + containing;
+  else placement += ' within root card';
+  return placement;
 }
 
 function _docEffectDetailSummary(effect) {
@@ -10087,6 +10165,25 @@ function _docEffectsDetailSummary(effects) {
   return parts.join(' | ');
 }
 
+function _docEffectOutset(effect) {
+  if (!effect || effect.visible === false) return 0;
+  const radius = typeof effect.radius === 'number' ? Math.max(0, effect.radius) : 0;
+  const spread = typeof effect.spread === 'number' ? Math.max(0, effect.spread) : 0;
+  const offset = effect.offset || {};
+  const offsetX = typeof offset.x === 'number' ? Math.abs(offset.x) : 0;
+  const offsetY = typeof offset.y === 'number' ? Math.abs(offset.y) : 0;
+  return Math.max(offsetX, offsetY) + radius + spread;
+}
+
+function _docEffectsOutset(effects) {
+  const list = Array.isArray(effects) ? effects : [];
+  let max = 0;
+  for (let i = 0; i < list.length; i++) {
+    max = Math.max(max, _docEffectOutset(list[i]));
+  }
+  return max;
+}
+
 function _docEffectSummary(node, effectStyleById) {
   if (!node) return 'No effects';
   if (node.effectStyleId && effectStyleById && effectStyleById[node.effectStyleId]) {
@@ -10100,6 +10197,15 @@ function _docEffectSummary(node, effectStyleById) {
     return details ? 'Effects: ' + details : 'Effects: ' + count;
   }
   return 'No effects';
+}
+
+function _docVariantPreviewOutset(node, effectStyleById) {
+  if (!node) return 0;
+  let max = _docEffectsOutset(node.effects);
+  if (node.effectStyleId && effectStyleById && effectStyleById[node.effectStyleId]) {
+    max = Math.max(max, _docEffectsOutset(effectStyleById[node.effectStyleId].effects));
+  }
+  return max;
 }
 
 function _docFormatReactionPart(value) {
@@ -10693,9 +10799,166 @@ async function _buildComponentDoc(opts) {
     return out;
   }
   const resolved = _resolveBindingRows(_rawBinds);
+
+  function _docInlineSummary(value) {
+    return String(value || '').replace(/\s*\|\s*/g, '; ').replace(/\n+/g, '; ');
+  }
+
+  function _boundVariableStyleSummary(node, key, property) {
+    const bv = node && node.boundVariables ? node.boundVariables : {};
+    const entry = bv[key] ? (Array.isArray(bv[key]) ? bv[key][0] : bv[key]) : null;
+    const id = entry && entry.id ? entry.id : null;
+    if (!id) return '';
+    const variable = varById[id];
+    const name = variable ? variable.name : id;
+    return name + ' (' + _resolvedVariableValueSummary(id, property) + ')';
+  }
+
+  function _paintStyleSummary(styleId) {
+    if (!styleId || styleId === figma.mixed) return '';
+    const style = paintStyleById[styleId];
+    return style ? _docPaintStyleSummary(style) : String(styleId);
+  }
+
+  function _conditionalPaintSummary(node, key, label) {
+    const variable = _boundVariableStyleSummary(node, key, label);
+    if (variable) return label + ': ' + variable;
+    if (key === 'fills') {
+      const fillStyle = _paintStyleSummary(node && node.fillStyleId);
+      if (fillStyle) return 'Fill style: ' + fillStyle;
+      const fills = _docPaintsDetailSummary(node && node.fills);
+      if (fills) return 'Fill: ' + fills;
+    }
+    if (key === 'strokes') {
+      const strokeStyle = _paintStyleSummary(node && node.strokeStyleId);
+      if (strokeStyle) return 'Stroke style: ' + strokeStyle;
+      const strokes = _docPaintsDetailSummary(node && node.strokes);
+      if (strokes) return 'Stroke: ' + strokes;
+    }
+    return '';
+  }
+
+  function _conditionalLayerStyleSummary(node) {
+    if (!node) return '—';
+    const parts = [];
+    const fill = _conditionalPaintSummary(node, 'fills', 'Fill');
+    const stroke = _conditionalPaintSummary(node, 'strokes', 'Stroke');
+    if (fill) parts.push(fill);
+    if (stroke) parts.push(stroke);
+    if (node.effectStyleId && effectStyleById[node.effectStyleId]) {
+      parts.push(_docEffectSummary({ effectStyleId: node.effectStyleId }, effectStyleById));
+    } else {
+      const effects = _docEffectsDetailSummary(node.effects);
+      if (effects) parts.push('Effects: ' + effects);
+    }
+    if (typeof node.opacity === 'number' && node.opacity !== 1) parts.push('Opacity: ' + _docFormatNumber(node.opacity * 100) + '%');
+    const radius = _docCornerRadiusSummary(node);
+    if (radius) parts.push(radius);
+    if (node.type === 'TEXT' && node.textStyleId && textStyleById[node.textStyleId]) {
+      parts.push('Text style: ' + textStyleById[node.textStyleId].name);
+    }
+    return parts.length ? _docInlineSummary(parts.join('; ')) : '—';
+  }
+
+  function _booleanComponentPropertyDefinitions() {
+    const defs = {};
+    const keys = Object.keys(compMeta.componentPropertyDefinitions || {});
+    for (let i = 0; i < keys.length; i++) {
+      const def = compMeta.componentPropertyDefinitions[keys[i]];
+      if (def && def.type === 'BOOLEAN') defs[keys[i]] = def;
+    }
+    return defs;
+  }
+
+  function _collectBooleanConditionalLayers(root) {
+    const boolDefs = _booleanComponentPropertyDefinitions();
+    const out = [];
+    const seen = {};
+    function walk(node, depth) {
+      if (!node || _isDocPrivateNodeName(node.name)) return;
+      const refs = node.componentPropertyReferences || {};
+      const visibleRef = refs.visible;
+      const def = visibleRef && boolDefs[visibleRef] ? boolDefs[visibleRef] : null;
+      if (def) {
+        const key = (node.id || node.name || '') + '|' + visibleRef;
+        if (!seen[key]) {
+          seen[key] = true;
+          const propName = _cleanComponentPropertyName(visibleRef);
+          const visibleWhen = _docBooleanVisibleWhen(def.defaultValue, node.visible);
+          out.push({
+            property: propName,
+            propertyKey: visibleRef,
+            layer: node.name || '',
+            type: node.type || '',
+            node: node,
+            depth: depth,
+            visibleWhen: visibleWhen,
+            visibility: _docBooleanVisibilitySummary(def.defaultValue, node.visible),
+            bounds: _docRelativeBoundsSummary(node, root),
+            styling: _conditionalLayerStyleSummary(node),
+            notes: _docPlacementSummary(node, root, _docAnatomyNodes)
+          });
+        }
+      }
+      if ('children' in node && node.children && node.type !== 'INSTANCE' && node.type !== 'SLOT') {
+        for (let i = 0; i < node.children.length; i++) walk(node.children[i], depth + 1);
+      }
+    }
+    walk(root, 0);
+    return out;
+  }
+
+  const _conditionalLayerRows = _collectBooleanConditionalLayers(_defaultV);
+
+  function _uniqueLayerNames(rows, visibleWhen) {
+    const names = [];
+    const seen = {};
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].visibleWhen !== visibleWhen) continue;
+      const name = rows[i].layer || 'Layer';
+      if (!seen[name]) {
+        seen[name] = true;
+        names.push(name);
+      }
+    }
+    return names;
+  }
+
+  function _booleanBehaviorCell(rows, value) {
+    const shown = _uniqueLayerNames(rows, value);
+    const hidden = _uniqueLayerNames(rows, !value);
+    const parts = [];
+    if (shown.length) parts.push('Shows ' + shown.join(', '));
+    if (hidden.length) parts.push('Hides ' + hidden.join(', '));
+    return parts.length ? parts.join('; ') : 'No boolean-controlled layer visibility detected';
+  }
+
+  function _buildBooleanBehaviorRows(layerRows) {
+    const byProp = {};
+    for (let i = 0; i < layerRows.length; i++) {
+      const row = layerRows[i];
+      const key = row.propertyKey || row.property;
+      if (!byProp[key]) byProp[key] = { property: row.property, propertyKey: key, rows: [] };
+      byProp[key].rows.push(row);
+    }
+    const props = Object.keys(byProp).sort();
+    const out = [];
+    for (let i = 0; i < props.length; i++) {
+      const group = byProp[props[i]];
+      out.push({
+        propertyKey: group.propertyKey,
+        property: group.property,
+        falseValue: _booleanBehaviorCell(group.rows, false),
+        trueValue: _booleanBehaviorCell(group.rows, true)
+      });
+    }
+    return out;
+  }
+
+  const _booleanBehaviorRows = _buildBooleanBehaviorRows(_conditionalLayerRows);
   const _accessibilityNotes = _mergedAccessibilityNotes(
     agentAccessibilityNotes,
-    _defaultAccessibilityNotes(_defaultV, _slotDocs, resolved.length > 0)
+    _defaultAccessibilityNotes(_defaultV, _slotDocs, resolved.length > 0 || _conditionalLayerRows.length > 0)
   );
 
   // ── Fonts ──────────────────────────────────────────────────────────────────
@@ -10928,6 +11191,115 @@ async function _buildComponentDoc(opts) {
     t.primaryAxisSizingMode = 'AUTO'; t.counterAxisSizingMode = 'FIXED';
     return t;
   }
+  function _mkPreviewText(parent, text, role, style, color, colorVar) {
+    const t = figma.createText();
+    t.characters = String(text);
+    _applyTextRole(t, role || 'body', role === 'sectionLabel' ? 11 : 12, style || _fReg, color || _cInk, colorVar || _vInk);
+    parent.appendChild(t);
+    t.textAutoResize = 'WIDTH_AND_HEIGHT';
+    return t;
+  }
+  function _applyBooleanPropertyPreview(instance, row, value) {
+    if (!instance || typeof instance.setProperties !== 'function') return false;
+    const payload = {};
+    payload[row.propertyKey || row.property] = value;
+    try {
+      instance.setProperties(payload);
+      return true;
+    } catch (e) {}
+    if (row.propertyKey && row.propertyKey !== row.property) {
+      const fallback = {};
+      fallback[row.property] = value;
+      try {
+        instance.setProperties(fallback);
+        return true;
+      } catch (e2) {}
+    }
+    return false;
+  }
+  function _mkBooleanPreviewState(parent, row, value) {
+    const pad = Math.ceil(_docVariantPreviewOutset(_defaultV, effectStyleById)) + 4;
+    const previewWidth = Math.ceil((typeof _defaultV.width === 'number' ? _defaultV.width : 320) + pad * 2);
+    const previewHeight = Math.ceil((typeof _defaultV.height === 'number' ? _defaultV.height : 240) + pad * 2);
+    const stateWidth = Math.max(520, previewWidth + 32);
+    const stateHeight = previewHeight + 72;
+    const col = figma.createFrame();
+    col.name = (value ? 'True' : 'False') + ' Preview';
+    col.layoutMode = 'VERTICAL';
+    col.primaryAxisSizingMode = 'FIXED';
+    col.counterAxisSizingMode = 'FIXED';
+    col.resize(stateWidth, stateHeight);
+    col.itemSpacing = 12;
+    col.paddingTop = 16; col.paddingBottom = 16; col.paddingLeft = 16; col.paddingRight = 16;
+    col.fills = [];
+    col.strokes = [_paint(_cBorder, _vBorder)];
+    col.strokeWeight = 1;
+    col.cornerRadius = 6;
+    col.clipsContent = false;
+    _bindVar(col, 'itemSpacing', _docSpace.padM);
+    _bindVar(col, 'paddingTop', _docSpace.padL);
+    _bindVar(col, 'paddingBottom', _docSpace.padL);
+    _bindVar(col, 'paddingLeft', _docSpace.padL);
+    _bindVar(col, 'paddingRight', _docSpace.padL);
+    _bindVar(col, 'cornerRadius', _docSpace.radius);
+    _bindVar(col, 'strokeWeight', _docSpace.border);
+    parent.appendChild(col);
+
+    _mkPreviewText(col, value ? 'TRUE' : 'FALSE', 'sectionLabel', _fSemi, _cSubtle, _vSubtle);
+    const shell = figma.createFrame();
+    shell.name = 'Boolean Preview Bounds';
+    shell.layoutMode = 'VERTICAL';
+    shell.primaryAxisSizingMode = 'FIXED';
+    shell.counterAxisSizingMode = 'FIXED';
+    shell.resize(previewWidth, previewHeight);
+    shell.primaryAxisAlignItems = 'CENTER';
+    shell.counterAxisAlignItems = 'CENTER';
+    shell.paddingTop = pad; shell.paddingRight = pad; shell.paddingBottom = pad; shell.paddingLeft = pad;
+    shell.fills = [];
+    shell.clipsContent = false;
+    col.appendChild(shell);
+
+    const inst = _defaultV.createInstance();
+    const applied = _applyBooleanPropertyPreview(inst, row, value);
+    if (applied) {
+      shell.appendChild(inst);
+    } else {
+      try { inst.remove(); } catch (e) {}
+      _mkPreviewText(shell, 'Preview unavailable: Figma did not expose a settable boolean property on this instance.', 'body', _fReg, _cSubtle, _vSubtle);
+    }
+    return col;
+  }
+  function _mkBooleanPreviewRow(parent, row) {
+    const wrap = figma.createFrame();
+    wrap.name = 'Boolean Property Preview · ' + row.property;
+    wrap.layoutMode = 'VERTICAL';
+    wrap.primaryAxisSizingMode = 'FIXED';
+    wrap.counterAxisSizingMode = 'FIXED';
+    const pad = Math.ceil(_docVariantPreviewOutset(_defaultV, effectStyleById)) + 4;
+    const previewHeight = Math.ceil((typeof _defaultV.height === 'number' ? _defaultV.height : 240) + pad * 2);
+    wrap.resize(1280, previewHeight + 112);
+    wrap.itemSpacing = 16;
+    wrap.fills = [];
+    wrap.clipsContent = false;
+    _bindVar(wrap, 'itemSpacing', _docSpace.padL);
+    parent.appendChild(wrap);
+
+    _mkPreviewText(wrap, row.property, 'bodyStrong', _fSemi, _cInk, _vInk);
+    const states = figma.createFrame();
+    states.name = 'Boolean Preview States';
+    states.layoutMode = 'HORIZONTAL';
+    states.primaryAxisSizingMode = 'AUTO';
+    states.counterAxisSizingMode = 'FIXED';
+    states.resize(1, previewHeight + 72);
+    states.itemSpacing = 24;
+    states.fills = [];
+    states.clipsContent = false;
+    _bindVar(states, 'itemSpacing', _docSpace.padXL);
+    wrap.appendChild(states);
+    _mkBooleanPreviewState(states, row, false);
+    _mkBooleanPreviewState(states, row, true);
+    return wrap;
+  }
 
   // Section A — Header
   const _secA = figma.createFrame();
@@ -10982,9 +11354,26 @@ async function _buildComponentDoc(opts) {
     const _v = _children[i];
     const _vf = figma.createFrame();
     _vf.layoutMode = 'VERTICAL'; _vf.primaryAxisSizingMode = 'AUTO'; _vf.counterAxisSizingMode = 'AUTO';
-    _vf.primaryAxisAlignItems = 'CENTER'; _vf.itemSpacing = 8; _vf.fills = [];
+    _vf.primaryAxisAlignItems = 'CENTER'; _vf.itemSpacing = 8; _vf.fills = []; _vf.clipsContent = false;
     _bindVar(_vf, 'itemSpacing', _docSpace.padS);
-    _secC.appendChild(_vf); _vf.appendChild(_v.createInstance());
+    _secC.appendChild(_vf);
+    const _previewOutset = Math.ceil(_docVariantPreviewOutset(_v, effectStyleById));
+    const _previewPad = _previewOutset > 0 ? _previewOutset + 4 : 0;
+    const _previewShell = figma.createFrame();
+    _previewShell.name = 'Variant Preview Bounds';
+    _previewShell.layoutMode = 'VERTICAL';
+    _previewShell.primaryAxisSizingMode = 'AUTO';
+    _previewShell.counterAxisSizingMode = 'AUTO';
+    _previewShell.primaryAxisAlignItems = 'CENTER';
+    _previewShell.counterAxisAlignItems = 'CENTER';
+    _previewShell.paddingTop = _previewPad;
+    _previewShell.paddingRight = _previewPad;
+    _previewShell.paddingBottom = _previewPad;
+    _previewShell.paddingLeft = _previewPad;
+    _previewShell.fills = [];
+    _previewShell.clipsContent = false;
+    _vf.appendChild(_previewShell);
+    _previewShell.appendChild(_v.createInstance());
     const _vl = figma.createText();
     _vl.characters = _v.name.replace(/,\s*/g, '\n');
     _applyTextRole(_vl, 'sectionLabel', 11, _fSemi, _cInk, _vInk);
@@ -11016,6 +11405,49 @@ async function _buildComponentDoc(opts) {
       _mkCell(r, key.replace(/#[^#]+$/, ''), 427, 'body');
       _mkCell(r, def.type, 427, 'mono');
       _mkCell(r, String(def.defaultValue !== undefined ? def.defaultValue : '—'), 426, 'body');
+    }
+  }
+
+  if (_booleanBehaviorRows.length > 0) {
+    _mkLabel(doc, 'BOOLEAN PROPERTY BEHAVIOR');
+    const _tblBool = _mkTable(doc, 'Boolean Property Behavior Table');
+    const _boolHdr = _mkRow(_tblBool, 1280, true);
+    _mkCell(_boolHdr, 'PROPERTY', 240, 'header-text');
+    _mkCell(_boolHdr, 'WHEN FALSE', 520, 'header-text');
+    _mkCell(_boolHdr, 'WHEN TRUE', 520, 'header-text');
+    for (let i = 0; i < _booleanBehaviorRows.length; i++) {
+      const row = _booleanBehaviorRows[i];
+      const r = _mkRow(_tblBool, 1280, false);
+      r.fills = i % 2 === 1 ? [_paint(_cSurface, _vSurface)] : [];
+      _mkCell(r, row.property, 240, 'body');
+      _mkCell(r, row.falseValue, 520, 'body');
+      _mkCell(r, row.trueValue, 520, 'body');
+    }
+    for (let i = 0; i < _booleanBehaviorRows.length; i++) {
+      _mkBooleanPreviewRow(doc, _booleanBehaviorRows[i]);
+    }
+  }
+
+  if (_conditionalLayerRows.length > 0) {
+    _mkLabel(doc, 'CONDITIONAL LAYERS');
+    const _tblCond = _mkTable(doc, 'Conditional Layers Table');
+    const _condHdr = _mkRow(_tblCond, 1280, true);
+    _mkCell(_condHdr, 'PROPERTY', 150, 'header-text');
+    _mkCell(_condHdr, 'LAYER', 210, 'header-text');
+    _mkCell(_condHdr, 'VISIBILITY', 220, 'header-text');
+    _mkCell(_condHdr, 'BOUNDS', 250, 'header-text');
+    _mkCell(_condHdr, 'STYLING', 310, 'header-text');
+    _mkCell(_condHdr, 'NOTES', 140, 'header-text');
+    for (let i = 0; i < _conditionalLayerRows.length; i++) {
+      const row = _conditionalLayerRows[i];
+      const r = _mkRow(_tblCond, 1280, false);
+      r.fills = i % 2 === 1 ? [_paint(_cSurface, _vSurface)] : [];
+      _mkCell(r, row.property, 150, 'body');
+      _mkCell(r, row.layer, 210, 'body');
+      _mkCell(r, row.visibility, 220, 'body');
+      _mkCell(r, row.bounds, 250, 'mono');
+      _mkCell(r, row.styling, 310, 'body');
+      _mkCell(r, row.notes, 140, 'body');
     }
   }
 
@@ -11373,19 +11805,37 @@ async function _buildComponentDoc(opts) {
     });
   }
   _pushLayoutMd('Root variant', _defaultV, true);
+  const _anatomyNodeIds = {};
   for (let i = 0; i < _docAnatomyNodes.length; i++) {
     const item = _docAnatomyNodes[i];
     const node = item.node;
     if (node && item.depth > 0) {
+      _anatomyNodeIds[node.id || node.name] = true;
       _anatomyMd.push({
         idx: _anatIdx++,
         name: node.name,
         type: node.type,
         token: _primaryAnatomyToken(node),
-        depth: item.depth
+        depth: item.depth,
+        note: ''
       });
       _pushLayoutMd(node.name, node, false);
     }
+  }
+  for (let i = 0; i < _conditionalLayerRows.length; i++) {
+    const row = _conditionalLayerRows[i];
+    const node = row.node;
+    const key = node && (node.id || node.name);
+    if (!node || (key && _anatomyNodeIds[key])) continue;
+    if (key) _anatomyNodeIds[key] = true;
+    _anatomyMd.push({
+      idx: _anatIdx++,
+      name: node.name,
+      type: node.type,
+      token: _primaryAnatomyToken(node),
+      depth: row.depth || 1,
+      note: 'Conditional ' + row.property + ': ' + row.visibility
+    });
   }
 
   const _variantChangeRows = [];
@@ -11435,7 +11885,10 @@ async function _buildComponentDoc(opts) {
   }
   for (let i = 0; i < _children.length; i++) _collectReactionDocs(_children[i], _children[i].name);
 
-  function _mdRow(cells) { return '| ' + cells.join(' | ') + ' |'; }
+  function _mdCell(value) {
+    return String(value === undefined || value === null ? '' : value).replace(/\|/g, '\\|').replace(/\n+/g, '<br>');
+  }
+  function _mdRow(cells) { return '| ' + cells.map(_mdCell).join(' | ') + ' |'; }
   function _mdTable(header, rows) {
     const lines = [_mdRow(header), _mdRow(header.map(function () { return '---'; }))];
     for (let i = 0; i < rows.length; i++) lines.push(_mdRow(rows[i]));
@@ -11469,6 +11922,16 @@ async function _buildComponentDoc(opts) {
   const _propsTable = _compProps.length > 0
     ? _mdTable(['Property', 'Type', 'Default', 'Description'],
         _compProps.map(function (p) { return [p.name, p.type, p.defaultValue, p.description]; }))
+    : '';
+
+  const _booleanBehaviorTable = _booleanBehaviorRows.length > 0
+    ? _mdTable(['Property', 'When false', 'When true'],
+        _booleanBehaviorRows.map(function (r) { return [r.property, r.falseValue, r.trueValue]; }))
+    : '';
+
+  const _conditionalLayersTable = _conditionalLayerRows.length > 0
+    ? _mdTable(['Property', 'Layer', 'Visibility', 'Bounds', 'Styling', 'Notes'],
+        _conditionalLayerRows.map(function (r) { return [r.property, r.layer, r.visibility, r.bounds, r.styling, r.notes]; }))
     : '';
 
   const _slotsTable = _slotDocs.length > 0
@@ -11510,7 +11973,7 @@ async function _buildComponentDoc(opts) {
     ? _mdTable(['#', 'Element', 'Type', 'Primary Token', 'Notes'],
         _anatomyMd.map(function (a) {
           const indent = a.depth > 1 ? new Array(a.depth).join('  ') : '';
-          return [a.idx, indent + a.name, a.type, a.token, ''];
+          return [a.idx, indent + a.name, a.type, a.token, a.note || ''];
         }))
     : '';
 
@@ -11549,6 +12012,22 @@ async function _buildComponentDoc(opts) {
     _md.push('## Component Properties');
     _md.push('');
     _md.push(_propsTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
+  if (_booleanBehaviorTable) {
+    _md.push('## Boolean Property Behavior');
+    _md.push('');
+    _md.push(_booleanBehaviorTable);
+    _md.push('');
+    _md.push('---');
+    _md.push('');
+  }
+  if (_conditionalLayersTable) {
+    _md.push('## Conditional Layers');
+    _md.push('');
+    _md.push(_conditionalLayersTable);
     _md.push('');
     _md.push('---');
     _md.push('');

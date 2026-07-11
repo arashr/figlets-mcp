@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-11 — component docs include boolean conditional layers]
+
+**Status:** Product handoff fix after `component-specs/Card.md` documented a `SoldOut` boolean and badge tokens but missed the hidden `Sold Out Grey` overlay behavior.
+
+**Shipped behavior:** `generate_component_doc` now detects nodes whose `componentPropertyReferences.visible` points to a boolean component property. The generated Figma spec sheet and markdown output include Boolean Property Behavior and Conditional Layers tables with false/true visibility, relative bounds, styling summaries, and placement/coverage notes. The Figma spec sheet also renders side-by-side false/true component previews for each documented boolean property. Controlled hidden layers are represented in Anatomy with a conditional note, and markdown table cells now escape pipes from paint/effect summaries. The Figma variant showcase wraps each preview instance in non-clipping padded bounds based on visible effect radius/spread/offset so focus rings and shadows are not cropped or overlapped by labels.
+
+**Boundary:** This documents Figma-backed visibility and visual facts only. Do not invent interactivity, cursor, disabled state, grayscale behavior, or click behavior unless Figma exposes it through properties, bindings, or prototype reactions.
+
+---
+
 ### [2026-07-10 — gradient paint styles included in handoff docs]
 
 **Status:** Product export fix after a designer added a Figma gradient paint style and Figlets ignored it.

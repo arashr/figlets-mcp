@@ -4,6 +4,18 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-07-11] Boolean-controlled layers belong in component handoffs
+
+**Decision:** `generate_component_doc` documents boolean component-property visibility bindings as implementation facts. When a node's `componentPropertyReferences.visible` points to a boolean property, both the Figma spec sheet and markdown include Boolean Property Behavior and Conditional Layers tables with the controlled layer, visibility states, relative bounds, visual styling, and placement/coverage notes. The Figma spec sheet also renders side-by-side false/true component previews for each documented boolean property. Controlled hidden layers are also added to the anatomy table with a conditional note.
+
+The Figma spec sheet's variant showcase also wraps each variant instance in a non-clipping preview bounds frame with padding derived from visible effect radius/spread/offset. Focus rings and shadows are part of the variant's visual behavior, so the showcase must allocate space for them instead of cropping or overlapping them with captions.
+
+**Why:** Conditional states such as a sold-out overlay can be hidden in the default component while still being essential to implementation. The previous anatomy filter intentionally skipped hidden layers, so generated docs could mention a boolean property and badge tokens while omitting the overlay bounds, color, opacity, and placement that a developer needs.
+
+**Consequence:** Component docs surface Figma-backed conditional visibility and visual facts in the designer-visible sheet and exported handoff without inventing behavior that Figma does not encode. Interactivity, cursor, disabled semantics, and click behavior remain implementation/product decisions unless represented by Figma properties or prototype reactions.
+
+---
+
 ## [2026-07-10] Gradient paint styles are exported as observed handoff facts
 
 **Decision:** `sync_figma_data` captures local Figma paint styles, including gradient fills, and `export_design_md` renders them inside the canonical `## Colors` section when a synced snapshot is available. Component documentation also records `fillStyleId`/`strokeStyleId` paint styles in its implementation-facing bindings table, including gradient type and stop details. REST-based file export preserves paint-style names/types when Figma exposes them as `FILL` styles, but full gradient stops require the bridge snapshot because the local plugin can read `PaintStyle.paints`.

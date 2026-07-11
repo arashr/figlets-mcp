@@ -29,17 +29,27 @@ const helperNames = [
   "_docVisibleEffectCount",
   "_docColorSummary",
   "_docPaintStopSummary",
+  "_docPaintOpacitySummary",
   "_docPaintDetailSummary",
   "_docPaintsDetailSummary",
   "_docPaintStyleSummary",
+  "_docBooleanVisibleWhen",
+  "_docBooleanVisibilitySummary",
+  "_docRelativeBoundsSummary",
+  "_docBoundsArea",
+  "_docBoundsIntersectionArea",
+  "_docPlacementSummary",
   "_docEffectDetailSummary",
   "_docEffectsDetailSummary",
+  "_docEffectOutset",
+  "_docEffectsOutset",
   "_docEffectSummary",
+  "_docVariantPreviewOutset",
 ];
 
 const helpers = new Function(
   helperNames.map(name => extractFunction(code, name)).join("\n") +
-    "\nreturn { _docColorSummary, _docPaintStyleSummary, _docEffectSummary };"
+    "\nreturn { _docColorSummary, _docPaintDetailSummary, _docPaintStyleSummary, _docBooleanVisibleWhen, _docBooleanVisibilitySummary, _docRelativeBoundsSummary, _docPlacementSummary, _docEffectSummary, _docVariantPreviewOutset };"
 )();
 
 module.exports = (async () => {
@@ -71,6 +81,21 @@ module.exports = (async () => {
     "Effect style: elevation/4; DROP_SHADOW color rgba(0, 0, 0, 0.16), alpha 0.16, offset-x 0px, offset-y 4px, blur 12px, spread 0px | DROP_SHADOW color rgba(0, 0, 0, 0.1), alpha 0.1, offset-x 0px, offset-y 0px, blur 20px, spread 0px",
     "effect summaries should preserve shadow alpha and zero offset-y values from Figma"
   );
+  assert.strictEqual(
+    helpers._docVariantPreviewOutset(
+      { effectStyleId: "effect-focus", effects: [] },
+      {
+        "effect-focus": {
+          effects: [
+            { type: "DROP_SHADOW", visible: true, offset: { x: 0, y: 0 }, radius: 0, spread: 2 },
+            { type: "DROP_SHADOW", visible: true, offset: { x: 0, y: 0 }, radius: 28, spread: 4 },
+          ],
+        },
+      }
+    ),
+    32,
+    "variant showcase previews should reserve space for focus-ring and shadow outsets"
+  );
 
   assert.strictEqual(
     helpers._docPaintStyleSummary({
@@ -89,6 +114,42 @@ module.exports = (async () => {
     }),
     "Paint style: gradient/brand-glow; GRADIENT_LINEAR stops 0% #3373ff -> 100% rgba(242, 77, 166, 0.72)",
     "paint style summaries should preserve gradient type, stops, colors, and alpha for implementation"
+  );
+
+  assert.strictEqual(
+    helpers._docPaintDetailSummary({
+      type: "SOLID",
+      visible: true,
+      color: { r: 0.07, g: 0.07, b: 0.07, a: 1 },
+      opacity: 0.45,
+    }),
+    "SOLID #121212 opacity 45%",
+    "paint summaries should preserve Figma paint opacity for overlays"
+  );
+
+  const root = { absoluteBoundingBox: { x: 100, y: 200, width: 320, height: 316 } };
+  const imageNode = {
+    name: "Image",
+    absoluteBoundingBox: { x: 100, y: 200, width: 320, height: 200 },
+  };
+  const overlayNode = {
+    absoluteBoundingBox: { x: 100, y: 200, width: 320, height: 200 },
+  };
+  const badgeNode = {
+    absoluteBoundingBox: { x: 340, y: 216, width: 64, height: 24 },
+  };
+  assert.strictEqual(helpers._docBooleanVisibleWhen(false, false), true);
+  assert.strictEqual(helpers._docBooleanVisibilitySummary(false, false), "false: hidden; true: visible");
+  assert.strictEqual(helpers._docRelativeBoundsSummary(overlayNode, root), "x 0px, y 0px, w 320px, h 200px");
+  assert.strictEqual(
+    helpers._docPlacementSummary(overlayNode, root, [{ name: "Image", node: imageNode }]),
+    "covers Image",
+    "conditional overlay notes should say which visible part the layer covers"
+  );
+  assert.strictEqual(
+    helpers._docPlacementSummary(badgeNode, root, [{ name: "Image", node: imageNode }]),
+    "top-right within Image",
+    "conditional badge notes should include placement relative to the visible part"
   );
 
   assert.ok(
@@ -117,12 +178,48 @@ module.exports = (async () => {
   );
 
   assert.ok(
+    code.includes("refs.visible") &&
+      code.includes("def.type === 'BOOLEAN'") &&
+      code.includes("## Boolean Property Behavior") &&
+      code.includes("## Conditional Layers") &&
+      code.includes("['Property', 'When false', 'When true']") &&
+      code.includes("['Property', 'Layer', 'Visibility', 'Bounds', 'Styling', 'Notes']") &&
+      code.includes("_mkLabel(doc, 'BOOLEAN PROPERTY BEHAVIOR')") &&
+      code.includes("_mkTable(doc, 'Boolean Property Behavior Table')") &&
+      code.includes("_mkBooleanPreviewRow(doc, _booleanBehaviorRows[i])") &&
+      code.includes("Boolean Property Preview · ") &&
+      code.includes("Boolean Preview States") &&
+      code.includes("Boolean Preview Bounds") &&
+      code.includes("const previewHeight = Math.ceil((typeof _defaultV.height === 'number' ? _defaultV.height : 240) + pad * 2)") &&
+      code.includes("col.primaryAxisSizingMode = 'FIXED'") &&
+      code.includes("shell.resize(previewWidth, previewHeight)") &&
+      code.includes("wrap.resize(1280, previewHeight + 112)") &&
+      code.includes("states.resize(1, previewHeight + 72)") &&
+      code.includes("instance.setProperties(payload)") &&
+      code.includes("_mkBooleanPreviewState(states, row, false)") &&
+      code.includes("_mkBooleanPreviewState(states, row, true)") &&
+      code.includes("_mkLabel(doc, 'CONDITIONAL LAYERS')") &&
+      code.includes("_mkTable(doc, 'Conditional Layers Table')") &&
+      code.includes("Conditional ' + row.property + ': ' + row.visibility"),
+    "component docs should document boolean-controlled conditional layer visibility, bounds, styling, anatomy notes, and false/true previews in markdown and the Figma spec sheet"
+  );
+
+  assert.ok(
     code.includes("const _variantChangeRows = [];") &&
       code.includes("_rootVisualState(variant)") &&
       code.includes("_resolveBindingRows(_collectBind(variant, []))") &&
       code.includes("### Variant changes") &&
       code.includes("['Variant', 'Target', 'Property', 'Value', 'Default']"),
     "component docs should include Figma-backed per-variant visual/token deltas"
+  );
+
+  assert.ok(
+    code.includes("Variant Preview Bounds") &&
+      code.includes("_docVariantPreviewOutset(_v, effectStyleById)") &&
+      code.includes("_previewShell.clipsContent = false") &&
+      code.includes("_vf.fills = []; _vf.clipsContent = false") &&
+      code.includes("_previewPad = _previewOutset > 0 ? _previewOutset + 4 : 0"),
+    "Figma spec-sheet variant previews should reserve layout space for out-of-bounds focus rings and shadows"
   );
 
   assert.ok(
@@ -138,8 +235,9 @@ module.exports = (async () => {
       code.includes("_resolvedVariableValueSummary") &&
       code.includes("_variableContext(b.varId)") &&
       code.includes("mode.name + ': ' + val") &&
+      code.includes("replace(/\\|/g, '\\\\|')") &&
       code.includes("breakpoint pixel thresholds"),
-    "token binding docs should include collection/mode context, per-mode resolved values, and avoid inventing breakpoint widths"
+    "token binding docs should include collection/mode context, per-mode resolved values, valid markdown escaping, and avoid inventing breakpoint widths"
   );
 
   assert.ok(

@@ -28,6 +28,10 @@ const helperNames = [
   "_docFormatNumber",
   "_docVisibleEffectCount",
   "_docColorSummary",
+  "_docPaintStopSummary",
+  "_docPaintDetailSummary",
+  "_docPaintsDetailSummary",
+  "_docPaintStyleSummary",
   "_docEffectDetailSummary",
   "_docEffectsDetailSummary",
   "_docEffectSummary",
@@ -35,7 +39,7 @@ const helperNames = [
 
 const helpers = new Function(
   helperNames.map(name => extractFunction(code, name)).join("\n") +
-    "\nreturn { _docColorSummary, _docEffectSummary };"
+    "\nreturn { _docColorSummary, _docPaintStyleSummary, _docEffectSummary };"
 )();
 
 module.exports = (async () => {
@@ -68,14 +72,48 @@ module.exports = (async () => {
     "effect summaries should preserve shadow alpha and zero offset-y values from Figma"
   );
 
+  assert.strictEqual(
+    helpers._docPaintStyleSummary({
+      id: "paint-brand-glow",
+      name: "gradient/brand-glow",
+      paints: [
+        {
+          type: "GRADIENT_LINEAR",
+          visible: true,
+          gradientStops: [
+            { position: 0, color: { r: 0.2, g: 0.45, b: 1, a: 1 } },
+            { position: 1, color: { r: 0.95, g: 0.3, b: 0.65, a: 0.72 } },
+          ],
+        },
+      ],
+    }),
+    "Paint style: gradient/brand-glow; GRADIENT_LINEAR stops 0% #3373ff -> 100% rgba(242, 77, 166, 0.72)",
+    "paint style summaries should preserve gradient type, stops, colors, and alpha for implementation"
+  );
+
   assert.ok(
     code.includes("const _allEffectStyles = _ds.effectStyles || [];") &&
+      code.includes("const _allPaintStyles = _ds.paintStyles || [];") &&
       code.includes("const effectStyleById = {};") &&
+      code.includes("const paintStyleById = {};") &&
       code.includes("node.effectStyleId") &&
+      code.includes("node.fillStyleId") &&
+      code.includes("node.strokeStyleId") &&
       code.includes("property: 'Effect style'") &&
+      code.includes("property: 'Fill style'") &&
+      code.includes("property: 'Stroke style'") &&
       code.includes("effect.boundVariables") &&
       code.includes("_collectEffectBindRows(effectStyleById[node.effectStyleId].effects"),
-    "component docs should collect effect style references and effect variable bindings"
+    "component docs should collect paint/effect style references and effect variable bindings"
+  );
+
+  assert.ok(
+    code.includes("context: 'Paint style'") &&
+      code.includes("_docPaintStyleSummary(style)") &&
+      code.includes("remoteStyle.type === 'PAINT' || remoteStyle.type === 'FILL'") &&
+      code.includes("return paintStyleById[node.fillStyleId].name") &&
+      code.includes("Stroke style: "),
+    "component docs should resolve local or library paint styles into implementation-visible markdown facts"
   );
 
   assert.ok(

@@ -225,6 +225,21 @@ module.exports = (async () => {
           ],
         },
       ];
+      snapshot.paintStyles = [
+        {
+          name: 'Gradient/Brand Glow',
+          paints: [
+            {
+              type: 'GRADIENT_LINEAR',
+              gradientStops: [
+                { position: 0, color: { r: 0.2, g: 0.45, b: 1, a: 1 } },
+                { position: 1, color: { r: 0.95, g: 0.3, b: 0.65, a: 1 } },
+              ],
+              visible: true,
+            },
+          ],
+        },
+      ];
       fs.writeFileSync(ws.snapshotPath, JSON.stringify(snapshot), 'utf8');
 
       const result = await withCwd(ws.tmp, () => handleExportDesignMd({
@@ -236,8 +251,12 @@ module.exports = (async () => {
       assert.ok(md.includes('## Additional Effect Styles'), 'DESIGN.md should include synced non-elevation effect styles');
       assert.ok(md.includes('| Focus Ring |'), 'DESIGN.md should name the observed effect style');
       assert.ok(md.includes('DROP_SHADOW'), 'DESIGN.md should include implementation-relevant effect facts');
+      assert.ok(md.includes('| Gradient/Brand Glow |'), 'DESIGN.md should name observed local paint styles');
+      assert.ok(md.includes('GRADIENT_LINEAR'), 'DESIGN.md should include gradient paint type');
+      assert.ok(md.includes('0% rgba(51, 115, 255, 1) -> 100% rgba(242, 77, 166, 1)'), 'DESIGN.md should include gradient stop positions and colors');
       const refreshedConfig = fs.readFileSync(ws.configPath, 'utf8');
       assert.ok(!refreshedConfig.includes('Focus Ring'), 'export refresh must not promote observed effect styles into config');
+      assert.ok(!refreshedConfig.includes('Gradient/Brand Glow'), 'export refresh must not promote observed paint styles into config');
     } finally {
       fs.rmSync(ws.tmp, { recursive: true, force: true });
     }

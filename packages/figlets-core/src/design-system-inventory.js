@@ -10,8 +10,9 @@ function designSystemInventory(figmaData = {}) {
     variables: _count(figmaData.variables),
     textStyles: _count(figmaData.textStyles),
     effectStyles: _count(figmaData.effectStyles),
+    paintStyles: _count(figmaData.paintStyles),
   };
-  counts.designSystemArtifacts = counts.variables + counts.textStyles + counts.effectStyles;
+  counts.designSystemArtifacts = counts.variables + counts.textStyles + counts.effectStyles + counts.paintStyles;
   counts.foundationCollections = counts.collections;
 
   const hasFoundationShell = counts.foundationCollections > 0;

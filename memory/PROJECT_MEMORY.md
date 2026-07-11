@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-07-10 — gradient paint styles included in handoff docs]
+
+**Status:** Product export fix after a designer added a Figma gradient paint style and Figlets ignored it.
+
+**Shipped behavior:** `sync_figma_data` now captures local paint styles via the bridge, including `PaintStyle.paints`. DESIGN.md export includes synced local paint styles inside `## Colors`, with gradient type and stop position/color details. Component documentation records referenced fill/stroke paint styles in the implementation bindings table, including gradient details, so generated component specs expose styles needed for implementation. REST export preserves Figma `FILL` style metadata as `paintStyles` when available, though full gradient definitions require bridge sync. Shared snapshot summaries and inventory now count `paintStyles` so paint-style-only files are not treated as empty.
+
+**Boundary:** Gradients are observed handoff facts, not automatically created config tokens. Do not promote paint styles into `design-system.config.js` or Figma variables without a separate designer-approved gradient-token/product flow.
+
+---
+
 ### [2026-07-10 — DESIGN.md color prose expanded under Google spec]
 
 **Status:** Export quality fix after `## Colors` looked barebones even though the exact color data existed in YAML/front matter and `figlets-extended`.

@@ -916,13 +916,15 @@ function _bodyOverview(DS) {
   return name + ' is a Figma-rooted design system exported to DESIGN.md as a portable handoff artifact. The tokens below are the normative values; the prose provides context for how to apply them.';
 }
 
-function _bodyColors(DS, colorsMap) {
+function _bodyColors(DS, colorsMap, options) {
   const lines = [];
   const brand = DS.color && Array.isArray(DS.color.brand) ? DS.color.brand : [];
   const ramps = DS.color && Array.isArray(DS.color.ramps) ? DS.color.ramps : [];
   const pairs = DS.color && DS.color.semantics && Array.isArray(DS.color.semantics.pairs)
     ? DS.color.semantics.pairs
     : [];
+  const figmaData = options && options.figmaData ? options.figmaData : null;
+  const paintStyles = Array.isArray(figmaData && figmaData.paintStyles) ? figmaData.paintStyles : [];
   const algo = DS.color && DS.color.contrastAlgorithm ? String(DS.color.contrastAlgorithm).toUpperCase() : null;
 
   if (brand.length) {
@@ -969,6 +971,18 @@ function _bodyColors(DS, colorsMap) {
       const light = pair.Light || {};
       const dark = pair.Dark || {};
       lines.push('| ' + _tableCell(name || '-') + ' | ' + _tableCell(_formatAliasWithValue(light.bg, colorsMap)) + ' | ' + _tableCell(_formatAliasWithValue(light.text, colorsMap)) + ' | ' + _tableCell(_formatAliasWithValue(dark.bg, colorsMap)) + ' | ' + _tableCell(_formatAliasWithValue(dark.text, colorsMap)) + ' |');
+    }
+  }
+
+  if (paintStyles.length) {
+    lines.push('');
+    lines.push('Local Figma paint styles were present in the latest synced snapshot. These are included as implementation handoff facts only; Figlets does not promote observed paint styles into config tokens unless a dedicated update flow does so.');
+    lines.push('');
+    lines.push('| Paint style | Definition |');
+    lines.push('|---|---|');
+    for (const style of paintStyles.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))) {
+      if (!style || !style.name) continue;
+      lines.push('| ' + _tableCell(style.name) + ' | ' + _tableCell(_formatPaintStyle(style)) + ' |');
     }
   }
 
@@ -1088,6 +1102,42 @@ function _formatEffect(effect) {
   if (effect.blendMode) parts.push('blend ' + effect.blendMode);
   if (effect.visible === false) parts.push('hidden');
   return parts.join(', ');
+}
+
+function _formatStop(stop) {
+  if (!stop || typeof stop !== 'object') return '';
+  const position = typeof stop.position === 'number' && isFinite(stop.position)
+    ? Math.round(stop.position * 1000) / 10 + '%'
+    : '?';
+  const color = _formatColor(stop.color) || 'unknown color';
+  return position + ' ' + color;
+}
+
+function _formatPaint(paint) {
+  if (!paint || typeof paint !== 'object') return '';
+  const parts = [paint.type || 'PAINT'];
+  if (paint.visible === false) parts.push('hidden');
+  if (paint.type === 'SOLID') {
+    const color = _formatColor(paint.color);
+    if (color) parts.push('color ' + color);
+  }
+  if (/^GRADIENT_/.test(String(paint.type || ''))) {
+    const stops = Array.isArray(paint.gradientStops)
+      ? paint.gradientStops.map(_formatStop).filter(Boolean)
+      : [];
+    if (stops.length) parts.push('stops ' + stops.join(' -> '));
+  }
+  const opacity = _formatNumber(paint.opacity);
+  if (opacity != null && opacity !== '1') parts.push('opacity ' + opacity);
+  if (paint.blendMode) parts.push('blend ' + paint.blendMode);
+  return parts.join(', ');
+}
+
+function _formatPaintStyle(style) {
+  const paints = Array.isArray(style && style.paints) ? style.paints : [];
+  if (!paints.length) return 'Paint definition unavailable in the synced snapshot.';
+  const summary = paints.map(_formatPaint).filter(Boolean).join(' | ');
+  return summary || 'No visible paints recorded.';
 }
 
 function _configuredEffectStyleNames(DS) {
@@ -1237,7 +1287,7 @@ function dsConfigToDesignMd(ds, options) {
 
   // Canonical section order per the DESIGN.md spec.
   pushSection('Overview', _bodyOverview(DS));
-  pushSection('Colors', _bodyColors(DS, colorsMap));
+  pushSection('Colors', _bodyColors(DS, colorsMap, options));
   pushSection('Typography', _bodyTypography(DS));
   pushSection('Layout', _bodyLayout(DS));
   pushSection('Elevation & Depth', _bodyElevation(DS));

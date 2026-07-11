@@ -13,7 +13,8 @@ const designSystemSnapshotShape = {
   target: "string",
   collections: "DesignSystemCollection[]",
   textStyles: "object[]",
-  effectStyles: "object[]"
+  effectStyles: "object[]",
+  paintStyles: "object[]"
 };
 
 const figmaDataInputShape = {
@@ -21,7 +22,8 @@ const figmaDataInputShape = {
   variables: "FigmaVariable[]",
   collections: "FigmaVariableCollection[]",
   textStyles: "object[]",
-  effectStyles: "object[]"
+  effectStyles: "object[]",
+  paintStyles: "object[]"
 };
 
 module.exports = {

@@ -86,6 +86,7 @@ function collectStyles(fileResponse) {
   const stylesMap = fileResponse.styles || {};
   const textStyles = [];
   const effectStyles = [];
+  const paintStyles = [];
 
   Object.keys(stylesMap).forEach(function(styleId) {
     const style = stylesMap[styleId];
@@ -103,6 +104,10 @@ function collectStyles(fileResponse) {
     if (normalized.styleType === "EFFECT") {
       effectStyles.push(normalized);
     }
+
+    if (normalized.styleType === "FILL" || normalized.styleType === "PAINT") {
+      paintStyles.push(normalized);
+    }
   });
 
   textStyles.sort(function(left, right) {
@@ -113,9 +118,14 @@ function collectStyles(fileResponse) {
     return left.name.localeCompare(right.name);
   });
 
+  paintStyles.sort(function(left, right) {
+    return left.name.localeCompare(right.name);
+  });
+
   return {
     textStyles: textStyles,
-    effectStyles: effectStyles
+    effectStyles: effectStyles,
+    paintStyles: paintStyles
   };
 }
 
@@ -216,6 +226,7 @@ async function exportFigmaFile(input) {
     collections: collections,
     textStyles: styles.textStyles,
     effectStyles: styles.effectStyles,
+    paintStyles: styles.paintStyles,
     warnings: warnings
   };
 }

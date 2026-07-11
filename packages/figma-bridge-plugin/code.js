@@ -239,6 +239,7 @@ figma.ui.onmessage = async (msg) => {
     const variables = await figma.variables.getLocalVariablesAsync();
     const textStyles = await figma.getLocalTextStylesAsync();
     const effectStyles = await figma.getLocalEffectStylesAsync();
+    const paintStyles = figma.getLocalPaintStylesAsync ? await figma.getLocalPaintStylesAsync() : [];
 
     const componentNodes = figma.root.findAllWithCriteria({ types: ['COMPONENT', 'COMPONENT_SET'] });
 
@@ -276,6 +277,12 @@ figma.ui.onmessage = async (msg) => {
         id: s.id,
         name: s.name,
         effects: s.effects,
+        description: s.description || ""
+      })),
+      paintStyles: paintStyles.map(s => ({
+        id: s.id,
+        name: s.name,
+        paints: s.paints,
         description: s.description || ""
       })),
       components: componentNodes.map(n => ({
@@ -549,6 +556,7 @@ async function _createDsBindingContext() {
   const allColls = await figma.variables.getLocalVariableCollectionsAsync();
   const textStyles = await figma.getLocalTextStylesAsync();
   const effectStyles = await figma.getLocalEffectStylesAsync();
+  const paintStyles = figma.getLocalPaintStylesAsync ? await figma.getLocalPaintStylesAsync() : [];
 
   const varByName = {};
   const varById = {};
@@ -1076,6 +1084,7 @@ async function _createDsBindingContext() {
     allColls,
     textStyles,
     effectStyles,
+    paintStyles,
     varByName,
     varById,
     dsCollections,
@@ -9981,8 +9990,11 @@ function _docVisibleEffectCount(effects) {
   return count;
 }
 
-function _docStrokeSummary(node) {
+function _docStrokeSummary(node, paintStyleById) {
   if (!node || _docVisiblePaintCount(node.strokes) === 0) return 'No stroke';
+  if (node.strokeStyleId && node.strokeStyleId !== figma.mixed && paintStyleById && paintStyleById[node.strokeStyleId]) {
+    return 'Stroke style: ' + paintStyleById[node.strokeStyleId].name;
+  }
   return 'Stroke count: ' + _docVisiblePaintCount(node.strokes);
 }
 
@@ -9999,6 +10011,50 @@ function _docColorSummary(color) {
     return s.length === 1 ? '0' + s : s;
   }
   return '#' + hex(r) + hex(g) + hex(b);
+}
+
+function _docPaintStopSummary(stop) {
+  if (!stop) return '';
+  const color = _docColorSummary(stop.color);
+  const pos = typeof stop.position === 'number' ? _docFormatNumber(stop.position * 100) + '%' : '';
+  if (pos && color) return pos + ' ' + color;
+  return color || pos;
+}
+
+function _docPaintDetailSummary(paint) {
+  if (!paint || paint.visible === false) return '';
+  const type = paint.type || 'Paint';
+  if (type === 'SOLID') {
+    const color = _docColorSummary(paint.color);
+    return color ? 'SOLID ' + color : 'SOLID';
+  }
+  if (String(type).indexOf('GRADIENT_') === 0) {
+    const stops = [];
+    const gradientStops = Array.isArray(paint.gradientStops) ? paint.gradientStops : [];
+    for (let i = 0; i < gradientStops.length; i++) {
+      const stop = _docPaintStopSummary(gradientStops[i]);
+      if (stop) stops.push(stop);
+    }
+    return type + (stops.length ? ' stops ' + stops.join(' -> ') : '');
+  }
+  if (type === 'IMAGE') return 'IMAGE ' + (paint.scaleMode || '');
+  return type;
+}
+
+function _docPaintsDetailSummary(paints) {
+  const list = Array.isArray(paints) ? paints : [];
+  const parts = [];
+  for (let i = 0; i < list.length; i++) {
+    const detail = _docPaintDetailSummary(list[i]);
+    if (detail) parts.push(detail);
+  }
+  return parts.join(' | ');
+}
+
+function _docPaintStyleSummary(style) {
+  if (!style) return '—';
+  const details = _docPaintsDetailSummary(style.paints);
+  return 'Paint style: ' + style.name + (details ? '; ' + details : '');
 }
 
 function _docEffectDetailSummary(effect) {
@@ -10155,12 +10211,15 @@ async function _buildComponentDoc(opts) {
   const _allVars = _ds.allVars;
   const _allTextStyles = _ds.textStyles;
   const _allEffectStyles = _ds.effectStyles || [];
+  const _allPaintStyles = _ds.paintStyles || [];
   const varById = {};
   for (let i = 0; i < _allVars.length; i++) varById[_allVars[i].id] = _allVars[i];
   const textStyleById = {};
   for (let i = 0; i < _allTextStyles.length; i++) textStyleById[_allTextStyles[i].id] = _allTextStyles[i];
   const effectStyleById = {};
   for (let i = 0; i < _allEffectStyles.length; i++) effectStyleById[_allEffectStyles[i].id] = _allEffectStyles[i];
+  const paintStyleById = {};
+  for (let i = 0; i < _allPaintStyles.length; i++) paintStyleById[_allPaintStyles[i].id] = _allPaintStyles[i];
   const collectionByVarId = {};
   for (let i = 0; i < (_ds.allColls || []).length; i++) {
     const coll = _ds.allColls[i];
@@ -10355,6 +10414,12 @@ async function _buildComponentDoc(opts) {
     }
     if (node.type === 'TEXT' && node.textStyleId) {
       acc.push({ node: node.name, property: 'textStyle', styleId: node.textStyleId });
+    }
+    if (node.fillStyleId && node.fillStyleId !== figma.mixed) {
+      acc.push({ node: node.name, property: 'Fill style', styleId: node.fillStyleId, styleKind: 'paint' });
+    }
+    if (node.strokeStyleId && node.strokeStyleId !== figma.mixed) {
+      acc.push({ node: node.name, property: 'Stroke style', styleId: node.strokeStyleId, styleKind: 'paint' });
     }
     if (node.effectStyleId) {
       acc.push({ node: node.name, property: 'Effect style', styleId: node.effectStyleId, styleKind: 'effect' });
@@ -10568,7 +10633,7 @@ async function _buildComponentDoc(opts) {
   const _missingStyleIds = {};
   for (let i = 0; i < _rawBinds.length; i++) {
     const id = _rawBinds[i].styleId;
-    if (id && !textStyleById[id]) _missingStyleIds[id] = true;
+    if (id && !textStyleById[id] && !effectStyleById[id] && !paintStyleById[id]) _missingStyleIds[id] = true;
   }
   const _missingStyleIdList = Object.keys(_missingStyleIds);
   if (typeof figma.getStyleByIdAsync === 'function') {
@@ -10577,6 +10642,7 @@ async function _buildComponentDoc(opts) {
         const remoteStyle = await figma.getStyleByIdAsync(_missingStyleIdList[i]);
         if (remoteStyle && remoteStyle.type === 'TEXT') textStyleById[_missingStyleIdList[i]] = remoteStyle;
         else if (remoteStyle && remoteStyle.type === 'EFFECT') effectStyleById[_missingStyleIdList[i]] = remoteStyle;
+        else if (remoteStyle && (remoteStyle.type === 'PAINT' || remoteStyle.type === 'FILL')) paintStyleById[_missingStyleIdList[i]] = remoteStyle;
       } catch (e) {}
     }
   }
@@ -10603,6 +10669,15 @@ async function _buildComponentDoc(opts) {
           token: style ? style.name : b.styleId,
           context: 'Effect style',
           resolvedVal: style ? _docEffectSummary({ effectStyleId: style.id }, effectStyleById) : '—'
+        });
+      } else if (b.styleId && b.styleKind === 'paint') {
+        const style = paintStyleById[b.styleId];
+        out.push({
+          node: b.node,
+          property: b.property,
+          token: style ? style.name : b.styleId,
+          context: 'Paint style',
+          resolvedVal: style ? _docPaintStyleSummary(style) : '—'
         });
       } else if (b.styleId) {
         const style = textStyleById[b.styleId];
@@ -11235,6 +11310,10 @@ async function _buildComponentDoc(opts) {
       const s = textStyleById[node.textStyleId];
       if (s) return s.name;
     }
+    if (node.fillStyleId && node.fillStyleId !== figma.mixed) {
+      const s = paintStyleById[node.fillStyleId];
+      if (s) return s.name;
+    }
     return '—';
   }
   function _visibleFillSummary(node) {
@@ -11243,6 +11322,9 @@ async function _buildComponentDoc(opts) {
     if (bv.fills && bv.fills[0] && bv.fills[0].id) {
       const v = varById[bv.fills[0].id];
       if (v) return v.name;
+    }
+    if (node.fillStyleId && node.fillStyleId !== figma.mixed && paintStyleById[node.fillStyleId]) {
+      return paintStyleById[node.fillStyleId].name;
     }
     const fills = Array.isArray(node.fills) ? node.fills : [];
     for (let i = 0; i < fills.length; i++) {
@@ -11258,7 +11340,7 @@ async function _buildComponentDoc(opts) {
     const opacity = typeof node.opacity === 'number' ? _docFormatNumber(node.opacity) : 1;
     return {
       Fill: _visibleFillSummary(node),
-      Stroke: _docStrokeSummary(node),
+      Stroke: _docStrokeSummary(node, paintStyleById),
       Effects: _docEffectSummary(node, effectStyleById),
       Opacity: String(opacity)
     };
@@ -11275,7 +11357,7 @@ async function _buildComponentDoc(opts) {
     const imageFill = _docImageFillSummary(node);
     const radius = _docCornerRadiusSummary(node);
     if (isRoot) {
-      notes.push(_docStrokeSummary(node));
+      notes.push(_docStrokeSummary(node, paintStyleById));
       notes.push(_docEffectSummary(node, effectStyleById));
     }
     if (imageFill) notes.push(imageFill);

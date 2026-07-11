@@ -30,6 +30,8 @@ const {
   assert.strictEqual(styles.textStyles[0].name, "body/md");
   assert.strictEqual(styles.effectStyles.length, 1);
   assert.strictEqual(styles.effectStyles[0].name, "elevation/100");
+  assert.strictEqual(styles.paintStyles.length, 1);
+  assert.strictEqual(styles.paintStyles[0].name, "fill/brand");
 }
 
 {

@@ -63,4 +63,5 @@ assert.deepStrictEqual(
 );
 
 assert.ok(plugin.includes("msg.type === 'extract-all'"), "plugin must handle global sync command");
+assert.ok(plugin.includes("getLocalPaintStylesAsync"), "global sync must capture local paint styles for gradient handoff");
 assert.ok(plugin.includes("msg.type === 'extract-selection'"), "plugin must handle selection sync command");

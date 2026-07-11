@@ -45,3 +45,17 @@ const {
   assert.strictEqual(emptyDesignSystemPrompt(inventory), null);
   assert.strictEqual(emptyDesignSystemMessage(inventory), null);
 }
+
+{
+  const inventory = designSystemInventory({
+    collections: [],
+    variables: [],
+    textStyles: [],
+    effectStyles: [],
+    paintStyles: [{ name: "Gradient/Brand" }],
+  });
+  assert.strictEqual(inventory.isEmpty, false);
+  assert.strictEqual(inventory.state, "has-token-artifacts");
+  assert.strictEqual(inventory.counts.paintStyles, 1);
+  assert.strictEqual(inventory.designSystemArtifactCount, 1);
+}

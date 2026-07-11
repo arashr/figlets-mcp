@@ -151,7 +151,7 @@ function analyzeCollections(variables = [], collections = []) {
     });
 }
 
-function buildDesignSystemContext(variables = [], collections = [], textStyles = [], effectStyles = []) {
+function buildDesignSystemContext(variables = [], collections = [], textStyles = [], effectStyles = [], paintStyles = []) {
   const varsById = new Map(variables.map(variable => [variable.id, variable]));
   const varByName = toObjectByName(variables, "name");
   const colorVarByHex = {};
@@ -201,6 +201,7 @@ function buildDesignSystemContext(variables = [], collections = [], textStyles =
   const collectionByName = toObjectByName(collections, "name");
   const textStyleByName = toObjectByName(textStyles, "name");
   const effectStyleByName = toObjectByName(effectStyles, "name");
+  const paintStyleByName = toObjectByName(paintStyles, "name");
   const typographyStrategy = textStyles.length > 0
     ? "text-styles"
     : Object.keys(typographyVarByValue).length > 0
@@ -212,14 +213,16 @@ function buildDesignSystemContext(variables = [], collections = [], textStyles =
       variables: variables.length,
       collections: collections.length,
       textStyles: textStyles.length,
-      effectStyles: effectStyles.length
+      effectStyles: effectStyles.length,
+      paintStyles: paintStyles.length
     },
     typographyStrategy,
     keys: {
       variables: Object.keys(varByName).sort(),
       collections: Object.keys(collectionByName).sort(),
       textStyles: Object.keys(textStyleByName).sort(),
-      effectStyles: Object.keys(effectStyleByName).sort()
+      effectStyles: Object.keys(effectStyleByName).sort(),
+      paintStyles: Object.keys(paintStyleByName).sort()
     },
     indexes: {
       colorVarByHex,
@@ -235,14 +238,16 @@ function analyzeDesignSystemData(input = {}) {
   const collections = Array.isArray(input.collections) ? input.collections : [];
   const textStyles = Array.isArray(input.textStyles) ? input.textStyles : [];
   const effectStyles = Array.isArray(input.effectStyles) ? input.effectStyles : [];
+  const paintStyles = Array.isArray(input.paintStyles) ? input.paintStyles : [];
   const analyzedCollections = analyzeCollections(variables, collections);
-  const context = buildDesignSystemContext(variables, collections, textStyles, effectStyles);
+  const context = buildDesignSystemContext(variables, collections, textStyles, effectStyles, paintStyles);
 
   return {
     target: input.target !== undefined ? input.target : "unknown",
     collections: analyzedCollections,
     textStyles,
     effectStyles,
+    paintStyles,
     context
   };
 }

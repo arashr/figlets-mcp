@@ -127,7 +127,8 @@ function handleDetectDesignSystem(input = {}) {
       hasLightDark: c.hasLightDark
     })),
     textStyles: (result.snapshot && result.snapshot.textStyles || []).map(s => s.name),
-    effectStyles: (result.snapshot && result.snapshot.effectStyles || []).map(s => s.name)
+    effectStyles: (result.snapshot && result.snapshot.effectStyles || []).map(s => s.name),
+    paintStyles: (result.snapshot && result.snapshot.paintStyles || []).map(s => s.name)
   };
 }
 

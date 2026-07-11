@@ -4,6 +4,16 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-07-10] Gradient paint styles are exported as observed handoff facts
+
+**Decision:** `sync_figma_data` captures local Figma paint styles, including gradient fills, and `export_design_md` renders them inside the canonical `## Colors` section when a synced snapshot is available. Component documentation also records `fillStyleId`/`strokeStyleId` paint styles in its implementation-facing bindings table, including gradient type and stop details. REST-based file export preserves paint-style names/types when Figma exposes them as `FILL` styles, but full gradient stops require the bridge snapshot because the local plugin can read `PaintStyle.paints`.
+
+**Why:** Designers can define implementation-relevant gradients as Figma paint styles. Ignoring them made DESIGN.md feel incomplete even though the style existed in the file. Gradients do not fit cleanly into Google DESIGN.md's standard `colors:` token map, which accepts sRGB hex colors, so they should not be forced into unsupported YAML.
+
+**Consequence:** Gradient styles are included as human-readable implementation handoff data with paint type and stop colors/positions in DESIGN.md and component docs. They are not silently promoted into `design-system.config.js` tokens or Figma variables. A future dedicated gradient-token flow can add a structured config model if the product needs editable gradient tokens.
+
+---
+
 ## [2026-07-10] DESIGN.md color prose should be detailed while staying spec-compatible
 
 **Decision:** `dsConfigToDesignMd` keeps Google DESIGN.md-compatible front matter (`colors`, `typography`, `rounded`, `spacing`, `components`) and expands human-readable color guidance in the canonical `## Colors` section. The color body now includes source color roles, primitive ramp tokens with resolved hex values, contrast algorithm context, and Light/Dark semantic background/text aliases. Standard-compatible Dark-mode semantic aliases are also emitted as `*-dark` entries in `components` when they resolve to `colors.*` references.

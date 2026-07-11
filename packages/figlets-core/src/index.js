@@ -15,6 +15,7 @@ function summarizeDesignSystem(input = {}) {
   const collectionList = Array.isArray(input.collections) ? input.collections : [];
   const textStyleList = Array.isArray(input.textStyles) ? input.textStyles : [];
   const effectStyleList = Array.isArray(input.effectStyles) ? input.effectStyles : [];
+  const paintStyleList = Array.isArray(input.paintStyles) ? input.paintStyles : [];
   const colorCollections = collectionList.filter(
     collection => collection && typeof collection.colorVarCount === "number" && collection.colorVarCount > 0
   ).length;
@@ -24,19 +25,22 @@ function summarizeDesignSystem(input = {}) {
   const collections = collectionList.length;
   const textStyles = textStyleList.length;
   const effectStyles = effectStyleList.length;
+  const paintStyles = paintStyleList.length;
 
   return {
     collections,
     textStyles,
     effectStyles,
+    paintStyles,
     capabilities: {
       hasVariables: collections > 0,
       hasColorVariables: colorCollections > 0,
       hasFloatVariables: floatCollections > 0,
       hasTextStyles: textStyles > 0,
       hasEffectStyles: effectStyles > 0,
+      hasPaintStyles: paintStyles > 0,
       canAuditTokens: collections > 0,
-      canDocumentComponents: collections > 0 || textStyles > 0 || effectStyles > 0
+      canDocumentComponents: collections > 0 || textStyles > 0 || effectStyles > 0 || paintStyles > 0
     }
   };
 }
@@ -46,7 +50,8 @@ function normalizeDesignSystemSnapshot(input = {}) {
     target: input.target !== undefined ? input.target : "unknown",
     collections: Array.isArray(input.collections) ? input.collections : [],
     textStyles: Array.isArray(input.textStyles) ? input.textStyles : [],
-    effectStyles: Array.isArray(input.effectStyles) ? input.effectStyles : []
+    effectStyles: Array.isArray(input.effectStyles) ? input.effectStyles : [],
+    paintStyles: Array.isArray(input.paintStyles) ? input.paintStyles : []
   };
 }
 

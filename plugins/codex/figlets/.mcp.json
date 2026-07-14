@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "https://github.com/arashr/figlets-mcp/releases/download/v1.1.0/figlets-mcp-server-1.1.0.tgz"
+        "https://github.com/arashr/figlets-mcp/releases/download/v1.1.1/figlets-mcp-server-1.1.1.tgz"
       ]
     }
   }

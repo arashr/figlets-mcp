@@ -31,9 +31,11 @@ Ask your assistant to help with any of these:
 - **Check my design system:** review tokens, setup, and bindings; summarize what needs attention
 - **Set up a new design system:** bootstrap variables and foundations from your config
 - **Build a token showcase:** generate a visual reference in Figma
-- **Document a component:** create a spec sheet for handoff
+- **Document a component:** create a Figma spec sheet and markdown handoff with variants, properties, sizing, anatomy, token bindings, accessibility notes, boolean states, conditional layers, and visual state previews
 - **Export DESIGN.md:** export design documentation from your file
 - **Check the selected component:** audit selected layers for raw values and suggest safe bindings
+
+Component documentation produces both a designer-readable spec sheet in Figma and a `component-specs/[Name].md` file for implementation agents. The handoff includes Figma-backed variant changes, boolean property behavior, conditional layers such as overlays and badges, paint/effect details, and token bindings, so implementation does not rely on guesswork.
 
 ## Get started
 
@@ -48,7 +50,7 @@ Ask your assistant to help with any of these:
 Figlets is distributed as a GitHub release tarball. Install the command once:
 
 ```bash
-npm install -g https://github.com/arashr/figlets-mcp/releases/download/v1.1.0/figlets-mcp-server-1.1.0.tgz
+npm install -g https://github.com/arashr/figlets-mcp/releases/download/v1.1.1/figlets-mcp-server-1.1.1.tgz
 ```
 
 Then check that it runs:
@@ -122,11 +124,11 @@ You need the Figlets Bridge folder once. It is **not** installed by step 1 alone
 Download the repository source ZIP, not the `figlets-mcp-server-*.tgz` release asset. The `.tgz` file is only the MCP server used by your AI app; it does not include the Figma plugin files.
 
 1. Download the Figlets source ZIP:
-   - Stable v1.1.0 source: [figlets-mcp v1.1.0 source ZIP](https://github.com/arashr/figlets-mcp/archive/refs/tags/v1.1.0.zip)
+   - Stable v1.1.1 source: [figlets-mcp v1.1.1 source ZIP](https://github.com/arashr/figlets-mcp/archive/refs/tags/v1.1.1.zip)
    - Or latest source: [github.com/arashr/figlets-mcp](https://github.com/arashr/figlets-mcp) → **Code** → **Download ZIP**
 2. Unzip it.
 3. Inside the unzipped folder, open:
-   - **`figlets-mcp-1.1.0/packages/figma-bridge-plugin/`** if you downloaded the stable v1.1.0 source ZIP
+   - **`figlets-mcp-1.1.1/packages/figma-bridge-plugin/`** if you downloaded the stable v1.1.1 source ZIP
    - **`figlets-mcp-main/packages/figma-bridge-plugin/`** if you downloaded latest source from **Code** → **Download ZIP**
 
 That folder contains **`manifest.json`**. Figma will ask for this file during setup.

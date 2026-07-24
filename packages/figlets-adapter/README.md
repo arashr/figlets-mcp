@@ -36,6 +36,7 @@ Defines designer-facing intent routes and workflows the agent should follow when
 - **Build token showcase:** render the DS showcase in Figma
 - **Set up a design system:** preview and build variable collections from config
 - **Document a component:** generate a Figma spec sheet and markdown handoff with component variants, bound variable-mode previews, boolean states, conditional layers, visual state previews, and implementation bindings
+- **Generate Figma Make guidelines:** preview and export a linted, package-free guidelines/CSS bundle from confirmed Figlets, Figma, and project component-spec sources
 - **Full health check:** sync, detect, audit, semantic setup/accessibility QA, and approved repair in one flow
 
-All analysis and output generation happens inside the MCP tools and bridge plugin. The adapter handles intent routing, intake, ambiguity, confirmation, and presentation only.
+All analysis and output generation happens inside the MCP tools and bridge plugin. The adapter handles intent routing, intake, ambiguity, confirmation, and presentation only. For Make exports it also preserves the required order: optional guidance review first, approval for the latest exact local file plan second.

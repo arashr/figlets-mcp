@@ -33,6 +33,7 @@ Ask your assistant to help with any of these:
 - **Build a token showcase:** generate a visual reference in Figma
 - **Document a component:** create a Figma spec sheet and markdown handoff with variants, properties, sizing, anatomy, token bindings, accessibility notes, boolean states, conditional layers, and visual state previews
 - **Export DESIGN.md:** export design documentation from your file
+- **Generate Figma Make guidelines:** create guidance files that help new Make projects follow your design system
 - **Check the selected component:** audit selected layers for raw values and suggest safe bindings
 
 Component documentation produces both a designer-readable spec sheet in Figma and a `component-specs/[Name].md` file for implementation agents. The handoff includes Figma-backed variant changes, boolean property behavior, conditional layers such as overlays and badges, paint/effect details, and token bindings, so implementation does not rely on guesswork.
@@ -181,6 +182,7 @@ Tell your assistant what you want. For example:
 - “Check my design system”
 - “Set up tokens for this file”
 - “Document the component I have selected”
+- “Generate Figma Make guidelines”
 
 Figlets will **look first**, explain findings in everyday language, and **only apply fixes you approve**.
 

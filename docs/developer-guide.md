@@ -60,6 +60,43 @@ Common planner to apply routes:
 
 Destructive token prune apply requires `prune.config_authoritative=true` after dry-run review.
 
+## Figma Make guidelines export
+
+The Make workflow is a local multi-file export parallel to `export_design_md`; it is not a Figma mutation or a package generator.
+
+| Layer | Path | Responsibility |
+| --- | --- | --- |
+| Core model and renderer | `packages/figlets-core/src/make-guidelines.js` | Normalize confirmed design-system facts, serialize CSS, render the bundle, lint links/content, and fingerprint sources |
+| MCP workflow boundary | `packages/figlets-mcp-server/src/tools/make-guidelines.js` | Resolve config/snapshot/component-spec sources, preview file changes, persist approved optional guidance, guard output paths, and export only a current approved fingerprint |
+| Agent sequencing | `packages/figlets-mcp-server/src/agent-interface/workflows.js` | Present confirmed facts and optional guidance in the correct order before requesting local-write approval |
+
+Public tools:
+
+1. `prepare_make_guidelines` is read-only. It may sync Figma, bootstraps an unknown existing file in memory, discovers project `component-specs/*.md`, returns lint and an exact create/refresh/remove plan, and supplies the source fingerprint.
+2. `save_make_guidelines_profile` writes only designer-approved Make-specific guidance or persistent skip choices to the file-scoped `make-guidelines.config.json`.
+3. `export_make_guidelines` writes the previously previewed bundle under `<project>/specs/figma-make/` by default. It requires explicit approval, the current fingerprint, and confirmation that any optional suggestions were reviewed.
+
+Component specs are an independent project source. Identity comes from the first H1, falling back to the filename stem. Exact Figma matches combine snapshot facts with their spec; spec-only components remain exportable and are linked from `guidelines/components.md`. Duplicate identities fail closed.
+
+Keep these invariants when extending the feature:
+
+- no npm/package/provider scaffolding in the first-pass bundle;
+- no Figma write or Make-project automation;
+- no invented product or component policy;
+- optional product/composition guidance is offered before export confirmation and may be skipped;
+- generated CSS and Markdown stay inside the guarded project root;
+- stale previews and unmarked file removals fail closed.
+
+Deep contract and current Figma documentation baseline: **[figma-make-guidelines-feature-plan.md](./figma-make-guidelines-feature-plan.md)**.
+
+Focused verification:
+
+```bash
+node tests/core/make-guidelines.test.js
+node tests/server/make-guidelines-tool.test.js
+node tests/server/agent-interface-tool.test.js
+```
+
 ## Verify changes
 
 ```bash

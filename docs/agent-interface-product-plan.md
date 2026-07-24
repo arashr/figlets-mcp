@@ -4,7 +4,7 @@
 
 **Audience.** Future agents and maintainers implementing the feature. Read this before editing adapter docs, adding slash commands, or changing MCP tool descriptions.
 
-**Status.** Product plan approved in principle. **No implementation started.** Start with the read-only workflow registry and MCP guide tools described below.
+**Status.** Implemented and maintained as a product contract. The MCP workflow registry, guide tools, host adapters, and Figma Make guidelines workflow are shipped; later-phase ideas remain explicitly marked as optional.
 
 ---
 
@@ -223,11 +223,13 @@ flowchart LR
   Start --> Showcase["Build Showcase"]
   Start --> Component["Document Component"]
   Start --> Export["Export DESIGN.md"]
+  Start --> Make["Generate Figma Make Guidelines"]
 
   Health --> QA
   Health --> Showcase
   Health --> Component
   Health --> Export
+  Health --> Make
 
   Setup --> Showcase
   Setup --> Export
@@ -241,6 +243,7 @@ flowchart LR
   Component --> BindingQA["Binding QA"]
   BindingQA --> Component
   Component --> Export
+  Component --> Make
 ```
 
 ---
@@ -296,6 +299,7 @@ Guide behavior:
    - build a token showcase
    - document a component
    - export `DESIGN.md`
+   - generate Figma Make guidelines
 
 Next workflows: all.
 
@@ -488,6 +492,35 @@ Next workflows:
 - Health Check
 - Hand off to coding agent
 
+### Generate Figma Make Guidelines
+
+Designer intent examples:
+
+- "Generate Figma Make guidelines."
+- "Make a guidelines bundle for a new Make project."
+- "Keep Figma Make close to this design system."
+
+Tools:
+
+1. `prepare_make_guidelines` with the active project root when available.
+2. If optional suggestions exist, present them as `Accept`, `Edit`, `Skip`, or `Skip all` before asking for export approval.
+3. Optional, after an explicit designer choice: `save_make_guidelines_profile`, then prepare again.
+4. After explicit approval of the latest exact plan: `export_make_guidelines` with its unchanged fingerprint.
+
+Confirmation boundary:
+
+- Preparation is read-only and returns confirmed translations, component-spec discovery diagnostics, lint, generated CSS status, and exact local file changes.
+- Optional product/composition guidance is skippable, but its review must precede export confirmation.
+- Profile persistence and bundle export are local writes requiring explicit approval.
+- Export writes only inside the guarded project root, defaults to `specs/figma-make/`, rejects stale fingerprints, and does not mutate Figma or operate the Make project.
+- Component specs remain valid project guidance even when the active Figma snapshot omits their component.
+
+Next workflows:
+
+- Export DESIGN.md
+- Document Component
+- Health Check
+
 ---
 
 ## 11. Workflow registry data model
@@ -637,7 +670,7 @@ These should consume or mirror the workflow registry rather than inventing new b
 
 The smallest valuable version is:
 
-1. Create the workflow registry with the seven MVP workflows.
+1. Create the workflow registry with the canonical designer workflows, including Figma Make guidelines.
 2. Expose `figlets_start`, `figlets_route_intent`, and `figlets_workflow_guide`.
 3. Add tests for routing and approval boundaries.
 4. Update adapter docs to tell agents: call `figlets_start` before improvising.

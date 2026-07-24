@@ -35,7 +35,7 @@ Defines designer-facing intent routes and workflows the agent should follow when
 - **QA binding audit:** check selected Figma work for raw/unbound values
 - **Build token showcase:** render the DS showcase in Figma
 - **Set up a design system:** preview and build variable collections from config
-- **Document a component:** generate a Figma spec sheet and markdown handoff with variants, boolean states, conditional layers, visual state previews, and implementation bindings
+- **Document a component:** generate a Figma spec sheet and markdown handoff with component variants, bound variable-mode previews, boolean states, conditional layers, visual state previews, and implementation bindings
 - **Full health check:** sync, detect, audit, semantic setup/accessibility QA, and approved repair in one flow
 
 All analysis and output generation happens inside the MCP tools and bridge plugin. The adapter handles intent routing, intake, ambiguity, confirmation, and presentation only.

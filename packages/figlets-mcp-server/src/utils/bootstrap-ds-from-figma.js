@@ -190,14 +190,29 @@ function inferCollectionsFromSnapshot(figmaData) {
 
 function inferBreakpointsFromSnapshot(figmaData) {
   const summaries = _collectionSummary(figmaData);
-  const responsive = summaries
-    .map(entry => ({
-      modes: (entry.collection.modes || []).map(m => m.name).filter(Boolean),
-      score: (String(entry.collection.name || "").match(/spacing|type|typography/i) ? 20 : 0)
-        + (entry.collection.modes || []).length
-    }))
-    .filter(entry => entry.modes.length > 1)
-    .sort((a, b) => b.score - a.score)[0];
+  const collections = inferCollectionsFromSnapshot(figmaData);
+  const responsiveCollectionNames = Array.from(new Set([
+    collections.spacing,
+    collections.typography,
+  ].filter(Boolean)));
+  const responsive = responsiveCollectionNames
+    .map((collectionName, priority) => {
+      const entry = summaries.find(item => item.collection.name === collectionName);
+      const modes = entry
+        ? (entry.collection.modes || []).map(mode => mode.name).filter(Boolean)
+        : [];
+      return { modes, priority };
+    })
+    .filter(entry => {
+      if (!entry.modes.length) return false;
+      const normalized = entry.modes.map(mode => String(mode).trim().toLowerCase());
+      const themeOnly = normalized.every(mode => mode === "light" || mode === "dark");
+      const genericOnly = normalized.every(mode =>
+        mode === "default" || mode === "value" || /^mode\s*\d+$/.test(mode)
+      );
+      return !themeOnly && !genericOnly;
+    })
+    .sort((a, b) => b.modes.length - a.modes.length || a.priority - b.priority)[0];
   const modes = responsive ? responsive.modes : ["Mobile", "Tablet", "Desktop"];
   return { modes, tier: modes.length };
 }

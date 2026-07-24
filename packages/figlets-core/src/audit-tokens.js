@@ -87,18 +87,137 @@ function duplicateSeverity(names) {
   return "info";
 }
 
+const ELEVATION_STYLE_BINDINGS = {
+  1: {
+    key: "xs",
+    keyBindings: [
+      { property: "color", variable: "color/shadow/key" },
+      { property: "offsetY", variable: "elevation/xs/offset-y" },
+      { property: "radius", variable: "elevation/xs/radius" },
+    ],
+  },
+  2: {
+    key: "sm",
+    keyBindings: [
+      { property: "color", variable: "color/shadow/key" },
+      { property: "offsetY", variable: "elevation/sm/offset-y" },
+      { property: "radius", variable: "elevation/sm/radius" },
+    ],
+    ambientBindings: [
+      { property: "color", variable: "color/shadow/ambient" },
+      { property: "radius", variable: "shadow/ambient/2/radius" },
+    ],
+  },
+  3: {
+    key: "md",
+    keyBindings: [
+      { property: "color", variable: "color/shadow/key" },
+      { property: "offsetY", variable: "elevation/md/offset-y" },
+      { property: "radius", variable: "elevation/md/radius" },
+    ],
+    ambientBindings: [
+      { property: "color", variable: "color/shadow/ambient" },
+      { property: "radius", variable: "shadow/ambient/3/radius" },
+    ],
+  },
+  4: {
+    key: "lg",
+    keyBindings: [
+      { property: "color", variable: "color/shadow/key" },
+      { property: "offsetY", variable: "elevation/lg/offset-y" },
+      { property: "radius", variable: "elevation/lg/radius" },
+    ],
+    ambientBindings: [
+      { property: "color", variable: "color/shadow/ambient" },
+      { property: "radius", variable: "shadow/ambient/4/radius" },
+    ],
+  },
+  5: {
+    key: "xl",
+    keyBindings: [
+      { property: "color", variable: "color/shadow/key" },
+      { property: "offsetY", variable: "elevation/xl/offset-y" },
+      { property: "radius", variable: "elevation/xl/radius" },
+    ],
+    ambientBindings: [
+      { property: "color", variable: "color/shadow/ambient" },
+      { property: "radius", variable: "shadow/ambient/5/radius" },
+    ],
+  },
+};
+
+function _effectRawValue(effect, property) {
+  if (!effect) return null;
+  if (property === "offsetY") {
+    return effect.offset && typeof effect.offset.y === "number" ? effect.offset.y : null;
+  }
+  return Object.prototype.hasOwnProperty.call(effect, property) ? effect[property] : null;
+}
+
+function auditEffectStyleBindings(effectStyles = [], variables = []) {
+  const variableByName = new Map(
+    (Array.isArray(variables) ? variables : [])
+      .filter(variable => variable && variable.name)
+      .map(variable => [variable.name, variable])
+  );
+  const issues = [];
+
+  for (const style of Array.isArray(effectStyles) ? effectStyles : []) {
+    const match = style && String(style.name || "").match(/^elevation\/([1-5])$/);
+    if (!match) continue;
+    const definition = ELEVATION_STYLE_BINDINGS[Number(match[1])];
+    const dropShadows = (Array.isArray(style.effects) ? style.effects : [])
+      .filter(effect => effect && effect.type === "DROP_SHADOW");
+    const expectations = [
+      { effect: dropShadows[0], effectIndex: 0, shadowRole: "key", bindings: definition.keyBindings },
+      {
+        effect: dropShadows[1],
+        effectIndex: 1,
+        shadowRole: "ambient",
+        bindings: definition.ambientBindings || [],
+      },
+    ];
+
+    for (const expectation of expectations) {
+      if (!expectation.effect) continue;
+      const boundVariables = expectation.effect.boundVariables || {};
+      for (const binding of expectation.bindings) {
+        if (boundVariables[binding.property]) continue;
+        const expectedVariable = variableByName.get(binding.variable) || null;
+        issues.push({
+          styleId: style.id || null,
+          styleName: style.name,
+          effectIndex: expectation.effectIndex,
+          shadowRole: expectation.shadowRole,
+          property: binding.property,
+          rawValue: _effectRawValue(expectation.effect, binding.property),
+          expectedVariable: binding.variable,
+          expectedVariableId: expectedVariable && expectedVariable.id || null,
+          expectedVariableExists: Boolean(expectedVariable),
+          reason: "This effect-style shadow property uses a raw value instead of the expected variable binding.",
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
 function auditTokens(input = {}) {
   const variables = Array.isArray(input.variables) ? input.variables : [];
   const collections = Array.isArray(input.collections) ? input.collections : [];
+  const effectStyles = Array.isArray(input.effectStyles) ? input.effectStyles : [];
+  const rawEffectStyleBindings = auditEffectStyleBindings(effectStyles, variables);
 
   if (variables.length === 0) {
-    const inventory = designSystemInventory({ collections, variables });
+    const inventory = designSystemInventory({ collections, variables, effectStyles });
     return {
       summary: {
         totalVariables: 0,
         unaliasedCount: 0,
         partiallyUnaliasedCount: 0,
         rawPrimitiveCount: 0,
+        rawEffectStyleBindingCount: rawEffectStyleBindings.length,
         duplicateValueGroups: 0,
         informationalDuplicateValueGroups: 0,
         collectionNamingIssues: 0
@@ -115,6 +234,7 @@ function auditTokens(input = {}) {
       unaliased: [],
       partiallyUnaliased: [],
       rawPrimitives: [],
+      rawEffectStyleBindings,
       duplicates: [],
       informationalDuplicates: [],
       namingIssues: []
@@ -243,6 +363,7 @@ function auditTokens(input = {}) {
       unaliasedCount: unaliased.length,
       partiallyUnaliasedCount: partiallyUnaliased.length,
       rawPrimitiveCount: rawPrimitives.length,
+      rawEffectStyleBindingCount: rawEffectStyleBindings.length,
       duplicateValueGroups: duplicateIssues.length,
       informationalDuplicateValueGroups: informationalDuplicates.length,
       collectionNamingIssues: namingIssues.length
@@ -250,6 +371,7 @@ function auditTokens(input = {}) {
     unaliased,
     partiallyUnaliased,
     rawPrimitives,
+    rawEffectStyleBindings,
     duplicates,
     informationalDuplicates,
     namingIssues
@@ -257,6 +379,7 @@ function auditTokens(input = {}) {
 }
 
 module.exports = {
+  auditEffectStyleBindings,
   auditTokens,
   isPrimitiveLikeName,
   isPrimitiveSpacingStepToken,

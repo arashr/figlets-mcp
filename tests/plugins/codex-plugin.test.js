@@ -39,6 +39,9 @@ const commandSource = fs.readFileSync(path.join(PLUGIN_DIR, "commands", "start.m
 assert.ok(commandSource.includes("figlets_start"), "start command must instruct the agent to call figlets_start");
 assert.ok(commandSource.includes("designerResponse"), "start command must direct the agent to use figlets_start.designerResponse");
 assert.ok(commandSource.includes("figlets_route_intent"), "start command must route concrete initial goals instead of showing the menu");
+assert.ok(commandSource.includes("interpreted_workflow_id"), "start command must pass the AI-interpreted canonical workflow id");
+assert.ok(/own language/i.test(commandSource), "start command must make intent routing language-independent");
+assert.ok(/do not rely on English keywords/i.test(commandSource), "start command must not delegate multilingual understanding to text scoring");
 assert.ok(commandSource.includes("selectionPrompt"), "start command must support structured selection prompts for ambiguous goals");
 assert.ok(/Use `figlets_start\.designerResponse` only for generic help\/start requests/i.test(commandSource), "start command must reserve the generic menu for generic help");
 assert.ok(/design-system review[\s\S]*Figlets MCP tools\/scripts/i.test(commandSource), "start command must require Figlets tools/scripts for designer review");
@@ -61,6 +64,9 @@ assert.ok(/figlets_start/.test(skillFrontmatter), "skill description must mentio
 assert.ok(skillBody.includes("figlets_start"), "skill body must instruct calling figlets_start");
 assert.ok(skillBody.includes("designerResponse"), "skill body must direct the agent to use figlets_start.designerResponse");
 assert.ok(skillBody.includes("figlets_route_intent"), "skill body must route concrete initial goals");
+assert.ok(skillBody.includes("interpreted_workflow_id"), "skill body must pass the AI-interpreted canonical workflow id");
+assert.ok(/user's own language/i.test(skillBody), "skill body must interpret goals in the user's language");
+assert.ok(/do not rely on English keyword matching/i.test(skillBody), "skill body must reserve keyword matching for fallback");
 assert.ok(skillBody.includes("selectionPrompt"), "skill body must support structured selection prompts");
 assert.ok(/Only use `figlets_start\.designerResponse` verbatim for generic help\/start requests/i.test(skillBody), "skill body must not show the generic menu for concrete goals");
 assert.ok(/workflow guide is mandatory/i.test(skillBody), "skill body must make the workflow guide mandatory for designer review");
@@ -73,6 +79,10 @@ assert.ok(/schema validation rejects[\s\S]*rerun `inspect_ds_setup_gaps`/i.test(
 assert.ok(skillBody.includes("repairPlan.optionalApplyInput"), "skill body must document optional bulk apply payloads");
 assert.ok(skillBody.includes("inspect_ds_token_gaps"), "skill body must mention token-gap planner");
 assert.ok(skillBody.includes("fixableNow"), "skill body must document binding-audit fixableNow boundary");
+assert.ok(skillBody.includes("effect_style_repairs"), "skill body must preserve exact elevation findings through preview and apply");
+assert.ok(skillBody.includes("interaction.mustReviewOptionalSuggestionsBeforeExportApproval"), "skill body must surface Make suggestions before export approval");
+assert.ok(/never combine that question with export confirmation/i.test(skillBody), "skill body must keep suggestion review ahead of export confirmation");
+assert.ok(skillBody.includes("optional_suggestions_reviewed: true"), "skill body must carry the Make suggestion-review gate into export");
 assert.ok(/gaps cannot be fixed as a dead end/i.test(skillBody), "skill body must avoid dead-end bulk repair wording");
 assert.ok(!/repo edit|plugin edit/i.test(skillBody) || /not.*developer-mode|do not offer developer-mode/i.test(skillBody), "skill body must not offer developer-mode options");
 assert.ok(/setup --hosts=codex-plugin --yes/.test(skillBody), "skill body should point to the Codex setup target when Figlets is unavailable");

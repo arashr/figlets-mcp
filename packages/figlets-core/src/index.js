@@ -1,6 +1,6 @@
 const { analyzeDesignSystemData } = require("./analyze-design-system.js");
 const { inspectComponentData } = require("./inspect-component.js");
-const { auditTokens } = require("./audit-tokens.js");
+const { auditEffectStyleBindings, auditTokens } = require("./audit-tokens.js");
 const {
   designSystemInventory,
   emptyDesignSystemMessage,
@@ -8,6 +8,7 @@ const {
 } = require("./design-system-inventory.js");
 const dsConfig = require("./ds-config/index.js");
 const variableBinding = require("./variable-binding.js");
+const makeGuidelines = require("./make-guidelines.js");
 
 const { version: coreVersion } = require("../package.json");
 
@@ -81,6 +82,7 @@ function detectDesignSystemFromFigmaData(input = {}) {
 
 module.exports = {
   CORE_VERSION: coreVersion,
+  auditEffectStyleBindings,
   auditTokens,
   detectDesignSystem,
   detectDesignSystemFromFigmaData,
@@ -91,5 +93,6 @@ module.exports = {
   normalizeDesignSystemSnapshot,
   summarizeDesignSystem,
   variableBinding,
+  makeGuidelines,
   dsConfig,
 };

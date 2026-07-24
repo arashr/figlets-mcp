@@ -27,7 +27,19 @@ const figmaData = {
   collections: [
     { id: "c1", name: "Primitives", variableIds: ["v1", "v2"] },
     { id: "c2", name: "Spacing", variableIds: ["v3", "v4"] }
-  ]
+  ],
+  effectStyles: [{
+    id: "effect-1",
+    name: "elevation/1",
+    effects: [{
+      type: "DROP_SHADOW",
+      color: { r: 0, g: 0, b: 0, a: 0.2 },
+      offset: { x: 0, y: 1 },
+      radius: 2,
+      spread: 0,
+      boundVariables: {},
+    }],
+  }],
 };
 
 try {
@@ -50,6 +62,12 @@ try {
     // primitive raw values are inventory, not unaliased defects
     assert.strictEqual(data.summary.unaliasedCount, 1, "semantic raw float should count as unaliased");
     assert.strictEqual(data.summary.rawPrimitiveCount, 2, "primitive color and numeric spacing are inventory");
+    assert.strictEqual(data.summary.rawEffectStyleBindingCount, 3, "raw elevation style color, offset, and radius should be detected");
+    assert.deepStrictEqual(
+      data.rawEffectStyleBindings.map(item => item.property),
+      ["color", "offsetY", "radius"],
+      "server audit should pass effect styles into the shared raw-binding audit"
+    );
     // space/4 and space/md share the same value in one domain — review, not cross-domain info
     assert.strictEqual(data.summary.duplicateValueGroups, 1, "should detect same-domain duplicate value group");
     assert.ok(data.duplicates[0].variables.includes("space/4"), "should name duplicate variables");

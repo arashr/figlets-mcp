@@ -215,10 +215,10 @@ module.exports = (async () => {
 
   assert.ok(
     code.includes("Variant Preview Bounds") &&
-      code.includes("_docVariantPreviewOutset(_v, effectStyleById)") &&
-      code.includes("_previewShell.clipsContent = false") &&
-      code.includes("_vf.fills = []; _vf.clipsContent = false") &&
-      code.includes("_previewPad = _previewOutset > 0 ? _previewOutset + 4 : 0"),
+      code.includes("_docVariantPreviewOutset(sourceComponent, effectStyleById)") &&
+      code.includes("previewShell.clipsContent = false") &&
+      code.includes("preview.fills = []") &&
+      code.includes("const previewPad = previewOutset > 0 ? previewOutset + 4 : 0"),
     "Figma spec-sheet variant previews should reserve layout space for out-of-bounds focus rings and shadows"
   );
 

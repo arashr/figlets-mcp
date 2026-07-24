@@ -255,12 +255,14 @@ assert.ok(
   code.includes("function _isDocPrivateNodeName(name)") &&
     code.includes("first === '_' || first === '.'") &&
     code.includes("function _absoluteDocX(node)") &&
-    code.includes("function _positionDocumentationSection(section, frame, target)") &&
-    code.includes("function _syncDocumentationSectionBounds(section, frame)") &&
+    code.includes("function _docPlanSpecSheetPlacement(options)") &&
+    code.includes("function _docExpandedDocumentationSectionSize(currentWidth, currentHeight, children, padding)") &&
+    code.includes("function _positionDocumentationSection(section, frame, target, sectionExists, replacement, existingSheets)") &&
+    code.includes("function _syncDocumentationSectionBounds(section, padding)") &&
     code.includes("componentX: _absoluteDocX(compSet)") &&
-    code.includes("section.resizeWithoutConstraints(frame.width, frame.height)") &&
+    code.includes("section.resizeWithoutConstraints(size.width, size.height)") &&
     code.includes("if (_isDocPrivateNodeName(node.name)) return"),
-  "Component docs must position the documentation section beside the component, fit the section to frame content, and ignore private _/. anatomy layers"
+  "Component docs must position a new documentation section beside the component, preserve existing sheets, expand the section, and ignore private _/. anatomy layers"
 );
 
 assert.ok(

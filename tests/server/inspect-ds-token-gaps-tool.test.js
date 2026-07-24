@@ -938,6 +938,120 @@ module.exports = (() => {
   }
 
   {
+    const bound = (id) => ({ type: "VARIABLE_ALIAS", id });
+    const fullyBoundKey = (level) => ({
+      type: "DROP_SHADOW",
+      color: { r: 0, g: 0, b: 0, a: 0.2 },
+      offset: { x: 0, y: level },
+      radius: level * 2,
+      spread: 0,
+      boundVariables: {
+        color: bound("shadow-key"),
+        offsetY: bound(`elevation-${level}-offset`),
+        radius: bound(`elevation-${level}-radius`),
+      },
+    });
+    const fullyBoundAmbient = (level) => ({
+      type: "DROP_SHADOW",
+      color: { r: 0, g: 0, b: 0, a: 0.08 },
+      offset: { x: 0, y: 0 },
+      radius: level * 4,
+      spread: 0,
+      boundVariables: {
+        color: bound("shadow-ambient"),
+        radius: bound(`shadow-ambient-${level}-radius`),
+      },
+    });
+    const rawStyleSnapshot = {
+      collections: [{ name: "5. Elevation" }],
+      variables: elevationVariables(),
+      textStyles: [],
+      effectStyles: [
+        { name: "elevation/0", effects: [] },
+        {
+          id: "effect-1",
+          name: "elevation/1",
+          effects: [{
+            type: "DROP_SHADOW",
+            color: { r: 0, g: 0, b: 0, a: 0.2 },
+            offset: { x: 0, y: 1 },
+            radius: 2,
+            spread: 0,
+            boundVariables: { color: bound("shadow-key") },
+          }],
+        },
+        { name: "elevation/2", effects: [fullyBoundKey(2), fullyBoundAmbient(2)] },
+        { name: "elevation/3", effects: [fullyBoundKey(3), fullyBoundAmbient(3)] },
+        { name: "elevation/4", effects: [fullyBoundKey(4), fullyBoundAmbient(4)] },
+        { name: "elevation/5", effects: [fullyBoundKey(5), fullyBoundAmbient(5)] },
+      ],
+    };
+    const rawElevationStyles = inspectDsTokenGapsFromConfigAndFigmaData(DS, rawStyleSnapshot, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["elevation-styles"],
+    });
+
+    assert.strictEqual(rawElevationStyles.summary.missingStyleCount, 0);
+    assert.strictEqual(rawElevationStyles.summary.staleStyleCount, 1);
+    assert.strictEqual(rawElevationStyles.topFindings.staleStyles[0].name, "elevation/1");
+    assert.deepStrictEqual(
+      rawElevationStyles.topFindings.staleStyles[0].bindings.map(item => item.property),
+      ["offsetY", "radius"],
+      "existing elevation styles should report the exact raw numeric shadow properties"
+    );
+    assert.deepStrictEqual(
+      rawElevationStyles.repairPlan.applyInput.categories,
+      ["elevation-styles"],
+      "raw effect-style bindings should route to the existing narrow elevation-styles refresh"
+    );
+    assert.deepStrictEqual(
+      rawElevationStyles.repairPlan.previewInput.effect_style_repairs.map(item => item.name),
+      ["elevation/1"],
+      "the preview must carry the exact audited effect-style repair instead of rediscovering refresh candidates"
+    );
+    assert.deepStrictEqual(
+      rawElevationStyles.repairPlan.applyInput.effect_style_repairs,
+      rawElevationStyles.repairPlan.previewInput.effect_style_repairs,
+      "preview and apply must use the same exact audited effect-style repair payload"
+    );
+    assert.strictEqual(
+      rawElevationStyles.repairPlan.previewInput.effect_style_repairs[0].styleId,
+      "effect-1",
+      "the exact repair payload should preserve the audited style identity"
+    );
+    assert.deepStrictEqual(
+      rawElevationStyles.repairPlan.reviewOptions
+        .find(option => option.id === "elevation-tokens-and-styles")
+        .previewInput.effect_style_repairs,
+      rawElevationStyles.repairPlan.previewInput.effect_style_repairs,
+      "the suggestion option must reuse the initial audit payload unchanged"
+    );
+    assert.ok(
+      rawElevationStyles.repairPlan.reviewOptions.some(option => option.id === "elevation-tokens-and-styles"),
+      "raw elevation style findings should expose a separately reviewable repair boundary"
+    );
+    assert.ok(
+      rawElevationStyles.repairPlan.designerPresentation.sections.some(section => section.title === "Elevation effect-style bindings"),
+      "designer presentation should explain raw effect-style bindings plainly"
+    );
+
+    const broadElevation = inspectDsTokenGapsFromConfigAndFigmaData(DS, rawStyleSnapshot, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["elevation"],
+    });
+    assert.deepStrictEqual(
+      broadElevation.repairPlan.applyInput.categories,
+      ["elevation-styles"],
+      "the health-check's broad elevation category should narrow raw style bindings to elevation-styles"
+    );
+    assert.deepStrictEqual(
+      broadElevation.repairPlan.applyInput.effect_style_repairs.map(item => item.name),
+      ["elevation/1"],
+      "broad health-check routing should preserve the exact raw style finding"
+    );
+  }
+
+  {
     const typographyStyles = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
       collections: [{ name: "3. Typography" }],
       variables: typographyVariables(),

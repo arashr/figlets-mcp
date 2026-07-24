@@ -68,9 +68,34 @@ module.exports = new Promise((resolve, reject) => {
       const toolNames = listResponse.result.tools.map(tool => tool.name);
       assert.ok(toolNames.indexOf("figlets_start") >= 0, "tools/list should expose figlets_start");
       assert.ok(toolNames.indexOf("figlets_route_intent") >= 0, "tools/list should expose figlets_route_intent");
+      const routeIntent = listResponse.result.tools.find(tool => tool.name === "figlets_route_intent");
+      assert.ok(
+        routeIntent.inputSchema &&
+          routeIntent.inputSchema.properties &&
+          routeIntent.inputSchema.properties.interpreted_workflow_id,
+        "registered figlets_route_intent schema should expose the AI-interpreted canonical workflow id"
+      );
+      assert.ok(
+        routeIntent.inputSchema.properties.interpreted_workflow_id.enum.includes("health-check"),
+        "registered route schema should enumerate health-check"
+      );
+      assert.ok(
+        !routeIntent.inputSchema.properties.interpreted_workflow_id.enum.includes("setup-gap-qa"),
+        "registered route schema should reject hidden legacy workflows"
+      );
       assert.ok(toolNames.indexOf("figlets_workflow_guide") >= 0, "tools/list should expose figlets_workflow_guide");
       assert.ok(toolNames.indexOf("figlets_health_check") >= 0, "tools/list should expose figlets_health_check");
       assert.ok(toolNames.indexOf("create_ds_config_from_intake") >= 0, "tools/list should expose intake-to-config setup tool");
+      assert.ok(toolNames.indexOf("prepare_make_guidelines") >= 0, "tools/list should expose read-only Make guidelines preparation");
+      assert.ok(toolNames.indexOf("save_make_guidelines_profile") >= 0, "tools/list should expose approved optional Make profile save");
+      assert.ok(toolNames.indexOf("export_make_guidelines") >= 0, "tools/list should expose approved Make guidelines export");
+      const exportMakeGuidelines = listResponse.result.tools.find(tool => tool.name === "export_make_guidelines");
+      assert.ok(
+        exportMakeGuidelines.inputSchema &&
+          exportMakeGuidelines.inputSchema.properties &&
+          exportMakeGuidelines.inputSchema.properties.optional_suggestions_reviewed,
+        "registered export_make_guidelines schema should expose the pre-approval suggestion-review gate"
+      );
       assert.ok(toolNames.indexOf("apply_ds_config_contrast_repairs") >= 0, "tools/list should expose pre-build config contrast repair tool");
       assert.ok(toolNames.indexOf("inspect_ds_token_gaps") >= 0, "tools/list should expose inspect_ds_token_gaps");
       assert.ok(toolNames.indexOf("apply_ds_config_responsive_spacing_repairs") >= 0, "tools/list should expose responsive spacing config repair tool");
@@ -81,6 +106,10 @@ module.exports = new Promise((resolve, reject) => {
           updateDsTokens.inputSchema.properties &&
           updateDsTokens.inputSchema.properties.spacing_semantic_repairs,
         "registered update_ds_tokens schema should expose exact spacing_semantic_repairs"
+      );
+      assert.ok(
+        updateDsTokens.inputSchema.properties.effect_style_repairs,
+        "registered update_ds_tokens schema should expose exact audited effect_style_repairs"
       );
       assert.ok(toolNames.indexOf("apply_ds_foundation_repairs") >= 0, "tools/list should expose apply_ds_foundation_repairs");
       const generateComponentDoc = listResponse.result.tools.find(tool => tool.name === "generate_component_doc");

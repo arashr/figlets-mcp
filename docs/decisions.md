@@ -4,6 +4,180 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-07-24] Component variable modes require mode-driven value changes
+
+**Decision:** A bound multi-mode variable collection is a component Variable Modes collection only if changing that collection's mode changes at least one bound variable's resolved value in the documented component. Binding presence alone remains sufficient for Token Bindings, but not for visual mode previews.
+
+**Why:** Input legitimately references the `button/focus` token from `Component / Button`, yet that token is invariant across Primary, Secondary, Ghost, and Danger. Treating the collection as an Input visual dimension generated redundant previews and implied a mode relationship that does not affect Input.
+
+**Consequence:** Mode relevance is determined from exact bound variable IDs plus recursive alias/value comparison across collection modes; no component-name or collection-name heuristic is introduced. Invariant bindings remain documented accurately under Token Bindings. Only mode-varying collections feed the Figma Variable Modes sheet section, Markdown mode table, `[SPEC]` metadata, and structured return payload.
+
+**Verification:** Regression coverage includes a mode-varying collection and an invariant cross-component `button/focus` binding in the same component. The latter is excluded from mode groups. Full `npm test` passed **116/116**.
+
+---
+
+## [2026-07-24] Component documentation uses stable section-relative placement
+
+**Decision:** Treat the existing Figma `Documentation` section as persistent layout state. For a component without a sheet, append its generated `· Spec` frame to the right of the rightmost existing spec sheet with an 80px gap. For a component whose sheet already exists, replace it at the same section-relative `x`/`y`. Never reposition an existing Documentation section during component-doc generation.
+
+**Why:** Positioning every generated frame at `(0, 0)` and resizing the section to that frame overwrote the visible layout whenever multiple component sheets existed. The section and its children already encode the designer's documentation organization and must not be reconstructed around the latest component.
+
+**Consequence:** New Documentation sections begin with 80px padding and remain beside the initial target component. Existing sections preserve all sibling frames and only expand to encompass every child plus right/bottom padding; they never shrink. Placement considers direct-child spec frames so nested content inside a sheet cannot affect sibling layout. Same-component regeneration remains replacement rather than duplication.
+
+**Verification:** Focused tests cover initial padding, rightmost placement, row alignment, stable section coordinates, in-place regeneration, all-child expansion, and no-shrink behavior. Existing component-doc layout, variable-mode, variant-fact, QA-policy, and integration tests pass. Full `npm test` passed **116/116**.
+
+---
+
+## [2026-07-23] Make suggestion review precedes export confirmation
+
+**Decision:** When `prepare_make_guidelines` returns optional suggestions, the agent must present them as an `Accept` / `Edit` / `Skip` / `Skip all` decision before asking whether to create or refresh the bundle. Suggestion review and export confirmation are separate conversational steps. Export requires `optional_suggestions_reviewed: true` when suggestions remain in the approved preview.
+
+**Why:** Optional suggestions are known during the first read-only preparation. Deferring them until after the designer approves generation makes the approval incomplete, creates a needless second confirmation, and falsely frames a pre-existing guidance gap as a consequence of refreshing the source.
+
+**Consequence:** Preparation exposes `interaction.phase`, `exportApprovalReady`, `mustReviewOptionalSuggestionsBeforeExportApproval`, and the exact pending suggestion ids. The Agent Interface and distributed host skills treat this state as mandatory sequencing. The designer may still decline every suggestion without blocking export; the new export flag confirms only that the suggestions were shown and resolved before approval. Accepted profile changes or persistent skips continue through `save_make_guidelines_profile` and require a fresh fingerprinted preview.
+
+**Verification:** Regression coverage fails an export that has approval and a current fingerprint but no suggestion-review acknowledgment, then succeeds with the same preview after review. Workflow and plugin tests assert the before-approval order and prohibition on combining the questions. Full `npm test` passed **115/115**.
+
+---
+
+## [2026-07-23] Project component specs are independent Make inputs
+
+**Decision:** Discover every Markdown file in the canonical project `component-specs/` directory before reconciling with the current Figma snapshot. Resolve component identity from the document's first H1, falling back to the filename stem. Merge exact identity matches with Figma facts, but also export unmatched specs as spec-only component guidance. If multiple files resolve to the same identity, fail closed with both paths instead of selecting one.
+
+**Why:** Generated component documentation is durable project knowledge, while the active Figma snapshot is transient and can point at another file or fixture. Filtering specs by snapshot component names—and by exact filename stems—made valid files invisible and encouraged the false explanation that documentation had been deleted. Component guidance should not disappear merely because the current snapshot does not contain the component.
+
+**Consequence:** The existing `prepare_make_guidelines` and `export_make_guidelines` surfaces are extended; no new public tool or write boundary is introduced. Preparation exposes `componentSpecDiscovery` with the searched directory, existence, all discovered files, matched components, and spec-only components. Hosts must inspect these facts and may not claim deletion or absence when files were found. Per-component Make pages preserve relevant generated-spec sections, including Variable Modes, and `components.md` links every granular page. Bundle schema version 3 invalidates stale prepared previews.
+
+**Verification:** Core and server regressions cover canonical H1 identity, versioned filenames, exact merging, spec-only inclusion, Variable Modes preservation, and index routing. A real read-only preparation found the existing Button and Tab Bar specs and generated both pages. Full `npm test` passed **115/115**.
+
+---
+
+## [2026-07-23] Bound variable modes are first-class component visual states
+
+**Decision:** `generate_component_doc` must document both Figma component variants and variable modes that affect the component. A variable collection qualifies when a variable from that collection is bound anywhere across the component or its variant set and the collection has more than one mode. For every qualifying collection, render every component variant under every collection mode in the Figma spec sheet and record the mode facts in Markdown and machine-readable output.
+
+**Why:** A mode-backed Button with Primary, Secondary, Ghost, and Danger can have four intentional visual representations without four component-set variants. Listing the collection and mode names in a token table does not communicate those representations and leaves the human spec sheet visually incomplete.
+
+**Consequence:** The existing `generate_component_doc` bridge surface is extended; there is no new public tool or parallel documentation path. Detection uses exact bound variable IDs and collection metadata, never collection-name heuristics. Local and remote collections are supported. The current component mode is read from `resolvedVariableModes`, each preview uses `setExplicitVariableModeForCollection(collection, modeId)`, and token values are resolved against that generated preview instance. The Cartesian product is collection mode × component variant, so no state is silently omitted.
+
+**Output contract:** Markdown includes a `Variable Modes` table with collection, mode, current-state marker, bound token values, and Figma preview coverage. The Figma `[SPEC]` block includes `variable-modes`; the result exposes counts plus structured collection/mode/token facts. Single-mode collections remain ordinary token bindings and do not create redundant visual sections.
+
+**Verification:** Official Plugin API documentation was rechecked on 2026-07-23 for `resolvedVariableModes`, `getVariableCollectionByIdAsync`, `Variable.resolveForConsumer`, and `setExplicitVariableModeForCollection`. Automated coverage passes **115/115**. Live spec-sheet regeneration remains approval-gated because it mutates Figma.
+
+---
+
+## [2026-07-23] Component guidance keeps granular files behind a canonical components.md index
+
+**Decision:** When a Make-guidelines export contains Figma components, emit both `guidelines/components.md` and the existing `guidelines/components/` folder. Treat `components.md` as the canonical component entrypoint: link the full catalog and every generated component-specific guideline directly from it, and route the root and library-local guideline files through that entrypoint.
+
+**Why:** Granular component files are useful for progressive disclosure, but files that are merely present in a folder are not guaranteed to become active Make context. The previous bundle omitted the `components.md` file designers see in Make and provided no explicit route from the top-level guidance to each spec. Make could therefore miss confirmed component documentation even though Figlets exported it.
+
+**Consequence:** `components/overview.md` remains the complete facts catalog and per-component specs remain separate focused files. Components without a confirmed spec stay facts-only; the index does not invent usage guidance. Schema version 2 refreshes existing bundles. The bundle linter fails closed when the component entrypoint, catalog, root route, or any direct spec route is missing.
+
+**Research basis:** Current Figma guidance was rechecked on 2026-07-23. It recommends a short top-level entrypoint that routes to focused files and uses granular component guidance; the canonical `components.md` index also matches the designer-observed Make export structure.
+
+---
+
+## [2026-07-23] Repair previews consume exact elevation audit findings
+
+**Decision:** Raw elevation effect-style repair is an exact finding handoff, not a category-level rediscovery. `inspect_ds_token_gaps` owns the analysis and emits `effect_style_repairs` containing each audited style identity plus its raw binding rows. Preview consumes those entries directly; apply receives the same approved entries and limits the bridge mutation to those styles. A generic `elevation-styles` refresh remains only as an explicit backward-compatible category operation when no exact repair payload is supplied.
+
+**Why:** The previous dry-run re-invoked the shared planner but lost `raw-effect-style-bindings` in a separate report adapter. Its generic existing-refresh path then excluded the broken styles and included healthy `elevation/0`, reversing the initial result. Running the same detector twice did not add useful information because both passes read the same cached snapshot; the divergent projection introduced the bug.
+
+**Consequence:** The exact elevation-only preview does not perform a second discovery pass. It reports the original style names, IDs, binding rows, and count. Apply fails closed for empty/malformed exact payloads, forwards the exact set to the bridge, checks style identity, and never expands it to all six elevation styles. Category-only fallback previews now project raw-binding gaps directly and suppress unrelated healthy refreshes whenever raw findings exist. Host instructions require agents to preserve `effect_style_repairs` unchanged through preview and apply.
+
+**Verification:** The active snapshot produces 14 binding findings over `elevation/1`–`elevation/5`; the preview produces the identical five-style set and excludes `elevation/0`. Regression coverage verifies five-style preview parity, unchanged preview/apply payloads, fail-closed malformed inputs, bridge exact-scope mutation, MCP schema exposure, and distributed host guidance. Full `npm test` passed **114/114**.
+
+---
+
+## [2026-07-23] Language understanding belongs to the AI interface
+
+**Decision:** For every clear designer goal, the AI interface interprets intent in the designer's own language and passes the original `intent` plus a canonical `interpreted_workflow_id` to the existing `figlets_route_intent` tool. Figlets validates that id and returns the workflow contract. It does not attempt to become a multilingual natural-language classifier. Deterministic text scoring remains only a backward-compatible fallback when the AI genuinely cannot choose a workflow.
+
+**Why:** The AI already has language and semantic understanding. Reimplementing that capability as English keyword weights or an expanding collection of per-language dictionaries creates needless ambiguity, asks multilingual designers to adapt to the script, and duplicates an inexpensive inference the interface can make before calling the tool. Figlets still needs to own validation, public workflow availability, sequencing, and safety boundaries.
+
+**Consequence:** `figlets_route_intent` gains the optional, enum-constrained `interpreted_workflow_id` input instead of adding a parallel public router. A valid AI interpretation overrides raw-text scoring and always suppresses `selectionPrompt`; unknown ids and hidden legacy workflow ids fail closed. Results identify `routingMode` as `ai-interpreted` or `deterministic-fallback`, and preserve the original-language request. Host and plugin instructions require the semantic id whenever the goal is clear in any language and forbid relying on English keyword matching or asking for translation.
+
+**Verification:** The Persian request `دیزاین سیستم من رو چک کن` routes directly to `health-check` when the AI supplies that interpretation, while the same raw text without an interpretation exercises the existing fallback and asks for a choice. MCP schema, host-entrypoint, adapter, Codex plugin, Claude plugin, and invalid-id regressions pass. Full `npm test` passed **114/114**.
+
+---
+
+## [2026-07-23] Whole-system checks outrank generic “check” keyword matches
+
+**Decision:** A request that explicitly scopes checking, reviewing, auditing, inspecting, or health to the whole design system routes directly to `health-check`, unless it also names a component/frame/layer/node/instance scope. Generic workflow verbs (`check`, `review`, `audit`, `inspect`) are stopwords for loose per-example scoring; exact phrases and meaningful scope nouns still score normally. Selection prompts remain for requests that genuinely omit scope.
+
+**Why:** Repeating the same generic verb across several QA Binding Audit examples caused unrelated score accumulation. The exact product phrase `check my design system using figlets` tied Health Check with selected-layer QA and produced a needless chooser. A model can display the returned chooser, but the ambiguity originated in deterministic Figlets routing rather than model intelligence or size.
+
+**Consequence:** Clear whole-system requests start the full health-check workflow immediately. Explicit selection-scoped checking continues to use QA Binding Audit, and bare requests such as `check` retain clarification. Hosts and models receive an unambiguous `selectionPrompt: null` for the canonical health-check phrase.
+
+---
+
+## [2026-07-23] Elevation style health includes internal variable bindings
+
+**Decision:** Token health must distinguish correctly aliased Elevation variables from the bindings inside local elevation effect styles. For managed styles `elevation/1`–`elevation/5`, audit the same fields the existing apply contract owns: key shadow `color`, `offsetY`, and `radius`, plus ambient shadow `color` and `radius`. Report any unbound field as an exact raw effect-style binding finding. Keep `elevation/0` as an intentionally empty style and ignore unrelated local effect styles.
+
+**Why:** Style existence is not style health. An elevation style can have the expected name and visually correct numbers while still bypassing the token graph through raw shadow properties. Reporting the Elevation variable collection as alias-backed does not prove that consumers such as local effect styles are bound to those variables.
+
+**Consequence:** `audit_tokens` exposes `rawEffectStyleBindings` and a summary count. `inspect_ds_token_gaps` treats affected existing styles as stale, presents the exact binding gap, and narrows the approved repair to the existing `elevation-styles` refresh surface, which preserves style IDs. This extends shared read-only analysis and an existing apply boundary; it does not add a public tool, invent a generic operation batch, or authorize an automatic Figma write.
+
+---
+
+## [2026-07-23] Snapshot breakpoints come only from responsive foundation collections
+
+**Decision:** `inferBreakpointsFromSnapshot` may derive responsive modes only from the collections that the shared collection-role inference identifies as Spacing or Typography. A meaningful single mode such as `Desktop` is valid observed evidence. Color collection modes are never breakpoint evidence, and theme-only or generic mode sets are excluded even if they appear on a candidate responsive collection. If neither responsive collection supplies usable evidence, retain the existing Mobile/Tablet/Desktop bootstrap fallback.
+
+**Why:** Collection modes have different dimensions. `Light`/`Dark` describes color theme, while responsive Spacing/Typography modes describe viewport or density contexts. Ranking all multi-mode collections silently crossed those dimensions and caused a health check to recommend destructive, nonsensical Light/Dark mode creation in Desktop-only responsive collections.
+
+**Consequence:** Existing/imported files preserve their observed responsive mode shape, including Desktop-only systems. Generated file-scoped configs self-heal through the existing `refreshGenerated` sync path, after which `inspect_ds_token_gaps` no longer emits false missing-mode foundation repairs. This is a correction to shared bootstrap inference, not a new planner, apply surface, or Figma mutation.
+
+---
+
+## [2026-07-22] Make guidelines use a distinct preview/fingerprint/local-export boundary
+
+**Decision:** Ship three public tools instead of extending `export_design_md`: read-only `prepare_make_guidelines`, approved optional-profile persistence through `save_make_guidelines_profile`, and approved `export_make_guidelines` with current-source fingerprint validation. This surface writes no Figma data and does not add a bridge mutation branch.
+
+**Why:** A guideline/CSS bundle has its own evidence, optional-enrichment, refresh, and multi-file approval contract. Reusing a Figma mutation planner would weaken that boundary; adding a format switch to DESIGN.md would couple unrelated handoff formats.
+
+**Consequence:** Pure normalization/rendering/serialization lives in `@figlets/core`; server code owns source resolution, exact component-spec discovery, guarded paths, profile persistence, diffing, and writes. Existing snapshot and prepared-config starts converge on the same model. Local bundle refreshes require a new preview/approval when any config, snapshot, component spec, profile, schema, docs date, or destination changes.
+
+---
+
+## [2026-07-22] Figma-aligned CSS accompanies Make guidelines without forced intake
+
+**Decision:** The Make-guidelines MVP generates its own project-workspace `src/<library-slug>/styles.css` alongside library-local guidance and root `guidelines/setup.md`/`styles.md`. Figma's latest official documentation defines the relative organization only; CSS that Figma creates inside a Make project is never treated as a Figlets workspace input. Valid `codeSyntax.WEB` is the first-choice CSS name, with a versioned deterministic CSS-safe fallback from the exact Figma path. The bundle supports one source library and defaults to `<project_path>/specs/figma-make/`.
+
+**Interaction contract:** Translation is the default. If Figlets has enough confirmed design-system information, it prepares a useful guideline/CSS preview before asking for anything else. Missing enrichment becomes a concrete, editable suggestion with accept/edit/skip/skip-all behavior. Only genuine safety or source blockers enter `needsDesignerInput`, one question at a time.
+
+**Why:** Figma's in-project library import demonstrates that CSS and guidelines are complementary, so a guidelines-only Figlets handoff leaves out useful style context. The two workspaces are separate: Figlets must translate its own facts into local files, not model a nonexistent Figma-CSS import flow. Optional product or composition context can improve Make without becoming an obstacle to exporting what Figlets already knows.
+
+**Consequence:** The normalized model marks CSS as Figlets-generated and tracks its name map. If a local Figlets bundle exists, preparation previews a full refresh and asks approval; approved export replaces the managed manifest without merging, and Figlets does not manage what happens after export. Tests cover Figma-aligned paths, stylesheet loading, collisions, units, escaping, refresh approval, and non-repeating optional suggestions.
+
+---
+
+## [2026-07-22] Figma Make guidelines MVP is package-free and designer-facing
+
+**Decision:** The first Figma Make guidelines release must not ask designers to choose or understand npm packages, package manifests, React/Vite setup, providers, or package imports. It may generate a CSS companion and CSS-only `setup.md`; these are design-system artifacts, not npm-package setup.
+
+**Why:** The primary designer need is to keep fast Make prototypes inside the visual and behavioral boundaries of an existing design system. Requiring package or kit knowledge would introduce an implementation concern before the designer has received that basic value.
+
+**Consequence:** Both starting paths—an existing/new Figlets config and a Figma file unknown to Figlets—translate confirmed information first and discuss optional design-language or composition enrichment only in designer-readable terms. Kit education and package integration remain post-MVP enhancements.
+
+---
+
+## [2026-07-20] Figma Make guidelines are a distinct evidence-backed export flow
+
+**Decision:** Plan a first-class Figma Make guidelines workflow parallel to `export_design_md`, with a read-only preparation boundary and an explicitly approved local multi-file export. The workflow supports a trusted Figlets config path and an unknown-existing-Figma-file path. It reuses shared sync/bootstrap/config helpers but owns a distinct Make-specific artifact contract.
+
+**Why:** Figma Make guidelines are behavioral AI instructions, not merely a token handoff. Current Figma guidance recommends a top-level routing file plus short focused files, decision-oriented token guidance, explicit prohibitions, and package/style setup only when real evidence exists. Folding this into DESIGN.md would blur two different source-of-truth and approval contracts.
+
+**Evidence boundary:** Final imperative guidance may use exact snapshot facts, confirmed Figlets config, explicit designer answers, existing component documentation, or supplied package/style artifacts. Inference may create a confirmation question but must not silently become policy. In particular, Figlets must not invent CSS variable names after Figma's simplified library-style extraction, React/package APIs, breakpoint widths, component usage rules, or product personality.
+
+**Architecture consequence:** Prefer `prepare_make_guidelines` plus `export_make_guidelines`, a normalized provenance-aware core model, deterministic multi-file renderer, source fingerprints, and linting. Persist Make-only policy separately from `design-system.config.js`. Do not add a Make-specific Figma mutation command. Full scope and unresolved MVP choices are in [`figma-make-guidelines-feature-plan.md`](./figma-make-guidelines-feature-plan.md).
+
+**Research freshness:** Official Figma Make and Make-kit documentation was reviewed on 2026-07-20 and must be rechecked before implementation/release because the product is evolving.
+
+---
+
 ## [2026-07-11] Boolean-controlled layers belong in component handoffs
 
 **Decision:** `generate_component_doc` documents boolean component-property visibility bindings as implementation facts. When a node's `componentPropertyReferences.visible` points to a boolean property, both the Figma spec sheet and markdown include Boolean Property Behavior and Conditional Layers tables with the controlled layer, visibility states, relative bounds, visual styling, and placement/coverage notes. The Figma spec sheet also renders side-by-side false/true component previews for each documented boolean property. Controlled hidden layers are also added to the anatomy table with a conditional note.

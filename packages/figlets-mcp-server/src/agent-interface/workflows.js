@@ -77,6 +77,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "inspect_ds_setup_gaps.repairPlan.missingCapabilityNotes for named findings that need designer decisions or future Figlets planner/apply surfaces",
     "inspect_ds_token_gaps.repairPlan.foundationRepairPlan.applyInput → apply_ds_foundation_repairs for approved missing collection shells before token completion",
     "inspect_ds_token_gaps.repairPlan.previewInput / repairPlan.applyInput → update_ds_tokens for config-backed non-color token dry-run preview and narrow approved apply",
+    "Raw elevation effect-style findings must carry repairPlan.previewInput.effect_style_repairs unchanged into preview and the same approved repairPlan.applyInput.effect_style_repairs into apply; do not rediscover or widen the style set.",
     "designer-specified exact Figma design-system operations → plan_ds_figma_operations, then approved repairPlan.applyInput → apply_ds_figma_operations for variable creation, variable values, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers; do not use this generic surface to invent semantic naming migrations from health-check conflicts",
     "update_ds_primitives with categories color, spacing, color-semantics, primitive-typography, and primitive-shadow for config-backed primitive values, primitive typography/shadow tokens, and Color collection semantic alias updates",
     "inspect_ds_token_gaps.repairPlan.primitiveRepairPlan → update_ds_primitives for approved primitive-typography or primitive-shadow create/update in the Primitives collection",
@@ -238,7 +239,7 @@ const WORKFLOWS = [
         designerMessage: "What are you trying to do today?",
       },
     ],
-    next: ["health-check", "new-ds-setup", "build-showcase", "component-docs", "export-design-md"],
+    next: ["health-check", "new-ds-setup", "build-showcase", "component-docs", "export-design-md", "export-make-guidelines"],
     errors: [],
   },
   {
@@ -756,6 +757,61 @@ const WORKFLOWS = [
     ],
   },
   {
+    id: "export-make-guidelines",
+    title: "Generate Figma Make guidelines",
+    summary: "Translate the current Figlets design-system facts into Figma Make guideline files plus a Figlets-generated CSS stylesheet, with optional designer guidance and an approved local export.",
+    intents: [
+      "figma make guidelines",
+      "generate make guidelines",
+      "export make guidelines",
+      "make style context",
+      "guidelines for figma make",
+    ],
+    prerequisites: ["Figma Desktop and the Figlets Bridge are open for a fresh snapshot, or a cached file-scoped snapshot exists"],
+    steps: [
+      {
+        id: "prepare",
+        kind: "read",
+        tool: "prepare_make_guidelines",
+        designerMessage: "I'll translate the confirmed Figlets and Figma facts, discover every project component spec, generate a stylesheet preview, lint the bundle, and show exactly which local files would be created or refreshed.",
+      },
+      {
+        id: "review-suggestions",
+        kind: "read",
+        optional: true,
+        designerMessage: "If useful context is missing, I'll show every optional, evidence-based suggestion and ask whether you want to accept, edit, skip, or skip all before I ask for export approval. You can skip them without blocking the export, and I will not combine this question with the export confirmation.",
+      },
+      {
+        id: "save-approved-profile",
+        kind: "write-local",
+        tool: "save_make_guidelines_profile",
+        requiresApproval: true,
+        optional: true,
+        designerMessage: "I'll save only suggestions or rules you explicitly accept, plus any suggestion ids you explicitly skip so they do not recur, then prepare a fresh preview.",
+      },
+      {
+        id: "approve-export",
+        kind: "confirmation",
+        designerMessage: "Only after optional suggestions are resolved, I'll ask before creating or refreshing the latest Figlets-managed bundle inside this project's specs/figma-make folder.",
+      },
+      {
+        id: "export",
+        kind: "write-local",
+        tool: "export_make_guidelines",
+        requiresApproval: true,
+        designerMessage: "After approval, I'll export the exact preview using its source fingerprint and return placement instructions for the new Figma Make project.",
+      },
+    ],
+    next: ["export-design-md", "health-check", "component-docs"],
+    errors: [
+      "If the source fingerprint is stale, rerun prepare_make_guidelines and ask approval against the refreshed file plan.",
+      "Read source.componentSpecDiscovery before describing component coverage. Never claim component specs were deleted or are absent when directoryExists is true and files is non-empty; report exact Figma matches and spec-only components separately.",
+      "Obey interaction.mustReviewOptionalSuggestionsBeforeExportApproval. When true, present optionalSuggestions and ask the skippable guidance question before asking for export approval; never reveal that question only after the designer has approved generation, and never combine the two confirmations.",
+      "Do not require answers to optional suggestions; export the confirmed translation when lint is valid.",
+      "Do not ask about Figma-generated project CSS. The stylesheet in the Figlets workspace is generated and managed by Figlets.",
+    ],
+  },
+  {
     id: "export-design-md",
     title: "Export DESIGN.md",
     summary: "Refresh from Figma and write a portable DESIGN.md handoff artifact. If no local config exists, bootstrap one from the Figma snapshot so existing variables are preserved before asking for optional gap-filling context.",
@@ -783,6 +839,12 @@ const WORKFLOWS = [
 ];
 
 const WORKFLOW_BY_ID = new Map(WORKFLOWS.map(workflow => [workflow.id, workflow]));
+const ROUTABLE_WORKFLOW_IDS = Object.freeze(
+  WORKFLOWS
+    .filter(workflow => workflow.id !== "start" && workflow.designerVisible !== false)
+    .map(workflow => workflow.id)
+);
+const ROUTABLE_WORKFLOW_ID_SET = new Set(ROUTABLE_WORKFLOW_IDS);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -792,13 +854,43 @@ function normalizeText(value) {
   return String(value == null ? "" : value).toLowerCase();
 }
 
-const ROUTE_STOPWORDS = new Set(["what", "this", "that", "with", "using", "help", "figlets", "design", "system"]);
+const ROUTE_STOPWORDS = new Set([
+  "what",
+  "this",
+  "that",
+  "with",
+  "using",
+  "help",
+  "figlets",
+  "design",
+  "system",
+  "check",
+  "review",
+  "audit",
+  "inspect",
+]);
 
 function _hasAnyWord(text, words) {
   return words.some(word => new RegExp(`\\b${word}\\b`).test(text));
 }
 
 function _semanticWorkflowOverride(text) {
+  const scopedObject = _hasAnyWord(
+    text,
+    ["component", "components", "frame", "frames", "layer", "layers", "node", "nodes", "instance", "instances"]
+  );
+  const targetScoped =
+    _hasAnyWord(text, ["selected", "selection", "current", "this", "these"]) &&
+    scopedObject;
+
+  if (/\bfigma\s+make\b/.test(text) && _hasAnyWord(text, ["guideline", "guidelines", "rules", "context", "export", "generate"])) {
+    return {
+      workflowId: "export-make-guidelines",
+      reason: "The request explicitly asks for guidance or style context for Figma Make.",
+      matchedIntents: ["Figma Make guidelines"],
+    };
+  }
+
   if (
     _hasAnyWord(text, ["file"]) &&
     _hasAnyWord(text, ["check", "review", "audit", "inspect", "empty"])
@@ -807,6 +899,18 @@ function _semanticWorkflowOverride(text) {
       workflowId: "health-check",
       reason: "The request asks to check the file, so use the file-level design-system health check instead of selected-layer QA.",
       matchedIntents: ["file-level health check"],
+    };
+  }
+
+  if (
+    !scopedObject &&
+    (/\bdesign\s+system\b/.test(text) || /\bds\b/.test(text)) &&
+    _hasAnyWord(text, ["check", "review", "audit", "inspect", "health"])
+  ) {
+    return {
+      workflowId: "health-check",
+      reason: "The request asks to check the whole design system, so use the full health check without offering selected-layer QA.",
+      matchedIntents: ["whole design-system health check"],
     };
   }
 
@@ -820,10 +924,6 @@ function _semanticWorkflowOverride(text) {
       matchedIntents: ["foundation setup"],
     };
   }
-
-  const targetScoped =
-    _hasAnyWord(text, ["selected", "selection", "current", "this", "these"]) &&
-    _hasAnyWord(text, ["component", "components", "frame", "frames", "layer", "layers", "node", "nodes", "instance", "instances"]);
 
   if (!targetScoped) return null;
 
@@ -902,6 +1002,23 @@ function _workflowStartResponse(workflow) {
       "Please make sure the Figlets Bridge plugin is open in Figma, then I'll begin.",
     ].join("\n");
   }
+  if (workflow.id === "export-make-guidelines") {
+    return [
+      "# Figlets",
+      "",
+      "I'll generate a Figma Make guidelines bundle from the design-system information Figlets already has.",
+      "",
+      "I'll start read-only:",
+      "1. Sync or load the current Figma snapshot",
+      "2. Translate confirmed variables, modes, styles, and components",
+      "3. Generate and lint the Figlets CSS and guideline structure",
+      "4. Show the exact files that would be created or refreshed",
+      "",
+      "I may offer optional suggestions for useful missing context, but you can skip them. I won't ask about packages or require you to fill every gap.",
+      "",
+      "I'll ask before saving optional guidance or exporting local files.",
+    ].join("\n");
+  }
   const readSteps = (workflow.steps || []).filter(step => step.kind === "read" && step.tool);
   const writeSteps = (workflow.steps || []).filter(step => step.kind === "write" || step.kind === "write-local");
   const lines = [
@@ -953,9 +1070,28 @@ function _selectionPrompt(candidates, capabilityMenu) {
   };
 }
 
-function routeIntent(intent) {
+function routeIntent(intent, options = {}) {
   const text = normalizeText(intent);
+  const interpretedWorkflowId = options && options.interpretedWorkflowId;
+  if (interpretedWorkflowId != null && !ROUTABLE_WORKFLOW_ID_SET.has(interpretedWorkflowId)) {
+    throw new Error(
+      `Invalid interpreted workflow id "${String(interpretedWorkflowId)}". ` +
+      `Expected one of: ${ROUTABLE_WORKFLOW_IDS.join(", ")}.`
+    );
+  }
+  const aiOverride = interpretedWorkflowId
+    ? {
+      workflowId: interpretedWorkflowId,
+      matchedIntents: [],
+      reason: "The AI interface interpreted the designer's language-independent goal and supplied the canonical workflow id.",
+    }
+    : null;
   const semanticOverride = _semanticWorkflowOverride(text);
+  const ambiguousGuidelinesExport = _hasAnyWord(text, ["export", "generate"])
+    && _hasAnyWord(text, ["guideline", "guidelines"])
+    && !/\bfigma\s+make\b/.test(text)
+    && !/\bmake\s+guidelines?\b/.test(text)
+    && !/design\.md|design md/.test(text);
   const candidates = WORKFLOWS
     .filter(workflow => workflow.id !== "start")
     .map(workflow => {
@@ -980,13 +1116,15 @@ function routeIntent(intent) {
     .filter(candidate => candidate.score > 0)
     .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
 
-  const best = semanticOverride
+  const selectedOverride = aiOverride || semanticOverride;
+  const best = selectedOverride
     ? {
-      workflowId: semanticOverride.workflowId,
-      title: getWorkflowGuide(semanticOverride.workflowId).title,
+      workflowId: selectedOverride.workflowId,
+      title: getWorkflowGuide(selectedOverride.workflowId).title,
       score: Number.MAX_SAFE_INTEGER,
-      matchedIntents: semanticOverride.matchedIntents,
-      semanticReason: semanticOverride.reason,
+      matchedIntents: selectedOverride.matchedIntents,
+      semanticReason: selectedOverride.reason,
+      interpretationKind: aiOverride ? "ai-semantic" : "semantic",
     }
     : candidates[0] || {
       workflowId: "start",
@@ -995,7 +1133,7 @@ function routeIntent(intent) {
       matchedIntents: [],
     };
   const bestWorkflow = getWorkflowGuide(best.workflowId);
-  const ambiguous = !semanticOverride && candidates.length > 1 && candidates[0].score === candidates[1].score;
+  const ambiguous = !selectedOverride && candidates.length > 1 && candidates[0].score === candidates[1].score;
   const fallbackChoices = [
     {
       label: "Check my design system",
@@ -1012,8 +1150,20 @@ function routeIntent(intent) {
       workflowId: "export-design-md",
       description: "Create a portable handoff for coding agents.",
     },
+    {
+      label: "Generate Figma Make guidelines",
+      workflowId: "export-make-guidelines",
+      description: "Create Make guidance and Figlets-generated styles from this design system.",
+    },
   ];
-  const selectionPrompt = best.workflowId === "start"
+  const selectionPrompt = aiOverride
+    ? null
+    : ambiguousGuidelinesExport
+    ? _selectionPrompt([
+      getWorkflowGuide("export-make-guidelines"),
+      getWorkflowGuide("export-design-md"),
+    ], fallbackChoices)
+    : best.workflowId === "start"
     ? _selectionPrompt([], fallbackChoices)
     : ambiguous
       ? _selectionPrompt(candidates.map(candidate => {
@@ -1022,12 +1172,20 @@ function routeIntent(intent) {
       }), fallbackChoices)
       : null;
 
-  return _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, intent);
+  return _routeIntentResult(
+    best,
+    candidates,
+    selectionPrompt,
+    bestWorkflow,
+    intent,
+    aiOverride ? "ai-interpreted" : "deterministic-fallback"
+  );
 }
 
-function _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, intent) {
+function _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, intent, routingMode) {
   const result = {
     intent: String(intent == null ? "" : intent),
+    routingMode,
     workflow: bestWorkflow,
     candidates,
     selectionPrompt,
@@ -1044,7 +1202,7 @@ function _routeIntentResult(best, candidates, selectionPrompt, bestWorkflow, int
   }
   if (best.semanticReason) {
     result.intentInterpretation = {
-      kind: "semantic",
+      kind: best.interpretationKind || "semantic",
       reason: best.semanticReason,
       selectedWorkflow: best.workflowId,
     };
@@ -1094,6 +1252,11 @@ function getStartGuide() {
       workflowId: "export-design-md",
       description: "Create a portable handoff file for coding agents and downstream tools.",
     },
+    {
+      label: "Generate Figma Make guidelines",
+      workflowId: "export-make-guidelines",
+      description: "Translate this design system into Make guidance plus Figlets-generated CSS.",
+    },
   ];
   const forbiddenDesignerMenuItems = [
     "Plugin / MCP server code",
@@ -1120,7 +1283,7 @@ function getStartGuide() {
   ]).join("\n");
 
   return {
-    message: "Use designerResponse only for generic help/start requests. If the designer already stated a concrete goal, call figlets_route_intent and figlets_workflow_guide, then use the routed designerResponse instead of showing the menu.",
+    message: "Use designerResponse only for generic help/start requests. If the designer already stated a concrete goal, interpret it in their own language, call figlets_route_intent with the original intent and canonical interpreted_workflow_id, then call figlets_workflow_guide and use the routed designerResponse instead of showing the menu.",
     responseContract: {
       openingFormat: "capability-menu",
       useVerbatimWhenPossible: "designerResponse for generic help only; routed designerResponse for specific goals",
@@ -1129,7 +1292,8 @@ function getStartGuide() {
       designSystemReviewRule: "Use Figlets workflow tools/scripts only. Do not write custom scripts or inspect local snapshots/tool-results unless the designer explicitly asks to go out of bounds.",
       bulkUpdateRule: "Bulk design-system updates are in Figlets scope when they are represented as structured, designer-approved tool payloads. Use repairPlan.applyInput with the named tool; present repairPlan.optionalApplyInput separately. Token gaps use inspect_ds_token_gaps → update_ds_tokens; binding gaps use qa_binding_audit fixableNow or qa_binding_audit approved_suggestions after explicit designer approval, including exact alternate token/style targets for the same audited finding. Exact designer-specified variable, collection, mode, local style, binding, metadata, and token lifecycle edits outside the current QA findings use plan_ds_figma_operations → apply_ds_figma_operations, with warnings shown before approval. Do not use the generic operations surface to invent semantic naming migrations from health-check conflicts. Only product-specific planning or designer-decision gaps should be reported as future Figlets planner scope.",
       mode: "designer-facing",
-      nextAction: "For a concrete initial goal, route it before replying. For ambiguous routing, use selectionPrompt. For generic help, show designerResponse.",
+      intentRoutingRule: "The AI interface owns language understanding. For a clear goal in any language, pass the original intent plus interpreted_workflow_id. Omit that id only when genuinely unsure; text scoring and selectionPrompt are fallback behavior.",
+      nextAction: "For a concrete initial goal, route it before replying by interpreting it in the designer's language and supplying interpreted_workflow_id. For genuinely ambiguous fallback routing, use selectionPrompt. For generic help, show designerResponse.",
     },
     designerIntro: designerResponse,
     designerResponse,
@@ -1148,7 +1312,7 @@ function getStartGuide() {
     hardRules: clone(DESIGNER_FLOW_HARD_RULES),
     scope: {
       figletsDoes: [
-        "Design-system setup, QA, repair, showcase, documentation, and DESIGN.md export workflows.",
+        "Design-system setup, QA, repair, showcase, documentation, DESIGN.md export, and Figma Make guidelines workflows.",
         "Deterministic checks through Figlets MCP tools and the Figlets Bridge plugin.",
         "Designer-approved Figma writes only through Figlets tools that are part of a workflow guide.",
         "Structured bulk design-system updates when Figlets can plan or receive an explicit approved payload.",
@@ -1187,6 +1351,7 @@ module.exports = {
   DESIGNER_FLOW_HARD_RULES,
   MUTATING_TOOLS,
   NEW_DS_SETUP_INTAKE_CONTRACT,
+  ROUTABLE_WORKFLOW_IDS,
   WORKFLOWS,
   getStartGuide,
   getWorkflowGuide,

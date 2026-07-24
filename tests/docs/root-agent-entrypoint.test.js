@@ -11,6 +11,9 @@ for (const file of files) {
   assert.ok(content.includes("Call the Figlets MCP tool `figlets_start` first"), `${file} should require figlets_start first`);
   assert.ok(content.includes("Use `figlets_start.designerResponse`"), `${file} should use the MCP-provided designer menu`);
   assert.ok(content.includes("If the designer already stated a concrete goal"), `${file} should route concrete requests instead of showing the menu`);
+  assert.ok(content.includes("interpreted_workflow_id"), `${file} should pass the AI-interpreted canonical workflow id`);
+  assert.ok(content.includes("designer's own language"), `${file} should make intent routing language-independent`);
+  assert.ok(content.includes("do not rely on English keyword scoring"), `${file} should reserve keyword scoring for fallback`);
   assert.ok(content.includes("selectionPrompt"), `${file} should support structured selection prompts`);
   assert.ok(content.includes("Hard rule for reviews/checks/audits"), `${file} should make Figlets scripts mandatory for designer review`);
   assert.ok(content.includes("use the Figlets workflow and the Figlets MCP tools/scripts"), `${file} should forbid ad hoc design-system review paths`);
@@ -32,10 +35,12 @@ for (const file of files) {
   assert.ok(content.includes("Plugin / MCP server code") === false, `${file} should not offer plugin code as a menu item`);
   assert.ok(content.includes("Check my design system"), `${file} should list designer menu items`);
   assert.ok(content.includes("Export DESIGN.md"), `${file} should list designer menu items`);
+  assert.ok(content.includes("Generate Figma Make guidelines"), `${file} should list the Make guidelines workflow`);
   assert.ok(content.includes("## Developer Mode"), `${file} should preserve a developer path`);
   assert.ok(content.includes("repairPlan.optionalApplyInput"), `${file} should document optional bulk apply payloads`);
   assert.ok(content.includes("inspect_ds_token_gaps"), `${file} should route token completion through inspect_ds_token_gaps`);
   assert.ok(content.includes("fixableNow"), `${file} should document qa_binding_audit fixableNow apply boundary`);
+  assert.ok(content.includes("effect_style_repairs"), `${file} should preserve exact raw elevation style findings through preview and apply`);
   assert.ok(content.includes("Linear task comments"), `${file} should define Linear task comment logging in Developer Mode`);
   assert.ok(content.includes("Status: started | checkpoint | review | completed | blocked"), `${file} should include the Linear comment template`);
   assert.ok(content.includes("paste-ready comment text"), `${file} should require paste-ready comments when Linear is unavailable`);

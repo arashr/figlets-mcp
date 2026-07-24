@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
+  auditEffectStyleBindings,
   designSystemInventory,
   emptyDesignSystemPrompt,
 } = require("../figlets-core.js");
@@ -116,7 +117,8 @@ function _elevationApplySlices(context) {
   const hasElevationVariableWork = (context.missingVariables || []).some(gap => gap.category === "elevation")
     || (context.typeMismatches || []).some(gap => gap.category === "elevation");
   const hasElevationStyleWork = (context.missingStyles || []).some(gap => gap.category === "elevation")
-    || (context.typeMismatches || []).some(gap => gap.category === "elevation" && gap.kind === "style");
+    || (context.typeMismatches || []).some(gap => gap.category === "elevation" && gap.kind === "style")
+    || (context.staleStyles || []).some(gap => gap.category === "elevation");
   if (hasElevationVariableWork && hasElevationStyleWork) return ["elevation-variables", "elevation-styles"];
   if (hasElevationVariableWork) return ["elevation-variables"];
   if (hasElevationStyleWork) return ["elevation-styles"];
@@ -819,6 +821,17 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const variableMap = _variableByName(figmaData);
   const textStyleNames = _styleNameSet(figmaData, "textStyles");
   const effectStyleNames = _styleNameSet(figmaData, "effectStyles");
+  const effectStyleBindingIssues = auditEffectStyleBindings(
+    figmaData && figmaData.effectStyles,
+    figmaData && figmaData.variables
+  );
+  const effectStyleBindingIssuesByName = new Map();
+  for (const issue of effectStyleBindingIssues) {
+    if (!effectStyleBindingIssuesByName.has(issue.styleName)) {
+      effectStyleBindingIssuesByName.set(issue.styleName, []);
+    }
+    effectStyleBindingIssuesByName.get(issue.styleName).push(issue);
+  }
   const collectionNames = _collectionNameSet(figmaData);
   const spacingEffective = withEffectiveSpacingSemantic(ds, figmaData, variableMap);
   const planningDs = spacingEffective.ds;
@@ -935,6 +948,18 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         const styleSet = item.styleType === "EFFECT" ? effectStyleNames : textStyleNames;
         if (!styleSet.has(item.name)) {
           tokenGaps.push(Object.assign({}, item, { gapType: "missing-style" }));
+          supportedCategoriesWithGaps.add(category);
+        } else if (
+          item.styleType === "EFFECT"
+          && effectStyleBindingIssuesByName.has(item.name)
+        ) {
+          const bindings = effectStyleBindingIssuesByName.get(item.name);
+          tokenGaps.push(Object.assign({}, item, {
+            styleId: bindings[0] && bindings[0].styleId || null,
+            gapType: "raw-effect-style-bindings",
+            bindings,
+            reason: `${bindings.length} shadow propert${bindings.length === 1 ? "y uses" : "ies use"} raw values instead of variable bindings.`,
+          }));
           supportedCategoriesWithGaps.add(category);
         } else if (options.include_existing_style_refreshes) {
           existingUpdates.push(Object.assign({}, item, {
@@ -1092,6 +1117,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
 
   const missingVariables = tokenGaps.filter(gap => gap.gapType === "missing-variable");
   const missingStyles = tokenGaps.filter(gap => gap.gapType === "missing-style");
+  const staleStyles = tokenGaps.filter(gap => gap.gapType === "raw-effect-style-bindings");
   const typeMismatches = tokenGaps.filter(gap => gap.gapType === "type-mismatch");
   const spacingAliasRepairGaps = tokenGaps.filter(gap => gap.gapType === "spacing-alias-repair");
   const spacingAliasConfigDriftGaps = tokenGaps.filter(gap => gap.gapType === "spacing-alias-config-drift");
@@ -1115,6 +1141,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     includeExistingUpdates: !!options.include_existing_updates,
     missingVariables,
     missingStyles,
+    staleStyles,
     typeMismatches,
     spacingAliasRepairs: spacingAliasRepairGaps,
     spacingAliasConfigDrift: spacingAliasConfigDriftGaps,
@@ -1146,7 +1173,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     staleVariableCount: spacingAliasRepairGaps.length,
     configDriftCount: spacingAliasConfigDriftGaps.length,
     missingStyleCount: missingStyles.length,
-    staleStyleCount: 0,
+    staleStyleCount: staleStyles.length,
     typeMismatchCount: typeMismatches.length,
     unsupportedCategoryCount: unsupportedCategories.length,
     inspectedCategoryCount: supportedCategories.length,
@@ -1154,7 +1181,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     responsiveSpacingAdvisoryCount: (spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || []).length,
   };
 
-  const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount;
+  const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.staleStyleCount
+    + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount;
   return {
     message: _composeMessage(summary),
     semanticAliasRepairModel: spacingAliasPlan.model || SEMANTIC_ALIAS_REPAIR_MODEL,
@@ -1165,6 +1193,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     topFindings: {
       missingVariables: missingVariables.slice(0, 10),
       missingStyles: missingStyles.slice(0, 10),
+      staleStyles: staleStyles.slice(0, 10),
       typeMismatches: typeMismatches.slice(0, 10),
       spacingAliasRepairs: spacingAliasRepairGaps.slice(0, 10),
       spacingAliasConfigDrift: spacingAliasConfigDriftGaps.slice(0, 10),
@@ -1204,6 +1233,19 @@ function _buildRepairPlan(context) {
     else elevationSlices.forEach(slice => applyCategorySet.add(slice));
   }
   const applyCategories = Array.from(applyCategorySet).sort();
+  const effectStyleRepairs = (context.staleStyles || []).map(style => ({
+    styleId: style.styleId || null,
+    name: style.name,
+    bindings: (style.bindings || []).map(binding => ({
+      effectIndex: binding.effectIndex,
+      shadowRole: binding.shadowRole,
+      property: binding.property,
+      rawValue: binding.rawValue,
+      expectedVariable: binding.expectedVariable,
+      expectedVariableId: binding.expectedVariableId || null,
+      expectedVariableExists: !!binding.expectedVariableExists,
+    })),
+  }));
   const primitiveApplyCategories = categories
     .filter(category => PRIMITIVE_APPLY_CATEGORIES.has(category))
     .filter(category =>
@@ -1213,6 +1255,7 @@ function _buildRepairPlan(context) {
     .sort();
   const total = (context.missingVariables || []).length
     + (context.missingStyles || []).length
+    + (context.staleStyles || []).length
     + (context.typeMismatches || []).length
     + (context.spacingAliasRepairs || []).length;
   const advisoryTotal = (context.spacingResponsiveModeAdvisories || []).length;
@@ -1231,6 +1274,12 @@ function _buildRepairPlan(context) {
     include_existing_updates: false,
     dry_run: false,
   };
+  if (effectStyleRepairs.length && applyCategories.some(category =>
+    category === "elevation" || category === "elevation-styles"
+  )) {
+    previewInput.effect_style_repairs = effectStyleRepairs;
+    applyInput.effect_style_repairs = effectStyleRepairs;
+  }
   if (applyCategories.indexOf("spacing-semantics") >= 0 && spacingAliasRepairsForApply.length) {
     applyInput.spacing_semantic_repairs = spacingAliasRepairsForApply.map(repair => ({
       name: repair.name,
@@ -1278,6 +1327,7 @@ function _buildRepairPlan(context) {
     foundationApplyInput,
     foundationCollections,
     spacingSemanticRepairs: applyInput.spacing_semantic_repairs || [],
+    effectStyleRepairs,
   });
 
   return {
@@ -1322,6 +1372,8 @@ function _buildRepairPlan(context) {
     counts: {
       missingVariables: (context.missingVariables || []).length,
       missingStyles: (context.missingStyles || []).length,
+      staleStyles: (context.staleStyles || []).length,
+      effectStyleRepairs: effectStyleRepairs.length,
       typeMismatches: (context.typeMismatches || []).length,
       spacingAliasConfigDrift: (context.spacingAliasConfigDrift || []).length,
       total,
@@ -1367,6 +1419,7 @@ function _buildReviewOptions({
   foundationApplyInput,
   foundationCollections,
   spacingSemanticRepairs,
+  effectStyleRepairs,
 }) {
   const options = [];
   const configPath = context.configPath;
@@ -1511,6 +1564,36 @@ function _buildReviewOptions({
         dry_run: false,
       },
       "Reviews configured Typography collection variables and config-derived text styles. Existing text styles may be refreshed in place."
+    ));
+  }
+
+  if (applyCategorySet.has("elevation") || applyCategorySet.has("elevation-variables") || applyCategorySet.has("elevation-styles")) {
+    const elevationCategories = applyCategorySet.has("elevation")
+      ? ["elevation"]
+      : ["elevation-variables", "elevation-styles"].filter(category => applyCategorySet.has(category));
+    const exactEffectStyleRepairs = effectStyleRepairs || [];
+    const elevationPreviewInput = {
+      config_path: configPath,
+      categories: elevationCategories,
+      create_missing: true,
+      include_existing_updates: false,
+      dry_run: true,
+    };
+    const elevationApplyInput = Object.assign({}, elevationPreviewInput, { dry_run: false });
+    if (exactEffectStyleRepairs.length) {
+      elevationPreviewInput.effect_style_repairs = exactEffectStyleRepairs;
+      elevationApplyInput.effect_style_repairs = exactEffectStyleRepairs;
+    }
+    options.push(_reviewOption(
+      "elevation-tokens-and-styles",
+      "Review elevation variables and effect styles",
+      "semantic-token",
+      "update_ds_tokens",
+      elevationPreviewInput,
+      elevationApplyInput,
+      exactEffectStyleRepairs.length
+        ? `Reviews only the ${exactEffectStyleRepairs.length} audited elevation effect style${exactEffectStyleRepairs.length === 1 ? "" : "s"} with raw shadow properties, preserving their style IDs.`
+        : "Reviews configured Elevation variables and effect styles. Existing elevation effect styles may be refreshed in place while preserving style IDs."
     ));
   }
 
@@ -1761,6 +1844,7 @@ function _suggestResponsiveSpacingReviews(ds, figmaData, advisories, spacingAlia
 function _buildDesignerPresentation(context, total) {
   const missingVariables = context.missingVariables || [];
   const missingStyles = context.missingStyles || [];
+  const staleStyles = context.staleStyles || [];
   const spacingAliasRepairs = context.spacingAliasRepairs || [];
   const spacingAliasConfigDrift = context.spacingAliasConfigDrift || [];
   const spacingResponsiveModeAdvisories = context.spacingResponsiveModeAdvisories || [];
@@ -1806,6 +1890,16 @@ function _buildDesignerPresentation(context, total) {
       sections.push({
         title: "Styles to create",
         message: `Figlets can preview ${missingStyles.length} missing text/effect style${missingStyles.length === 1 ? "" : "s"} from config.`,
+      });
+    }
+    if (staleStyles.length) {
+      const rawBindingCount = staleStyles.reduce(
+        (count, style) => count + (Array.isArray(style.bindings) ? style.bindings.length : 0),
+        0
+      );
+      sections.push({
+        title: "Elevation effect-style bindings",
+        message: `Figlets found ${rawBindingCount} raw shadow propert${rawBindingCount === 1 ? "y" : "ies"} across ${staleStyles.length} elevation effect style${staleStyles.length === 1 ? "" : "s"}. The elevation-styles repair can bind them to the existing elevation/shadow variables while preserving style IDs.`,
       });
     }
     if (spacingAliasRepairs.length) {
@@ -1896,6 +1990,7 @@ function _buildDesignerPresentation(context, total) {
     summaryCounts: {
       emptyDesignSystem: Boolean(emptyDesignSystem && emptyDesignSystem.isEmpty),
       readyToPreview: total,
+      staleStyles: staleStyles.length,
       optional: 0,
       foundationRepairs: foundationRepairs.length,
       productGaps: notes.filter(note => note.productGap).length,
@@ -1954,7 +2049,7 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 
 function _composeMessage(summary) {
   const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount
-    + (summary.staleVariableCount || 0) + (summary.configDriftCount || 0);
+    + (summary.staleVariableCount || 0) + (summary.staleStyleCount || 0) + (summary.configDriftCount || 0);
   if (summary.emptyDesignSystem) {
     const setupMessage = "This file has no design-system variables or local styles yet. Ask whether the designer wants to set up or continue the design-system foundation before presenting ordinary token-gap repair choices.";
     if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
@@ -1971,6 +2066,7 @@ function _composeMessage(summary) {
   const parts = [];
   if (summary.missingVariableCount) parts.push(`${summary.missingVariableCount} missing variable${summary.missingVariableCount === 1 ? "" : "s"}`);
   if (summary.missingStyleCount) parts.push(`${summary.missingStyleCount} missing style${summary.missingStyleCount === 1 ? "" : "s"}`);
+  if (summary.staleStyleCount) parts.push(`${summary.staleStyleCount} effect style${summary.staleStyleCount === 1 ? "" : "s"} with raw shadow properties`);
   if (summary.typeMismatchCount) parts.push(`${summary.typeMismatchCount} type mismatch${summary.typeMismatchCount === 1 ? "" : "es"}`);
   if (summary.staleVariableCount) parts.push(`${summary.staleVariableCount} alias repair${summary.staleVariableCount === 1 ? "" : "s"}`);
   if (summary.configDriftCount) parts.push(`${summary.configDriftCount} config drift mode${summary.configDriftCount === 1 ? "" : "s"}`);

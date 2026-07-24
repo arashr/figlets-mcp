@@ -346,4 +346,34 @@ module.exports = (async () => {
     { modeId: "tablet", modeName: "Tablet", value: 20 },
     { modeId: "desktop", modeName: "Desktop", value: 24 },
   ]);
+
+  elevationOneStyle.effects = [{ type: "INNER_SHADOW", radius: 777 }];
+  elevationTwoStyle.effects = [{ type: "DROP_SHADOW", radius: 888 }];
+  const exactStyleResult = await context.module.exports._updateDsTokens({
+    DS,
+    categories: ["elevation-styles"],
+    effectStyleRepairs: [{
+      styleId: elevationTwoStyle.id,
+      name: "elevation/2",
+      bindings: [{
+        effectIndex: 0,
+        property: "radius",
+        expectedVariable: "elevation/sm/radius",
+      }],
+    }],
+    createMissing: true,
+    dryRun: false,
+  });
+  assert.ok(!exactStyleResult.error, exactStyleResult.error);
+  assertJsonEqual(
+    exactStyleResult.report["elevation-styles"].refreshedStyles.map(style => style.name),
+    ["elevation/2"],
+    "bridge apply must refresh only the exact audited style set"
+  );
+  assertJsonEqual(
+    elevationOneStyle.effects,
+    [{ type: "INNER_SHADOW", radius: 777 }],
+    "exact effect-style apply must not touch unapproved elevation styles"
+  );
+  assert.notStrictEqual(elevationTwoStyle.effects[0].radius, 888, "the approved raw style should be rebuilt");
 })();

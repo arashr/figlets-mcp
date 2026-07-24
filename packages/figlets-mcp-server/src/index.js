@@ -48,10 +48,19 @@ const {
 } = require("./tools/design-md-intake.js");
 const { exportDesignMdTool, handleExportDesignMd } = require("./tools/export-design-md.js");
 const {
+  prepareMakeGuidelinesTool,
+  saveMakeGuidelinesProfileTool,
+  exportMakeGuidelinesTool,
+  handlePrepareMakeGuidelines,
+  handleSaveMakeGuidelinesProfile,
+  handleExportMakeGuidelines,
+} = require("./tools/make-guidelines.js");
+const {
   figletsStartTool,
   figletsRouteIntentTool,
   figletsWorkflowGuideTool,
   figletsHealthCheckTool,
+  ROUTABLE_WORKFLOW_IDS,
   handleFigletsStart,
   handleFigletsRouteIntent,
   handleFigletsWorkflowGuide,
@@ -87,7 +96,10 @@ server.tool(
   figletsRouteIntentTool.name,
   figletsRouteIntentTool.description,
   {
-    intent: z.string().describe("The designer's natural-language request, such as 'check my design system' or 'document this component'.")
+    intent: z.string().describe("The designer's natural-language request, such as 'check my design system' or 'document this component'."),
+    interpreted_workflow_id: z.enum(ROUTABLE_WORKFLOW_IDS).optional().describe(
+      "Language-independent canonical workflow id interpreted by the AI interface. Supply this whenever the designer's goal is clear in any language; omit it only when genuinely unsure."
+    )
   },
   async (args) => {
     try {
@@ -394,6 +406,90 @@ server.tool(
   }
 );
 
+const makeGuidelinesSourceSchema = {
+  config_path: z.string().optional().describe("Optional absolute path to design-system.config.js. Defaults to the active file-scoped config."),
+  project_path: z.string().optional().describe("Optional absolute path to the code project root. Defaults to the MCP server working directory."),
+  output_path: z.string().optional().describe("Optional absolute output directory inside project_path. Defaults to specs/figma-make."),
+  figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. When provided, live sync is skipped."),
+  skip_sync: z.boolean().optional().describe("When true, use the cached snapshot instead of syncing through the Figlets Bridge."),
+};
+
+const makeGuidelinesProfileSchema = z.object({
+  productPurpose: z.string().optional(),
+  productCharacter: z.string().optional(),
+  density: z.string().optional(),
+  surfaceStrategy: z.string().optional(),
+  compositionRules: z.array(z.string()).optional(),
+  iconRules: z.array(z.string()).optional(),
+  mustDo: z.array(z.string()).optional(),
+  mustNot: z.array(z.string()).optional(),
+  breakpointWidths: z.record(z.string(), z.number().positive()).optional(),
+  componentPolicies: z.record(z.string(), z.string()).optional(),
+  skippedSuggestions: z.array(z.string()).optional().describe("Suggestion ids the designer explicitly skipped, or ['all'] for Skip all."),
+}).strict();
+
+// --- prepare_make_guidelines ---
+server.tool(
+  prepareMakeGuidelinesTool.name,
+  prepareMakeGuidelinesTool.description,
+  makeGuidelinesSourceSchema,
+  async (args) => {
+    try {
+      const result = await handlePrepareMakeGuidelines(args || {});
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        isError: Boolean(result && result.error),
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// --- save_make_guidelines_profile ---
+server.tool(
+  saveMakeGuidelinesProfileTool.name,
+  saveMakeGuidelinesProfileTool.description,
+  {
+    config_path: z.string().optional().describe("Optional absolute path to design-system.config.js. Defaults to the active file-scoped config."),
+    profile: makeGuidelinesProfileSchema.describe("Only optional guidance or skip choices the designer explicitly approved."),
+    approved: z.literal(true).describe("Explicit designer approval to save the optional profile."),
+  },
+  async (args) => {
+    try {
+      const result = handleSaveMakeGuidelinesProfile(args || {});
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        isError: Boolean(result && result.error),
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// --- export_make_guidelines ---
+server.tool(
+  exportMakeGuidelinesTool.name,
+  exportMakeGuidelinesTool.description,
+  Object.assign({}, makeGuidelinesSourceSchema, {
+    source_fingerprint: z.string().describe("Exact sourceFingerprint returned by prepare_make_guidelines."),
+    optional_suggestions_reviewed: z.boolean().optional().describe("Required as true when the approved preview contains optionalSuggestions. Set true only after those suggestions were shown before export confirmation and the designer accepted, edited, skipped, or explicitly chose to continue without them."),
+    approved: z.literal(true).describe("Explicit designer approval for this prepared export."),
+  }),
+  async (args) => {
+    try {
+      const result = await handleExportMakeGuidelines(args || {});
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        isError: Boolean(result && result.error),
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
 // --- prepare_ds_config ---
 server.tool(
   "prepare_ds_config",
@@ -650,6 +746,19 @@ server.tool(
         configExpected: z.number().optional(),
       }).passthrough()),
     })).optional().describe("Optional exact semantic spacing alias repairs copied from inspect_ds_token_gaps.repairPlan.applyInput.spacing_semantic_repairs. When provided, update_ds_tokens applies only these token/mode entries instead of the whole spacing-semantics category."),
+    effect_style_repairs: z.array(z.object({
+      styleId: z.string().nullable().optional(),
+      name: z.string(),
+      bindings: z.array(z.object({
+        effectIndex: z.number(),
+        shadowRole: z.string().optional(),
+        property: z.enum(["color", "offsetY", "radius"]),
+        rawValue: z.any().optional(),
+        expectedVariable: z.string(),
+        expectedVariableId: z.string().nullable().optional(),
+        expectedVariableExists: z.boolean().optional(),
+      })),
+    })).optional().describe("Exact elevation effect-style binding repairs copied from inspect_ds_token_gaps. Preview and apply use this audited set directly instead of rediscovering or widening the style refresh scope."),
     prune: z.object({
       off_config_variables: z.boolean().optional(),
       off_config_text_styles: z.boolean().optional(),

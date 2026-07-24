@@ -44,6 +44,21 @@ try {
   {
     assert.ok(figletsStartTool.description.includes("not custom scripts"));
     assert.ok(figletsRouteIntentTool.description.includes("before any design-system review scripting"));
+    assert.ok(figletsRouteIntentTool.description.includes("AI interface"));
+    assert.ok(figletsRouteIntentTool.description.includes("compatibility fallback"));
+    assert.deepStrictEqual(
+      figletsRouteIntentTool.inputSchema.properties.interpreted_workflow_id.enum,
+      [
+        "health-check",
+        "token-gap-completion",
+        "new-ds-setup",
+        "build-showcase",
+        "component-docs",
+        "qa-binding-audit",
+        "export-make-guidelines",
+        "export-design-md",
+      ]
+    );
     assert.ok(figletsWorkflowGuideTool.description.includes("named Figlets tools/scripts only"));
     assert.ok(figletsHealthCheckTool.description.includes("Read-only Agent Interface health check"));
     assert.ok(figletsHealthCheckTool.description.includes("setup intake and proposal boundaries"));
@@ -65,6 +80,9 @@ try {
     assert.ok(start.responseContract.bulkUpdateRule.includes("Bulk design-system updates"));
     assert.ok(start.responseContract.bulkUpdateRule.includes("plan_ds_figma_operations"));
     assert.ok(start.responseContract.nextAction.includes("For a concrete initial goal, route it before replying"));
+    assert.ok(start.responseContract.intentRoutingRule.includes("AI interface owns language understanding"));
+    assert.ok(start.responseContract.intentRoutingRule.includes("any language"));
+    assert.ok(start.responseContract.intentRoutingRule.includes("interpreted_workflow_id"));
     assert.strictEqual(start.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(start.hardRules.bulkDesignSystemUpdatesAreInScope, true);
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_setup_repairs")));
@@ -79,6 +97,7 @@ try {
       "bulk surfaces should list update_ds_primitives categories including color-semantics"
     );
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("update_ds_tokens")));
+    assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("effect_style_repairs")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("apply_ds_foundation_repairs")));
     assert.ok(start.hardRules.supportedBulkUpdateSurfaces.some(item => item.includes("qa_binding_audit")));
     assert.ok(Array.isArray(start.hardRules.bulkRepairRouting) && start.hardRules.bulkRepairRouting.length >= 4);
@@ -115,6 +134,7 @@ try {
     assert.ok(!start.designerResponse.includes("Hi, I'm Figlets"));
     assert.ok(start.designerResponse.includes("| What you can ask for | What I'll do |"));
     assert.ok(start.designerResponse.includes("Check my design system"));
+    assert.ok(start.designerResponse.includes("Generate Figma Make guidelines"));
     assert.ok(!start.designerResponse.includes("Fix setup gaps"));
     assert.ok(!start.designerResponse.includes("Plugin / MCP server code"));
     assert.ok(!start.designerResponse.includes("Edit repo files"));
@@ -131,6 +151,33 @@ try {
   }
 
   {
+    const route = routeIntent("generate Figma Make guidelines for this design system");
+    assert.strictEqual(route.workflow.id, "export-make-guidelines");
+    assert.strictEqual(route.selectionPrompt, null);
+    assert.ok(route.designerResponse.includes("Make guidelines bundle"));
+    assert.ok(route.designerResponse.includes("optional suggestions"));
+
+    const guide = getWorkflowGuide("export-make-guidelines");
+    assert.strictEqual(guide.steps[0].tool, "prepare_make_guidelines");
+    assert.strictEqual(guide.steps[0].kind, "read");
+    assert.ok(guide.steps.some(step => step.tool === "save_make_guidelines_profile" && step.optional === true && step.requiresApproval === true));
+    assert.ok(guide.steps.some(step => step.tool === "export_make_guidelines" && step.requiresApproval === true));
+    assert.ok(guide.steps.find(step => step.id === "review-suggestions").designerMessage.includes("before I ask for export approval"));
+    assert.ok(guide.steps.find(step => step.id === "review-suggestions").designerMessage.includes("not combine this question"));
+    assert.ok(guide.errors.some(item => item.includes("interaction.mustReviewOptionalSuggestionsBeforeExportApproval")));
+    assert.ok(guide.errors.some(item => item.includes("never reveal that question only after")));
+    assert.ok(guide.errors.some(item => item.includes("Do not require answers")));
+    assert.ok(guide.errors.some(item => item.includes("Figlets workspace is generated and managed by Figlets")));
+
+    const ambiguous = routeIntent("export guidelines");
+    assert.ok(ambiguous.selectionPrompt);
+    assert.deepStrictEqual(
+      ambiguous.selectionPrompt.choices.map(choice => choice.id),
+      ["export-make-guidelines", "export-design-md"]
+    );
+  }
+
+  {
     const route = routeIntent("review my design system using Figlets");
     assert.strictEqual(route.workflow.id, "health-check");
     assert.ok(route.message.includes("Use Figlets workflow tools/scripts only"));
@@ -142,6 +189,63 @@ try {
     assert.ok(route.designerResponse.includes("5. Inspect config-backed token-gap suggestions"));
     assert.ok(route.designerResponse.includes("semantic setup findings separately from token-gap suggestions"));
     assert.ok(!route.designerResponse.includes("| What you can ask for |"));
+  }
+
+  {
+    for (const intent of [
+      "check my design system using figlets",
+      "check my design system",
+    ]) {
+      const route = routeIntent(intent);
+      assert.strictEqual(route.workflow.id, "health-check", intent);
+      assert.strictEqual(route.selectionPrompt, null, intent);
+      assert.strictEqual(route.intentInterpretation.kind, "semantic", intent);
+      assert.ok(route.intentInterpretation.reason.includes("whole design system"), intent);
+      assert.ok(!route.candidates.some(candidate =>
+        candidate.workflowId === "qa-binding-audit" && candidate.score > 0
+      ), intent);
+      assert.strictEqual(route.routingMode, "deterministic-fallback", intent);
+    }
+  }
+
+  {
+    const intent = "دیزاین سیستم من رو چک کن";
+    const route = handleFigletsRouteIntent({
+      intent,
+      interpreted_workflow_id: "health-check",
+    });
+    assert.strictEqual(route.intent, intent);
+    assert.strictEqual(route.workflow.id, "health-check");
+    assert.strictEqual(route.selectionPrompt, null);
+    assert.strictEqual(route.routingMode, "ai-interpreted");
+    assert.strictEqual(route.intentInterpretation.kind, "ai-semantic");
+    assert.strictEqual(route.intentInterpretation.selectedWorkflow, "health-check");
+    assert.ok(route.intentInterpretation.reason.includes("AI interface"));
+
+    const ambiguousTextWithInterpretation = handleFigletsRouteIntent({
+      intent: "export guidelines",
+      interpreted_workflow_id: "export-make-guidelines",
+    });
+    assert.strictEqual(ambiguousTextWithInterpretation.workflow.id, "export-make-guidelines");
+    assert.strictEqual(ambiguousTextWithInterpretation.selectionPrompt, null);
+    assert.strictEqual(ambiguousTextWithInterpretation.routingMode, "ai-interpreted");
+
+    const fallback = handleFigletsRouteIntent({ intent });
+    assert.strictEqual(fallback.workflow.id, "start");
+    assert.ok(fallback.selectionPrompt);
+    assert.strictEqual(fallback.routingMode, "deterministic-fallback");
+
+    assert.throws(
+      () => handleFigletsRouteIntent({
+        intent,
+        interpreted_workflow_id: "setup-gap-qa",
+      }),
+      /Invalid interpreted workflow id/
+    );
+    assert.throws(
+      () => routeIntent(intent, { interpretedWorkflowId: "not-a-workflow" }),
+      /Expected one of/
+    );
   }
 
   {
@@ -173,6 +277,12 @@ try {
     assert.ok(route.selectionPrompt.choices.some(choice => choice.id === "build-showcase"));
     assert.ok(route.selectionPrompt.message.includes("Choose one:"));
     assert.strictEqual(route.designerResponse, route.selectionPrompt.message);
+  }
+
+  {
+    const route = routeIntent("check");
+    assert.ok(route.selectionPrompt, "a scope-free check request should remain a genuine clarification");
+    assert.strictEqual(route.workflow.id, "start");
   }
 
   {

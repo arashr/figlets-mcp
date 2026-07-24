@@ -7726,6 +7726,26 @@ async function _updateDsTokens(payload) {
   var spacingSemanticRepairs = Array.isArray(payload && payload.spacingSemanticRepairs)
     ? payload.spacingSemanticRepairs
     : [];
+  var exactEffectStyleRepairsProvided = !!(payload && Object.prototype.hasOwnProperty.call(payload, 'effectStyleRepairs'));
+  var effectStyleRepairs = Array.isArray(payload && payload.effectStyleRepairs)
+    ? payload.effectStyleRepairs
+    : [];
+  var effectStyleRepairByName = {};
+  for (var esri = 0; esri < effectStyleRepairs.length; esri++) {
+    var effectStyleRepair = effectStyleRepairs[esri];
+    if (effectStyleRepair && /^elevation\/[1-5]$/.test(effectStyleRepair.name || '')) {
+      effectStyleRepairByName[effectStyleRepair.name] = effectStyleRepair;
+    }
+  }
+  if (exactEffectStyleRepairsProvided && Object.keys(effectStyleRepairByName).length === 0) {
+    return {
+      error: 'Exact effect-style repair input was provided without valid audited elevation styles.',
+      dryRun: dryRun,
+      categories: [],
+      unknownCategories: [],
+      report: {},
+    };
+  }
   var pruneOffConfigVariables = !!(payload && payload.pruneOffConfigVariables);
   var pruneOffConfigTextStyles = !!(payload && payload.pruneOffConfigTextStyles);
   var pruneOffConfigEffectStyles = !!(payload && payload.pruneOffConfigEffectStyles);
@@ -8380,9 +8400,36 @@ async function _updateDsTokens(payload) {
 
       for (var sli = 0; sli < styleLevels.length; sli++) {
         var levelDef = styleLevels[sli];
+        var exactStyleRepair = effectStyleRepairByName[levelDef.name];
+        if (exactEffectStyleRepairsProvided && !exactStyleRepair) continue;
         catReport.entries += 1;
         var existingStyle = styleByName[levelDef.name];
         var levelItem = _styleItem(levelDef.name);
+        if (exactEffectStyleRepairsProvided && !existingStyle) {
+          catReport.bindingWarnings.push({
+            kind: 'staleEffectStyleRepair',
+            styleName: levelDef.name,
+            expectedStyleId: exactStyleRepair.styleId || null,
+            reason: 'The audited elevation effect style no longer exists. Sync and inspect again before applying.',
+          });
+          catReport.unmatched.push(levelItem);
+          continue;
+        }
+        if (
+          exactEffectStyleRepairsProvided
+          && exactStyleRepair.styleId
+          && existingStyle.id !== exactStyleRepair.styleId
+        ) {
+          catReport.bindingWarnings.push({
+            kind: 'staleEffectStyleRepair',
+            styleName: levelDef.name,
+            expectedStyleId: exactStyleRepair.styleId,
+            actualStyleId: existingStyle.id || null,
+            reason: 'The audited elevation effect style identity changed. Sync and inspect again before applying.',
+          });
+          catReport.unmatched.push(levelItem);
+          continue;
+        }
         if (!existingStyle) {
           if (!createMissing) {
             catReport.unmatched.push(levelItem);
@@ -9849,6 +9896,7 @@ function _docFormatResolvedVariableValue(property, res, colorFormatter) {
   if (!res) return '—';
   if (res.type === 'COLOR') return colorFormatter(res.val.r, res.val.g, res.val.b, res.val.a);
   if (res.type === 'STRING') return String(res.val);
+  if (res.type === 'BOOLEAN') return res.val ? 'true' : 'false';
   if (res.type !== 'FLOAT') return '—';
   const prop = String(property || '').toLowerCase();
   if (prop === 'fontweight' || prop === 'font weight') return String(_docFormatNumber(res.val));
@@ -10097,6 +10145,85 @@ function _docBoundsIntersectionArea(a, b) {
   return Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
 }
 
+function _docPlanSpecSheetPlacement(options) {
+  const padding = 80;
+  const gap = 80;
+  const target = options && options.target ? options.target : {};
+  const replacement = options && options.replacement ? options.replacement : null;
+  const existingSheets = options && Array.isArray(options.existingSheets) ? options.existingSheets : [];
+  const sectionExists = options && options.sectionExists === true;
+  const currentSection = options && options.currentSection ? options.currentSection : {};
+
+  if (!sectionExists) {
+    const targetX = typeof target.componentX === 'number' ? target.componentX : 0;
+    const targetY = typeof target.componentY === 'number' ? target.componentY : 0;
+    const targetWidth = typeof target.componentWidth === 'number' ? target.componentWidth : 0;
+    return {
+      sectionX: targetX + targetWidth + 100,
+      sectionY: targetY,
+      frameX: padding,
+      frameY: padding,
+      padding: padding,
+      gap: gap,
+      placement: 'new-section'
+    };
+  }
+
+  if (replacement && typeof replacement.x === 'number' && typeof replacement.y === 'number') {
+    return {
+      sectionX: currentSection.x,
+      sectionY: currentSection.y,
+      frameX: replacement.x,
+      frameY: replacement.y,
+      padding: padding,
+      gap: gap,
+      placement: 'replace-in-place'
+    };
+  }
+
+  let right = padding;
+  let top = padding;
+  if (existingSheets.length) {
+    right = existingSheets[0].x + existingSheets[0].width;
+    top = existingSheets[0].y;
+    for (let i = 1; i < existingSheets.length; i++) {
+      const sheet = existingSheets[i];
+      right = Math.max(right, sheet.x + sheet.width);
+      top = Math.min(top, sheet.y);
+    }
+  }
+  return {
+    sectionX: currentSection.x,
+    sectionY: currentSection.y,
+    frameX: right + (existingSheets.length ? gap : 0),
+    frameY: top,
+    padding: padding,
+    gap: gap,
+    placement: 'append-right'
+  };
+}
+
+function _docExpandedDocumentationSectionSize(currentWidth, currentHeight, children, padding) {
+  const inset = typeof padding === 'number' ? padding : 80;
+  let right = 0;
+  let bottom = 0;
+  const nodes = Array.isArray(children) ? children : [];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (!node) continue;
+    const x = typeof node.x === 'number' ? node.x : 0;
+    const y = typeof node.y === 'number' ? node.y : 0;
+    const width = typeof node.width === 'number' ? node.width : 0;
+    const height = typeof node.height === 'number' ? node.height : 0;
+    right = Math.max(right, x + width);
+    bottom = Math.max(bottom, y + height);
+  }
+  return {
+    width: Math.max(typeof currentWidth === 'number' ? currentWidth : 0, right + inset),
+    height: Math.max(typeof currentHeight === 'number' ? currentHeight : 0, bottom + inset)
+  };
+}
+
 function _docPlacementSummary(node, root, anatomyItems) {
   const nb = node && node.absoluteBoundingBox;
   const rb = root && root.absoluteBoundingBox;
@@ -10206,6 +10333,96 @@ function _docVariantPreviewOutset(node, effectStyleById) {
     max = Math.max(max, _docEffectsOutset(effectStyleById[node.effectStyleId].effects));
   }
   return max;
+}
+
+function _docComparableVariableModeValue(varId, modeId, varById, depth) {
+  if (!varId || !varById || depth > 8) return 'unresolved';
+  const variable = varById[varId];
+  if (!variable) return 'unresolved:' + varId;
+  const values = variable.valuesByMode || {};
+  const modeIds = Object.keys(values);
+  const raw = Object.prototype.hasOwnProperty.call(values, modeId)
+    ? values[modeId]
+    : (modeIds.length ? values[modeIds[0]] : undefined);
+  if (raw && raw.type === 'VARIABLE_ALIAS' && raw.id) {
+    return _docComparableVariableModeValue(raw.id, modeId, varById, depth + 1);
+  }
+  if (raw && typeof raw === 'object' && raw.r !== undefined) {
+    return [
+      'color',
+      Number(raw.r),
+      Number(raw.g),
+      Number(raw.b),
+      raw.a === undefined ? 1 : Number(raw.a)
+    ].join(':');
+  }
+  if (raw === undefined) return 'undefined';
+  if (raw === null) return 'null';
+  return typeof raw + ':' + String(raw);
+}
+
+function _docVariableChangesAcrossModes(varId, collection, varById) {
+  const modes = collection && Array.isArray(collection.modes) ? collection.modes : [];
+  if (modes.length <= 1) return false;
+  const first = _docComparableVariableModeValue(varId, modes[0].modeId, varById, 0);
+  for (let i = 1; i < modes.length; i++) {
+    if (_docComparableVariableModeValue(varId, modes[i].modeId, varById, 0) !== first) return true;
+  }
+  return false;
+}
+
+function _docComponentVariableModeGroups(rawBinds, varById, collectionById) {
+  const groupsById = {};
+  const rows = Array.isArray(rawBinds) ? rawBinds : [];
+  for (let i = 0; i < rows.length; i++) {
+    const binding = rows[i] || {};
+    if (!binding.varId) continue;
+    const variable = varById && varById[binding.varId];
+    if (!variable || !variable.variableCollectionId) continue;
+    const collection = collectionById && collectionById[variable.variableCollectionId];
+    if (!collection || !Array.isArray(collection.modes) || collection.modes.length <= 1) continue;
+    let group = groupsById[collection.id];
+    if (!group) {
+      group = {
+        collection: collection,
+        collectionId: collection.id,
+        collectionName: collection.name || collection.id,
+        defaultModeId: collection.defaultModeId || '',
+        modes: collection.modes.map(function (mode) {
+          return { modeId: mode.modeId, name: mode.name || mode.modeId };
+        }),
+        bindings: [],
+        bindingKeys: {}
+      };
+      groupsById[collection.id] = group;
+    }
+    const key = binding.varId + '|' + String(binding.node || '') + '|' + String(binding.property || '');
+    if (group.bindingKeys[key]) continue;
+    group.bindingKeys[key] = true;
+    group.bindings.push({
+      varId: binding.varId,
+      variableName: variable.name || binding.varId,
+      node: binding.node || '',
+      property: binding.property || ''
+    });
+  }
+  return Object.keys(groupsById).map(function (id) {
+    const group = groupsById[id];
+    delete group.bindingKeys;
+    group.bindings.sort(function (a, b) {
+      const left = a.variableName + '|' + a.node + '|' + a.property;
+      const right = b.variableName + '|' + b.node + '|' + b.property;
+      return left.localeCompare(right);
+    });
+    return group;
+  }).filter(function (group) {
+    for (let i = 0; i < group.bindings.length; i++) {
+      if (_docVariableChangesAcrossModes(group.bindings[i].varId, group.collection, varById)) return true;
+    }
+    return false;
+  }).sort(function (a, b) {
+    return String(a.collectionName).localeCompare(String(b.collectionName));
+  });
 }
 
 function _docFormatReactionPart(value) {
@@ -10327,8 +10544,10 @@ async function _buildComponentDoc(opts) {
   const paintStyleById = {};
   for (let i = 0; i < _allPaintStyles.length; i++) paintStyleById[_allPaintStyles[i].id] = _allPaintStyles[i];
   const collectionByVarId = {};
+  const collectionById = {};
   for (let i = 0; i < (_ds.allColls || []).length; i++) {
     const coll = _ds.allColls[i];
+    collectionById[coll.id] = coll;
     const ids = coll.variableIds || [];
     for (let j = 0; j < ids.length; j++) collectionByVarId[ids[j]] = coll;
   }
@@ -10428,18 +10647,32 @@ async function _buildComponentDoc(opts) {
     return node && typeof node.y === 'number' ? node.y : 0;
   }
 
-  function _positionDocumentationSection(section, frame, target) {
-    const gap = 100;
-    const targetWidth = target && typeof target.componentWidth === 'number' ? target.componentWidth : 0;
-    section.x = (target && typeof target.componentX === 'number' ? target.componentX : 0) + targetWidth + gap;
-    section.y = target && typeof target.componentY === 'number' ? target.componentY : 0;
-    frame.x = 0;
-    frame.y = 0;
+  function _positionDocumentationSection(section, frame, target, sectionExists, replacement, existingSheets) {
+    const placement = _docPlanSpecSheetPlacement({
+      sectionExists: sectionExists,
+      currentSection: { x: section.x, y: section.y },
+      target: target,
+      replacement: replacement,
+      existingSheets: existingSheets
+    });
+    if (!sectionExists) {
+      section.x = placement.sectionX;
+      section.y = placement.sectionY;
+    }
+    frame.x = placement.frameX;
+    frame.y = placement.frameY;
+    return placement;
   }
 
-  function _syncDocumentationSectionBounds(section, frame) {
+  function _syncDocumentationSectionBounds(section, padding) {
+    const size = _docExpandedDocumentationSectionSize(
+      section.width,
+      section.height,
+      section.children,
+      padding
+    );
     try {
-      section.resizeWithoutConstraints(frame.width, frame.height);
+      section.resizeWithoutConstraints(size.width, size.height);
     } catch (e) {}
   }
 
@@ -10499,7 +10732,6 @@ async function _buildComponentDoc(opts) {
   }
   function _collectBind(node, acc) {
     if (_isDocPrivateNodeName(node.name)) return acc;
-    if (node.type === 'INSTANCE') return acc;
     const bv = node.boundVariables || {};
     const _props = [
       ['fills', 'Fill'], ['strokes', 'Stroke'],
@@ -10532,13 +10764,15 @@ async function _buildComponentDoc(opts) {
       if (effectStyleById[node.effectStyleId]) _collectEffectBindRows(effectStyleById[node.effectStyleId].effects, node.name, acc);
     }
     _collectEffectBindRows(node.effects, node.name, acc);
-    if (node.type === 'SLOT') return acc;
+    if (node.type === 'SLOT' || node.type === 'INSTANCE') return acc;
     if ('children' in node) {
       for (let i = 0; i < node.children.length; i++) _collectBind(node.children[i], acc);
     }
     return acc;
   }
   const _rawBinds = _collectBind(_defaultV, []);
+  const _allComponentRawBinds = [];
+  for (let i = 0; i < _children.length; i++) _collectBind(_children[i], _allComponentRawBinds);
 
   function _cleanComponentPropertyName(name) {
     return String(name || '').replace(/#[^#]+$/, '');
@@ -10725,8 +10959,8 @@ async function _buildComponentDoc(opts) {
   // Pre-fetch any varIds we don't have locally (library/remote variables).
   // figma.variables.getVariableByIdAsync resolves both local and library vars.
   const _missingIds = {};
-  for (let i = 0; i < _rawBinds.length; i++) {
-    const id = _rawBinds[i].varId;
+  for (let i = 0; i < _allComponentRawBinds.length; i++) {
+    const id = _allComponentRawBinds[i].varId;
     if (id && !varById[id]) _missingIds[id] = true;
   }
   const _missingIdList = Object.keys(_missingIds);
@@ -10736,9 +10970,45 @@ async function _buildComponentDoc(opts) {
       if (remote) varById[_missingIdList[i]] = remote;
     } catch (e) {}
   }
+  const _missingCollectionIds = {};
+  const _boundVariableIds = Object.keys(varById);
+  for (let i = 0; i < _boundVariableIds.length; i++) {
+    const variable = varById[_boundVariableIds[i]];
+    if (
+      variable
+      && variable.variableCollectionId
+      && !collectionById[variable.variableCollectionId]
+    ) {
+      _missingCollectionIds[variable.variableCollectionId] = true;
+    }
+  }
+  const _missingCollectionIdList = Object.keys(_missingCollectionIds);
+  if (typeof figma.variables.getVariableCollectionByIdAsync === 'function') {
+    for (let i = 0; i < _missingCollectionIdList.length; i++) {
+      try {
+        const remoteCollection = await figma.variables.getVariableCollectionByIdAsync(_missingCollectionIdList[i]);
+        if (!remoteCollection) continue;
+        collectionById[remoteCollection.id] = remoteCollection;
+        const remoteVariableIds = remoteCollection.variableIds || [];
+        for (let j = 0; j < remoteVariableIds.length; j++) {
+          collectionByVarId[remoteVariableIds[j]] = remoteCollection;
+        }
+      } catch (e) {}
+    }
+  }
+  const _variableModeGroups = _docComponentVariableModeGroups(
+    _allComponentRawBinds,
+    varById,
+    collectionById
+  );
+  for (let i = 0; i < _variableModeGroups.length; i++) {
+    const resolvedModes = _defaultV && _defaultV.resolvedVariableModes ? _defaultV.resolvedVariableModes : {};
+    _variableModeGroups[i].activeModeId = resolvedModes[_variableModeGroups[i].collectionId]
+      || _variableModeGroups[i].defaultModeId;
+  }
   const _missingStyleIds = {};
-  for (let i = 0; i < _rawBinds.length; i++) {
-    const id = _rawBinds[i].styleId;
+  for (let i = 0; i < _allComponentRawBinds.length; i++) {
+    const id = _allComponentRawBinds[i].styleId;
     if (id && !textStyleById[id] && !effectStyleById[id] && !paintStyleById[id]) _missingStyleIds[id] = true;
   }
   const _missingStyleIdList = Object.keys(_missingStyleIds);
@@ -10799,6 +11069,43 @@ async function _buildComponentDoc(opts) {
     return out;
   }
   const resolved = _resolveBindingRows(_rawBinds);
+  const _variableModeRows = [];
+
+  function _resolvedVariableValueForConsumer(binding, consumer, modeId) {
+    const variable = binding && binding.varId ? varById[binding.varId] : null;
+    if (!variable) return '—';
+    if (consumer && typeof variable.resolveForConsumer === 'function') {
+      try {
+        const result = variable.resolveForConsumer(consumer);
+        if (result) {
+          return _docFormatResolvedVariableValue(
+            binding.property,
+            { type: result.resolvedType, val: result.value },
+            _toHex
+          );
+        }
+      } catch (e) {}
+    }
+    return _docFormatResolvedVariableValue(
+      binding.property,
+      _resolveAliasForMode(binding.varId, modeId, 0),
+      _toHex
+    );
+  }
+
+  function _modeBindingValueSummary(group, consumer, modeId) {
+    const values = [];
+    const seen = {};
+    for (let i = 0; i < group.bindings.length; i++) {
+      const binding = group.bindings[i];
+      const value = _resolvedVariableValueForConsumer(binding, consumer, modeId);
+      const label = binding.variableName + ' (' + binding.node + ' · ' + binding.property + ') = ' + value;
+      if (seen[label]) continue;
+      seen[label] = true;
+      values.push(label);
+    }
+    return values.join('; ');
+  }
 
   function _docInlineSummary(value) {
     return String(value || '').replace(/\s*\|\s*/g, '; ').replace(/\n+/g, '; ');
@@ -11114,17 +11421,39 @@ async function _buildComponentDoc(opts) {
   let _docSec = figma.currentPage.findOne(function (n) {
     return n.type === 'SECTION' && n.name === 'Documentation';
   });
+  const _docSectionExisted = Boolean(_docSec);
   if (!_docSec) {
     _docSec = figma.createSection();
     _docSec.name = 'Documentation';
     figma.currentPage.appendChild(_docSec);
   }
 
-  // If we're rebuilding the same component, replace the old sheet. Placement is
-  // recalculated from the documented component so docs stay beside their target.
-  const _old = figma.currentPage.findOne(function (n) { return n.name === compName + ' · Spec'; });
+  // If we're rebuilding the same component, preserve its existing sheet position.
+  // Other documentation sheets remain untouched.
+  let _old = null;
+  const _docChildrenBefore = _docSec.children ? _docSec.children.slice() : [];
+  for (let i = 0; i < _docChildrenBefore.length; i++) {
+    if (_docChildrenBefore[i].name === compName + ' · Spec') {
+      _old = _docChildrenBefore[i];
+      break;
+    }
+  }
+  const _replacementPosition = _old ? { x: _old.x, y: _old.y } : null;
   if (_old) {
     _old.remove();
+  }
+  const _existingDocSheets = [];
+  const _remainingDocChildren = _docSec.children ? _docSec.children.slice() : [];
+  for (let i = 0; i < _remainingDocChildren.length; i++) {
+    const _sheet = _remainingDocChildren[i];
+    if (_sheet.type === 'FRAME' && / · Spec$/.test(_sheet.name || '')) {
+      _existingDocSheets.push({
+        x: _sheet.x,
+        y: _sheet.y,
+        width: _sheet.width,
+        height: _sheet.height
+      });
+    }
   }
 
   const doc = figma.createFrame();
@@ -11140,11 +11469,11 @@ async function _buildComponentDoc(opts) {
   _bindVar(doc, 'paddingBottom', _docSpace.pad2XL);
   _docSec.appendChild(doc);
 
-  _positionDocumentationSection(_docSec, doc, {
+  const _docPlacement = _positionDocumentationSection(_docSec, doc, {
     componentX: _absoluteDocX(compSet),
     componentY: _absoluteDocY(compSet),
     componentWidth: compSet.width
-  });
+  }, _docSectionExisted, _replacementPosition, _existingDocSheets);
 
   function _mkLabel(parent, text) {
     const t = figma.createText();
@@ -11198,6 +11527,92 @@ async function _buildComponentDoc(opts) {
     parent.appendChild(t);
     t.textAutoResize = 'WIDTH_AND_HEIGHT';
     return t;
+  }
+  function _mkComponentVisualPreview(parent, sourceComponent, label, description, variableMode) {
+    const preview = figma.createFrame();
+    preview.name = variableMode
+      ? 'Variable Mode Preview · ' + variableMode.modeName + ' · ' + label
+      : 'Variant Preview · ' + label;
+    preview.layoutMode = 'VERTICAL';
+    preview.primaryAxisSizingMode = 'AUTO';
+    preview.counterAxisSizingMode = 'AUTO';
+    preview.primaryAxisAlignItems = 'CENTER';
+    preview.itemSpacing = 8;
+    preview.fills = [];
+    preview.clipsContent = false;
+    _bindVar(preview, 'itemSpacing', _docSpace.padS);
+    parent.appendChild(preview);
+
+    const previewOutset = Math.ceil(_docVariantPreviewOutset(sourceComponent, effectStyleById));
+    const previewPad = previewOutset > 0 ? previewOutset + 4 : 0;
+    const previewShell = figma.createFrame();
+    previewShell.name = variableMode ? 'Variable Mode Preview Bounds' : 'Variant Preview Bounds';
+    previewShell.layoutMode = 'VERTICAL';
+    previewShell.primaryAxisSizingMode = 'AUTO';
+    previewShell.counterAxisSizingMode = 'AUTO';
+    previewShell.primaryAxisAlignItems = 'CENTER';
+    previewShell.counterAxisAlignItems = 'CENTER';
+    previewShell.paddingTop = previewPad;
+    previewShell.paddingRight = previewPad;
+    previewShell.paddingBottom = previewPad;
+    previewShell.paddingLeft = previewPad;
+    previewShell.fills = [];
+    previewShell.clipsContent = false;
+    preview.appendChild(previewShell);
+
+    const instance = sourceComponent.createInstance();
+    let modeApplied = true;
+    if (variableMode) {
+      modeApplied = false;
+      try {
+        instance.setExplicitVariableModeForCollection(
+          variableMode.collection,
+          variableMode.modeId
+        );
+        modeApplied = true;
+      } catch (e) {
+        _warnBinding(
+          'Could not preview variable mode "' + variableMode.modeName
+          + '" from collection "' + variableMode.collectionName + '".'
+        );
+      }
+    }
+    if (modeApplied) {
+      const resolvedPreviewOutset = Math.ceil(_docVariantPreviewOutset(instance, effectStyleById));
+      const resolvedPreviewPad = resolvedPreviewOutset > 0 ? resolvedPreviewOutset + 4 : 0;
+      const finalPreviewPad = Math.max(previewPad, resolvedPreviewPad);
+      previewShell.paddingTop = finalPreviewPad;
+      previewShell.paddingRight = finalPreviewPad;
+      previewShell.paddingBottom = finalPreviewPad;
+      previewShell.paddingLeft = finalPreviewPad;
+      previewShell.appendChild(instance);
+    } else {
+      try { instance.remove(); } catch (e) {}
+      _mkPreviewText(
+        previewShell,
+        'Preview unavailable for this variable mode.',
+        'body',
+        _fReg,
+        _cSubtle,
+        _vSubtle
+      );
+    }
+
+    const variantLabel = figma.createText();
+    variantLabel.characters = String(label).replace(/,\s*/g, '\n');
+    _applyTextRole(variantLabel, 'sectionLabel', 11, _fSemi, _cInk, _vInk);
+    variantLabel.textAlignHorizontal = 'CENTER';
+    preview.appendChild(variantLabel);
+    variantLabel.textAutoResize = 'WIDTH_AND_HEIGHT';
+    if (description) {
+      const detail = figma.createText();
+      detail.characters = String(description);
+      _applyTextRole(detail, 'body', 10, _fReg, _cSubtle, _vSubtle);
+      detail.textAlignHorizontal = 'CENTER';
+      preview.appendChild(detail);
+      detail.textAutoResize = 'WIDTH_AND_HEIGHT';
+    }
+    return { instance: modeApplied ? instance : null, modeApplied: modeApplied };
   }
   function _applyBooleanPropertyPreview(instance, row, value) {
     if (!instance || typeof instance.setProperties !== 'function') return false;
@@ -11352,39 +11767,130 @@ async function _buildComponentDoc(opts) {
   doc.appendChild(_secC); _secC.layoutSizingHorizontal = 'FILL'; _secC.counterAxisSizingMode = 'AUTO';
   for (let i = 0; i < _children.length; i++) {
     const _v = _children[i];
-    const _vf = figma.createFrame();
-    _vf.layoutMode = 'VERTICAL'; _vf.primaryAxisSizingMode = 'AUTO'; _vf.counterAxisSizingMode = 'AUTO';
-    _vf.primaryAxisAlignItems = 'CENTER'; _vf.itemSpacing = 8; _vf.fills = []; _vf.clipsContent = false;
-    _bindVar(_vf, 'itemSpacing', _docSpace.padS);
-    _secC.appendChild(_vf);
-    const _previewOutset = Math.ceil(_docVariantPreviewOutset(_v, effectStyleById));
-    const _previewPad = _previewOutset > 0 ? _previewOutset + 4 : 0;
-    const _previewShell = figma.createFrame();
-    _previewShell.name = 'Variant Preview Bounds';
-    _previewShell.layoutMode = 'VERTICAL';
-    _previewShell.primaryAxisSizingMode = 'AUTO';
-    _previewShell.counterAxisSizingMode = 'AUTO';
-    _previewShell.primaryAxisAlignItems = 'CENTER';
-    _previewShell.counterAxisAlignItems = 'CENTER';
-    _previewShell.paddingTop = _previewPad;
-    _previewShell.paddingRight = _previewPad;
-    _previewShell.paddingBottom = _previewPad;
-    _previewShell.paddingLeft = _previewPad;
-    _previewShell.fills = [];
-    _previewShell.clipsContent = false;
-    _vf.appendChild(_previewShell);
-    _previewShell.appendChild(_v.createInstance());
-    const _vl = figma.createText();
-    _vl.characters = _v.name.replace(/,\s*/g, '\n');
-    _applyTextRole(_vl, 'sectionLabel', 11, _fSemi, _cInk, _vInk);
-    _vl.textAlignHorizontal = 'CENTER';
-    _vf.appendChild(_vl); _vl.textAutoResize = 'WIDTH_AND_HEIGHT';
-    if (variantDesc[_v.name]) {
-      const _vdt = figma.createText();
-      _vdt.characters = variantDesc[_v.name];
-      _applyTextRole(_vdt, 'body', 10, _fReg, _cSubtle, _vSubtle);
-      _vdt.textAlignHorizontal = 'CENTER';
-      _vf.appendChild(_vdt); _vdt.textAutoResize = 'WIDTH_AND_HEIGHT';
+    _mkComponentVisualPreview(_secC, _v, _v.name, variantDesc[_v.name] || '', null);
+  }
+
+  if (_variableModeGroups.length > 0) {
+    _mkLabel(doc, 'VARIABLE MODES');
+    const modeSection = figma.createFrame();
+    modeSection.name = 'Section C · Variable Modes';
+    modeSection.layoutMode = 'VERTICAL';
+    modeSection.primaryAxisSizingMode = 'AUTO';
+    modeSection.counterAxisSizingMode = 'FIXED';
+    modeSection.itemSpacing = 32;
+    modeSection.fills = [];
+    modeSection.clipsContent = false;
+    _bindVar(modeSection, 'itemSpacing', _docSpace.pad2XL);
+    doc.appendChild(modeSection);
+    modeSection.layoutSizingHorizontal = 'FILL';
+
+    for (let groupIndex = 0; groupIndex < _variableModeGroups.length; groupIndex++) {
+      const group = _variableModeGroups[groupIndex];
+      const groupFrame = figma.createFrame();
+      groupFrame.name = 'Variable Mode Collection · ' + group.collectionName;
+      groupFrame.layoutMode = 'VERTICAL';
+      groupFrame.primaryAxisSizingMode = 'AUTO';
+      groupFrame.counterAxisSizingMode = 'FIXED';
+      groupFrame.itemSpacing = 20;
+      groupFrame.paddingTop = 24;
+      groupFrame.paddingBottom = 24;
+      groupFrame.paddingLeft = 24;
+      groupFrame.paddingRight = 24;
+      groupFrame.fills = [_paint(_cSurface, _vSurface)];
+      groupFrame.cornerRadius = 8;
+      groupFrame.strokes = [_paint(_cBorder, _vBorder)];
+      groupFrame.strokeWeight = 1;
+      groupFrame.clipsContent = false;
+      _bindVar(groupFrame, 'itemSpacing', _docSpace.padL);
+      _bindVar(groupFrame, 'paddingTop', _docSpace.padXL);
+      _bindVar(groupFrame, 'paddingBottom', _docSpace.padXL);
+      _bindVar(groupFrame, 'paddingLeft', _docSpace.padXL);
+      _bindVar(groupFrame, 'paddingRight', _docSpace.padXL);
+      _bindVar(groupFrame, 'cornerRadius', _docSpace.radius);
+      _bindVar(groupFrame, 'strokeWeight', _docSpace.border);
+      modeSection.appendChild(groupFrame);
+      groupFrame.layoutSizingHorizontal = 'FILL';
+
+      const activeMode = group.modes.find(function (mode) {
+        return mode.modeId === group.activeModeId;
+      });
+      _mkPreviewText(groupFrame, group.collectionName, 'bodyStrong', _fSemi, _cInk, _vInk);
+      _mkPreviewText(
+        groupFrame,
+        'Current component mode: ' + (activeMode ? activeMode.name : 'Not explicitly set'),
+        'body',
+        _fReg,
+        _cSubtle,
+        _vSubtle
+      );
+
+      for (let modeIndex = 0; modeIndex < group.modes.length; modeIndex++) {
+        const mode = group.modes[modeIndex];
+        const modeBlock = figma.createFrame();
+        modeBlock.name = 'Variable Mode · ' + mode.name;
+        modeBlock.layoutMode = 'VERTICAL';
+        modeBlock.primaryAxisSizingMode = 'AUTO';
+        modeBlock.counterAxisSizingMode = 'FIXED';
+        modeBlock.itemSpacing = 12;
+        modeBlock.fills = [];
+        modeBlock.clipsContent = false;
+        _bindVar(modeBlock, 'itemSpacing', _docSpace.padM);
+        groupFrame.appendChild(modeBlock);
+        modeBlock.layoutSizingHorizontal = 'FILL';
+
+        _mkPreviewText(
+          modeBlock,
+          mode.name + (mode.modeId === group.activeModeId ? ' · CURRENT' : ''),
+          'sectionLabel',
+          _fSemi,
+          _cInk,
+          _vInk
+        );
+        const modePreviews = figma.createFrame();
+        modePreviews.name = 'Mode Visuals · ' + mode.name;
+        modePreviews.layoutMode = 'HORIZONTAL';
+        modePreviews.layoutWrap = 'WRAP';
+        modePreviews.primaryAxisSizingMode = 'FIXED';
+        modePreviews.counterAxisSizingMode = 'AUTO';
+        modePreviews.counterAxisAlignItems = 'MIN';
+        modePreviews.itemSpacing = 24;
+        modePreviews.counterAxisSpacing = 24;
+        modePreviews.fills = [];
+        modePreviews.clipsContent = false;
+        _bindVar(modePreviews, 'itemSpacing', _docSpace.padXL);
+        _bindVar(modePreviews, 'counterAxisSpacing', _docSpace.padXL);
+        modeBlock.appendChild(modePreviews);
+        modePreviews.layoutSizingHorizontal = 'FILL';
+
+        let modeConsumer = null;
+        let previewCount = 0;
+        for (let variantIndex = 0; variantIndex < _children.length; variantIndex++) {
+          const variant = _children[variantIndex];
+          const previewResult = _mkComponentVisualPreview(
+            modePreviews,
+            variant,
+            variant.name,
+            variantDesc[variant.name] || '',
+            {
+              collection: group.collection,
+              collectionName: group.collectionName,
+              modeId: mode.modeId,
+              modeName: mode.name
+            }
+          );
+          if (!modeConsumer && previewResult.instance) modeConsumer = previewResult.instance;
+          if (previewResult.modeApplied) previewCount++;
+        }
+        _variableModeRows.push({
+          collection: group.collectionName,
+          mode: mode.name,
+          current: mode.modeId === group.activeModeId ? 'Yes' : 'No',
+          boundValues: _modeBindingValueSummary(group, modeConsumer, mode.modeId),
+          preview: previewCount === _children.length
+            ? _children.length + (_children.length === 1 ? ' visual' : ' variant visuals')
+            : 'Unavailable'
+        });
+      }
     }
   }
 
@@ -11673,11 +12179,19 @@ async function _buildComponentDoc(opts) {
     if (i > 0) _tokensForSpec += ', ';
     _tokensForSpec += resolved[i].property + '=' + resolved[i].token;
   }
+  let _variableModesForSpec = '';
+  for (let i = 0; i < _variableModeGroups.length; i++) {
+    if (i > 0) _variableModesForSpec += '; ';
+    _variableModesForSpec += _variableModeGroups[i].collectionName + '='
+      + _variableModeGroups[i].modes.map(function (mode) { return mode.name; }).join(' | ');
+  }
+  if (!_variableModesForSpec) _variableModesForSpec = 'none';
   const _accessibilityForSpec = _accessibilityNotes.length ? _accessibilityNotes.join(' | ') : 'none';
   const _specBlock =
     '[SPEC]\n' +
     'component: ' + compName + '\n' +
     'variants: ' + compMeta.variants.join(' | ') + '\n' +
+    'variable-modes: ' + _variableModesForSpec + '\n' +
     'properties: ' + _propsForSpec + '\n' +
     'tokens: ' + _tokensForSpec + '\n' +
     'accessibility: ' + _accessibilityForSpec + '\n' +
@@ -11914,6 +12428,15 @@ async function _buildComponentDoc(opts) {
         _variantChangeRows.map(function (r) { return [r.variant, r.target, r.property, r.value, r.defaultValue]; }))
     : '';
 
+  const _variableModesTable = _variableModeRows.length > 0
+    ? _mdTable(
+        ['Collection', 'Mode', 'Current', 'Bound token values', 'Figma spec preview'],
+        _variableModeRows.map(function (row) {
+          return [row.collection, row.mode, row.current, row.boundValues, row.preview];
+        })
+      )
+    : '';
+
   const _interactionsTable = _interactionRows.length > 0
     ? _mdTable(['Variant', 'Element', 'Trigger', 'Action', 'Transition'],
         _interactionRows.map(function (r) { return [r.variant, r.element, r.trigger, r.action, r.transition]; }))
@@ -12004,6 +12527,16 @@ async function _buildComponentDoc(opts) {
     _md.push('### Prototype interactions');
     _md.push('');
     _md.push(_interactionsTable);
+    _md.push('');
+  }
+  if (_variableModesTable) {
+    _md.push('---');
+    _md.push('');
+    _md.push('## Variable Modes');
+    _md.push('');
+    _md.push('These modes are defined by multi-mode variable collections bound to the component. The Figma spec sheet renders the complete component variant set under every mode.');
+    _md.push('');
+    _md.push(_variableModesTable);
     _md.push('');
   }
   _md.push('---');
@@ -12102,7 +12635,7 @@ async function _buildComponentDoc(opts) {
   _md.push('- **ComponentSet ID:** ' + compSet.id);
   _md.push('- **Spec Frame:** Documentation · ' + compName + ' · Spec');
 
-  _syncDocumentationSectionBounds(_docSec, doc);
+  _syncDocumentationSectionBounds(_docSec, _docPlacement.padding);
 
   try { figma.viewport.scrollAndZoomIntoView([doc]); } catch (e) {}
 
@@ -12117,9 +12650,26 @@ async function _buildComponentDoc(opts) {
       height: compMeta.height,
       propertyCount: _compProps.length,
       slotCount: _slotDocs.length,
+      variableModeCollectionCount: _variableModeGroups.length,
+      variableModeCount: _variableModeRows.length,
       documentedVariantSelection: documentedVariantSelection,
       selectedVariantName: selectedVariantName
     },
+    variableModes: _variableModeGroups.map(function (group) {
+      return {
+        collectionId: group.collectionId,
+        collectionName: group.collectionName,
+        activeModeId: group.activeModeId,
+        modes: group.modes.map(function (mode) {
+          return { modeId: mode.modeId, name: mode.name };
+        }),
+        boundVariables: group.bindings.map(function (binding) {
+          return binding.variableName;
+        }).filter(function (name, index, names) {
+          return names.indexOf(name) === index;
+        })
+      };
+    }),
     bindingsCount: resolved.length,
     bindingWarnings: _docBindingWarnings,
     bindingDiagnostics: _docBindingDiagnostics,

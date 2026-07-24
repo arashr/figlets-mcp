@@ -81,6 +81,10 @@ module.exports = (async () => {
     assert.strictEqual(updateDsTokensTool.name, "update_ds_tokens");
     assert.ok(updateDsTokensTool.description.includes("broad typography/elevation orchestration"));
     assert.ok(updateDsTokensTool.inputSchema.properties.prune, "schema should expose prune options");
+    assert.ok(
+      updateDsTokensTool.inputSchema.properties.effect_style_repairs,
+      "schema should expose exact audited effect-style repairs"
+    );
 
     {
       const result = handleUpdateDsTokens({});
@@ -428,6 +432,76 @@ module.exports = (async () => {
     }
 
     {
+      const rawStyleDataPath = path.join(tmp, "figma-data-five-raw-elevation-styles.json");
+      const rawEffectStyles = [{ id: "effect-0", name: "elevation/0", effects: [] }];
+      for (let level = 1; level <= 5; level++) {
+        rawEffectStyles.push({
+          id: `effect-${level}`,
+          name: `elevation/${level}`,
+          effects: [{
+            type: "DROP_SHADOW",
+            color: { r: 0, g: 0, b: 0, a: 0.2 },
+            offset: { x: 0, y: level },
+            radius: level * 2,
+            boundVariables: {},
+          }],
+        });
+      }
+      fs.writeFileSync(rawStyleDataPath, JSON.stringify({
+        variables: [],
+        textStyles: [],
+        effectStyles: rawEffectStyles,
+      }, null, 2), "utf8");
+
+      const fallbackPreview = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath: rawStyleDataPath,
+        categories: ["elevation-styles"],
+        create_missing: true,
+        dry_run: true,
+      });
+      assert.ok(!fallbackPreview.error, fallbackPreview.error);
+      assert.deepStrictEqual(
+        fallbackPreview.report["elevation-styles"].wouldRefreshStyles.map(item => item.name),
+        ["elevation/1", "elevation/2", "elevation/3", "elevation/4", "elevation/5"],
+        "fallback preview must project the shared raw-binding findings instead of proposing healthy elevation/0"
+      );
+
+      const exactRepairs = rawEffectStyles.slice(1).map((style, index) => ({
+        styleId: style.id,
+        name: style.name,
+        bindings: [{
+          effectIndex: 0,
+          shadowRole: "key",
+          property: "radius",
+          rawValue: (index + 1) * 2,
+          expectedVariable: `elevation/${["xs", "sm", "md", "lg", "xl"][index]}/radius`,
+          expectedVariableId: null,
+          expectedVariableExists: false,
+        }],
+      }));
+      const exactPreview = handleUpdateDsTokens({
+        config_path: configPath,
+        figmaDataPath: rawStyleDataPath,
+        categories: ["elevation-styles"],
+        effect_style_repairs: exactRepairs,
+        create_missing: true,
+        dry_run: true,
+      });
+      assert.ok(!exactPreview.error, exactPreview.error);
+      assert.strictEqual(exactPreview.repairSource, "inspect_ds_token_gaps.effect_style_repairs");
+      assert.deepStrictEqual(
+        exactPreview.report["elevation-styles"].wouldRefreshStyles.map(item => item.name),
+        ["elevation/1", "elevation/2", "elevation/3", "elevation/4", "elevation/5"],
+        "exact preview must use the carried audit payload without a second discovery pass"
+      );
+      assert.ok(
+        !exactPreview.report["elevation-styles"].wouldRefreshStyles.some(item => item.name === "elevation/0"),
+        "exact preview must not widen the repair to a healthy style"
+      );
+    }
+
+    {
       const capturePath = path.join(tmp, "capture-orchestration.json");
       stubUpdateTokensRoute(hookPath, capturePath, {
         dryRun: false,
@@ -566,6 +640,19 @@ module.exports = (async () => {
       const result = await handleUpdateDsTokens({
         config_path: configPath,
         categories: ["elevation-styles"],
+        effect_style_repairs: [{
+          styleId: "existing-style-1",
+          name: "elevation/1",
+          bindings: [{
+            effectIndex: 0,
+            shadowRole: "key",
+            property: "radius",
+            rawValue: 2,
+            expectedVariable: "elevation/xs/radius",
+            expectedVariableId: "elevation-xs-radius",
+            expectedVariableExists: true,
+          }],
+        }],
         create_missing: true,
         dry_run: false,
       });
@@ -581,6 +668,25 @@ module.exports = (async () => {
       );
       assert.ok(receivedBody.DS, "elevation-styles apply should send DS to bridge hook");
       assert.deepStrictEqual(receivedBody.categories, ["elevation-styles"]);
+      assert.deepStrictEqual(
+        receivedBody.effectStyleRepairs.map(item => item.name),
+        ["elevation/1"],
+        "apply must forward the exact approved style set to the bridge"
+      );
+    }
+
+    {
+      const result = await handleUpdateDsTokens({
+        config_path: configPath,
+        categories: ["elevation-styles"],
+        effect_style_repairs: [],
+        create_missing: true,
+        dry_run: false,
+      });
+      assert.ok(
+        result.error && result.error.includes("effect_style_repairs was provided"),
+        "an empty exact effect-style payload must fail closed instead of widening to every elevation style"
+      );
     }
 
     {

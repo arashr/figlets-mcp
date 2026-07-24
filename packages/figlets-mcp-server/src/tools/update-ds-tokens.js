@@ -71,6 +71,36 @@ const updateDsTokensTool = {
         },
         description: "Optional exact semantic spacing alias repairs copied from inspect_ds_token_gaps. When provided, update_ds_tokens applies only these token/mode entries instead of the whole spacing-semantics category."
       },
+      effect_style_repairs: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            styleId: { type: ["string", "null"] },
+            name: { type: "string" },
+            bindings: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  effectIndex: { type: "number" },
+                  shadowRole: { type: "string" },
+                  property: { type: "string" },
+                  rawValue: {},
+                  expectedVariable: { type: "string" },
+                  expectedVariableId: { type: ["string", "null"] },
+                  expectedVariableExists: { type: "boolean" }
+                },
+                required: ["effectIndex", "property", "expectedVariable"],
+                additionalProperties: false
+              }
+            }
+          },
+          required: ["name", "bindings"],
+          additionalProperties: false
+        },
+        description: "Optional exact elevation effect-style binding repairs copied from inspect_ds_token_gaps. Preview and apply use this audited set directly instead of rediscovering or widening the style refresh scope."
+      },
       prune: {
         type: "object",
         properties: {
@@ -139,10 +169,13 @@ function _pushCategoryItem(report, category, key, item) {
 function _toPreviewItem(gap) {
   return {
     name: gap.name,
+    styleId: gap.styleId || undefined,
     kind: gap.kind,
     expectedType: gap.expectedType || undefined,
     styleType: gap.styleType || undefined,
     collection: gap.collection || undefined,
+    bindings: gap.bindings || undefined,
+    reason: gap.reason || undefined,
   };
 }
 
@@ -152,6 +185,9 @@ function _buildDryRunReport(plannerResult, options) {
   const spacingSemanticRepairs = _normalizeSpacingSemanticRepairs(options.spacing_semantic_repairs);
   const exactSpacingRepairByName = new Map(spacingSemanticRepairs.map(repair => [repair.name, repair]));
   const exactSpacingRequested = exactSpacingRepairByName.size > 0;
+  const effectStyleRepairs = _normalizeEffectStyleRepairs(options.effect_style_repairs);
+  const exactEffectStyleRepairsRequested = effectStyleRepairs.length > 0;
+  const rawEffectStyleCategories = new Set();
 
   for (const gap of plannerResult.tokenGaps || []) {
     if (exactSpacingRequested && gap.category === "spacing-semantics" && gap.gapType !== "spacing-alias-repair") {
@@ -192,10 +228,35 @@ function _buildDryRunReport(plannerResult, options) {
         updates,
         reason: gap.reason,
       }));
+    } else if (gap.gapType === "raw-effect-style-bindings") {
+      rawEffectStyleCategories.add(gap.category);
+      if (!exactEffectStyleRepairsRequested) {
+        _pushCategoryItem(report, gap.category, "wouldRefreshStyles", _toPreviewItem(gap));
+      }
+    }
+  }
+  if (exactEffectStyleRepairsRequested) {
+    const category = report["elevation-styles"] ? "elevation-styles" : "elevation";
+    for (const repair of effectStyleRepairs) {
+      _pushCategoryItem(report, category, "wouldRefreshStyles", {
+        name: repair.name,
+        styleId: repair.styleId || undefined,
+        kind: "style",
+        styleType: "EFFECT",
+        collection: "local effect styles",
+        bindings: repair.bindings,
+        reason: "Exact raw effect-style binding repair carried forward from inspect_ds_token_gaps.",
+      });
     }
   }
   for (const update of plannerResult.existingUpdates || []) {
     if (update.gapType === "existing-style-refresh") {
+      if (
+        update.styleType === "EFFECT"
+        && (exactEffectStyleRepairsRequested || rawEffectStyleCategories.has(update.category))
+      ) {
+        continue;
+      }
       _pushCategoryItem(report, update.category, "wouldRefreshStyles", _toPreviewItem(update));
     }
   }
@@ -275,6 +336,50 @@ function _hasSpacingSemanticRepairsInput(args) {
   return !!(args && Object.prototype.hasOwnProperty.call(args, "spacing_semantic_repairs"));
 }
 
+function _normalizeEffectStyleRepairs(input) {
+  if (!Array.isArray(input)) return [];
+  const repairs = [];
+  const seen = new Set();
+  for (const repair of input) {
+    if (!repair || typeof repair !== "object") continue;
+    const name = String(repair.name || "").trim();
+    if (!/^elevation\/[1-5]$/.test(name) || seen.has(name) || !Array.isArray(repair.bindings)) continue;
+    const bindings = repair.bindings
+      .filter(binding => binding && typeof binding === "object")
+      .map(binding => ({
+        effectIndex: Number(binding.effectIndex),
+        shadowRole: binding.shadowRole != null ? String(binding.shadowRole) : undefined,
+        property: String(binding.property || ""),
+        rawValue: binding.rawValue,
+        expectedVariable: String(binding.expectedVariable || ""),
+        expectedVariableId: binding.expectedVariableId != null ? String(binding.expectedVariableId) : null,
+        expectedVariableExists: !!binding.expectedVariableExists,
+      }))
+      .filter(binding =>
+        Number.isInteger(binding.effectIndex)
+        && binding.effectIndex >= 0
+        && ["color", "offsetY", "radius"].includes(binding.property)
+        && binding.expectedVariable
+      );
+    if (!bindings.length) continue;
+    seen.add(name);
+    repairs.push({
+      styleId: repair.styleId != null ? String(repair.styleId) : null,
+      name,
+      bindings,
+    });
+  }
+  return repairs;
+}
+
+function _hasEffectStyleRepairsInput(args) {
+  return !!(args && Object.prototype.hasOwnProperty.call(args, "effect_style_repairs"));
+}
+
+function _invalidEffectStyleRepairsError() {
+  return "Invalid approval boundary: effect_style_repairs was provided but did not contain exact elevation style/binding findings copied from inspect_ds_token_gaps. Stop and rerun inspect_ds_token_gaps, then pass the exact approved effect_style_repairs entries or omit the field entirely for a full category refresh.";
+}
+
 function _invalidSpacingSemanticRepairsError() {
   return "Invalid approval boundary: spacing_semantic_repairs was provided but did not contain any exact token/mode alias repair entries copied from inspect_ds_token_gaps.repairPlan.applyInput. Stop and rerun inspect_ds_token_gaps, then pass the exact approved spacing_semantic_repairs entries or omit the field entirely for a full category apply.";
 }
@@ -305,6 +410,17 @@ function _applyUnsupportedCategories(categories) {
 
 function _resolveApplyCategories(args, configPath, ds) {
   const requested = _requestedCategories(args);
+  if (
+    _hasEffectStyleRepairsInput(args)
+    && requested.length === 1
+    && requested[0] === "elevation-styles"
+  ) {
+    return {
+      requested,
+      bridgeCategories: ["elevation-styles"],
+      orchestratedFrom: [],
+    };
+  }
   const dataSource = args.figmaDataPath
     ? loadFigmaDataSource({ figmaDataPath: args.figmaDataPath })
     : (loadActiveFigmaDataSource(args) || loadFigmaDataSource(args));
@@ -432,6 +548,29 @@ function _handleApplyDsTokens(args, configPath, ds) {
       missingCapabilityNotes,
     };
   }
+  const effectStyleRepairsProvided = _hasEffectStyleRepairsInput(args);
+  const effectStyleRepairs = _normalizeEffectStyleRepairs(args.effect_style_repairs);
+  if (effectStyleRepairsProvided && !effectStyleRepairs.length) {
+    return {
+      error: _invalidEffectStyleRepairsError(),
+      dryRun: false,
+      configPath,
+      categories: resolved.requested,
+      missingCapabilityNotes,
+    };
+  }
+  if (
+    effectStyleRepairsProvided
+    && resolved.bridgeCategories.indexOf("elevation-styles") < 0
+  ) {
+    return {
+      error: "Invalid approval boundary: effect_style_repairs requires the elevation-styles category.",
+      dryRun: false,
+      configPath,
+      categories: resolved.requested,
+      missingCapabilityNotes,
+    };
+  }
 
   const bridgePayload = {
     DS: bridgeDs,
@@ -446,6 +585,9 @@ function _handleApplyDsTokens(args, configPath, ds) {
   };
   if (spacingSemanticRepairsProvided) {
     bridgePayload.spacingSemanticRepairs = spacingSemanticRepairs;
+  }
+  if (effectStyleRepairsProvided) {
+    bridgePayload.effectStyleRepairs = effectStyleRepairs;
   }
 
   return requestBridgePost("/request-update-tokens", bridgePayload, {
@@ -522,6 +664,64 @@ function handleUpdateDsTokens(args = {}) {
   }
 
   const prune = _normalizePruneOptions(args.prune);
+  const effectStyleRepairsProvided = _hasEffectStyleRepairsInput(args);
+  const effectStyleRepairs = _normalizeEffectStyleRepairs(args.effect_style_repairs);
+  if (effectStyleRepairsProvided && !effectStyleRepairs.length) {
+    return {
+      error: _invalidEffectStyleRepairsError(),
+      dryRun: true,
+      configPath,
+      categories: _requestedCategories(args),
+    };
+  }
+  const requestedCategories = _requestedCategories(args);
+  if (
+    effectStyleRepairsProvided
+    && !requestedCategories.some(category => category === "elevation" || category === "elevation-styles")
+  ) {
+    return {
+      error: "Invalid approval boundary: effect_style_repairs requires the elevation-styles category.",
+      dryRun: true,
+      configPath,
+      categories: requestedCategories,
+    };
+  }
+  if (
+    effectStyleRepairsProvided
+    && requestedCategories.length === 1
+    && requestedCategories[0] === "elevation-styles"
+  ) {
+    const report = _reportForCategories(["elevation-styles"]);
+    for (const repair of effectStyleRepairs) {
+      _pushCategoryItem(report, "elevation-styles", "wouldRefreshStyles", {
+        name: repair.name,
+        styleId: repair.styleId || undefined,
+        kind: "style",
+        styleType: "EFFECT",
+        collection: "local effect styles",
+        bindings: repair.bindings,
+        reason: "Exact raw effect-style binding repair carried forward from inspect_ds_token_gaps.",
+      });
+    }
+    return {
+      dryRun: true,
+      categories: ["elevation-styles"],
+      unknownCategories: [],
+      report,
+      missingCapabilityNotes: [],
+      message: _messageForReport(report, [], true),
+      configPath,
+      snapshot: {
+        kind: dataSource.kind,
+        path: dataSource.meta && dataSource.meta.path || null,
+        fileKey: dataSource.meta && dataSource.meta.fileKey || null,
+      },
+      repairSource: "inspect_ds_token_gaps.effect_style_repairs",
+      applySupported: true,
+      supportedApplyCategories: Array.from(SUPPORTED_APPLY_CATEGORIES).sort(),
+      nextStep: "Show these exact audited effect-style repairs to the designer. After explicit approval, pass the same effect_style_repairs unchanged to update_ds_tokens with dry_run:false. Do not rediscover or widen the style set.",
+    };
+  }
   const plannerResult = inspectDsTokenGapsFromConfigAndFigmaData(ds, dataSource.figmaData, {
     configPath,
     categories: args.categories,
@@ -545,6 +745,7 @@ function handleUpdateDsTokens(args = {}) {
   const report = _buildDryRunReport(plannerResult, {
     create_missing: args.create_missing,
     spacing_semantic_repairs: args.spacing_semantic_repairs,
+    effect_style_repairs: args.effect_style_repairs,
   });
   const unknownCategories = (plannerResult.categories && plannerResult.categories.unsupported) || [];
   const missingCapabilityNotes = (plannerResult.repairPlan && plannerResult.repairPlan.missingCapabilityNotes || []).slice();

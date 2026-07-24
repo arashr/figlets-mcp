@@ -73,6 +73,12 @@ module.exports = (async () => {
     "font family variables should resolve string values"
   );
 
+  assert.strictEqual(
+    helpers._docFormatResolvedVariableValue("visible", { type: "BOOLEAN", val: false }, () => "#000000"),
+    "false",
+    "boolean values in component mode collections should remain explicit"
+  );
+
   assert.ok(
     code.includes("['fontFamily', 'fontFamily']") &&
       code.includes("['fontWeight', 'fontWeight']") &&

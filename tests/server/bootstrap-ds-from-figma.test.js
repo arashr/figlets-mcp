@@ -171,6 +171,97 @@ module.exports = (async () => {
     assert.strictEqual(ds.elevation["1"][0].offset.y, 2);
   }
 
+  // Theme modes belong to Color; they must never become responsive breakpoints.
+  // A file whose Spacing and Typography collections are Desktop-only should
+  // bootstrap that exact responsive mode instead of expecting Light and Dark.
+  {
+    const snapshot = {
+      collections: [
+        {
+          id: "color",
+          name: "2. Color",
+          modes: [
+            { modeId: "light", name: "Light" },
+            { modeId: "dark", name: "Dark" },
+          ],
+          variableIds: ["surface"],
+        },
+        {
+          id: "typography",
+          name: "3. Typography",
+          modes: [{ modeId: "desktop-type", name: "Desktop" }],
+          variableIds: ["font-sans"],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          modes: [{ modeId: "desktop-space", name: "Desktop" }],
+          variableIds: ["space-component-md"],
+        },
+      ],
+      variables: [
+        {
+          id: "surface",
+          name: "color/surface/default",
+          resolvedType: "COLOR",
+          variableCollectionId: "color",
+          valuesByMode: {
+            light: { r: 1, g: 1, b: 1 },
+            dark: { r: 0, g: 0, b: 0 },
+          },
+        },
+        {
+          id: "font-sans",
+          name: "font/sans",
+          resolvedType: "STRING",
+          variableCollectionId: "typography",
+          valuesByMode: { "desktop-type": "Inter" },
+        },
+        {
+          id: "space-component-md",
+          name: "space/component/md",
+          resolvedType: "FLOAT",
+          variableCollectionId: "spacing",
+          valuesByMode: { "desktop-space": 16 },
+        },
+      ],
+    };
+
+    const ds = bootstrapDsFromSnapshot(snapshot);
+    assert.deepStrictEqual(ds.breakpoints, { modes: ["Desktop"], tier: 1 });
+  }
+
+  // Color-only theme modes are not evidence of responsive breakpoints.
+  {
+    const snapshot = {
+      collections: [{
+        id: "color",
+        name: "2. Color",
+        modes: [
+          { modeId: "light", name: "Light" },
+          { modeId: "dark", name: "Dark" },
+        ],
+        variableIds: ["surface"],
+      }],
+      variables: [{
+        id: "surface",
+        name: "color/surface/default",
+        resolvedType: "COLOR",
+        variableCollectionId: "color",
+        valuesByMode: {
+          light: { r: 1, g: 1, b: 1 },
+          dark: { r: 0, g: 0, b: 0 },
+        },
+      }],
+    };
+
+    const ds = bootstrapDsFromSnapshot(snapshot);
+    assert.deepStrictEqual(ds.breakpoints, {
+      modes: ["Mobile", "Tablet", "Desktop"],
+      tier: 3,
+    });
+  }
+
   // ── bootstrapDsFromSnapshot ─────────────────────────────────────────────
   {
     const snapshot = {

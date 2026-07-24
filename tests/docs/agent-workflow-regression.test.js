@@ -626,6 +626,7 @@ try {
     assert.strictEqual(draftedProposal.nextAction.type, "ask_user");
 
     const negativeRoutes = [
+      ["check my design system using figlets", "health-check"],
       ["using figlets build a token showcase for vibrant colors", "build-showcase"],
       ["using figlets export DESIGN.md for background colors", "export-design-md"],
       ["using figlets check foreground contrast in my design system", "health-check"],
@@ -639,6 +640,17 @@ try {
         `intent should route to ${expectedWorkflowId}: ${intent}`
       );
     }
+
+    const persianIntent = "دیزاین سیستم من رو چک کن";
+    const multilingualRoute = handleFigletsRouteIntent({
+      intent: persianIntent,
+      interpreted_workflow_id: "health-check",
+    });
+    assert.strictEqual(multilingualRoute.intent, persianIntent);
+    assert.strictEqual(multilingualRoute.workflow.id, "health-check");
+    assert.strictEqual(multilingualRoute.routingMode, "ai-interpreted");
+    assert.strictEqual(multilingualRoute.selectionPrompt, null);
+    assert.strictEqual(multilingualRoute.intentInterpretation.kind, "ai-semantic");
   }
 
   // --- figlets_health_check first check set (host/model-neutral corrective guidance) ---

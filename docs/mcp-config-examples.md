@@ -243,7 +243,7 @@ Once connected, the agent will have access to:
 | Tool | Description |
 |---|---|
 | `figlets_start` | Returns the Agent Interface intro, safety contract, runtime environment hints, capability menu, and first designer-facing question. |
-| `figlets_route_intent` | Routes a designer's natural-language request to the most likely Figlets workflow. |
+| `figlets_route_intent` | Validates the AI interface's language-independent `interpreted_workflow_id`; natural-language scoring remains a fallback for genuine ambiguity. |
 | `figlets_workflow_guide` | Returns workflow steps, read/write boundaries, confirmation points, recovery notes, and safe next flows. |
 | `sync_figma_data` | Triggers the Figma bridge plugin to extract and save the full design system snapshot. Blocks until complete. |
 | `inspect_component` | Grabs the currently selected Figma node(s) and returns structure, layout, and variant properties. |

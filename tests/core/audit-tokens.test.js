@@ -148,6 +148,95 @@ const mockData = {
 }
 
 {
+  const variables = [
+    { id: "key-color", name: "color/shadow/key" },
+    { id: "ambient-color", name: "color/shadow/ambient" },
+    { id: "xs-offset", name: "elevation/xs/offset-y" },
+    { id: "xs-radius", name: "elevation/xs/radius" },
+    { id: "sm-offset", name: "elevation/sm/offset-y" },
+    { id: "sm-radius", name: "elevation/sm/radius" },
+    { id: "ambient-2-radius", name: "shadow/ambient/2/radius" },
+  ];
+  const effectStyles = [
+    {
+      id: "style-0",
+      name: "elevation/0",
+      effects: [],
+    },
+    {
+      id: "style-1",
+      name: "elevation/1",
+      effects: [{
+        type: "DROP_SHADOW",
+        color: { r: 0, g: 0, b: 0, a: 0.2 },
+        offset: { x: 0, y: 1 },
+        radius: 2,
+        spread: 0,
+        boundVariables: {
+          color: ALIAS("key-color"),
+        },
+      }],
+    },
+    {
+      id: "style-2",
+      name: "elevation/2",
+      effects: [
+        {
+          type: "DROP_SHADOW",
+          color: { r: 0, g: 0, b: 0, a: 0.2 },
+          offset: { x: 0, y: 4 },
+          radius: 8,
+          spread: 0,
+          boundVariables: {
+            color: ALIAS("key-color"),
+            offsetY: ALIAS("sm-offset"),
+            radius: ALIAS("sm-radius"),
+          },
+        },
+        {
+          type: "DROP_SHADOW",
+          color: { r: 0, g: 0, b: 0, a: 0.08 },
+          offset: { x: 0, y: 0 },
+          radius: 8,
+          spread: 0,
+          boundVariables: {
+            color: ALIAS("ambient-color"),
+          },
+        },
+      ],
+    },
+    {
+      id: "unrelated",
+      name: "effects/focus-ring",
+      effects: [{
+        type: "DROP_SHADOW",
+        offset: { x: 0, y: 0 },
+        radius: 2,
+      }],
+    },
+  ];
+
+  const result = auditTokens({ variables, collections: [], effectStyles });
+  assert.strictEqual(result.summary.rawEffectStyleBindingCount, 3);
+  assert.deepStrictEqual(
+    result.rawEffectStyleBindings.map(issue => [
+      issue.styleName,
+      issue.effectIndex,
+      issue.property,
+      issue.rawValue,
+      issue.expectedVariable,
+      issue.expectedVariableExists,
+    ]),
+    [
+      ["elevation/1", 0, "offsetY", 1, "elevation/xs/offset-y", true],
+      ["elevation/1", 0, "radius", 2, "elevation/xs/radius", true],
+      ["elevation/2", 1, "radius", 8, "shadow/ambient/2/radius", true],
+    ],
+    "elevation styles should report raw key and ambient shadow properties while ignoring bound fields and unrelated styles"
+  );
+}
+
+{
   // Test 5: works with real-world style data where all values are aliased
   const allAliased = {
     collections: [{ id: "c1", name: "Semantics", variableIds: ["v1", "v2"] }],

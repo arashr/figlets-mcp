@@ -32,7 +32,7 @@ The plugin does not invent a Codex-specific workflow. It routes to the shared Fi
 
 1. Call `figlets_start` first.
 2. Use `figlets_start.designerResponse` as the opening capability menu.
-3. After the designer picks a goal, call `figlets_route_intent`, then `figlets_workflow_guide`.
+3. Interpret a clear goal in the designer's own language, pass its canonical `interpreted_workflow_id` to `figlets_route_intent`, then call `figlets_workflow_guide`. Text scoring is only a fallback for genuine ambiguity.
 4. Run read-only QA before mutation.
 5. Ask for explicit approval before any Figma write.
 6. Apply changes only through known Figlets tools.

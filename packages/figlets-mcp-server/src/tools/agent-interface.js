@@ -3,6 +3,7 @@
 const {
   DESIGNER_FLOW_HARD_RULES,
   MUTATING_TOOLS,
+  ROUTABLE_WORKFLOW_IDS,
   WORKFLOWS,
   getStartGuide,
   getWorkflowGuide,
@@ -24,13 +25,18 @@ const figletsStartTool = {
 const figletsRouteIntentTool = {
   name: "figlets_route_intent",
   description:
-    "Read-only Agent Interface router. Maps a designer's natural-language request to the most likely Figlets workflow and returns confirmation boundaries and next steps. Use the returned workflow before any design-system review scripting or mutation. Does not inspect or mutate Figma.",
+    "Read-only Agent Interface router. The AI interface should interpret the designer's goal in their own language and pass interpreted_workflow_id when the goal is clear; Figlets validates that canonical workflow id. Natural-language scoring is a compatibility fallback only when the AI is genuinely unsure. Returns confirmation boundaries and next steps. Use the returned workflow before any design-system review scripting or mutation. Does not inspect or mutate Figma.",
   inputSchema: {
     type: "object",
     properties: {
       intent: {
         type: "string",
         description: "The designer's natural-language request, such as 'check my design system' or 'document this component'.",
+      },
+      interpreted_workflow_id: {
+        type: "string",
+        enum: ROUTABLE_WORKFLOW_IDS,
+        description: "Language-independent canonical workflow id interpreted by the AI interface. Supply this whenever the designer's goal is clear in any language; omit it only when genuinely unsure so Figlets can use its text fallback.",
       },
     },
     required: ["intent"],
@@ -970,7 +976,9 @@ function handleFigletsStart() {
 }
 
 function handleFigletsRouteIntent(args) {
-  return routeIntent(args && args.intent);
+  return routeIntent(args && args.intent, {
+    interpretedWorkflowId: args && args.interpreted_workflow_id,
+  });
 }
 
 function handleFigletsWorkflowGuide(args) {
@@ -1001,6 +1009,7 @@ module.exports = {
   figletsRouteIntentTool,
   figletsWorkflowGuideTool,
   figletsHealthCheckTool,
+  ROUTABLE_WORKFLOW_IDS,
   handleFigletsStart,
   handleFigletsRouteIntent,
   handleFigletsWorkflowGuide,

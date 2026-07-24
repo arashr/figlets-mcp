@@ -7,7 +7,7 @@ const { enrichAuditTokensWithSpacingAliasRepairs } = require("./semantic-alias-r
 const auditTokensTool = {
   name: "audit_tokens",
   description:
-    "Analyzes the local Figma design system snapshot for token health issues: non-primitive raw values that should probably reference tokens, same-domain duplicate values, and naming convention inconsistencies within collections. Raw primitive values are counted as inventory, not defects. When design-system.config.js is available, repairable raw semantic spacing tokens are routed to inspect_ds_token_gaps / update_ds_tokens instead of dead-ending as manual follow-up. Run sync_figma_data and detect_design_system first to ensure the snapshot is current.",
+    "Analyzes the local Figma design system snapshot for token health issues: non-primitive raw values that should probably reference tokens, raw numeric properties inside elevation effect styles, same-domain duplicate values, and naming convention inconsistencies within collections. Raw primitive values are counted as inventory, not defects. When design-system.config.js is available, repairable raw semantic spacing tokens are routed to inspect_ds_token_gaps / update_ds_tokens instead of dead-ending as manual follow-up. Run sync_figma_data and detect_design_system first to ensure the snapshot is current.",
   inputSchema: {
     type: "object",
     properties: {
@@ -66,6 +66,7 @@ function handleAuditTokens(args = {}) {
   const result = auditTokens({
     variables: rawData.variables || [],
     collections: rawData.collections || [],
+    effectStyles: rawData.effectStyles || [],
     contextIndexes
   });
 

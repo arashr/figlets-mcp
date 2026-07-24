@@ -172,7 +172,7 @@ Expose it through read-only MCP tools:
 | Tool | Purpose | Mutates Figma? |
 |---|---|---|
 | `figlets_start` | Returns the intro, prerequisites, capability menu, and first designer-facing question. | No |
-| `figlets_route_intent` | Maps natural-language designer intent to the most likely Figlets workflow. | No |
+| `figlets_route_intent` | Validates the AI interface's canonical language-independent workflow interpretation, with natural-language scoring as fallback. | No |
 | `figlets_workflow_guide` | Returns the step contract for one workflow: tools, confirmations, summary style, errors, next steps. | No |
 | `figlets_next_step` | Given a completed workflow/result category, suggests safe next flows. Optional after MVP. | No |
 
@@ -656,7 +656,7 @@ The next slice after that should be the installer plan:
 
 ## 14. Open questions
 
-1. Should `figlets_route_intent` use deterministic keyword matching only for MVP, or should it return multiple candidates with scores?
+1. **Resolved:** `figlets_route_intent` accepts the AI interface's canonical `interpreted_workflow_id` whenever the goal is clear in any language. Deterministic keyword matching and scored candidates remain compatibility fallback behavior for genuine ambiguity.
 2. Should the workflow registry live in the MCP server only, or move later to `figlets-core` so CLIs can render the same guides?
 3. Should `figlets_start` include installation health hints after MCP is connected, or only runtime workflow help?
 4. Should adapter docs be generated from the registry, or manually maintained with tests that check coverage?
@@ -664,4 +664,4 @@ The next slice after that should be the installer plan:
 6. Should the installer live in this monorepo package, or in a separate published package that depends on `@figlets/mcp-server`?
 7. What is the acceptable non-developer path for installing the Figma Bridge plugin before Community publication is possible?
 
-Recommendation for MVP: keep it simple. Deterministic keyword matching, MCP-server registry, runtime help only, manually aligned docs, and no persistent workflow state.
+Current posture: keep the MCP-server registry, runtime help, manually aligned docs, and no persistent workflow state. Language understanding belongs to the AI interface; deterministic keyword matching remains a compatibility fallback rather than the primary product interface.

@@ -23,7 +23,7 @@ const {
 const generateComponentDocTool = {
   name: 'generate_component_doc',
   description:
-    'Generate a complete component spec sheet inside Figma (Documentation section), write the local markdown handoff file at component-specs/[Name].md under project_path when provided, otherwise under the MCP server working directory, and return the markdown body plus written path. The spec sheet includes preview, variant showcase, properties table, sizing, anatomy diagram with badges, Do/Don\'t usage panels, and accessibility maintenance notes. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
+    'Generate a complete component spec sheet inside Figma (Documentation section), write the local markdown handoff file at component-specs/[Name].md under project_path when provided, otherwise under the MCP server working directory, and return the markdown body plus written path. The spec sheet includes component variants, every bound multi-mode variable collection with visual previews for each mode, properties, sizing, anatomy, token bindings, Do/Don\'t usage panels, and accessibility maintenance notes. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
   inputSchema: {
     type: 'object',
     properties: {

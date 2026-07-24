@@ -1,6 +1,6 @@
 {
   "name": "figlets",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Figlets MCP toolkit for designer-driven Figma design-system workflows. Registers the Figlets MCP server and adds a /figlets:start entrypoint.",
   "author": {
     "name": "Figlets"
@@ -10,7 +10,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "https://github.com/arashr/figlets-mcp/releases/download/v1.1.1/figlets-mcp-server-1.1.1.tgz"
+        "https://github.com/arashr/figlets-mcp/releases/download/v1.2.0/figlets-mcp-server-1.2.0.tgz"
       ]
     }
   }

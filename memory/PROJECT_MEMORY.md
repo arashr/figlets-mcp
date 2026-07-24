@@ -3438,3 +3438,12 @@ Fixes shipped:
 **Environment note:** Plain shell still resolves old Node v10.1.0. Release commands were run through interactive zsh/nvm with Node v24.14.0. The global npm cache had permission issues, so tarball/release verification commands used `npm_config_cache=/Users/arash/Projects/figlets-mcp/.local/npm-cache`.
 
 **Remaining release ops:** commit the intentional release/product changes, tag `v1.0.0`, publish the GitHub release with `dist/figlets-mcp-server-1.0.0.tgz`, and re-check the install path after the asset is available.
+### [2026-07-24 — v1.2.0 release checkpoint]
+
+**Release scope:** Figma Make guidelines export and the component-documentation improvements completed on `codex/figma-make-component-docs`, including component mode coverage, Make component-spec discovery/routing, stable Documentation-section layout, and relevant-collection filtering.
+
+**Release prep:**
+
+- `npm run release:prepare -- --minor` advanced all product and plugin version surfaces from `1.1.1` to `1.2.0`.
+- `npm run release:prepare -- --check`, `npm test` (`116/116`), `npm run build:server-tarball`, `npm run verify:release`, and `npm run smoke:plugins` passed.
+- The release asset is `dist/figlets-mcp-server-1.2.0.tgz`.

@@ -6,7 +6,8 @@ const path = require("path");
 
 const {
   generateComponentDocTool,
-  handleGenerateComponentDoc
+  handleGenerateComponentDoc,
+  _appendNestedComponentsMarkdown
 } = require("../../packages/figlets-mcp-server/src/tools/generate-component-doc.js");
 
 function startMockReceiver(handler) {
@@ -44,6 +45,35 @@ module.exports = (async () => {
   assert.ok(generateComponentDocTool.inputSchema.required.indexOf("usage_do") >= 0);
   assert.ok(generateComponentDocTool.inputSchema.required.indexOf("usage_dont") >= 0);
   assert.strictEqual(generateComponentDocTool.inputSchema.required.indexOf("component_name"), -1);
+  assert.ok(generateComponentDocTool.inputSchema.properties.component_id);
+
+  // --- Nested dependency markdown is additive and never recursive ---
+  {
+    const original = "# Button\n\n> stub\n\n## Usage Rules\n\nDo this.";
+    assert.strictEqual(_appendNestedComponentsMarkdown(original, []), original);
+
+    const markdown = _appendNestedComponentsMarkdown(original, [
+      {
+        componentName: "Icon",
+        documented: true,
+        specPath: "component-specs/Icon.md",
+        relationship: "Nested dependency",
+        viaComponentNames: ["Input"]
+      },
+      {
+        componentName: "Spinner",
+        documented: false,
+        specPath: null,
+        relationship: "Direct dependency"
+      }
+    ]);
+    assert.ok(markdown.includes("## Nested Components"));
+    assert.ok(markdown.includes("| Icon | `component-specs/Icon.md` | Nested via Input |"));
+    assert.ok(markdown.includes("| Spinner | No standalone Figlets spec | Direct dependency |"));
+    assert.ok(markdown.indexOf("## Nested Components") < markdown.indexOf("## Usage Rules"));
+    assert.strictEqual((markdown.match(/^## Nested Components$/gm) || []).length, 1);
+    assert.strictEqual(_appendNestedComponentsMarkdown(markdown, [{ componentName: "Other" }]), markdown);
+  }
 
   // --- Missing component_name and no selected component → error ---
   {
@@ -221,10 +251,16 @@ module.exports = (async () => {
     const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-doc-cwd-"));
     const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-doc-project-"));
     const selection = writeSelectionFile("Input");
+    let selectionRequestPayload = null;
     const server = await startMockReceiver((req, res) => {
       if (req.url === "/request-selection") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ success: true, path: selection.filePath }));
+        let body = "";
+        req.on("data", chunk => { body += chunk.toString(); });
+        req.on("end", () => {
+          selectionRequestPayload = JSON.parse(body);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, path: selection.filePath }));
+        });
         return;
       }
       req.on("data", () => {});
@@ -245,12 +281,14 @@ module.exports = (async () => {
     try {
       const result = await handleGenerateComponentDoc({
         component_name: "Input",
+        component_id: "1:2",
         description: "A text input used to collect short form values.",
         usage_do: ["Use for short text values", "Pair labels with every input"],
         usage_dont: ["Don't use for long-form content", "Don't omit validation states"],
         project_path: projectDir
       });
       assert.ok(!result.isError, `expected success, got: ${JSON.stringify(result)}`);
+      assert.deepStrictEqual(selectionRequestPayload, { componentId: "1:2" });
       const parsed = JSON.parse(result.content[0].text);
       const expectedWrittenPath = path.join(path.resolve(projectDir), "component-specs", "Input.md");
       assert.strictEqual(parsed.writtenPath, expectedWrittenPath);

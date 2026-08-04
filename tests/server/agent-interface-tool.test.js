@@ -566,9 +566,25 @@ try {
     assert.ok(guide.steps.some(step => step.id === "sync-design-system-context" && step.kind === "read" && step.tool === "sync_figma_data"));
     assert.ok(guide.steps.some(step => step.id === "sync-design-system-context" && step.designerMessage.includes("silently refreshes compatible local Figlets context")));
     assert.ok(guide.steps.some(step => step.id === "inspect" && step.designerMessage.includes("after the sync freshness check")));
+    assert.ok(guide.steps.some(step => step.id === "review-nested-components" && step.kind === "confirmation"));
+    assert.ok(guide.steps.some(step => step.id === "review-nested-components" && step.conditional.includes("nestedComponentSummary.requiresDesignerChoice")));
+    assert.ok(guide.steps.some(step => step.id === "review-nested-components" && step.designerMessage.includes("nested via their parent component")));
+    assert.ok(guide.steps.some(step => step.id === "review-nested-components" && step.designerMessage.includes("no standalone Figlets spec")));
+    assert.ok(guide.steps.some(step => step.id === "review-nested-components" && step.designerMessage.includes("approve full documentation")));
+    assert.ok(guide.steps.some(step => step.id === "approve-full-dependency-plan" && step.kind === "confirmation"));
+    assert.ok(guide.steps.some(step => step.id === "approve-full-dependency-plan" && step.designerMessage.includes("use each returned componentId")));
+    assert.ok(guide.steps.some(step => step.id === "approve-full-dependency-plan" && step.designerMessage.includes("without changing the designer's Figma selection")));
+    assert.ok(guide.steps.some(step => step.id === "review-next-missing-dependency" && step.kind === "confirmation"));
+    assert.ok(guide.steps.some(step => step.id === "review-next-missing-dependency" && step.conditional.includes("missingCount is greater than zero")));
+    assert.ok(guide.steps.some(step => step.id === "review-next-missing-dependency" && step.designerMessage.includes("skip it for now")));
+    assert.ok(guide.steps.some(step => step.id === "review-next-missing-dependency" && step.designerMessage.includes("Skip performs no tool call or write")));
+    assert.ok(guide.steps.some(step => step.id === "review-next-missing-dependency" && step.designerMessage.includes("future inspection may flag the component again")));
     assert.ok(guide.errors.some(item => item.includes("stale snapshot")));
     assert.ok(guide.errors.some(item => item.includes("activeFile.configRefresh.compatible === false")));
     assert.ok(guide.errors.some(item => item.includes("route exact additions through the relevant Figlets planning flow")));
+    assert.ok(guide.errors.some(item => item.includes("Never expand documentation recursively")));
+    assert.ok(guide.errors.some(item => item.includes("skipped only for the current conversation run")));
+    assert.ok(guide.errors.some(item => item.includes("ask for manual selection as a fallback")));
   }
 
   {

@@ -4,6 +4,32 @@ Running log of non-obvious project decisions and the reasons behind them.
 
 ---
 
+## [2026-08-04] Nested component documentation is bounded and designer-controlled
+
+**Decision:** Component inspection discovers nested component dependencies before documentation writes and returns one deduplicated, leaf-first list. Existing project component specs are references, not regeneration targets. The designer may document only the selected component, review missing dependencies one at a time, or approve one exact finite list that Figlets executes automatically by component ID with the selected parent last.
+
+**Why:** Silently ignoring nested components leaves implementation handoffs incomplete, while unconstrained recursive generation can become an endless or surprising write process. Requiring manual Figma selection for every dependency also makes an approved full documentation run unnecessarily fragile.
+
+**Consequence:** Discovery is cycle-safe and capped, repeated dependencies appear once, remote components are never documented automatically, and newly discovered work requires a new decision. A one-by-one skip is conversation-scoped and may be shown again later. Targeted inspection and generation do not change the designer's Figma selection. Components without dependencies keep the original documentation flow.
+
+**Ownership boundary:** A parent spec references nested components but does not inherit their internal slots, bindings, anatomy, or variable collections. Each component owns those facts in its own standalone spec.
+
+**Verification:** Dependency, targeted-inspection, existing-spec, ownership, server workflow, and full-plan regressions pass. Live smoke testing documented nested components leaf-first without manual reselection and confirmed that nested slots and bindings no longer leaked into the parent handoff.
+
+---
+
+## [2026-08-04] Component handoffs preserve ordered paint and effect stacks
+
+**Decision:** Multi-fill, multi-stroke, and multi-effect component states are ordered implementation facts. Documentation indexes every stack entry and preserves its raw visual details. A paint's own `boundVariables.color` is authoritative for that paint position, with the node-level binding array used only as a fallback. Multi-effect entries retain their index, color, offset, blur, spread, blend mode, visibility, and token bindings; the complete effect stack is also included in `[SPEC]` handoff metadata.
+
+**Why:** Figma can retain a stale node-level fill-binding order after paints are reordered. Separately, combining several shadows into one unindexed summary—or omitting unbound entries from machine-readable handoff—caused hover overlays and focus rings to be implemented incompletely even though the layer looked correct in Figma.
+
+**Consequence:** Layered fills keep the token attached to the correct Figma paint, and focus states include every shadow, including unbound inner rings. Single-fill and single-effect output remains unchanged. Variant comparisons normalize the first indexed entry against an ordinary single-entry default without collapsing the remaining stack.
+
+**Verification:** Focused multi-paint and multi-effect regressions cover reordered aliases, indexed bindings, complete geometry, and unbound effects. Full `npm test` passed **122/122**. A live Menu Item regeneration confirmed the Hover and Focus fill order and all three focus effects in both Markdown and `[SPEC]` metadata.
+
+---
+
 ## [2026-07-24] Component variable modes require mode-driven value changes
 
 **Decision:** A bound multi-mode variable collection is a component Variable Modes collection only if changing that collection's mode changes at least one bound variable's resolved value in the documented component. Binding presence alone remains sufficient for Token Bindings, but not for visual mode previews.

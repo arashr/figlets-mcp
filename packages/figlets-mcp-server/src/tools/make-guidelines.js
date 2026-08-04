@@ -7,12 +7,13 @@ const {
   getConfigPathGuardError,
 } = require('../utils/paths.js');
 const { bootstrapDsFromSnapshot } = require('../utils/bootstrap-ds-from-figma.js');
+const { discoverComponentSpecs } = require('../utils/component-specs.js');
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require('../bridges/figma-data-source.js');
 const { handleSyncFigmaData } = require('./sync-figma-data.js');
 
 const prepareMakeGuidelinesTool = {
   name: 'prepare_make_guidelines',
-  description: 'Prepare a read-only preview for a Figma Make guidelines bundle from the current Figlets config, Figma snapshot, and every project-scoped component-specs/*.md file. Reports component-spec discovery paths/provenance, confirmed translations, optional suggestions, a pre-export interaction state, generated Figlets CSS, lint results, exact file changes, and a source fingerprint. When suggestions exist, show and resolve them before asking for export approval. Does not write files.',
+  description: 'Prepare a read-only preview for a Figma Make guidelines bundle from the current Figlets config, Figma snapshot, and every project-scoped component-specs/**/*.md file. Reports component-spec discovery paths/provenance, confirmed translations, optional suggestions, a pre-export interaction state, generated Figlets CSS, lint results, exact file changes, and a source fingerprint. When suggestions exist, show and resolve them before asking for export approval. Does not write files.',
 };
 
 const saveMakeGuidelinesProfileTool = {
@@ -129,7 +130,8 @@ function _hasDesignSystemArtifacts(figmaData) {
 }
 
 function _discoverComponentSpecs(projectRoot, figmaData) {
-  const specsDir = path.join(projectRoot, 'component-specs');
+  const discovered = discoverComponentSpecs(projectRoot);
+  const specsDir = discovered.directory;
   const componentNames = new Set((Array.isArray(figmaData.components) ? figmaData.components : [])
     .filter(component => component && typeof component.name === 'string')
     .map(component => component.name));
@@ -141,37 +143,15 @@ function _discoverComponentSpecs(projectRoot, figmaData) {
     specOnlyComponents: [],
   };
   if (!diagnostics.directoryExists) return { specs: [], diagnostics };
-  const specs = [];
-  const seenNames = new Map();
-  for (const entry of fs.readdirSync(specsDir, { withFileTypes: true })) {
-    if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.md') continue;
-    const absolutePath = path.join(specsDir, entry.name);
-    const relativePath = path.relative(projectRoot, absolutePath).split(path.sep).join('/');
-    const content = fs.readFileSync(absolutePath, 'utf8');
-    const heading = content.match(/^#\s+(.+?)\s*$/m);
-    const name = heading && heading[1].trim()
-      ? heading[1].trim()
-      : path.basename(entry.name, path.extname(entry.name));
-    if (seenNames.has(name)) {
-      throw new Error(
-        `Multiple component specs resolve to "${name}": ${seenNames.get(name)} and ${relativePath}.`
-      );
-    }
-    seenNames.set(name, relativePath);
-    diagnostics.files.push(relativePath);
-    if (componentNames.has(name)) diagnostics.matchedFigmaComponents.push(name);
-    else diagnostics.specOnlyComponents.push(name);
-    specs.push({
-      name,
-      path: relativePath,
-      content,
-    });
+  for (const spec of discovered.specs) {
+    diagnostics.files.push(spec.path);
+    if (componentNames.has(spec.name)) diagnostics.matchedFigmaComponents.push(spec.name);
+    else diagnostics.specOnlyComponents.push(spec.name);
   }
-  specs.sort((a, b) => a.name.localeCompare(b.name));
   diagnostics.files.sort();
   diagnostics.matchedFigmaComponents.sort();
   diagnostics.specOnlyComponents.sort();
-  return { specs, diagnostics };
+  return { specs: discovered.specs, diagnostics };
 }
 
 function _fileState(outputRoot, file) {

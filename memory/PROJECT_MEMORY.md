@@ -4,6 +4,26 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-08-04 — Nested component documentation is finite and ownership-safe]
+
+**Shipped contract:** `inspect_component` returns a bounded, deduplicated, leaf-first dependency list and recognizes existing project specs. Designers can document only the selected component, review missing dependencies one by one with a session-scoped skip, or approve one exact finite list. Full-plan execution targets each component by ID without changing Figma selection and documents the selected parent last.
+
+**Safety and ownership:** Cycle/repeat protection and traversal caps prevent recursive loops. Existing and remote specs are not regenerated automatically. Parent documentation references nested components but excludes their internal slots, bindings, variable collections, and anatomy; those remain owned by the nested component's standalone spec.
+
+**Verification:** Core dependency, targeted inspection, nested ownership, workflow, and server tests pass. Live smoke testing confirmed automatic leaf-first generation and no nested-property leakage into the parent.
+
+---
+
+### [2026-08-04 — Component docs preserve layered fills and focus effects]
+
+**Root causes:** Node-level fill alias arrays can be stale after Figma paint reordering, and multi-shadow states were transferred as an unindexed visual summary with incomplete machine-readable handoff. This could swap overlay/surface token meaning and omit parts of a focus ring during implementation.
+
+**Shipped contract:** Per-paint color aliases take priority over the node-level fallback. Multi-paint and multi-effect entries keep their Figma order and index. Effect rows retain color, offset, blur, spread, blend, visibility, and bindings, while `[SPEC]` includes the complete effect stack, including unbound entries.
+
+**Verification:** Multi-paint and multi-effect unit regressions plus the full **122/122** suite passed. Live Menu Item regeneration showed the correct Hover/Focus fill order and all three focus shadows in Markdown and `[SPEC]`.
+
+---
+
 ### [2026-07-24 — Component mode previews exclude invariant collections]
 
 **Observed cause:** The generated Input spec listed `Component / Button` because the Focused and Active Input effects really are bound to `button/focus`. However, that token resolves to the same `#5d8227` value in Primary, Secondary, Ghost, and Danger. The binding is a truthful token fact, but switching Button modes cannot change Input's visual representation, so rendering four Button-mode Input previews was irrelevant.

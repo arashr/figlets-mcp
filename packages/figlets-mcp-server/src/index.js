@@ -235,10 +235,13 @@ server.tool(
 server.tool(
   inspectComponentTool.name,
   inspectComponentTool.description,
-  {},
-  async () => {
+  {
+    project_path: z.string().optional().describe("Optional absolute path to the active code workspace/project root. Used only to recognize existing component-specs documentation during read-only inspection."),
+    component_id: z.string().optional().describe("Optional component ID returned by a previous nested-component inspection. Inspects that component in the current Figma file without changing the user's selection.")
+  },
+  async (args) => {
     try {
-      return await handleInspectComponent();
+      return await handleInspectComponent(args);
     } catch (err) {
       return {
         content: [{ type: "text", text: `Error: ${err.message}` }],
@@ -1008,6 +1011,7 @@ server.tool(
   generateComponentDocTool.description,
   {
     component_name: z.string().optional().describe("Optional name of the COMPONENT or COMPONENT_SET on the current Figma page. Omit to document the selected component or selected variant's parent component set."),
+    component_id: z.string().optional().describe("Optional component ID returned by inspect_component. Documents that component in the current Figma file without requiring the user to select it."),
     description: z.string().optional().describe("Human-readable description (1-2 sentences) shown under the title on the spec sheet. Agent should craft this after inspecting the component."),
     usage_do: z.array(z.string()).optional().describe("Do rules for the usage panel. Agent should ground these in the component's actual purpose, not pass generic placeholders."),
     usage_dont: z.array(z.string()).optional().describe("Don't rules for the usage panel. Agent should ground these in the component's actual purpose."),

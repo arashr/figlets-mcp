@@ -60,6 +60,32 @@ Common planner to apply routes:
 
 Destructive token prune apply requires `prune.config_authoritative=true` after dry-run review.
 
+## Component documentation
+
+The public flow remains `sync_figma_data` → `inspect_component` → designer approval → `generate_component_doc`. Components without nested instances follow the original single-component path unchanged.
+
+When nested components exist:
+
+- inspection returns a bounded, deduplicated dependency list in leaf-first order;
+- existing `component-specs/*.md` files are referenced rather than regenerated;
+- the designer may document only the selected component, review missing dependencies one by one, or approve one exact finite list;
+- an approved full list is executed one component at a time by `component_id`, without changing the Figma selection;
+- cycles, repeats, remote components, and traversal limits stop expansion instead of creating recursive work;
+- parent documentation does not absorb a nested component's slots, variable bindings, or internal anatomy.
+
+Visual state handoff preserves ordered Figma paint and effect stacks. Multi-fill and multi-stroke rows are indexed, each paint uses its own color-variable binding when available, and multi-effect rows retain the effect index plus color, offset, blur, spread, blend mode, and visibility. The machine-readable `[SPEC]` block includes complete effect stacks so implementation agents receive the same facts as the human-readable Markdown.
+
+Primary implementation areas:
+
+| Area | Path |
+| --- | --- |
+| Dependency collection and ordering | `packages/figlets-core/src/component-dependencies.js` |
+| Inspection and existing-spec recognition | `packages/figlets-mcp-server/src/tools/inspect-component.js` |
+| Targeted generation and nested reference table | `packages/figlets-mcp-server/src/tools/generate-component-doc.js` |
+| Figma spec rendering and visual stack capture | `packages/figma-bridge-plugin/code.js` |
+
+Focused regressions live in `tests/core/component-dependencies.test.js`, `tests/bridge/component-doc-nested-ownership.test.js`, `tests/bridge/component-doc-multi-paint.test.js`, `tests/bridge/component-doc-multi-effect.test.js`, and the component-doc server tests.
+
 ## Figma Make guidelines export
 
 The Make workflow is a local multi-file export parallel to `export_design_md`; it is not a Figma mutation or a package generator.

@@ -148,7 +148,7 @@ module.exports = (async () => {
     const selectionPollPromise = pollForCommand(port, []);
     const selectionRequestPromise = request(port, "POST", "/request-selection", "{}");
     const selectionPoll = await selectionPollPromise;
-    assert.deepStrictEqual(selectionPoll.json, { command: "extract-selection" });
+    assert.deepStrictEqual(selectionPoll.json, { command: "extract-selection", data: {} });
     const selectionAck = await request(port, "POST", "/sync-selection", JSON.stringify({ selection: [] }));
     assert.strictEqual(selectionAck.statusCode, 200);
     assert.deepStrictEqual(selectionAck.json, { success: true });

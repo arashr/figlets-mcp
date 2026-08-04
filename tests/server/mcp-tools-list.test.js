@@ -114,6 +114,7 @@ module.exports = new Promise((resolve, reject) => {
       assert.ok(toolNames.indexOf("apply_ds_foundation_repairs") >= 0, "tools/list should expose apply_ds_foundation_repairs");
       const generateComponentDoc = listResponse.result.tools.find(tool => tool.name === "generate_component_doc");
       assert.ok(generateComponentDoc, "tools/list should expose generate_component_doc");
+      assert.ok(generateComponentDoc.inputSchema.properties.component_id, "registered generate_component_doc schema should expose component_id targeting");
       assert.ok(
         !generateComponentDoc.inputSchema.required ||
           generateComponentDoc.inputSchema.required.indexOf("component_name") === -1,

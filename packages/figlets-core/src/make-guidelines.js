@@ -451,6 +451,7 @@ function _componentSpecSummary(spec) {
     "Boolean Property Behavior",
     "Conditional Layers",
     "Slots",
+    "Nested Components",
     "Token Bindings",
     "Sizing",
     "Layout",

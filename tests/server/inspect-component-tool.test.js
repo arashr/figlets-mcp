@@ -30,6 +30,13 @@ fs.writeFileSync(selectionPath, JSON.stringify(selectionData), "utf-8");
 
 const toolModule = "../../packages/figlets-mcp-server/src/tools/inspect-component.js";
 
+{
+  const { inspectComponentTool } = require(toolModule);
+  assert.ok(inspectComponentTool.inputSchema.properties.project_path);
+  assert.ok(inspectComponentTool.inputSchema.properties.component_id);
+  assert.ok(inspectComponentTool.description.includes("bounded nested-component dependency summary"));
+}
+
 async function runTests() {
   // --- successful inspection ---
   await (async () => {
@@ -57,6 +64,58 @@ async function runTests() {
       assert.ok(data.selection[0].autoLayout, "should include autoLayout for HORIZONTAL layout");
       assert.strictEqual(data.selection[0].autoLayout.itemSpacing, 8, "should preserve itemSpacing");
       assert.ok(data.selection[0].componentPropertyDefinitions, "should preserve componentPropertyDefinitions");
+    } finally {
+      await new Promise(resolve => mockServer.close(resolve));
+    }
+  })();
+
+  // --- nested inspection recognizes existing project-scoped component specs ---
+  await (async () => {
+    const projectPath = path.join(TEMP_DIR, "nested-project");
+    const componentSpecsPath = path.join(projectPath, "component-specs");
+    const nestedSelectionPath = path.join(TEMP_DIR, "figma-selection-nested.json");
+    fs.mkdirSync(componentSpecsPath, { recursive: true });
+    fs.writeFileSync(path.join(componentSpecsPath, "Icon.md"), "# Icon\n\n> Existing spec.", "utf8");
+    fs.writeFileSync(nestedSelectionPath, JSON.stringify({
+      selection: [{
+        id: "201:1",
+        type: "COMPONENT",
+        name: "Icon Button",
+        children: [{
+          id: "201:2",
+          type: "INSTANCE",
+          name: "Icon",
+          mainComponent: { id: "301:1", key: "icon", name: "Icon" },
+          children: []
+        }]
+      }]
+    }), "utf8");
+
+    let requestPayload = null;
+    const mockServer = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", chunk => { body += chunk.toString(); });
+      req.on("end", () => {
+        requestPayload = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ path: nestedSelectionPath }));
+      });
+    });
+
+    await new Promise(resolve => mockServer.listen(0, resolve));
+    process.env.FIGLETS_RECEIVER_URL = `http://localhost:${mockServer.address().port}`;
+    try {
+      delete require.cache[require.resolve(toolModule)];
+      const { handleInspectComponent } = require(toolModule);
+      const result = await handleInspectComponent({
+        project_path: projectPath,
+        component_id: "201:1"
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.deepStrictEqual(requestPayload, { componentId: "201:1" });
+      assert.strictEqual(data.nestedComponentSummary.count, 1);
+      assert.strictEqual(data.nestedComponentSummary.documentedCount, 1);
+      assert.strictEqual(data.nestedComponents[0].specPath, "component-specs/Icon.md");
     } finally {
       await new Promise(resolve => mockServer.close(resolve));
     }

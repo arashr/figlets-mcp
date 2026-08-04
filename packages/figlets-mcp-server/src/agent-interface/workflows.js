@@ -663,7 +663,25 @@ const WORKFLOWS = [
         id: "inspect",
         kind: "read",
         tool: "inspect_component",
-        designerMessage: "I'll inspect the selected component after the sync freshness check before writing guidance.",
+        designerMessage: "I'll inspect the selected component after the sync freshness check before writing guidance. When the active project root is known, I'll pass it as project_path so existing Figlets component specs can be recognized.",
+      },
+      {
+        id: "review-nested-components",
+        kind: "confirmation",
+        conditional: "Only when inspect_component returns nestedComponentSummary.requiresDesignerChoice.",
+        designerMessage: "If nested components are found, I'll show the finite leaf-first list, label transitive dependencies as nested via their parent component, identify existing Figlets specs, and label missing ones as having no standalone Figlets spec. Then I'll offer three paths: document only the selected component, review missing dependencies one by one, or approve full documentation of the exact finite missing-dependency list plus the selected component. Existing docs are referenced rather than regenerated.",
+      },
+      {
+        id: "approve-full-dependency-plan",
+        kind: "confirmation",
+        conditional: "Only when the designer chooses full documentation of the selected component and missing dependencies.",
+        designerMessage: "I'll show the exact leaf-first write list once and ask for one full-plan approval. After approval, I'll use each returned componentId to inspect and document those components automatically without changing the designer's Figma selection, then document the originally selected component last. The approval covers only that displayed finite list; newly discovered dependencies require a new decision. Existing specs are skipped and referenced. Manual selection is fallback-only when a returned ID cannot be resolved on the current page.",
+      },
+      {
+        id: "review-next-missing-dependency",
+        kind: "confirmation",
+        conditional: "Only when the designer chooses to review dependencies and nestedComponentSummary.missingCount is greater than zero.",
+        designerMessage: "I'll offer only the first missing dependency in the returned leaf-first order: document this component, skip it for now, or stop dependency review and document only the originally selected component. Skip performs no tool call or write, removes only that item from the current in-conversation list, and immediately shows the next remaining dependency; when none remain, I'll return to the selected-component choice. It is not persisted, so a future inspection may flag the component again. For an approved item, I'll use its returned componentId to inspect and document it without changing the designer's selection. Manual selection is fallback-only if that ID cannot be resolved. One item approval never carries to the next item in review mode.",
       },
       {
         id: "draft-copy",
@@ -688,6 +706,9 @@ const WORKFLOWS = [
       "If sync_figma_data cannot run, ask the designer to open the Figlets Bridge plugin in Figma Desktop; do not continue from a stale snapshot unless they explicitly choose to proceed without freshness.",
       "If sync_figma_data returns activeFile.configRefresh.compatible === false or skipped rows, summarize the mismatch in designer language and ask before any override or route exact additions through the relevant Figlets planning flow. Do not ask the designer about updating a local JS config when sync already applied a compatible refresh.",
       "If the component has generic layer names or missing properties, ask whether the designer wants to fix those first.",
+      "Never expand documentation recursively. Full documentation may execute the exact approved finite leaf-first list automatically by component ID; newly discovered dependencies require a new decision. In one-by-one review mode, require separate confirmation for each component.",
+      "A skipped dependency is skipped only for the current conversation run. Do not call a tool, write a preference, mark it documented, or suppress it from future inspections.",
+      "If inspect_component or generate_component_doc cannot resolve a returned component ID on the current page, stop that item and ask for manual selection as a fallback instead of guessing by name.",
     ],
   },
   {

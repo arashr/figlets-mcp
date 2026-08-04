@@ -660,7 +660,7 @@
           document.getElementById('status').innerText = 'Extracting selection...';
           document.getElementById('substatus').innerText = 'Inspect triggered by agent.';
           _appendLog('Received command: inspect_component.');
-          parent.postMessage({ pluginMessage: { type: 'extract-selection' } }, '*');
+          parent.postMessage({ pluginMessage: { type: 'extract-selection', data: data.data || {} } }, '*');
         } else if (data.command === 'build-showcase') {
           isExtracting = true;
           _armWatchdog('Showcase', 120000);

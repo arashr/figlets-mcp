@@ -13,6 +13,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { inspectComponentData } = require('../figlets-core.js');
+const { discoverComponentSpecs } = require('../utils/component-specs.js');
 const {
   bridgeActiveSessionText,
   formatPluginNotListening,
@@ -23,13 +25,17 @@ const {
 const generateComponentDocTool = {
   name: 'generate_component_doc',
   description:
-    'Generate a complete component spec sheet inside Figma (Documentation section), write the local markdown handoff file at component-specs/[Name].md under project_path when provided, otherwise under the MCP server working directory, and return the markdown body plus written path. The spec sheet includes component variants, every bound multi-mode variable collection with visual previews for each mode, properties, sizing, anatomy, token bindings, Do/Don\'t usage panels, and accessibility maintenance notes. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
+    'Generate a complete component spec sheet inside Figma (Documentation section), write the local markdown handoff file at component-specs/[Name].md under project_path when provided, otherwise under the MCP server working directory, and return the markdown body plus written path. The spec sheet includes component variants, every bound multi-mode variable collection with visual previews for each mode, properties, sizing, anatomy, token bindings, Do/Don\'t usage panels, and accessibility maintenance notes. When the selected component contains nested component instances, the markdown includes a bounded dependency table that references existing Figlets specs without recursively generating documentation. Also writes a [SPEC] machine-readable block to the component\'s Figma description for MCP handover. Requires the Figlets Bridge plugin open in Figma Desktop, with the target component on the current page.',
   inputSchema: {
     type: 'object',
     properties: {
       component_name: {
         type: 'string',
         description: 'Optional name of the COMPONENT or COMPONENT_SET to document. Omit to document the selected component or selected variant\'s parent component set.'
+      },
+      component_id: {
+        type: 'string',
+        description: 'Optional component ID returned by inspect_component. Documents that component in the current Figma file without requiring the user to select it.'
       },
       description: {
         type: 'string',
@@ -68,7 +74,10 @@ const generateComponentDocTool = {
 function handleGenerateComponentDoc(args) {
   const fallbackComponentName = args && args.component_name ? String(args.component_name) : '';
 
-  return _resolveSelectedComponent().then((selectionInfo) => {
+  return _resolveSelectedComponent({
+    componentId: args && args.component_id,
+    projectPath: args && args.project_path
+  }).then((selectionInfo) => {
     if (selectionInfo && selectionInfo.bridgeError) {
       return {
         content: [{ type: 'text', text: _formatPluginConnectionError(selectionInfo.bridgeError) }],
@@ -144,9 +153,13 @@ function handleGenerateComponentDoc(args) {
             isError: true
           };
         }
+        const nestedComponents = selectionInfo && Array.isArray(selectionInfo.nestedComponents)
+          ? selectionInfo.nestedComponents
+          : [];
+        const markdown = _appendNestedComponentsMarkdown(result.markdown, nestedComponents);
         let writtenMarkdown = null;
         try {
-          writtenMarkdown = _writeMarkdownHandoff(result.path, result.markdown, {
+          writtenMarkdown = _writeMarkdownHandoff(result.path, markdown, {
             projectPath: args.project_path
           });
         } catch (writeErr) {
@@ -158,25 +171,33 @@ function handleGenerateComponentDoc(args) {
             isError: true
           };
         }
+        const responsePayload = {
+          componentName: result.componentName || componentName,
+          path: result.path,
+          markdown: markdown,
+          componentMeta: result.componentMeta || {},
+          bindingsCount: result.bindingsCount || 0,
+          bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
+          bindingDiagnostics: result.bindingDiagnostics || {},
+          accessibilityNotes: Array.isArray(result.accessibilityNotes) ? result.accessibilityNotes : [],
+          anatomyCount: result.anatomyCount || 0,
+          writtenPath: writtenMarkdown.absolutePath,
+          pathWritten: true,
+          selectionContext: result.selectionContext || selectionContext,
+          specSheet: result.specSheet || {},
+          message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Markdown handoff written to '${writtenMarkdown.relativePath}'.`
+        };
+        if (selectionInfo && selectionInfo.nestedComponentSummary) {
+          responsePayload.nestedComponents = nestedComponents;
+          responsePayload.nestedComponentSummary = selectionInfo.nestedComponentSummary;
+          responsePayload.componentMeta = Object.assign({}, responsePayload.componentMeta, {
+            nestedComponentCount: nestedComponents.length
+          });
+        }
         return {
           content: [{
             type: 'text',
-            text: JSON.stringify({
-              componentName: result.componentName || componentName,
-              path: result.path,
-              markdown: result.markdown,
-              componentMeta: result.componentMeta || {},
-              bindingsCount: result.bindingsCount || 0,
-              bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
-              bindingDiagnostics: result.bindingDiagnostics || {},
-              accessibilityNotes: Array.isArray(result.accessibilityNotes) ? result.accessibilityNotes : [],
-              anatomyCount: result.anatomyCount || 0,
-              writtenPath: writtenMarkdown.absolutePath,
-              pathWritten: true,
-              selectionContext: result.selectionContext || selectionContext,
-              specSheet: result.specSheet || {},
-              message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Markdown handoff written to '${writtenMarkdown.relativePath}'.`
-            }, null, 2)
+            text: JSON.stringify(responsePayload, null, 2)
           }]
         };
       }
@@ -211,12 +232,14 @@ function handleGenerateComponentDoc(args) {
   });
 }
 
-function _resolveSelectedComponent() {
-  return _requestSelectedComponent();
+function _resolveSelectedComponent(options) {
+  return _requestSelectedComponent(options);
 }
 
-function _requestSelectedComponent() {
-  return requestBridgePost('/request-selection', {}, {
+function _requestSelectedComponent(options) {
+  return requestBridgePost('/request-selection', {
+    componentId: options && options.componentId ? String(options.componentId) : ''
+  }, {
     timeoutMs: 16000,
     bridgeRetryAttempts: 3
   }).then((response) => {
@@ -255,9 +278,22 @@ function _requestSelectedComponent() {
       return { component: null, context: context };
     }
 
+    let inspection = inspectComponentData({ selection: selection });
+    if (Array.isArray(inspection.nestedComponents) && inspection.nestedComponents.length > 0) {
+      inspection = inspectComponentData({
+        selection: selection,
+        componentSpecs: discoverComponentSpecs(options && options.projectPath).specs
+      });
+    }
+
     const node = selection[0];
     if (node && (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET')) {
-      return { component: { id: node.id, name: node.name, type: node.type }, context: context };
+      return {
+        component: { id: node.id, name: node.name, type: node.type },
+        context: context,
+        nestedComponents: inspection.nestedComponents || [],
+        nestedComponentSummary: inspection.nestedComponentSummary || null
+      };
     }
 
     return { component: null, context: context };
@@ -279,6 +315,50 @@ function _formatPluginConnectionError(parsed) {
 
 function _resolveMarkdownRoot(projectPath) {
   return projectPath ? path.resolve(projectPath) : process.cwd();
+}
+
+function _markdownCell(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/\|/g, '\\|')
+    .replace(/\n+/g, '<br>');
+}
+
+function _appendNestedComponentsMarkdown(markdown, nestedComponents) {
+  const dependencies = Array.isArray(nestedComponents) ? nestedComponents : [];
+  if (dependencies.length === 0) return String(markdown || '');
+  const source = String(markdown || '');
+  if (/^## Nested Components\s*$/m.test(source)) return source;
+
+  const lines = [
+    '## Nested Components',
+    '',
+    'These component dependencies are referenced rather than expanded so their existing Figlets documentation can be reused without recursive generation.',
+    '',
+    '| Nested component | Documentation | Relationship |',
+    '| --- | --- | --- |'
+  ];
+  for (const dependency of dependencies) {
+    const documentation = dependency.documented && dependency.specPath
+      ? '`' + dependency.specPath + '`'
+      : (dependency.documentationLabel || 'No standalone Figlets spec');
+    const viaNames = Array.isArray(dependency.viaComponentNames) ? dependency.viaComponentNames : [];
+    const relationship = dependency.relationship === 'Direct dependency'
+      ? (viaNames.length > 0
+        ? 'Direct dependency; also nested via ' + viaNames.join(', ')
+        : 'Direct dependency')
+      : (viaNames.length > 0 ? 'Nested via ' + viaNames.join(', ') : 'Nested dependency');
+    lines.push('| ' + [
+      _markdownCell(dependency.componentName),
+      _markdownCell(documentation),
+      _markdownCell(relationship)
+    ].join(' | ') + ' |');
+  }
+  lines.push('', '---', '');
+  const section = lines.join('\n');
+  const usageMarker = '## Usage Rules';
+  const usageIndex = source.indexOf(usageMarker);
+  if (usageIndex >= 0) return source.slice(0, usageIndex) + section + source.slice(usageIndex);
+  return source.replace(/\s*$/, '\n\n---\n\n') + section.replace(/\n---\n\s*$/, '\n');
 }
 
 function _writeMarkdownHandoff(relativePath, markdown, options) {
@@ -310,4 +390,9 @@ function _writeMarkdownHandoff(relativePath, markdown, options) {
   };
 }
 
-module.exports = { generateComponentDocTool, handleGenerateComponentDoc, _writeMarkdownHandoff };
+module.exports = {
+  generateComponentDocTool,
+  handleGenerateComponentDoc,
+  _appendNestedComponentsMarkdown,
+  _writeMarkdownHandoff
+};

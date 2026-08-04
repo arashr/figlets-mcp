@@ -146,7 +146,7 @@ module.exports = (async () => {
       true
     );
 
-    const selectionPromise = request(port, "POST", "/request-selection", "{}");
+    const selectionPromise = request(port, "POST", "/request-selection", JSON.stringify({ componentId: "34:2" }));
     await new Promise(resolve => setTimeout(resolve, 20));
 
     const selectionPollPromise = request(
@@ -155,7 +155,10 @@ module.exports = (async () => {
       "/poll?sessionId=figlets-live&capabilities=qa-audit,update-primitives,update-tokens"
     );
     const selectionPoll = await selectionPollPromise;
-    assert.deepStrictEqual(JSON.parse(selectionPoll.body), { command: "extract-selection" });
+    assert.deepStrictEqual(JSON.parse(selectionPoll.body), {
+      command: "extract-selection",
+      data: { componentId: "34:2" }
+    });
 
     const selectionAck = await request(port, "POST", "/sync-selection", JSON.stringify({
       selection: [{ id: "34:2", name: "Raw card target - BNN-37", type: "COMPONENT" }],

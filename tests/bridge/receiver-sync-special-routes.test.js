@@ -99,7 +99,7 @@ module.exports = (async () => {
 
     const selectionPoll = await request(port, "GET", "/poll?sessionId=selection-special&fileKey=selection_file");
     assert.strictEqual(selectionPoll.statusCode, 200);
-    assert.deepStrictEqual(selectionPoll.json, { command: "extract-selection" });
+    assert.deepStrictEqual(selectionPoll.json, { command: "extract-selection", data: {} });
 
     const selectionBody = JSON.stringify({
       fileKey: "selection_file",

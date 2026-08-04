@@ -132,6 +132,21 @@ figma.on("currentpagechange", function() {
   _appendSessionLog("Current page changed to " + (figma.currentPage ? figma.currentPage.name : "unknown") + ".");
 });
 
+function _findComponentNodeById(componentId) {
+  if (!componentId) return null;
+  var node = null;
+  try { node = figma.getNodeById(String(componentId)); } catch (e) {}
+  if (!node && figma.currentPage) {
+    node = figma.currentPage.findOne(function(candidate) {
+      return (
+        (candidate.type === 'COMPONENT' || candidate.type === 'COMPONENT_SET') &&
+        candidate.id === String(componentId)
+      );
+    });
+  }
+  return node && (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET') ? node : null;
+}
+
 function serializeNode(node) {
   const result = {
     id: node.id,
@@ -155,6 +170,41 @@ function serializeNode(node) {
     node.type === 'COMPONENT_SET'
   ) {
     result.componentProperties = node.componentProperties;
+  }
+
+  if (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET') {
+    try { result.componentKey = node.key || null; } catch (e) {}
+    try {
+      if (node.type === 'COMPONENT' && node.parent && node.parent.type === 'COMPONENT_SET') {
+        result.componentSet = {
+          id: node.parent.id,
+          key: node.parent.key || null,
+          name: node.parent.name,
+          remote: Boolean(node.parent.remote)
+        };
+      }
+    } catch (e) {}
+  }
+  if (node.type === 'INSTANCE') {
+    try {
+      const main = node.mainComponent;
+      if (main) {
+        result.mainComponent = {
+          id: main.id,
+          key: main.key || null,
+          name: main.name,
+          remote: Boolean(main.remote)
+        };
+        if (main.parent && main.parent.type === 'COMPONENT_SET') {
+          result.mainComponent.componentSet = {
+            id: main.parent.id,
+            key: main.parent.key || null,
+            name: main.parent.name,
+            remote: Boolean(main.parent.remote)
+          };
+        }
+      }
+    } catch (e) {}
   }
 
   if ('layoutMode' in node) result.layoutMode = node.layoutMode;
@@ -308,8 +358,27 @@ figma.ui.onmessage = async (msg) => {
       var usedFallback = false;
       var fallbackReason = "";
       var lastNonEmpty = _selectionCache.lastNonEmpty;
+      var requestedComponentId = msg.data && msg.data.componentId
+        ? String(msg.data.componentId)
+        : "";
+
+      if (requestedComponentId) {
+        var requestedComponent = _findComponentNodeById(requestedComponentId);
+        if (!requestedComponent) {
+          throw new Error('Component not found on current page: ' + requestedComponentId);
+        }
+        chosenSnapshot = {
+          nodes: [requestedComponent],
+          fileName: liveSnapshot.fileName,
+          pageId: liveSnapshot.pageId,
+          pageName: liveSnapshot.pageName,
+          ts: liveSnapshot.ts,
+          source: "component-id"
+        };
+      }
 
       if (
+        !requestedComponentId &&
         liveSnapshot.nodes.length === 0 &&
         lastNonEmpty.nodes.length > 0 &&
         lastNonEmpty.pageId === liveSnapshot.pageId &&
@@ -339,6 +408,7 @@ figma.ui.onmessage = async (msg) => {
           pageId: liveSnapshot.pageId,
           pageName: liveSnapshot.pageName,
           chosenSource: chosenSnapshot.source,
+          targetedComponentId: requestedComponentId || null,
           cachedAgeMs: usedFallback ? (liveSnapshot.ts - lastNonEmpty.ts) : 0
         }
       };
@@ -9781,6 +9851,10 @@ function _docPublicChildCount(node) {
   return count;
 }
 
+function _docIsNestedComponentInstance(node) {
+  return Boolean(node && node.type === 'INSTANCE');
+}
+
 function _docMeaningfulPartName(node) {
   if (_docIsSlotLike(node)) return true;
   const name = _docNormalizePartName(node && node.name);
@@ -10074,8 +10148,8 @@ function _docPaintOpacitySummary(paint) {
   return ' opacity ' + _docFormatNumber(paint.opacity * 100) + '%';
 }
 
-function _docPaintDetailSummary(paint) {
-  if (!paint || paint.visible === false) return '';
+function _docPaintDetailSummary(paint, includeHidden) {
+  if (!paint || (paint.visible === false && !includeHidden)) return '';
   const type = paint.type || 'Paint';
   const opacity = _docPaintOpacitySummary(paint);
   if (type === 'SOLID') {
@@ -10103,6 +10177,47 @@ function _docPaintsDetailSummary(paints) {
     if (detail) parts.push(detail);
   }
   return parts.join(' | ');
+}
+
+function _docPaintStackEntrySummary(label, paint, index, count, tokenName) {
+  const position = 'Figma ' + String(label || 'paint').toLowerCase() + ' ' + (index + 1) + '/' + count;
+  const detail = _docPaintDetailSummary(paint, true) || (paint && paint.type) || 'Paint';
+  const parts = [position + ': ' + (tokenName ? tokenName + '; ' : '') + detail];
+  if (detail.indexOf(' opacity ') === -1) parts.push('opacity 100%');
+  parts.push('blend ' + (paint && paint.blendMode ? paint.blendMode : 'NORMAL'));
+  parts.push(paint && paint.visible === false ? 'hidden' : 'visible');
+  return parts.join('; ');
+}
+
+function _docPaintVariableAlias(paint, fallbackEntry) {
+  const paintAlias = paint && paint.boundVariables && paint.boundVariables.color;
+  if (paintAlias && paintAlias.id) return paintAlias;
+  if (typeof paintAlias === 'string') return { id: paintAlias };
+  if (fallbackEntry && fallbackEntry.id) return fallbackEntry;
+  if (typeof fallbackEntry === 'string') return { id: fallbackEntry };
+  return null;
+}
+
+function _docPaintBindingRows(node, key, label) {
+  const bv = node && node.boundVariables ? node.boundVariables : {};
+  if (!bv[key]) return [];
+  const entries = Array.isArray(bv[key]) ? bv[key] : [bv[key]];
+  const paints = node && Array.isArray(node[key]) ? node[key] : [];
+  const count = Math.max(entries.length, paints.length, 1);
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    const entry = _docPaintVariableAlias(paints[i], entries[i]);
+    if (!entry || !entry.id) continue;
+    rows.push({
+      node: node.name,
+      property: count > 1 ? label + ' ' + (i + 1) : label,
+      varId: entry.id,
+      paintDetails: count > 1
+        ? _docPaintStackEntrySummary(label, paints[i], i, count, '')
+        : ''
+    });
+  }
+  return rows;
 }
 
 function _docPaintStyleSummary(style) {
@@ -10262,8 +10377,8 @@ function _docPlacementSummary(node, root, anatomyItems) {
   return placement;
 }
 
-function _docEffectDetailSummary(effect) {
-  if (!effect || effect.visible === false) return '';
+function _docEffectDetailSummary(effect, includeHidden) {
+  if (!effect || (effect.visible === false && !includeHidden)) return '';
   const parts = [effect.type || 'Effect'];
   const metrics = [];
   if (effect.color) {
@@ -10280,6 +10395,21 @@ function _docEffectDetailSummary(effect) {
   if (effect.blendMode) metrics.push('blend ' + effect.blendMode);
   if (metrics.length) parts.push(metrics.join(', '));
   return parts.join(' ');
+}
+
+function _docEffectStackEntrySummary(effect, index, count) {
+  const detail = _docEffectDetailSummary(effect, true) || (effect && effect.type) || 'Effect';
+  return 'Figma effect ' + (index + 1) + '/' + count + ': ' + detail
+    + '; ' + (effect && effect.visible === false ? 'hidden' : 'visible');
+}
+
+function _docEffectStackSummary(effects) {
+  const list = Array.isArray(effects) ? effects : [];
+  const parts = [];
+  for (let i = 0; i < list.length; i++) {
+    parts.push(_docEffectStackEntrySummary(list[i], i, list.length));
+  }
+  return parts.join(' | ');
 }
 
 function _docEffectsDetailSummary(effects) {
@@ -10320,7 +10450,9 @@ function _docEffectSummary(node, effectStyleById) {
   }
   const count = _docVisibleEffectCount(node.effects);
   if (count > 0) {
-    const details = _docEffectsDetailSummary(node.effects);
+    const details = Array.isArray(node.effects) && node.effects.length > 1
+      ? _docEffectStackSummary(node.effects)
+      : _docEffectsDetailSummary(node.effects);
     return details ? 'Effects: ' + details : 'Effects: ' + count;
   }
   return 'No effects';
@@ -10403,7 +10535,9 @@ function _docComponentVariableModeGroups(rawBinds, varById, collectionById) {
       varId: binding.varId,
       variableName: variable.name || binding.varId,
       node: binding.node || '',
-      property: binding.property || ''
+      property: binding.property || '',
+      paintDetails: binding.paintDetails || '',
+      effectDetails: binding.effectDetails || ''
     });
   }
   return Object.keys(groupsById).map(function (id) {
@@ -10461,9 +10595,7 @@ async function _buildComponentDoc(opts) {
   // ── Find component on current page ─────────────────────────────────────────
   let _comp = null;
   if (compId) {
-    _comp = figma.currentPage.findOne(function (n) {
-      return (n.type === 'COMPONENT' || n.type === 'COMPONENT_SET') && n.id === compId;
-    });
+    _comp = _findComponentNodeById(compId);
   }
   if (!_comp && compName) {
     _comp = figma.currentPage.findOne(function (n) {
@@ -10726,12 +10858,22 @@ async function _buildComponentDoc(opts) {
       const fields = Object.keys(effectBv);
       for (let j = 0; j < fields.length; j++) {
         const e = effectBv[fields[j]];
-        if (e && e.id) acc.push({ node: nodeName, property: 'Effect ' + (effect.type || '') + ' ' + fields[j], varId: e.id });
+        if (e && e.id) {
+          acc.push({
+            node: nodeName,
+            property: 'Effect ' + (list.length > 1 ? (i + 1) + ' ' : '') + (effect.type || '') + ' ' + fields[j],
+            varId: e.id,
+            effectDetails: list.length > 1 ? _docEffectStackEntrySummary(effect, i, list.length) : ''
+          });
+        }
       }
     }
   }
   function _collectBind(node, acc) {
     if (_isDocPrivateNodeName(node.name)) return acc;
+    // A nested instance owns its implementation bindings; the parent spec links
+    // to that component instead of expanding those bindings into this table.
+    if (_docIsNestedComponentInstance(node)) return acc;
     const bv = node.boundVariables || {};
     const _props = [
       ['fills', 'Fill'], ['strokes', 'Stroke'],
@@ -10745,6 +10887,11 @@ async function _buildComponentDoc(opts) {
     ];
     for (let i = 0; i < _props.length; i++) {
       const key = _props[i][0], label = _props[i][1];
+      if (key === 'fills' || key === 'strokes') {
+        const paintRows = _docPaintBindingRows(node, key, label);
+        for (let j = 0; j < paintRows.length; j++) acc.push(paintRows[j]);
+        continue;
+      }
       if (bv[key]) {
         const e = Array.isArray(bv[key]) ? bv[key][0] : bv[key];
         if (e && e.id) acc.push({ node: node.name, property: label, varId: e.id });
@@ -10764,7 +10911,7 @@ async function _buildComponentDoc(opts) {
       if (effectStyleById[node.effectStyleId]) _collectEffectBindRows(effectStyleById[node.effectStyleId].effects, node.name, acc);
     }
     _collectEffectBindRows(node.effects, node.name, acc);
-    if (node.type === 'SLOT' || node.type === 'INSTANCE') return acc;
+    if (node.type === 'SLOT') return acc;
     if ('children' in node) {
       for (let i = 0; i < node.children.length; i++) _collectBind(node.children[i], acc);
     }
@@ -10864,11 +11011,17 @@ async function _buildComponentDoc(opts) {
       if (def && def.type === 'SLOT') slotDefinitions[defKeys[i]] = def;
     }
     const out = [];
+    const seen = {};
     function walk(node) {
       if (!node || _isDocPrivateNodeName(node.name)) return;
+      // Slots below an instance belong to the nested component's own spec.
+      if (_docIsNestedComponentInstance(node)) return;
       if (node.type === 'SLOT') {
         const key = _slotNodePropertyKey(node, slotDefinitions);
         const def = key ? slotDefinitions[key] : null;
+        const identity = key || _cleanComponentPropertyName(node.name);
+        if (seen[identity]) return;
+        seen[identity] = true;
         const slotSettings = def && def.slotSettings ? def.slotSettings : {};
         let limitViolations = [];
         try {
@@ -10885,16 +11038,18 @@ async function _buildComponentDoc(opts) {
           limitViolations: limitViolations.length ? limitViolations.join(', ') : 'None',
           slotSettings: slotSettings
         });
+        return;
       }
       if ('children' in node && node.children) {
         for (let j = 0; j < node.children.length; j++) walk(node.children[j]);
       }
     }
-    walk(root);
+    const roots = Array.isArray(root) ? root : [root];
+    for (let i = 0; i < roots.length; i++) walk(roots[i]);
     return out;
   }
 
-  const _slotDocs = _collectSlotDocs(_defaultV, compMeta.componentPropertyDefinitions);
+  const _slotDocs = _collectSlotDocs(_children, compMeta.componentPropertyDefinitions);
 
   function _componentDocFeatureSignals(root) {
     const out = {
@@ -11036,6 +11191,10 @@ async function _buildComponentDoc(opts) {
           token: tokenName,
           context: _variableContext(b.varId),
           resolvedVal: _resolvedVariableValueSummary(b.varId, b.property)
+            + (b.paintDetails ? '; ' + b.paintDetails : '')
+            + (b.effectDetails ? '; ' + b.effectDetails : ''),
+          paintDetails: b.paintDetails || '',
+          effectDetails: b.effectDetails || ''
         });
       } else if (b.styleId && b.styleKind === 'effect') {
         const style = effectStyleById[b.styleId];
@@ -11069,6 +11228,7 @@ async function _buildComponentDoc(opts) {
     return out;
   }
   const resolved = _resolveBindingRows(_rawBinds);
+  const allResolved = _resolveBindingRows(_allComponentRawBinds);
   const _variableModeRows = [];
 
   function _resolvedVariableValueForConsumer(binding, consumer, modeId) {
@@ -11099,7 +11259,9 @@ async function _buildComponentDoc(opts) {
     for (let i = 0; i < group.bindings.length; i++) {
       const binding = group.bindings[i];
       const value = _resolvedVariableValueForConsumer(binding, consumer, modeId);
-      const label = binding.variableName + ' (' + binding.node + ' · ' + binding.property + ') = ' + value;
+      const label = binding.variableName + ' (' + binding.node + ' · ' + binding.property + ') = ' + value
+        + (binding.paintDetails ? '; ' + binding.paintDetails : '')
+        + (binding.effectDetails ? '; ' + binding.effectDetails : '');
       if (seen[label]) continue;
       seen[label] = true;
       values.push(label);
@@ -11113,12 +11275,23 @@ async function _buildComponentDoc(opts) {
 
   function _boundVariableStyleSummary(node, key, property) {
     const bv = node && node.boundVariables ? node.boundVariables : {};
-    const entry = bv[key] ? (Array.isArray(bv[key]) ? bv[key][0] : bv[key]) : null;
-    const id = entry && entry.id ? entry.id : null;
-    if (!id) return '';
-    const variable = varById[id];
-    const name = variable ? variable.name : id;
-    return name + ' (' + _resolvedVariableValueSummary(id, property) + ')';
+    if (!bv[key]) return '';
+    const entries = Array.isArray(bv[key]) ? bv[key] : [bv[key]];
+    const paints = node && Array.isArray(node[key]) ? node[key] : [];
+    const count = Math.max(entries.length, paints.length, 1);
+    const values = [];
+    for (let i = 0; i < count; i++) {
+      const entry = _docPaintVariableAlias(paints[i], entries[i]);
+      const id = entry && entry.id ? entry.id : null;
+      if (!id) continue;
+      const variable = varById[id];
+      const name = variable ? variable.name : id;
+      values.push(
+        name + ' (' + _resolvedVariableValueSummary(id, property) + ')'
+        + (count > 1 ? '; ' + _docPaintStackEntrySummary(property, paints[i], i, count, '') : '')
+      );
+    }
+    return values.join(' | ');
   }
 
   function _paintStyleSummary(styleId) {
@@ -11183,6 +11356,7 @@ async function _buildComponentDoc(opts) {
     const seen = {};
     function walk(node, depth) {
       if (!node || _isDocPrivateNodeName(node.name)) return;
+      if (_docIsNestedComponentInstance(node)) return;
       const refs = node.componentPropertyReferences || {};
       const visibleRef = refs.visible;
       const def = visibleRef && boolDefs[visibleRef] ? boolDefs[visibleRef] : null;
@@ -11207,7 +11381,7 @@ async function _buildComponentDoc(opts) {
           });
         }
       }
-      if ('children' in node && node.children && node.type !== 'INSTANCE' && node.type !== 'SLOT') {
+      if ('children' in node && node.children && node.type !== 'SLOT') {
         for (let i = 0; i < node.children.length; i++) walk(node.children[i], depth + 1);
       }
     }
@@ -12174,10 +12348,23 @@ async function _buildComponentDoc(opts) {
     _propsForSpec += _propKeys[i].replace(/#[^#]+$/, '') + ' (' + compMeta.componentPropertyDefinitions[_propKeys[i]].type + ')';
   }
   if (!_propsForSpec) _propsForSpec = 'none';
+  const _specBindingRows = [];
+  const _specBindingKeys = {};
+  function _pushSpecBinding(row) {
+    if (!row) return;
+    const key = row.property + '=' + row.token;
+    if (_specBindingKeys[key]) return;
+    _specBindingKeys[key] = true;
+    _specBindingRows.push(row);
+  }
+  for (let i = 0; i < Math.min(5, resolved.length); i++) _pushSpecBinding(resolved[i]);
+  for (let i = 0; i < allResolved.length; i++) {
+    if (allResolved[i].paintDetails || allResolved[i].effectDetails) _pushSpecBinding(allResolved[i]);
+  }
   let _tokensForSpec = '';
-  for (let i = 0; i < Math.min(5, resolved.length); i++) {
+  for (let i = 0; i < _specBindingRows.length; i++) {
     if (i > 0) _tokensForSpec += ', ';
-    _tokensForSpec += resolved[i].property + '=' + resolved[i].token;
+    _tokensForSpec += _specBindingRows[i].property + '=' + _specBindingRows[i].token;
   }
   let _variableModesForSpec = '';
   for (let i = 0; i < _variableModeGroups.length; i++) {
@@ -12186,6 +12373,14 @@ async function _buildComponentDoc(opts) {
       + _variableModeGroups[i].modes.map(function (mode) { return mode.name; }).join(' | ');
   }
   if (!_variableModesForSpec) _variableModesForSpec = 'none';
+  const _effectStacksForSpec = [];
+  for (let i = 0; i < _children.length; i++) {
+    const effectSummary = _docEffectSummary(_children[i], effectStyleById);
+    if (effectSummary && effectSummary !== 'No effects') {
+      _effectStacksForSpec.push(_children[i].name + ': ' + _docInlineSummary(effectSummary));
+    }
+  }
+  const _effectsForSpec = _effectStacksForSpec.length ? _effectStacksForSpec.join(' || ') : 'none';
   const _accessibilityForSpec = _accessibilityNotes.length ? _accessibilityNotes.join(' | ') : 'none';
   const _specBlock =
     '[SPEC]\n' +
@@ -12194,6 +12389,7 @@ async function _buildComponentDoc(opts) {
     'variable-modes: ' + _variableModesForSpec + '\n' +
     'properties: ' + _propsForSpec + '\n' +
     'tokens: ' + _tokensForSpec + '\n' +
+    'effects: ' + _effectsForSpec + '\n' +
     'accessibility: ' + _accessibilityForSpec + '\n' +
     'spec-file: component-specs/' + compName + '.md\n' +
     '[/SPEC]\n\n';
@@ -12248,8 +12444,13 @@ async function _buildComponentDoc(opts) {
   function _primaryAnatomyToken(node) {
     if (!node) return '—';
     const bv = node.boundVariables || {};
-    if (bv.fills && bv.fills[0] && bv.fills[0].id) {
-      const v = varById[bv.fills[0].id];
+    const fills = Array.isArray(node.fills) ? node.fills : [];
+    const singleFillEntry = _docPaintVariableAlias(
+      fills[0],
+      Array.isArray(bv.fills) ? bv.fills[0] : bv.fills
+    );
+    if (singleFillEntry && singleFillEntry.id) {
+      const v = varById[singleFillEntry.id];
       if (v) return v.name;
     }
     if (node.type === 'TEXT' && node.textStyleId) {
@@ -12265,6 +12466,22 @@ async function _buildComponentDoc(opts) {
   function _visibleFillSummary(node) {
     if (!node) return 'None';
     const bv = node.boundVariables || {};
+    const fills = Array.isArray(node.fills) ? node.fills : [];
+    if (fills.length > 1) {
+      const fillBindings = Array.isArray(bv.fills) ? bv.fills : [];
+      const parts = [];
+      for (let i = 0; i < fills.length; i++) {
+        const entry = _docPaintVariableAlias(fills[i], fillBindings[i]);
+        const variable = entry && entry.id ? varById[entry.id] : null;
+        const tokenName = variable ? variable.name : (entry && entry.id ? entry.id : '');
+        parts.push(_docPaintStackEntrySummary('fill', fills[i], i, fills.length, tokenName));
+      }
+      const stack = parts.join(' | ');
+      if (node.fillStyleId && node.fillStyleId !== figma.mixed && paintStyleById[node.fillStyleId]) {
+        return 'Paint style: ' + paintStyleById[node.fillStyleId].name + '; ' + stack;
+      }
+      return stack;
+    }
     if (bv.fills && bv.fills[0] && bv.fills[0].id) {
       const v = varById[bv.fills[0].id];
       if (v) return v.name;
@@ -12272,7 +12489,6 @@ async function _buildComponentDoc(opts) {
     if (node.fillStyleId && node.fillStyleId !== figma.mixed && paintStyleById[node.fillStyleId]) {
       return paintStyleById[node.fillStyleId].name;
     }
-    const fills = Array.isArray(node.fills) ? node.fills : [];
     for (let i = 0; i < fills.length; i++) {
       const fill = fills[i];
       if (!fill || fill.visible === false) continue;
@@ -12282,17 +12498,41 @@ async function _buildComponentDoc(opts) {
     }
     return 'None';
   }
+  function _visibleStrokeSummary(node) {
+    const strokes = node && Array.isArray(node.strokes) ? node.strokes : [];
+    if (strokes.length <= 1) return _docStrokeSummary(node, paintStyleById);
+    const bv = node.boundVariables || {};
+    const strokeBindings = Array.isArray(bv.strokes) ? bv.strokes : [];
+    const parts = [];
+    for (let i = 0; i < strokes.length; i++) {
+      const entry = _docPaintVariableAlias(strokes[i], strokeBindings[i]);
+      const variable = entry && entry.id ? varById[entry.id] : null;
+      const tokenName = variable ? variable.name : (entry && entry.id ? entry.id : '');
+      parts.push(_docPaintStackEntrySummary('stroke', strokes[i], i, strokes.length, tokenName));
+    }
+    const stack = parts.join(' | ');
+    if (node.strokeStyleId && node.strokeStyleId !== figma.mixed && paintStyleById[node.strokeStyleId]) {
+      return 'Paint style: ' + paintStyleById[node.strokeStyleId].name + '; ' + stack;
+    }
+    return stack;
+  }
   function _rootVisualState(node) {
     const opacity = typeof node.opacity === 'number' ? _docFormatNumber(node.opacity) : 1;
     return {
       Fill: _visibleFillSummary(node),
-      Stroke: _docStrokeSummary(node, paintStyleById),
+      Stroke: _visibleStrokeSummary(node),
       Effects: _docEffectSummary(node, effectStyleById),
       Opacity: String(opacity)
     };
   }
   function _bindingKey(row) {
-    return row.node + '|' + row.property;
+    let property = row.property === 'Fill 1'
+      ? 'Fill'
+      : (row.property === 'Stroke 1' ? 'Stroke' : row.property);
+    if (property.indexOf('Effect 1 ') === 0) {
+      property = 'Effect ' + property.slice('Effect 1 '.length);
+    }
+    return row.node + '|' + property;
   }
   function _bindingValue(row) {
     return row.token + ' (' + row.resolvedVal + ')';

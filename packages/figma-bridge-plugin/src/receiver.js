@@ -573,23 +573,25 @@ const server = http.createServer((req, res) => {
 
   // 3. MCP Agent calls this to trigger a selection sync
   if (req.method === 'POST' && pathname === '/request-selection') {
-    if (_dispatchOrWaitForPoll(res, () => {
-      pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
-      pendingPollResponse.end(JSON.stringify({ command: 'extract-selection' }));
-      _clearPendingPoll();
-      
-      pendingSelectionRequest = res;
-      
-      const selectionTimer = setTimeout(() => {
-        if (pendingSelectionRequest === res) {
-          res.writeHead(504, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Selection sync timed out' }));
-          pendingSelectionRequest = null;
-        }
-      }, 15000); // Selection is usually very fast
-      if (selectionTimer.unref) selectionTimer.unref();
-    })) return;
-    _sendNotConnected(res);
+    _readJsonBody(req, payload => {
+      if (_dispatchOrWaitForPoll(res, () => {
+        pendingPollResponse.writeHead(200, { 'Content-Type': 'application/json' });
+        pendingPollResponse.end(JSON.stringify({ command: 'extract-selection', data: payload }));
+        _clearPendingPoll();
+
+        pendingSelectionRequest = res;
+
+        const selectionTimer = setTimeout(() => {
+          if (pendingSelectionRequest === res) {
+            res.writeHead(504, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Selection sync timed out' }));
+            pendingSelectionRequest = null;
+          }
+        }, 15000); // Selection is usually very fast
+        if (selectionTimer.unref) selectionTimer.unref();
+      })) return;
+      _sendNotConnected(res);
+    });
     return;
   }
 

@@ -40,6 +40,8 @@ const helperNames = [
   "_docBoundsIntersectionArea",
   "_docPlacementSummary",
   "_docEffectDetailSummary",
+  "_docEffectStackEntrySummary",
+  "_docEffectStackSummary",
   "_docEffectsDetailSummary",
   "_docEffectOutset",
   "_docEffectsOutset",

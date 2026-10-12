@@ -1,5 +1,25 @@
 # Decisions
 
+## [2026-09-22] Standard DESIGN.md is normative and lossless Figlets data uses a verified sidecar
+
+**Decision:** Supersede the 2026-05-13 decision that made the fenced `figlets-extended` block canonical. New exports conform to pinned `@google/design.md` 0.4.0 and keep standard YAML plus prose normative. Responsive typography and spacing values are emitted as mode-specific standard tokens instead of collapsing to the last breakpoint. Full radii, including pill radius, are retained. Lossless Figlets-only data is written by default to optional `figlets-design.json` in the same directory as `DESIGN.md`.
+
+**Sidecar contract:** `figlets-design.json` stores the normalized DS and the SHA-256 fingerprint of its sibling `DESIGN.md`. Figlets uses it for lossless re-import only when the fingerprint matches. A stale or unreadable sidecar is ignored with a warning. Standard consumers do not need the sidecar. Designers can request `include_sidecar: false` for a standard-only export. Legacy `figlets-extended` files remain readable but are never generated.
+
+**Validation:** Every export is checked with `@google/design.md` 0.4.0 before `DESIGN.md` is written. Errors and meaningful warnings block the document write. Expected `orphaned-tokens` warnings stay visible and are non-blocking because a foundation palette may legitimately expose more primitives than current component examples reference. Figlets also blocks export when any configured `touch/min` mode is below 44px and directs dense controls to `touch/compact`.
+
+**Accessibility:** The configured APCA or WCAG algorithm remains the design-system decision. The exported Components section reports both WCAG contrast ratio and APCA Lc for every resolved semantic background and text pairing. The configured algorithm determines the pass result. Pairs with null thresholds are labeled exempt with their note and are not claimed as universally validated. Exempt pairs are omitted from standard `components` front matter so Google validation does not mistake them for approved text combinations.
+
+**Metadata handling:** Placeholder names such as `Untitled` block export. Figlets does not assume that a code package name is the design-system name. The designer can supply the exact `design_system_name`, which repairs generated local config metadata after validation. Snapshot bootstrap selects a primary ramp from strong semantic `brand` or `primary` aliases before falling back to ramp order. This prevents an alphabetically first info ramp from becoming primary when semantic brand tokens point elsewhere.
+
+**Touch targets:** Generated `touch/min` is 44px in every responsive mode. Generated `touch/comfortable` is 48px in every mode. Dense controls use the separate opt-in `touch/compact` token at 32px. The accessibility minimum is not weakened at desktop breakpoints.
+
+**Shared readiness gate:** Explicit export, config preparation, and successful setup all use one DESIGN.md artifact path. It renders once, runs Google 0.4.0 lint plus Figlets policy checks, and writes the same validated Markdown with its default sidecar. Snapshot bootstrap and generated setup reuse one touch-default helper. Figlets requires `touch/min` coverage for every configured mode, blocks values below 44px, and blocks `touch/comfortable` values below the corresponding minimum. Setup validates before mutating Figma, so a document problem cannot appear only after the setup write.
+
+**Why:** The prior inline block made two competing sources of truth inside one document, while several standard YAML values were lossy. The sidecar separates portability from Figlets round-trip fidelity. The fingerprint makes that separation explicit and prevents stale proprietary data from silently overriding an edited standard document.
+
+---
+
 Running log of non-obvious project decisions and the reasons behind them.
 
 ---

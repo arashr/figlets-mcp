@@ -22,7 +22,7 @@ function makeWorkspace(label) {
     + "    brand: [{ name: 'primary', hex: '#000000', role: 'primary', step: 500 }]\n"
     + "  },\n"
     + "  typography: { scale: { 'body/md': { sizes: [16, 16, 16], lineHeights: [24, 24, 24], weight: 400, tracking: 0 } }, families: { sans: 'Inter' } },\n"
-    + "  spacing: { semantic: { 'component/md': [16, 16, 16] }, radius: { md: 8 }, border: { default: 1 } },\n"
+    + "  spacing: { semantic: { 'component/md': [16, 16, 16], 'touch/min': [44, 44, 44], 'touch/comfortable': [48, 48, 48], 'touch/compact': [32, 32, 32] }, radius: { md: 8 }, border: { default: 1 } },\n"
     + "  primitives: { spacing: [[4, 16]] }\n"
     + "};\n", 'utf8');
 
@@ -131,13 +131,78 @@ module.exports = (async () => {
       assert.strictEqual(result.designMd.output.defaultKind, 'project-specs');
       assert.strictEqual(result.designMd.output.fallbackUsed, false);
       assert.ok(fs.existsSync(result.designMd.path), 'DESIGN.md should exist on disk');
+      assert.strictEqual(result.designMd.sidecar.written, true, 'lossless sidecar should be written by default');
+      assert.ok(fs.existsSync(result.designMd.sidecar.path), 'figlets-design.json should exist beside DESIGN.md');
+      assert.strictEqual(path.dirname(result.designMd.sidecar.path), path.dirname(result.designMd.path));
+      assert.strictEqual(result.lint.standard, '@google/design.md@0.4.0');
+      assert.strictEqual(result.lint.passed, true);
       const md = fs.readFileSync(result.designMd.path, 'utf8');
       assert.ok(md.includes('Export MD Test'), 'DESIGN.md should embed DS project name');
+      assert.ok(md.includes('touch/compact` is for intentional dense visual sizing'), 'DESIGN.md should prevent compact sizing from replacing the interactive minimum');
       assert.strictEqual(result.sync.attempted, false, 'sync should be skipped when figmaDataPath is provided');
       assert.ok(Array.isArray(result.refresh.changes), 'refresh.changes should be an array');
       // The snapshot's primary/500 differs from the config's [0,0,0], so refresh should have updated the ramp step + brand hex.
       const refreshedConfig = fs.readFileSync(ws.configPath, 'utf8');
       assert.ok(refreshedConfig.includes('0.5'), 'config should be rewritten with refreshed ramp value');
+    } finally {
+      fs.rmSync(ws.tmp, { recursive: true, force: true });
+    }
+  }
+
+  // --- Standard-only export can omit the optional Figlets sidecar
+  {
+    const ws = makeWorkspace('no-sidecar');
+    try {
+      const result = await withCwd(ws.tmp, () => handleExportDesignMd({
+        config_path: ws.configPath,
+        figmaDataPath: ws.snapshotPath,
+        include_sidecar: false,
+      }));
+      assert.ok(!result.error, 'standard-only export should succeed');
+      assert.strictEqual(result.designMd.sidecar.enabled, false);
+      assert.strictEqual(result.designMd.sidecar.written, false);
+      assert.ok(!fs.existsSync(result.designMd.sidecar.path), 'standard-only export must not write the sidecar');
+    } finally {
+      fs.rmSync(ws.tmp, { recursive: true, force: true });
+    }
+  }
+
+  // --- Accessibility guard blocks a weakened touch minimum
+  {
+    const ws = makeWorkspace('touch-min-block');
+    try {
+      const source = fs.readFileSync(ws.configPath, 'utf8').replace(
+        "'touch/min': [44, 44, 44]",
+        "'touch/min': [44, 44, 32]"
+      );
+      fs.writeFileSync(ws.configPath, source, 'utf8');
+      const result = await withCwd(ws.tmp, () => handleExportDesignMd({
+        config_path: ws.configPath,
+        figmaDataPath: ws.snapshotPath,
+      }));
+      assert.ok(result.error, 'export should block when touch/min drops below 44px');
+      assert.ok(result.lint.blockingFindings.some(finding => finding.rule === 'figlets-touch-target-minimum'));
+      assert.ok(!fs.existsSync(projectDesignMdPath(ws.tmp)), 'blocked export must not write DESIGN.md');
+    } finally {
+      fs.rmSync(ws.tmp, { recursive: true, force: true });
+    }
+  }
+
+  // --- Placeholder identity fails closed instead of guessing from the code project
+  {
+    const ws = makeWorkspace('placeholder-name');
+    try {
+      fs.writeFileSync(ws.configPath, fs.readFileSync(ws.configPath, 'utf8').replace('Export MD Test', 'Untitled'), 'utf8');
+      const before = fs.readFileSync(ws.configPath, 'utf8');
+      const result = await withCwd(ws.tmp, () => handleExportDesignMd({
+        config_path: ws.configPath,
+        figmaDataPath: ws.snapshotPath,
+        project_path: ws.tmp,
+      }));
+      assert.ok(result.error, 'placeholder identity must block export');
+      assert.ok(result.lint.blockingFindings.some(finding => finding.rule === 'figlets-placeholder-project-name'));
+      assert.ok(/design_system_name/.test(result.hint));
+      assert.strictEqual(fs.readFileSync(ws.configPath, 'utf8'), before, 'blocked validation must not mutate config');
     } finally {
       fs.rmSync(ws.tmp, { recursive: true, force: true });
     }
@@ -187,16 +252,20 @@ module.exports = (async () => {
     const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figlets-export-cwd-'));
     const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figlets-export-project-'));
     try {
+      fs.writeFileSync(ws.configPath, fs.readFileSync(ws.configPath, 'utf8').replace('Export MD Test', 'Untitled'), 'utf8');
       const result = await withCwd(cwdDir, () => handleExportDesignMd({
         config_path: ws.configPath,
         figmaDataPath: ws.snapshotPath,
         project_path: projectDir,
+        design_system_name: 'Candy',
       }));
       const expectedPath = path.join(path.resolve(projectDir), 'specs', 'DESIGN.md');
       assert.ok(!result.error, 'expected success, got error: ' + JSON.stringify(result));
       assert.strictEqual(result.designMd.path, expectedPath);
       assert.strictEqual(result.designMd.output.requestedPath, expectedPath);
       assert.ok(fs.existsSync(expectedPath), 'DESIGN.md should be written under project_path');
+      assert.ok(fs.readFileSync(expectedPath, 'utf8').includes('name: "Candy"'), 'placeholder names should be repaired only from an exact supplied name');
+      assert.ok(result.refresh.changes.some(change => change.kind === 'project-metadata'), 'name repair should be reported');
       assert.ok(!fs.existsSync(path.join(path.resolve(cwdDir), 'specs', 'DESIGN.md')), 'DESIGN.md should not be written under cwd when project_path is provided');
     } finally {
       fs.rmSync(ws.tmp, { recursive: true, force: true });
@@ -300,7 +369,7 @@ module.exports = (async () => {
       assert.ok(fs.existsSync(missingPath), 'snapshot-derived config should be written');
       assert.strictEqual(result.bootstrap.source, 'figma-snapshot-bootstrap');
       assert.strictEqual(result.bootstrap.created, true);
-      assert.strictEqual(result.bootstrap.summary.spacingTokens, 1);
+      assert.strictEqual(result.bootstrap.summary.spacingTokens, 4, 'snapshot bootstrap should add the three shared touch defaults');
       assert.strictEqual(result.bootstrap.summary.typographyRoles, 1);
       assert.strictEqual(result.bootstrap.summary.elevationStyles, 1);
       assert.ok(result.needsDesignerInput.some(item => item.field === 'breakpoints.widths'), 'breakpoint gap should be surfaced');

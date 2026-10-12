@@ -1,5 +1,14 @@
 'use strict';
 
+function getTouchSemanticDefaults(modeCount) {
+  const count = Math.max(1, Number(modeCount) || 3);
+  return {
+    'touch/min': Array(count).fill(44),
+    'touch/comfortable': Array(count).fill(48),
+    'touch/compact': Array(count).fill(32),
+  };
+}
+
 /**
  * compute-ds-config.js
  * Computes DS.spacing (semantic + radius + border) and DS.typography.scale from presets.
@@ -61,8 +70,7 @@ function computeDsConfig(ds) {
     'stack/md':          [16, 16,  16 ],
     'stack/lg':          [24, 24,  32 ],
     'stack/xl':          [32, 40,  48 ],
-    'touch/min':         [44, 44,  32 ],
-    'touch/comfortable': [48, 48,  40 ],
+    ...getTouchSemanticDefaults(3),
   };
 
   const SEMANTIC_4 = {
@@ -84,8 +92,7 @@ function computeDsConfig(ds) {
     'stack/md':          [16, 16,  16 ],
     'stack/lg':          [24, 24,  32 ],
     'stack/xl':          [32, 40,  48 ],
-    'touch/min':         [44, 44,  32 ],
-    'touch/comfortable': [48, 48,  40 ],
+    ...getTouchSemanticDefaults(3),
   };
 
   function withWide(arr) {
@@ -228,4 +235,4 @@ function normalizeTypographyPreset(value) {
   return text;
 }
 
-module.exports = { computeDsConfig, normalizeTypographyPreset };
+module.exports = { computeDsConfig, getTouchSemanticDefaults, normalizeTypographyPreset };

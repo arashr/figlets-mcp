@@ -38,9 +38,8 @@ function assertGuard(result, label) {
 }
 
 assertGuard(getConfigPathGuardError(flatConfigPath), "paths guard");
-assertGuard(handlePrepareDsConfig({ config_path: flatConfigPath }), "prepare_ds_config");
-
 module.exports = Promise.all([
+  handlePrepareDsConfig({ config_path: flatConfigPath }).then(result => assertGuard(result, "prepare_ds_config")),
   handleApplyDsSetup({ config_path: flatConfigPath }).then(result => assertGuard(result, "apply_ds_setup")),
   handleUpdateDsPrimitives({ config_path: flatConfigPath }).then(result => assertGuard(result, "update_ds_primitives")),
   Promise.resolve(handleInspectDsTokenGaps({ config_path: flatConfigPath, figmaData: { variables: [] } })).then(result => assertGuard(result, "inspect_ds_token_gaps")),

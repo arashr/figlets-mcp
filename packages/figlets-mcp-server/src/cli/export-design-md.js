@@ -14,8 +14,10 @@ function printUsage() {
       '  --config <path>          Absolute path to design-system.config.js (defaults to active file config)',
       '  --output <path>          Output path for DESIGN.md (defaults to DESIGN.md next to the config)',
       '  --figma-data <path>      Use this figma-data.json snapshot instead of running sync_figma_data',
+      '  --name <name>            Exact design-system name when stored metadata is missing or Untitled',
       '  --skip-sync              Skip the sync step and use whatever snapshot is already on disk',
       '  --dry-run                Preview the export without writing design-system.config.js or DESIGN.md',
+      '  --no-sidecar             Export only DESIGN.md and omit figlets-design.json',
       '  --json                   Print the full handler result as JSON',
       '  --help, -h               Show this message',
       ''
@@ -32,8 +34,10 @@ function parseArgs(argv) {
     else if (arg === '--config') { opts.config_path = path.resolve(next); i++; }
     else if (arg === '--output') { opts.output_path = path.resolve(next); i++; }
     else if (arg === '--figma-data') { opts.figmaDataPath = path.resolve(next); i++; }
+    else if (arg === '--name') { opts.design_system_name = next; i++; }
     else if (arg === '--skip-sync') opts.skip_sync = true;
     else if (arg === '--dry-run') opts.dry_run = true;
+    else if (arg === '--no-sidecar') opts.include_sidecar = false;
     else if (arg === '--json') opts.json = true;
     else {
       process.stderr.write('Unknown argument: ' + arg + '\n');
@@ -71,12 +75,19 @@ function _printPlain(result) {
       for (const change of result.refresh.changes) lines.push(_renderChange(change));
     }
   }
+  if (result.lint) {
+    lines.push('Validation:   ' + (result.lint.passed ? 'passed' : 'blocked') + ' with '
+      + result.lint.summary.errors + ' errors, ' + result.lint.summary.warnings + ' warnings');
+  }
   if (result.dryRun) {
     lines.push('');
     lines.push('Dry run: no files were written.');
   } else if (result.designMd && result.designMd.written) {
     lines.push('');
     lines.push('DESIGN.md exported to ' + result.designMd.path);
+    if (result.designMd.sidecar && result.designMd.sidecar.written) {
+      lines.push('Figlets sidecar exported to ' + result.designMd.sidecar.path);
+    }
   }
   process.stdout.write(lines.join('\n') + '\n');
 }
@@ -93,8 +104,10 @@ async function main() {
   if (opts.config_path) args.config_path = opts.config_path;
   if (opts.output_path) args.output_path = opts.output_path;
   if (opts.figmaDataPath) args.figmaDataPath = opts.figmaDataPath;
+  if (opts.design_system_name) args.design_system_name = opts.design_system_name;
   if (opts.skip_sync) args.skip_sync = true;
   if (opts.dry_run) args.dry_run = true;
+  if (opts.include_sidecar === false) args.include_sidecar = false;
 
   const result = await handleExportDesignMd(args);
 

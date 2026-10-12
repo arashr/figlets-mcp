@@ -31,8 +31,8 @@ fs.writeFileSync(configPath, `const DS = {
     }
   },
   typography: { scale: { 'body/md': { sizes: [16, 16, 16], lineHeights: [24, 24, 24], weight: 400, tracking: 0 } }, families: { sans: 'Inter' } },
-  spacing: { semantic: { 'component/md': [16, 16, 16] }, radius: { md: 8 }, border: { default: 1 } },
-  primitives: { spacing: [[1, 1], [8, 8], [16, 16]] }
+  spacing: { semantic: { 'component/md': [16, 16, 16], 'touch/min': [44, 44, 44], 'touch/comfortable': [48, 48, 48], 'touch/compact': [32, 32, 32] }, radius: { md: 8 }, border: { default: 1 } },
+  primitives: { spacing: [[1, 1], [8, 8], [16, 16], [32, 32], [44, 44], [48, 48]] }
 };\n`, 'utf8');
 
 fs.writeFileSync(failingConfigPath, `const DS = {
@@ -106,6 +106,8 @@ module.exports = (async () => {
     assert.strictEqual(requestBody.color, undefined, 'apply_ds_setup should not send raw DS as the top-level bridge payload');
     assert.ok(result.designMdExport && result.designMdExport.path, 'apply_ds_setup should expose DESIGN.md export path');
     assert.ok(fs.existsSync(result.designMdExport.path), 'DESIGN.md export should be written after setup');
+    assert.strictEqual(result.designMdExport.lint.passed, true, 'apply_ds_setup should use the shared DESIGN.md validation gate');
+    assert.ok(fs.existsSync(result.designMdExport.sidecarPath), 'apply_ds_setup should write the default lossless sidecar');
     assert.ok(fs.readFileSync(result.designMdExport.path, 'utf8').includes('Apply Export'), 'export should use DS project name');
   } finally {
     await new Promise(resolve => server.close(resolve));

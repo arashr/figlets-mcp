@@ -757,6 +757,137 @@ module.exports = (() => {
   }
 
   {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-touch-policy-config-"));
+    const configPath = path.join(tmp, "design-system.config.js");
+    const touchDs = {
+      project: { name: "Legacy Touch Policy" },
+      collections: { primitives: "1. Primitives", spacing: "4. Spacing" },
+      breakpoints: { modes: ["Mobile", "Tablet", "Desktop"] },
+      spacing: {
+        semantic: {
+          "touch/min": [44, 44, 32],
+          "touch/comfortable": [48, 48, 40],
+          "touch/compact": [32, 32, 32],
+        },
+        responsiveModeValidation: { allowSameValueModes: { categories: ["touch"] } },
+      },
+    };
+    const touchSnapshot = {
+      collections: [
+        {
+          id: "primitives",
+          name: "1. Primitives",
+          variableIds: ["p32", "p40", "p44", "p48"],
+          modes: [{ modeId: "default", name: "Default" }],
+        },
+        {
+          id: "spacing",
+          name: "4. Spacing",
+          variableIds: ["touch-min", "touch-comfortable", "touch-compact"],
+          modes: [
+            { modeId: "mobile", name: "Mobile" },
+            { modeId: "tablet", name: "Tablet" },
+            { modeId: "desktop", name: "Desktop" },
+          ],
+        },
+      ],
+      variables: [
+        { id: "p32", name: "space/32", resolvedType: "FLOAT", valuesByMode: { default: 32 } },
+        { id: "p40", name: "space/40", resolvedType: "FLOAT", valuesByMode: { default: 40 } },
+        { id: "p44", name: "space/44", resolvedType: "FLOAT", valuesByMode: { default: 44 } },
+        { id: "p48", name: "space/48", resolvedType: "FLOAT", valuesByMode: { default: 48 } },
+        {
+          id: "touch-min",
+          name: "space/touch/min",
+          resolvedType: "FLOAT",
+          valuesByMode: {
+            mobile: { type: "VARIABLE_ALIAS", id: "p44" },
+            tablet: { type: "VARIABLE_ALIAS", id: "p44" },
+            desktop: { type: "VARIABLE_ALIAS", id: "p32" },
+          },
+        },
+        {
+          id: "touch-comfortable",
+          name: "space/touch/comfortable",
+          resolvedType: "FLOAT",
+          valuesByMode: {
+            mobile: { type: "VARIABLE_ALIAS", id: "p48" },
+            tablet: { type: "VARIABLE_ALIAS", id: "p48" },
+            desktop: { type: "VARIABLE_ALIAS", id: "p40" },
+          },
+        },
+        {
+          id: "touch-compact",
+          name: "space/touch/compact",
+          resolvedType: "FLOAT",
+          valuesByMode: {
+            mobile: { type: "VARIABLE_ALIAS", id: "p32" },
+            tablet: { type: "VARIABLE_ALIAS", id: "p32" },
+            desktop: { type: "VARIABLE_ALIAS", id: "p32" },
+          },
+        },
+      ],
+      textStyles: [],
+      effectStyles: [],
+    };
+    fs.writeFileSync(configPath, "const DS = " + JSON.stringify(touchDs, null, 2) + ";\n", "utf8");
+
+    const inspected = inspectDsTokenGapsFromConfigAndFigmaData(touchDs, touchSnapshot, {
+      configPath,
+      categories: ["spacing-semantics"],
+    });
+    const policyOption = inspected.repairPlan.reviewOptions.find(option => option.id === "touch-target-policy");
+    assert.ok(policyOption, "legacy touch values should produce a focused policy repair option");
+    assert.strictEqual(policyOption.tool, "apply_ds_config_responsive_spacing_repairs");
+    assert.deepStrictEqual(policyOption.applyInput.updates, [
+      {
+        token: "space/touch/min",
+        values: { Desktop: 44 },
+        expectedCurrentValues: { Desktop: 32 },
+      },
+      {
+        token: "space/touch/comfortable",
+        values: { Desktop: 48 },
+        expectedCurrentValues: { Desktop: 40 },
+      },
+    ]);
+    assert.ok(
+      inspected.repairPlan.designerPresentation.proposedChanges.some(change =>
+        change.token === "space/touch/min" && change.mode === "Desktop" && change.from === 32 && change.to === 44
+      ),
+      "designer presentation should show the exact touch policy change"
+    );
+
+    const applied = handleApplyDsConfigResponsiveSpacingRepairs(policyOption.applyInput);
+    assert.ok(!applied.error, "approved touch policy config repair should apply");
+    assert.strictEqual(applied.figmaChanged, false, "touch policy config repair must not mutate Figma");
+
+    const repairedDs = require("../../packages/figlets-core/src/ds-config").readDsConfig(configPath);
+    const reinspected = inspectDsTokenGapsFromConfigAndFigmaData(repairedDs, touchSnapshot, {
+      configPath,
+      categories: ["spacing-semantics"],
+    });
+    assert.ok(
+      !reinspected.repairPlan.reviewOptions.some(option => option.id === "touch-target-policy"),
+      "fresh inspection should clear the config policy repair after apply"
+    );
+    const aliasOption = reinspected.repairPlan.reviewOptions.find(option => option.id === "semantic-spacing-aliases");
+    assert.ok(aliasOption, "fresh inspection should route the Figma half through the existing exact alias flow");
+    assert.deepStrictEqual(
+      aliasOption.applyInput.spacing_semantic_repairs.map(repair => ({
+        name: repair.name,
+        modes: repair.updates.map(update => update.modeName),
+        targets: repair.updates.map(update => update.toAliasName),
+      })),
+      [
+        { name: "space/touch/comfortable", modes: ["Desktop"], targets: ["space/48"] },
+        { name: "space/touch/min", modes: ["Desktop"], targets: ["space/44"] },
+      ],
+      "reinspection should emit only the exact touch alias retargets"
+    );
+  }
+
+  {
     const configDrift = inspectDsTokenGapsFromConfigAndFigmaData(DS, {
       collections: [
         {

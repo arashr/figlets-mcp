@@ -1,6 +1,6 @@
 # Designer export-DESIGN.md prompt
 
-Paste this into a fresh agent thread (Claude, Codex, or any agent connected to the Figlets MCP server) when the designer wants a portable `DESIGN.md` describing their current design-system setup — usually to hand to coding agents, share with another team, or check into a code repo.
+Paste this into a fresh agent thread (Claude, Codex, or any agent connected to the Figlets MCP server) when the designer wants a portable `DESIGN.md` describing their current design-system setup, usually to hand to coding agents, share with another team, or check into a code repo.
 
 The prompt assumes the agent has MCP access to `export_design_md`. If the agent has only the CLI, fall back to `npm run figlets:export-design-md`.
 
@@ -20,6 +20,8 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 > - Pull a fresh snapshot from my Figma file.
 > - Refresh `design-system.config.js` from that snapshot, or create a local snapshot-derived config if this file does not have one yet.
 > - Write a portable `DESIGN.md` to the active code workspace's `specs/DESIGN.md` path when the host exposes that workspace root, falling back to the MCP server working directory or Figlets local config folder if needed.
+> - Write `figlets-design.json` beside `DESIGN.md` by default. `DESIGN.md` is the Google-standard, normative handoff. The JSON file is an optional, fingerprinted Figlets sidecar for lossless re-import of details that the standard cannot represent.
+> - Validate the generated document with pinned `@google/design.md` 0.4.0 before writing it. Errors and meaningful warnings block export. Expected orphaned-token warnings remain visible but do not block export.
 >
 > You **can't** from this chat:
 > - Fill in context Figma does not encode, such as implementation platform or exact CSS breakpoint widths, unless I answer those gap questions.
@@ -48,11 +50,21 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 > - Save inside the active code workspace and the host exposes its root → pass `project_path`.
 > - Save to a custom path → pass `output_path`.
 > - Skip syncing (e.g. I want yesterday's snapshot) → pass `skip_sync: true`.
+> - Export only the standard document and omit the lossless sidecar → pass `include_sidecar: false`.
+> - If export reports a missing or placeholder name such as `Untitled`, ask me for the exact design-system name in one question, then retry with `design_system_name`. Do not guess from the repository or package name.
+>
+> Before writing, explain that the default result is two sibling files in the same folder:
+> - `DESIGN.md` is the portable source of truth for coding agents and standard tooling.
+> - `figlets-design.json` is optional Figlets round-trip data. It records a hash of `DESIGN.md`, so Figlets ignores it if the Markdown is edited without regenerating the sidecar.
+>
+> The sidecar does not override `DESIGN.md` for general consumers. A user can omit or delete it when they do not need lossless Figlets re-import.
 >
 > ### Step 4 — Report what happened
 >
 > After it returns, summarize in one short paragraph:
 > - Where `DESIGN.md` landed (full absolute path).
+> - Whether `figlets-design.json` was written beside it, including its full absolute path.
+> - The Google DESIGN.md 0.4.0 validation summary and any tolerated orphaned-token warnings.
 > - Whether it used the project `specs/` path or fell back to the Figlets local/config folder.
 > - Whether any config values were refreshed from Figma, and roughly how many.
 > - Whether Figlets had to create a local snapshot-derived config because none existed.
@@ -81,6 +93,6 @@ The prompt assumes the agent has MCP access to `export_design_md`. If the agent 
 ## Notes for the agent author (you, reading this in the future)
 
 - `export_design_md` chains `sync_figma_data` → config refresh or snapshot bootstrap → `writeDesignMdFromDsConfig`. By default it syncs and refreshes. `skip_sync` and `figmaDataPath` short-circuit the sync; `dry_run` short-circuits both writes.
-- DESIGN.md remains an **interchange artifact**, not a source of truth. The prepared config and Figma variables stay authoritative. See `docs/decisions.md` for the rationale (entry dated 2026-05-08).
-- The CLI fallback `npm run figlets:export-design-md` calls the same handler. Use it when the MCP server isn't connected. Supports `--config`, `--output`, `--figma-data`, `--skip-sync`, `--dry-run`, `--json`.
+- DESIGN.md is the normative interchange artifact for coding agents and standard tooling. The prepared config and Figma variables remain authoritative upstream sources for regeneration. `figlets-design.json` is only a verified lossless re-import companion.
+- The CLI fallback `npm run figlets:export-design-md` calls the same handler. Use it when the MCP server isn't connected. It supports `--name` for placeholder metadata and `--no-sidecar` for a standard-only export.
 - For new files (no config yet), `export_design_md` should create a local snapshot-derived config from existing Figma variables and return `needsDesignerInput` for context it cannot infer. Report the export first, then ask only those gap questions if the designer wants a more complete handoff.

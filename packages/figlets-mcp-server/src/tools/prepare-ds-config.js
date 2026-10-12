@@ -15,6 +15,7 @@
 const path = require('path');
 const fs = require('fs');
 const { getConfigPathGuardError } = require('../utils/paths.js');
+const { prepareAndWriteDesignMdArtifact } = require('../utils/design-md-artifact.js');
 
 const applyDsConfigContrastRepairsTool = {
   name: 'apply_ds_config_contrast_repairs',
@@ -407,18 +408,17 @@ function _writeSetupPreview(configPath, ds) {
   return previewPath;
 }
 
-function handlePrepareDsConfig({ config_path }) {
+async function handlePrepareDsConfig({ config_path }) {
   const resolvedPath = path.resolve(config_path);
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return guardError;
 
   let runDsPipeline;
-  let designMdIntake;
   try {
-    ({ runDsPipeline, designMdIntake } = require("../figlets-core.js").dsConfig);
+    ({ runDsPipeline } = require("../figlets-core.js").dsConfig);
   } catch (e) {
     // Fallback: direct path for development environments
-    ({ runDsPipeline, designMdIntake } = require("../figlets-core.js").dsConfig);
+    ({ runDsPipeline } = require("../figlets-core.js").dsConfig);
   }
 
   let result;
@@ -456,12 +456,24 @@ function handlePrepareDsConfig({ config_path }) {
     pairSuggestions: pairRepairSuggestions || pairSuggestions,
   });
   const contrastRepairOptions = _contrastRepairOptions(pairRepairSuggestions || pairSuggestions);
-  let designMdPath = null;
+  let designMdExport = null;
   try {
-    if (designMdIntake && designMdIntake.writeDesignMdFromDsConfig) {
-      designMdPath = designMdIntake.writeDesignMdFromDsConfig(resolvedPath);
-    }
-  } catch (_) {}
+    const artifact = await prepareAndWriteDesignMdArtifact({
+      ds,
+      outputPath: path.join(path.dirname(resolvedPath), 'DESIGN.md'),
+      renderOptions: { sourcePath: resolvedPath },
+      includeSidecar: true,
+    });
+    designMdExport = {
+      path: artifact.artifacts.path,
+      written: artifact.written,
+      sidecarPath: artifact.written ? artifact.artifacts.sidecar.path : null,
+      lint: artifact.lint,
+    };
+  } catch (err) {
+    designMdExport = { path: null, written: false, error: err.message };
+  }
+  const designMdBlocked = !designMdExport || !designMdExport.written;
 
   const staleWarning = staleSemantics && staleSemantics.length > 0
     ? `⚠️  ${staleSemantics.length} semantic token(s) reference ramp(s) not in the current brand config. ` +
@@ -506,9 +518,9 @@ function handlePrepareDsConfig({ config_path }) {
     },
     setupApprovalPreview,
     setupPreview: previewPath ? { svgPath: previewPath } : null,
-    designMdExport: designMdPath ? { path: designMdPath } : null,
+    designMdExport,
     configPath: resolvedPath,
-    readyToBuild: failCount === 0 && needsDesignerInput.length === 0 && (!staleSemantics || staleSemantics.length === 0),
+    readyToBuild: failCount === 0 && needsDesignerInput.length === 0 && (!staleSemantics || staleSemantics.length === 0) && !designMdBlocked,
     message: staleWarning
       ? staleWarning
       : failCount > 0
@@ -517,6 +529,8 @@ function handlePrepareDsConfig({ config_path }) {
         : `Config computed but ${failCount} semantic pair(s) fail contrast and no exact contrastRepairOptions were found. Do not build yet; rerun prepare_ds_config once, then ask for a concrete alias, brand hex, or color scale change if it still fails.`)
       : needsDesignerInput.length > 0
       ? `Config computed but ${needsDesignerInput.join(', ')} need designer input before building.`
+      : designMdBlocked
+      ? 'Config computed but DESIGN.md validation failed. Resolve designMdExport.lint.blockingFindings before building.'
       : 'Config ready. Call apply_ds_setup to build all collections in Figma.',
   };
 }

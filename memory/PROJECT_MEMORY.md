@@ -4,6 +4,20 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-09-22] DESIGN.md 0.4.0 export is standard-first, verified, and lossless by sidecar
+
+**Shipped contract:** New exports use pinned Google DESIGN.md 0.4.0. Standard YAML and prose are normative. Responsive typography and spacing are emitted per mode, pill radius is retained, elevation is shown as CSS `box-shadow`, and semantic color evidence includes both WCAG ratio and APCA Lc. The configured contrast algorithm still controls pass or fail. Exempt pairs remain explicitly exempt.
+
+**Round trip:** The exporter writes optional `figlets-design.json` beside `DESIGN.md` by default. The sidecar contains the lossless Figlets DS plus a SHA-256 fingerprint of the Markdown. Figlets uses it only when the fingerprint matches. Legacy inline `figlets-extended` blocks remain readable but are no longer generated.
+
+**Regression fixes from the real shop export:** Placeholder `Untitled` names block export until the exact `design_system_name` is supplied. Project package names are not assumed to be design-system names. Primary brand inference now follows semantic `brand` or `primary` aliases before ramp order, which keeps an info-only blue ramp from displacing grape brand semantics. Generated `touch/min` is 44px at all breakpoints, with `touch/compact` at 32px for intentional dense controls.
+
+**Validation:** Export gates on `@google/design.md` 0.4.0 errors and meaningful warnings. Expected orphaned-token warnings remain visible and non-blocking. A Figlets accessibility finding blocks export when any `touch/min` mode is below 44px.
+
+**P0 flow integrity:** `prepare_ds_config`, `apply_ds_setup`, and `export_design_md` now share the same artifact builder and validation gate. Preparation and setup write the default sidecar too. Snapshot bootstrap and generated setup share the same 44/48/32 touch defaults. Policy checks require `touch/min` for every configured mode and keep `touch/comfortable` at or above it. `apply_ds_setup` validates before the bridge write.
+
+---
+
 ### [2026-08-04 — Nested component documentation is finite and ownership-safe]
 
 **Shipped contract:** `inspect_component` returns a bounded, deduplicated, leaf-first dependency list and recognizes existing project specs. Designers can document only the selected component, review missing dependencies one by one with a session-scoped skip, or approve one exact finite list. Full-plan execution targets each component by ID without changing Figma selection and documents the selected parent last.

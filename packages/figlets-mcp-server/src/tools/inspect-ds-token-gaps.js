@@ -7,6 +7,7 @@ const {
   designSystemInventory,
   emptyDesignSystemPrompt,
 } = require("../figlets-core.js");
+const { getTouchSemanticDefaults } = require("../figlets-core.js").dsConfig;
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/paths.js");
 const {
@@ -49,7 +50,7 @@ const inspectDsTokenGapsTool = {
 const applyDsConfigResponsiveSpacingRepairsTool = {
   name: "apply_ds_config_responsive_spacing_repairs",
   description:
-    "Applies designer-approved responsive semantic spacing values to design-system.config.js only. Use the exact configRepairApplyInput emitted by inspect_ds_token_gaps.repairPlan.reviewOptions[id=responsive-spacing-values] before applying the paired Figma alias operations. Never mutates Figma.",
+    "Applies designer-approved semantic spacing values to design-system.config.js only. Use the exact payload emitted by inspect_ds_token_gaps review options for responsive spacing or touch-target policy repair, then reinspect before applying paired Figma alias operations. Never mutates Figma.",
   inputSchema: {
     type: "object",
     properties: {
@@ -77,7 +78,7 @@ const applyDsConfigResponsiveSpacingRepairsTool = {
           required: ["token", "values"],
           additionalProperties: false
         },
-        description: "Approved responsive spacing config updates copied from inspect_ds_token_gaps."
+        description: "Approved semantic spacing config updates copied from inspect_ds_token_gaps."
       }
     },
     required: ["config_path", "updates"],
@@ -255,6 +256,56 @@ function _spacingSemanticArray(ds, key) {
   return Array.isArray(values) ? values : null;
 }
 
+function _buildTouchPolicyReview(ds) {
+  const modes = _foundationModesForKind(ds, "spacing");
+  const semantic = ds && ds.spacing && ds.spacing.semantic;
+  const minimum = semantic && Array.isArray(semantic["touch/min"]) ? semantic["touch/min"] : null;
+  const comfortable = semantic && Array.isArray(semantic["touch/comfortable"])
+    ? semantic["touch/comfortable"]
+    : null;
+  if (!minimum || !modes.length) return null;
+
+  const defaults = getTouchSemanticDefaults(modes.length);
+  const updates = [];
+  const changes = [];
+
+  function addUpdate(key, current, targetValues, predicate) {
+    if (!current) return;
+    const values = {};
+    const expectedCurrentValues = {};
+    for (let index = 0; index < modes.length; index += 1) {
+      const before = Number(current[index]);
+      if (!Number.isFinite(before) || !predicate(before, index)) continue;
+      const after = targetValues[index];
+      values[modes[index]] = after;
+      expectedCurrentValues[modes[index]] = before;
+      changes.push({ token: "space/" + key, mode: modes[index], before, after });
+    }
+    if (Object.keys(values).length) {
+      updates.push({ token: "space/" + key, values, expectedCurrentValues });
+    }
+  }
+
+  addUpdate("touch/min", minimum, defaults["touch/min"], before => before < defaults["touch/min"][0]);
+  const correctedMinimum = modes.map((mode, index) => {
+    const current = Number(minimum[index]);
+    return Number.isFinite(current) ? Math.max(current, defaults["touch/min"][index]) : null;
+  });
+  addUpdate("touch/comfortable", comfortable, defaults["touch/comfortable"], (before, index) => {
+    const requiredMinimum = correctedMinimum[index];
+    return Number.isFinite(requiredMinimum) && before < requiredMinimum;
+  });
+
+  if (!updates.length) return null;
+  return {
+    updates,
+    changes,
+    designerSummary: "Figlets found " + changes.length + " outdated touch-target mode value"
+      + (changes.length === 1 ? "" : "s")
+      + ". This first updates only the approved local config values. No Figma values change in this step. Reinspect afterward so the existing semantic spacing alias flow can preview exact Figma alias retargets before a separate approved apply.",
+  };
+}
+
 function handleApplyDsConfigResponsiveSpacingRepairs(args) {
   args = args || {};
   const resolvedPath = path.resolve(args.config_path || "");
@@ -265,7 +316,7 @@ function handleApplyDsConfigResponsiveSpacingRepairs(args) {
   if (!updates.length) {
     return {
       error: "No responsive spacing config updates were provided.",
-      hint: "Pass inspect_ds_token_gaps.repairPlan.reviewOptions[id=responsive-spacing-values].configRepairApplyInput after designer approval.",
+      hint: "Pass the exact apply payload from the selected inspect_ds_token_gaps responsive-spacing or touch-target-policy review option after designer approval.",
     };
   }
 
@@ -280,9 +331,9 @@ function handleApplyDsConfigResponsiveSpacingRepairs(args) {
   }
 
   const modes = _foundationModesForKind(ds, "spacing");
-  if (modes.length < 2) {
+  if (modes.length < 1) {
     return {
-      error: "Config does not define enough spacing breakpoint modes for responsive spacing repairs.",
+      error: "Config does not define a spacing mode for semantic spacing repairs.",
       modes,
       hint: "Run prepare_ds_config or define DS.breakpoints.modes before approving responsive spacing values.",
     };
@@ -364,7 +415,7 @@ function handleApplyDsConfigResponsiveSpacingRepairs(args) {
       modes: item.appliedModes,
     })),
     nextTool: "inspect_ds_token_gaps",
-    message: "Applied approved responsive semantic spacing values to the local design-system.config.js only. No Figma changes were made. Rerun inspect_ds_token_gaps, then preview/apply the paired Figma alias operations if still ready.",
+    message: "Applied approved semantic spacing values to the local design-system.config.js only. No Figma changes were made. Rerun inspect_ds_token_gaps, then preview/apply the paired Figma alias operations if still ready.",
   };
 }
 
@@ -841,6 +892,9 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   });
   const spacingAliasRepairByName = new Map(spacingAliasPlan.repairs.map(item => [item.name, item]));
   const spacingAliasDriftByName = new Map(spacingAliasPlan.configDrift.map(item => [item.name, item]));
+  const touchPolicyReview = categories.indexOf("spacing-semantics") >= 0
+    ? _buildTouchPolicyReview(ds)
+    : null;
 
   const tokenGaps = [];
   const existingUpdates = [];
@@ -1165,6 +1219,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || [],
       spacingAliasRepairGaps
     ),
+    touchPolicyReview,
   });
   const summary = {
     emptyDesignSystem: emptyDesignSystem.isEmpty,
@@ -1179,10 +1234,12 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     inspectedCategoryCount: supportedCategories.length,
     plannedCategoryCount: categoriesWithGaps.length,
     responsiveSpacingAdvisoryCount: (spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || []).length,
+    touchPolicyDriftCount: touchPolicyReview ? touchPolicyReview.changes.length : 0,
   };
 
   const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.staleStyleCount
-    + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount;
+    + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount
+    + summary.touchPolicyDriftCount;
   return {
     message: _composeMessage(summary),
     semanticAliasRepairModel: spacingAliasPlan.model || SEMANTIC_ALIAS_REPAIR_MODEL,
@@ -1198,6 +1255,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       spacingAliasRepairs: spacingAliasRepairGaps.slice(0, 10),
       spacingAliasConfigDrift: spacingAliasConfigDriftGaps.slice(0, 10),
       spacingResponsiveModeAdvisories: (spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || []).slice(0, 10),
+      touchPolicyDrift: touchPolicyReview ? touchPolicyReview.changes : [],
       unsupportedCategories,
     },
     tokenGaps,
@@ -1257,7 +1315,8 @@ function _buildRepairPlan(context) {
     + (context.missingStyles || []).length
     + (context.staleStyles || []).length
     + (context.typeMismatches || []).length
-    + (context.spacingAliasRepairs || []).length;
+    + (context.spacingAliasRepairs || []).length
+    + (context.touchPolicyReview ? context.touchPolicyReview.changes.length : 0);
   const advisoryTotal = (context.spacingResponsiveModeAdvisories || []).length;
   const hasProductGapNotes = (context.missingCapabilityNotes || []).some(note => note && note.productGap);
   const previewInput = {
@@ -1328,6 +1387,7 @@ function _buildRepairPlan(context) {
     foundationCollections,
     spacingSemanticRepairs: applyInput.spacing_semantic_repairs || [],
     effectStyleRepairs,
+    touchPolicyReview: context.touchPolicyReview || null,
   });
 
   return {
@@ -1376,6 +1436,7 @@ function _buildRepairPlan(context) {
       effectStyleRepairs: effectStyleRepairs.length,
       typeMismatches: (context.typeMismatches || []).length,
       spacingAliasConfigDrift: (context.spacingAliasConfigDrift || []).length,
+      touchPolicyDrift: context.touchPolicyReview ? context.touchPolicyReview.changes.length : 0,
       total,
       applySupportedCategories: applyCategories.length,
       optionalTotal: 0,
@@ -1391,6 +1452,7 @@ function _buildRepairPlan(context) {
           : "EMPTY FILE FIRST: Tell the designer this file has no design-system collections, variables, text styles, or effect styles, and ask whether they want to set up a new design-system foundation before presenting ordinary token-gap repair choices. ")
         : "")
         + "STOP before any Figma write. This inspect pass is read-only. For designer-facing review, present repairPlan.reviewOptions as separate choices and run only the selected preview. Do not run repairPlan.previewInput and primitiveRepairPlan.previewInput together as one combined token preview. Summarize repairPlan.designerPresentation in plain language, then wait for explicit designer approval (yes / proceed / apply). A routing goal phrase is not approval. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs with foundationRepairPlan.applyInput, then sync and reinspect, then stop before any primitive or semantic token write. Apply update_ds_primitives or update_ds_tokens only after a fresh plan and a separate approval. Do not invent payloads. Other categories remain dry-run/product-gap scope unless primitiveRepairPlan covers them."
+        + (context.touchPolicyReview ? " For touch-target policy drift, apply only reviewOptions[id=touch-target-policy].applyInput to the local config after approval, then reinspect and use the fresh exact semantic-spacing alias repair preview before requesting separate approval for the Figma write." : "")
         + (advisoryTotal ? " Report responsive spacing mode advisories as responsive setup validation work when modes were just created, or designer validation items when modes already existed. They are not token gaps and not apply-ready repairs." : "")
       : advisoryTotal
         ? "No update_ds_tokens payload is ready from this read-only pass. Report responsive spacing mode advisories as responsive setup validation work when modes were just created, or designer validation items when modes already existed. They are not token gaps, not product/tool gaps, and not apply-ready repairs. Do not write custom Figma scripts or invent token updates."
@@ -1420,11 +1482,27 @@ function _buildReviewOptions({
   foundationCollections,
   spacingSemanticRepairs,
   effectStyleRepairs,
+  touchPolicyReview,
 }) {
   const options = [];
   const configPath = context.configPath;
   const applyCategorySet = new Set(applyCategories || []);
   const responsiveSpacingReview = context.responsiveSpacingReview || null;
+
+  if (touchPolicyReview && touchPolicyReview.updates.length) {
+    options.push(_reviewOption(
+      "touch-target-policy",
+      "Repair outdated touch-target values",
+      "config-policy",
+      "apply_ds_config_responsive_spacing_repairs",
+      null,
+      {
+        config_path: configPath,
+        updates: touchPolicyReview.updates,
+      },
+      touchPolicyReview.designerSummary
+    ));
+  }
 
   if ((foundationCollections || []).length) {
     options.push(_reviewOption(
@@ -1849,6 +1927,7 @@ function _buildDesignerPresentation(context, total) {
   const spacingAliasConfigDrift = context.spacingAliasConfigDrift || [];
   const spacingResponsiveModeAdvisories = context.spacingResponsiveModeAdvisories || [];
   const responsiveSpacingReview = context.responsiveSpacingReview || null;
+  const touchPolicyReview = context.touchPolicyReview || null;
   const notes = context.missingCapabilityNotes || [];
   const foundationRepairs = context.foundationRepairs || [];
   const emptyDesignSystem = context.emptyDesignSystem || null;
@@ -1926,6 +2005,15 @@ function _buildDesignerPresentation(context, total) {
           + (changes.length > 6 ? ", and more." : "."),
       });
     }
+    if (touchPolicyReview && touchPolicyReview.changes.length) {
+      sections.push({
+        title: "Touch-target policy repair",
+        message: touchPolicyReview.designerSummary + " Proposed config changes: "
+          + touchPolicyReview.changes.map(change =>
+            change.token + " [" + change.mode + "] " + change.before + "px -> " + change.after + "px"
+          ).join(", ") + ".",
+      });
+    }
     if ((context.spacingMissingResponsiveModes || []).length) {
       sections.push({
         title: "Spacing breakpoint modes required",
@@ -1985,6 +2073,7 @@ function _buildDesignerPresentation(context, total) {
     sourceFields: [
       "repairPlan.previewInput",
       "repairPlan.applyInput",
+      "repairPlan.reviewOptions",
       "repairPlan.missingCapabilityNotes",
     ],
     summaryCounts: {
@@ -1996,6 +2085,7 @@ function _buildDesignerPresentation(context, total) {
       productGaps: notes.filter(note => note.productGap).length,
       spacingAliasRepairs: spacingAliasRepairs.length,
       spacingResponsiveModeAdvisories: spacingResponsiveModeAdvisories.length,
+      touchPolicyDrift: touchPolicyReview ? touchPolicyReview.changes.length : 0,
       responsiveSpacingSuggestionOperations: responsiveSpacingReview && responsiveSpacingReview.operations
         ? responsiveSpacingReview.operations.length
         : 0,
@@ -2011,7 +2101,13 @@ function _buildDesignerPresentation(context, total) {
           : "alias-to-existing-primitive",
       sourceKind: _spacingRepairSourceKind(update),
       toAlias: update.toAliasName,
-    }))), []),
+    }))), []).concat(touchPolicyReview ? touchPolicyReview.changes.map(change => ({
+      token: change.token,
+      mode: change.mode,
+      action: "update-config-touch-policy-value",
+      from: change.before,
+      to: change.after,
+    })) : []),
   };
 }
 
@@ -2049,7 +2145,8 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 
 function _composeMessage(summary) {
   const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount
-    + (summary.staleVariableCount || 0) + (summary.staleStyleCount || 0) + (summary.configDriftCount || 0);
+    + (summary.staleVariableCount || 0) + (summary.staleStyleCount || 0) + (summary.configDriftCount || 0)
+    + (summary.touchPolicyDriftCount || 0);
   if (summary.emptyDesignSystem) {
     const setupMessage = "This file has no design-system variables or local styles yet. Ask whether the designer wants to set up or continue the design-system foundation before presenting ordinary token-gap repair choices.";
     if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
@@ -2070,6 +2167,7 @@ function _composeMessage(summary) {
   if (summary.typeMismatchCount) parts.push(`${summary.typeMismatchCount} type mismatch${summary.typeMismatchCount === 1 ? "" : "es"}`);
   if (summary.staleVariableCount) parts.push(`${summary.staleVariableCount} alias repair${summary.staleVariableCount === 1 ? "" : "s"}`);
   if (summary.configDriftCount) parts.push(`${summary.configDriftCount} config drift mode${summary.configDriftCount === 1 ? "" : "s"}`);
+  if (summary.touchPolicyDriftCount) parts.push(`${summary.touchPolicyDriftCount} outdated touch-target mode value${summary.touchPolicyDriftCount === 1 ? "" : "s"}`);
   if (summary.responsiveSpacingAdvisoryCount) parts.push(`${summary.responsiveSpacingAdvisoryCount} responsive spacing advisory${summary.responsiveSpacingAdvisoryCount === 1 ? "" : "ies"}`);
   if (summary.unsupportedCategoryCount) parts.push(`${summary.unsupportedCategoryCount} unsupported categor${summary.unsupportedCategoryCount === 1 ? "y" : "ies"}`);
   const gapSummary = `Figlets found ${parts.join(", ")} in the config-backed token planner.`;

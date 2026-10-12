@@ -42,8 +42,18 @@ function makeDs(overrides) {
   assert.ok(ds.primitives.spacing.some(s => s[0] === '100' && s[1] === 8), 'space/100 (8px base) must be present');
   assert.ok(ds.primitives.spacing.some(s => s[0] === '550' && s[1] === 44), 'space/550 (touch target) must be present');
   assert.ok(ds.spacing.semantic['touch/min'],            'touch/min semantic token must exist');
+  assert.deepStrictEqual(ds.spacing.semantic['touch/min'], [44, 44, 44], 'touch/min must remain 44px at every breakpoint');
+  assert.deepStrictEqual(ds.spacing.semantic['touch/compact'], [32, 32, 32], 'dense controls must use an explicit compact token');
+  assert.deepStrictEqual(ds.spacing.semantic['touch/comfortable'], [48, 48, 48], 'comfortable targets must not fall below touch/min');
   assert.strictEqual(ds.spacing.radius.md, 8,            'radius.md should be 8 for 8px base');
   assert.ok(ds.typography.scale['display/lg'],           'display/lg must be in scale');
+}
+
+{
+  const input = makeDs({ breakpoints: { modes: ['Mobile', 'Tablet', 'Desktop', 'Wide'], tier: 4 } });
+  const { ds } = computeDsConfig(input);
+  assert.deepStrictEqual(ds.spacing.semantic['touch/min'], [44, 44, 44, 44], 'wide mode should receive exactly one 44px touch minimum');
+  assert.deepStrictEqual(ds.spacing.semantic['touch/comfortable'], [48, 48, 48, 48], 'wide mode should receive exactly one comfortable value');
 }
 
 // Common Material type-scale labels normalize to the supported preset
@@ -686,6 +696,7 @@ function makeDs(overrides) {
 // ── handlePrepareDsConfig — missing config returns error ─────────────────────
 {
   const { handlePrepareDsConfig } = require('../../packages/figlets-mcp-server/src/tools/prepare-ds-config.js');
-  const result = handlePrepareDsConfig({ config_path: '/tmp/nonexistent-figlets-config-zz.js' });
-  assert.ok(result.error, 'Expected error object for missing config');
+  module.exports = handlePrepareDsConfig({ config_path: '/tmp/nonexistent-figlets-config-zz.js' }).then(result => {
+    assert.ok(result.error, 'Expected error object for missing config');
+  });
 }

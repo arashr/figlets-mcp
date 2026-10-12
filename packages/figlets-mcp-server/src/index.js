@@ -386,9 +386,11 @@ server.tool(
     config_path: z.string().optional().describe("Optional absolute path to design-system.config.js. Defaults to the active file config. If the file is missing, export_design_md can create a local snapshot-derived config from Figma variables."),
     output_path: z.string().optional().describe("Optional absolute path for the DESIGN.md output. Overrides project_path and the working-directory default."),
     project_path: z.string().optional().describe("Optional absolute path to the active code workspace/project root. Used for the default specs/DESIGN.md output when output_path is omitted."),
+    design_system_name: z.string().optional().describe("Exact design-system or product name to use when the stored project name is missing or a known placeholder such as Untitled."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. When provided, sync is skipped."),
     skip_sync: z.boolean().optional().describe("When true, skip the sync_figma_data step and use whatever snapshot is already on disk."),
-    dry_run: z.boolean().optional().describe("When true, do not write design-system.config.js or DESIGN.md; report what would change, including any snapshot bootstrap that would be possible.")
+    dry_run: z.boolean().optional().describe("When true, do not write design-system.config.js or DESIGN.md; report what would change, including any snapshot bootstrap that would be possible."),
+    include_sidecar: z.boolean().optional().describe("When true or omitted, write lossless figlets-design.json beside DESIGN.md. Set false for a standard-only export.")
   },
   async (args) => {
     try {
@@ -502,7 +504,7 @@ server.tool(
   },
   async (args) => {
     try {
-      const result = handlePrepareDsConfig(args);
+      const result = await handlePrepareDsConfig(args);
       if (result.error) {
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

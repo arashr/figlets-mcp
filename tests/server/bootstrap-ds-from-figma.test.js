@@ -80,20 +80,52 @@ module.exports = (async () => {
     ];
     // primary > brand > first
     const brand = detectBrand(ramps);
-    assert.deepStrictEqual(brand, [{ name: "primary", role: "primary", step: 400 }]);
+    assert.deepStrictEqual(brand, [{ name: "primary", role: "primary", step: 400, hex: "#4D80E6" }]);
   }
   {
     const ramps = [
       { folder: "color/neutral", steps: [[100, 1, 1, 1]] },
       { folder: "color/brand",   steps: [[700, 0.9, 0.1, 0.1]] },
     ];
-    assert.deepStrictEqual(detectBrand(ramps), [{ name: "brand", role: "primary", step: 700 }]);
+    assert.deepStrictEqual(detectBrand(ramps), [{ name: "brand", role: "primary", step: 700, hex: "#E61A1A" }]);
   }
   {
     const ramps = [{ folder: "color/teal", steps: [[300, 0.1, 0.5, 0.5]] }];
-    assert.deepStrictEqual(detectBrand(ramps), [{ name: "teal", role: "primary", step: 300 }]);
+    assert.deepStrictEqual(detectBrand(ramps), [{ name: "teal", role: "primary", step: 300, hex: "#1A8080" }]);
   }
   assert.deepStrictEqual(detectBrand([]), []);
+  {
+    const ramps = [
+      { folder: "color/blue", steps: [[500, 0.23, 0.51, 0.96]] },
+      { folder: "color/grape", steps: [[500, 0.65, 0.29, 0.93]] },
+    ];
+    const snapshot = {
+      variables: [
+        makePrim("blue-500", "color/blue/500", 0.23, 0.51, 0.96),
+        makePrim("grape-500", "color/grape/500", 0.65, 0.29, 0.93),
+        {
+          id: "bg-brand",
+          name: "color/bg/brand",
+          resolvedType: "COLOR",
+          valuesByMode: { light: { type: "VARIABLE_ALIAS", id: "grape-500" } },
+        },
+      ],
+    };
+    assert.strictEqual(detectBrand(ramps, snapshot)[0].name, "grape", "semantic brand aliases must outrank alphabetical ramp order");
+  }
+
+  {
+    const typography = inferTypographyFromSnapshot({
+      variables: [],
+      collections: [],
+      textStyles: [
+        { name: "type/display/lg", fontName: { family: "Bricolage Grotesque", style: "Regular" }, fontSize: 48, lineHeight: { unit: "PIXELS", value: 56 }, letterSpacing: { unit: "PIXELS", value: -0.02 } },
+        { name: "type/body/md", fontName: { family: "Space Grotesk", style: "Regular" }, fontSize: 16, lineHeight: { unit: "PIXELS", value: 24 }, letterSpacing: { unit: "PIXELS", value: 0.02 } },
+      ],
+    });
+    assert.strictEqual(typography.scale["display/lg"].family, "Bricolage Grotesque", "display styles must retain their bound family");
+    assert.strictEqual(typography.scale["body/md"].family, "Space Grotesk", "body styles must retain their bound family");
+  }
 
   // ── spacing / typography / elevation inference ─────────────────────────
   {
@@ -229,6 +261,9 @@ module.exports = (async () => {
 
     const ds = bootstrapDsFromSnapshot(snapshot);
     assert.deepStrictEqual(ds.breakpoints, { modes: ["Desktop"], tier: 1 });
+    assert.deepStrictEqual(ds.spacing.semantic["touch/min"], [44], "single-mode bootstrap should add one shared minimum value");
+    assert.deepStrictEqual(ds.spacing.semantic["touch/comfortable"], [48], "single-mode bootstrap should add one shared comfortable value");
+    assert.deepStrictEqual(ds.spacing.semantic["touch/compact"], [32], "single-mode bootstrap should add one shared compact value");
   }
 
   // Color-only theme modes are not evidence of responsive breakpoints.

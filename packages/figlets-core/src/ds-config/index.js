@@ -1,11 +1,12 @@
 'use strict';
 
-const { computeDsConfig, normalizeTypographyPreset } = require('./compute-ds-config');
+const { computeDsConfig, getTouchSemanticDefaults, normalizeTypographyPreset } = require('./compute-ds-config');
 const { generateColorRamps }     = require('./generate-color-ramps');
 const { validateSemanticPairs }  = require('./validate-semantic-pairs');
 const { generatePrimitivesData } = require('./generate-primitives-data');
 const semanticContrast           = require('./semantic-contrast');
 const designMdIntake             = require('./design-md-intake');
+const designSystemPolicy         = require('./design-system-policy');
 
 /**
  * readDsConfig(configPath) — reads and evaluates a design-system.config.js file.
@@ -131,6 +132,7 @@ function runDsPipeline(configPath) {
 
 module.exports = {
   computeDsConfig,
+  getTouchSemanticDefaults,
   normalizeTypographyPreset,
   generateColorRamps,
   validateSemanticPairs,
@@ -140,4 +142,5 @@ module.exports = {
   writeDsConfig,
   runDsPipeline,
   designMdIntake,
+  designSystemPolicy,
 };

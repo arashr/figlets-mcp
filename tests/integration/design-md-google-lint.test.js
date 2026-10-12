@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const { designMdIntake } = require('../../packages/figlets-core/src/ds-config/index.js');
 
@@ -106,28 +109,26 @@ module.exports = (async () => {
   const missingPrimary = report.findings.find(f => f.message && /no .primary./i.test(f.message) && /defined/i.test(f.message));
   assert.ok(!missingPrimary, 'Bare `primary` brand color should be emitted: ' + (missingPrimary && missingPrimary.message));
 
-  // Round-trip: parsing the exported markdown should reconstruct the DS via the
-  // figlets-extended block, including fields that are not expressible in the
-  // standard front matter (responsive size triples, mode-specific aliases,
-  // contrast algorithm).
-  const roundTrip = designMdIntake.designMdToDsConfig(markdown);
-  assert.strictEqual(roundTrip.parsed.extended, true, 'Round-trip should detect the figlets-extended block.');
-  assert.strictEqual(roundTrip.ds.color.contrastAlgorithm, 'apca', 'contrastAlgorithm must round-trip.');
-  assert.strictEqual(roundTrip.ds.color.semantics.pairs.length, 2, 'Semantic pairs must round-trip.');
-  assert.deepStrictEqual(
-    roundTrip.ds.color.semantics.pairs[0].Dark,
-    { bg: 'color/neutral/900', text: 'color/neutral/100' },
-    'Dark-mode aliases must round-trip.'
-  );
-  assert.deepStrictEqual(
-    roundTrip.ds.typography.scale['body/md'].sizes,
-    [16, 16, 16],
-    'Responsive size triples must round-trip.'
-  );
-  assert.deepStrictEqual(
-    roundTrip.ds.spacing.semantic['component/md'],
-    [12, 14, 16],
-    'Responsive spacing triples must round-trip.'
-  );
-  assert.strictEqual(roundTrip.ds.spacing.border.default, 1, 'Border width must round-trip.');
+  assert.ok(!markdown.includes('```figlets-extended'), 'New exports must keep Figlets-only data out of the standard document.');
+  assert.ok(markdown.includes('display-lg-mobile:'), 'Responsive typography must be normative in standard YAML.');
+  assert.ok(markdown.includes('component-md-tablet: "14px"'), 'Responsive spacing must be normative in standard YAML.');
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'figlets-design-md-sidecar-'));
+  try {
+    const configPath = path.join(tmp, 'design-system.config.js');
+    const designPath = path.join(tmp, 'DESIGN.md');
+    fs.writeFileSync(configPath, 'const DS = ' + JSON.stringify(DS, null, 2) + ';\n', 'utf8');
+    designMdIntake.writeDesignMdFromDsConfig(configPath, designPath, { writeSidecar: true });
+    const sidecarPath = path.join(tmp, 'figlets-design.json');
+    assert.ok(fs.existsSync(sidecarPath), 'Lossless sidecar must be written next to DESIGN.md.');
+    const roundTrip = designMdIntake.readDesignMdAsDsConfig(designPath);
+    assert.strictEqual(roundTrip.parsed.sidecar, true, 'Round-trip should verify the sibling sidecar.');
+    assert.strictEqual(roundTrip.ds.color.contrastAlgorithm, 'apca', 'contrastAlgorithm must round-trip.');
+    assert.strictEqual(roundTrip.ds.color.semantics.pairs.length, 2, 'Semantic pairs must round-trip.');
+    assert.deepStrictEqual(roundTrip.ds.typography.scale['body/md'].sizes, [16, 16, 16], 'Responsive size triples must round-trip.');
+    assert.deepStrictEqual(roundTrip.ds.spacing.semantic['component/md'], [12, 14, 16], 'Responsive spacing triples must round-trip.');
+    assert.strictEqual(roundTrip.ds.spacing.border.default, 1, 'Border width must round-trip.');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 })();

@@ -1,5 +1,7 @@
 # Components in DESIGN.md — follow-up plan
 
+> Historical note: the inline `figlets-extended` round-trip design in this plan was superseded on 2026-09-22. New exports keep Google DESIGN.md YAML and prose normative and write optional lossless data to sibling `figlets-design.json`. References below describe the earlier implementation context only.
+
 **Purpose.** This document captures everything a future agent or contributor needs to integrate per-component design specs (`generate_component_doc` output) into the DESIGN.md export flow. It is intentionally self-contained — you should be able to read this once and have full context, without re-deriving the spec, the architecture, or the open decisions.
 
 **Status.** Not started. The current `design-md-export-flow` branch ships the DESIGN.md export + Google-spec compliance + `figlets-extended` round-trip. Components are deliberately deferred to keep that branch reviewable.

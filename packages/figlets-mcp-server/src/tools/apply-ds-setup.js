@@ -13,6 +13,10 @@
 
 const path = require('path');
 const { getConfigPathGuardError } = require('../utils/paths.js');
+const {
+  prepareDesignMdArtifact,
+  writePreparedDesignMdArtifact,
+} = require('../utils/design-md-artifact.js');
 const { bridgeStatusError, requestBridgePost } = require('../bridges/bridge-request.js');
 
 function _loadDsConfigCore() {
@@ -202,25 +206,10 @@ function _buildDsSetupPayload(core, ds) {
   };
 }
 
-function _writeDesignMdExport(configPath) {
-  try {
-    let designMdIntake;
-    try {
-      designMdIntake = require("../figlets-core.js").dsConfig.designMdIntake;
-    } catch (_) {
-      designMdIntake = require("../figlets-core.js").dsConfig.designMdIntake;
-    }
-    if (designMdIntake && designMdIntake.writeDesignMdFromDsConfig) {
-      return designMdIntake.writeDesignMdFromDsConfig(configPath);
-    }
-  } catch (_) {}
-  return null;
-}
-
-function handleApplyDsSetup({ config_path }) {
+async function handleApplyDsSetup({ config_path }) {
   const resolvedPath = path.resolve(config_path);
   const guardError = getConfigPathGuardError(resolvedPath);
-  if (guardError) return Promise.resolve(guardError);
+  if (guardError) return guardError;
 
   const core = _loadDsConfigCore();
   const readDsConfig = core.readDsConfig;
@@ -229,80 +218,104 @@ function handleApplyDsSetup({ config_path }) {
   try {
     ds = readDsConfig(resolvedPath);
   } catch (err) {
-    return Promise.resolve({
+    return {
       error: err.message,
       hint: 'Run prepare_ds_config first to compute and validate the config.',
-    });
+    };
   }
 
   // Verify the config is ready — must have color ramps and no failing pairs
   if (!ds.color || !ds.color.ramps || !ds.color.ramps.length) {
-    return Promise.resolve({
+    return {
       error: 'Config is missing DS.color.ramps. Run prepare_ds_config first.',
-    });
+    };
   }
   if (!ds.spacing || !ds.primitives) {
-    return Promise.resolve({
+    return {
       error: 'Config is missing spacing/primitives data. Run prepare_ds_config first.',
-    });
+    };
   }
 
   let validation;
   try {
     validation = core.validateSemanticPairs(ds);
   } catch (err) {
-    return Promise.resolve({
+    return {
       error: `Config is not ready to build: ${err.message}`,
       hint: 'Run prepare_ds_config and resolve setup readiness findings before apply_ds_setup.',
-    });
+    };
   }
   if ((validation.failCount || 0) > 0) {
-    return Promise.resolve({
+    return {
       error: `Config is not ready to build: ${validation.failCount} semantic color pair(s) fail contrast.`,
       failCount: validation.failCount,
       contrastRepairTool: 'apply_ds_config_contrast_repairs',
       contrastRepairOptions: _contrastRepairOptions(validation.pairSuggestions || {}),
       hint: 'Apply approved semanticPairs.contrastRepairOptions to the config, rerun prepare_ds_config, and call apply_ds_setup only when readyToBuild is true.',
-    });
+    };
   }
   const staleSemantics = _staleSemanticRefs(validation.ds || ds);
   if (staleSemantics.length) {
-    return Promise.resolve({
+    return {
       error: `Config is not ready to build: ${staleSemantics.length} semantic reference(s) point to ramps outside the current brand/utility palette.`,
       staleSemantics,
       hint: 'Run prepare_ds_config and resolve stale semantic references before apply_ds_setup.',
-    });
+    };
   }
 
   let setupPayload;
   try {
     setupPayload = _buildDsSetupPayload(core, validation.ds || ds);
   } catch (err) {
-    return Promise.resolve({
+    return {
       error: err.message || 'Generated setup primitive coverage failed.',
       primitiveCoverageErrors: err.coverageErrors || [],
       hint: 'Run prepare_ds_config again. If this persists, the generated primitive ramp and semantic setup contract are out of sync.',
-    });
+    };
   }
 
-  return requestBridgePost('/request-ds-setup', setupPayload, { timeoutMs: 185000 }).then((response) => {
-    if (response.statusCode === 200) {
-      const parsed = response.data || {};
-      const result = parsed.result || {};
-      const designMdPath = _writeDesignMdExport(resolvedPath);
-      return {
-        collections: result.collections || [],
-        skipped:     result.skipped || [],
-        message:     result.message || 'DS setup complete.',
-        designMdExport: designMdPath ? { path: designMdPath } : null,
-        configPath:  resolvedPath,
-      };
-    }
-    return bridgeStatusError(response, {
+  let preparedArtifact;
+  try {
+    preparedArtifact = await prepareDesignMdArtifact({
+      ds: validation.ds || ds,
+      outputPath: path.join(path.dirname(resolvedPath), 'DESIGN.md'),
+      renderOptions: { sourcePath: resolvedPath },
+    });
+  } catch (err) {
+    return {
+      error: 'DESIGN.md validation failed before setup: ' + err.message,
+      hint: 'Rerun prepare_ds_config and resolve the reported artifact validation problem before apply_ds_setup.',
+    };
+  }
+  if (!preparedArtifact.lint.passed) {
+    return {
+      error: 'Config is not ready to build: DESIGN.md or Figlets policy validation failed.',
+      lint: preparedArtifact.lint,
+      hint: 'Rerun prepare_ds_config and resolve designMdExport.lint.blockingFindings before apply_ds_setup.',
+    };
+  }
+
+  const response = await requestBridgePost('/request-ds-setup', setupPayload, { timeoutMs: 185000 });
+  if (response.statusCode === 200) {
+    const parsed = response.data || {};
+    const result = parsed.result || {};
+    const written = writePreparedDesignMdArtifact(preparedArtifact, { includeSidecar: true });
+    return {
+      collections: result.collections || [],
+      skipped:     result.skipped || [],
+      message:     result.message || 'DS setup complete.',
+      designMdExport: {
+        path: written.path,
+        sidecarPath: written.sidecarPath,
+        lint: preparedArtifact.lint,
+      },
+      configPath:  resolvedPath,
+    };
+  }
+  return bridgeStatusError(response, {
       action: 'design-system setup',
       includeActiveSession: false,
       timeoutError: 'DS setup timed out. For large systems this can take 3+ minutes — try again with the plugin open.',
-    });
   });
 }
 

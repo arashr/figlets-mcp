@@ -2,6 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { wcagContrastRatio, apcaLc } = require('./semantic-contrast.js');
+
+const FIGLETS_SIDECAR_NAME = 'figlets-design.json';
 
 function _stripQuotes(value) {
   const s = String(value == null ? '' : value).trim();
@@ -700,6 +704,45 @@ function readDesignMdAsDsConfig(designMdPath, options) {
   const resolved = path.resolve(designMdPath);
   const markdown = fs.readFileSync(resolved, 'utf8');
   const opts = Object.assign({}, options || {}, { sourcePath: resolved });
+  const sidecarPath = path.join(path.dirname(resolved), FIGLETS_SIDECAR_NAME);
+  if (opts.useSidecar !== false && fs.existsSync(sidecarPath)) {
+    try {
+      const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+      const expectedHash = _sha256(markdown);
+      if (sidecar && sidecar.designMdSha256 === expectedHash && sidecar.ds && typeof sidecar.ds === 'object') {
+        const ds = sidecar.ds;
+        if (!ds.source) {
+          ds.source = { type: 'design.md', path: resolved, version: parseDesignMd(markdown).tokens.version || null };
+        }
+        return {
+          ds,
+          parsed: {
+            name: ds.project && ds.project.name || null,
+            colors: Object.keys(parseDesignMd(markdown).tokens.colors || {}).length,
+            typography: Object.keys(parseDesignMd(markdown).tokens.typography || {}).length,
+            spacing: Object.keys(parseDesignMd(markdown).tokens.spacing || {}).length,
+            rounded: Object.keys(parseDesignMd(markdown).tokens.rounded || {}).length,
+            components: Object.keys(parseDesignMd(markdown).tokens.components || {}).length,
+            sidecar: true,
+          },
+          parsedFromFrontMatter: true,
+          parsedFromMarkdown: null,
+          linkedConfigCandidates: [],
+          mapped: {
+            brandColors: ds.color && Array.isArray(ds.color.brand) ? ds.color.brand.length : 0,
+            typographyRoles: ds.typography && ds.typography.scale ? Object.keys(ds.typography.scale).length : 0,
+            gridBase: ds.grid && ds.grid.base ? ds.grid.base : 8,
+          },
+          needsDesignerInput: [],
+          warnings: [],
+          sidecar: { path: sidecarPath, verified: true },
+        };
+      }
+      opts.sidecarWarning = 'Ignored stale figlets-design.json because its DESIGN.md fingerprint did not match.';
+    } catch (err) {
+      opts.sidecarWarning = 'Ignored unreadable figlets-design.json: ' + err.message;
+    }
+  }
   if (!opts.linkedConfigPath && opts.autoLinkedConfig !== false) {
     const intake = parseMarkdownIntake(markdown, { baseDir: path.dirname(resolved) });
     const jsonCandidate = (intake.linkedConfigCandidates || []).find(entry => entry.kind === 'json' && entry.exists);
@@ -707,7 +750,9 @@ function readDesignMdAsDsConfig(designMdPath, options) {
       opts.linkedConfigPath = jsonCandidate.resolvedPath;
     }
   }
-  return designMdToDsConfig(markdown, opts);
+  const result = designMdToDsConfig(markdown, opts);
+  if (opts.sidecarWarning) result.warnings = [opts.sidecarWarning].concat(result.warnings || []);
+  return result;
 }
 
 function _formatDimension(value) {
@@ -731,6 +776,23 @@ function _yamlString(value) {
 
 function _slugForToken(name) {
   return String(name || '').replace(/\//g, '-');
+}
+
+function _responsiveModes(DS, valueCount) {
+  const configured = DS.breakpoints && Array.isArray(DS.breakpoints.modes) ? DS.breakpoints.modes : [];
+  if (configured.length) return configured;
+  if (valueCount === 3) return ['Mobile', 'Tablet', 'Desktop'];
+  return Array.from({ length: Math.max(1, valueCount || 1) }, (_, index) => 'Mode ' + (index + 1));
+}
+
+function _responsiveTokenNames(baseName, values, DS) {
+  const list = Array.isArray(values) && values.length ? values : [null];
+  const modes = _responsiveModes(DS, list.length);
+  if (list.length === 1) return [{ name: baseName, value: list[0] }];
+  return list.map((value, index) => ({
+    name: baseName + '-' + _slugForToken(modes[index] || ('mode-' + (index + 1))).toLowerCase(),
+    value,
+  }));
 }
 
 function _brandRoleColorKey(role) {
@@ -777,13 +839,17 @@ function _buildTypographyMap(DS) {
     const entry = DS.typography.scale[role] || {};
     const sizes = entry.sizes || [];
     const lineHeights = entry.lineHeights || [];
-    typography[_slugForToken(role)] = {
-      fontFamily: entry.family || defaultFamily,
-      fontSize: _formatDimension(sizes[sizes.length - 1] || sizes[0] || 16),
-      fontWeight: Number(entry.weight || 400),
-      lineHeight: _formatDimension(lineHeights[lineHeights.length - 1] || lineHeights[0] || 24),
-      letterSpacing: _formatDimension(entry.tracking || 0)
-    };
+    const sizeTokens = _responsiveTokenNames(_slugForToken(role), sizes.length ? sizes : [16], DS);
+    for (let index = 0; index < sizeTokens.length; index++) {
+      const token = sizeTokens[index];
+      typography[token.name] = {
+        fontFamily: entry.family || defaultFamily,
+        fontSize: _formatDimension(token.value),
+        fontWeight: Number(entry.weight || 400),
+        lineHeight: _formatDimension(lineHeights[index] != null ? lineHeights[index] : lineHeights[lineHeights.length - 1] || 24),
+        letterSpacing: _formatDimension(entry.tracking || 0)
+      };
+    }
   }
   return typography;
 }
@@ -793,8 +859,10 @@ function _buildSpacingMap(DS) {
   if (DS.spacing && DS.spacing.semantic) {
     for (const key of Object.keys(DS.spacing.semantic)) {
       const vals = DS.spacing.semantic[key] || [];
-      const value = _formatDimension(vals[vals.length - 1] || vals[0]);
-      if (value) spacing[_slugForToken(key)] = value;
+      for (const token of _responsiveTokenNames(_slugForToken(key), vals, DS)) {
+        const value = _formatDimension(token.value);
+        if (value) spacing[token.name] = value;
+      }
     }
   }
   return spacing;
@@ -805,7 +873,7 @@ function _buildRoundedMap(DS) {
   if (DS.spacing && DS.spacing.radius) {
     for (const key of Object.keys(DS.spacing.radius)) {
       const value = DS.spacing.radius[key];
-      if (value == null || value === 9999) continue;
+      if (value == null) continue;
       const formatted = _formatDimension(value);
       if (formatted) rounded[_slugForToken(key)] = formatted;
     }
@@ -843,9 +911,11 @@ function _buildComponentsMap(DS, colorsMap) {
 
   for (const pair of pairs) {
     if (!pair || (!pair.bg && !pair.text)) continue;
+    if (pair.min === null && pair.minLc === null) continue;
     const bgName = pair.bg || '';
     const textName = pair.text || '';
-    const slug = _slugForToken(String(bgName || textName).replace(/^color\//, ''));
+    const slug = _slugForToken(String(bgName).replace(/^color\//, ''))
+      + '-with-' + _slugForToken(String(textName).replace(/^color\//, ''));
     if (!slug) continue;
 
     const lightAlias = pair.Light && (pair.Light.bg || pair.Light.text) ? pair.Light : null;
@@ -996,24 +1066,27 @@ function _bodyColors(DS, colorsMap, options) {
 function _bodyTypography(DS) {
   const lines = [];
   const families = (DS.typography && DS.typography.families) || {};
-  if (families.sans) lines.push('Primary typeface: **' + families.sans + '**.');
-  if (families.mono) lines.push('Monospace typeface: **' + families.mono + '**.');
-  if (families.display) lines.push('Display typeface: **' + families.display + '**.');
-  if (!lines.length) lines.push('Typography is exported from the prepared Figlets scale.');
   const scale = DS.typography && DS.typography.scale ? DS.typography.scale : null;
+  const usedFamilies = new Set();
+  for (const entry of Object.values(scale || {})) {
+    usedFamilies.add(entry && entry.family || families.sans || 'Inter');
+  }
+  if (families.sans && usedFamilies.has(families.sans)) lines.push('Primary typeface: **' + families.sans + '**.');
+  if (families.mono && usedFamilies.has(families.mono)) lines.push('Monospace typeface: **' + families.mono + '**.');
+  if (families.display && usedFamilies.has(families.display)) lines.push('Display typeface: **' + families.display + '**.');
+  if (!lines.length) lines.push('Typography is exported from the prepared Figlets scale.');
   if (scale) {
     const rows = Object.keys(scale);
     if (rows.length) {
+      const modes = _responsiveModes(DS, Math.max(...rows.map(role => (scale[role].sizes || []).length), 1));
       lines.push('');
-      lines.push('| Role | Sizes (mobile / tablet / desktop) | Weight | Tracking |');
+      lines.push('| Role | Sizes (' + modes.join(' / ') + ') | Weight | Tracking |');
       lines.push('|---|---|---|---|');
       for (const role of rows) {
         const entry = scale[role] || {};
         const sizes = entry.sizes || [];
-        const sizeCell = sizes.length === 3
-          ? (sizes[0] + ' / ' + sizes[1] + ' / ' + sizes[2] + ' px')
-          : ((sizes[sizes.length - 1] || sizes[0] || '?') + ' px');
-        lines.push('| ' + role + ' | ' + sizeCell + ' | ' + (entry.weight || 400) + ' | ' + (entry.tracking || 0) + ' |');
+        const sizeCell = (sizes.length ? sizes : ['?']).join(' / ') + ' px';
+        lines.push('| ' + role + ' | ' + sizeCell + ' | ' + (entry.weight || 400) + ' | ' + (_formatNumber(Number(entry.tracking || 0)) || '0') + ' |');
       }
     }
   }
@@ -1026,15 +1099,20 @@ function _bodyLayout(DS) {
   if (grid) lines.push('Spacing follows a ' + grid + ' grid.');
   const semantic = DS.spacing && DS.spacing.semantic ? DS.spacing.semantic : null;
   if (semantic && Object.keys(semantic).length) {
+    const keys = Object.keys(semantic);
+    const maxValues = Math.max(...keys.map(key => (semantic[key] || []).length), 1);
+    const modes = _responsiveModes(DS, maxValues);
     lines.push('');
-    lines.push('| Role | Mobile / Tablet / Desktop |');
+    lines.push('| Role | ' + modes.join(' / ') + ' |');
     lines.push('|---|---|');
-    for (const key of Object.keys(semantic)) {
+    for (const key of keys) {
       const vals = semantic[key] || [];
-      const cell = vals.length === 3
-        ? (vals[0] + ' / ' + vals[1] + ' / ' + vals[2] + ' px')
-        : ((vals[vals.length - 1] || vals[0] || '?') + ' px');
+      const cell = (vals.length ? vals : ['?']).join(' / ') + ' px';
       lines.push('| ' + key + ' | ' + cell + ' |');
+    }
+    if (semantic['touch/compact']) {
+      lines.push('');
+      lines.push('`touch/min` is the minimum interactive target. `touch/compact` is for intentional dense visual sizing and does not reduce the 44px interactive target.');
     }
   }
   const border = DS.spacing && DS.spacing.border ? DS.spacing.border : null;
@@ -1053,13 +1131,13 @@ function _bodyElevation(DS) {
   const keys = Object.keys(elevation);
   if (keys.length) {
     lines.push('');
-    lines.push('| Step | Definition |');
+    lines.push('| Step | CSS box-shadow |');
     lines.push('|---|---|');
     for (const key of keys) {
       const value = elevation[key];
-      let summary;
-      if (value && typeof value === 'object') summary = '`' + JSON.stringify(value) + '`';
-      else summary = '`' + String(value) + '`';
+      const effects = Array.isArray(value) ? value : [value];
+      const css = effects.map(_effectToCssShadow).filter(Boolean);
+      const summary = '`' + (css.length ? css.join(', ') : String(value)) + '`';
       lines.push('| ' + key + ' | ' + summary + ' |');
     }
   }
@@ -1102,6 +1180,19 @@ function _formatEffect(effect) {
   if (effect.blendMode) parts.push('blend ' + effect.blendMode);
   if (effect.visible === false) parts.push('hidden');
   return parts.join(', ');
+}
+
+function _effectToCssShadow(effect) {
+  if (!effect || typeof effect !== 'object' || effect.visible === false) return null;
+  const type = String(effect.type || '').toUpperCase();
+  if (type !== 'DROP_SHADOW' && type !== 'INNER_SHADOW') return null;
+  const offset = effect.offset || {};
+  const x = _formatNumber(Number(offset.x || 0)) || '0';
+  const y = _formatNumber(Number(offset.y || 0)) || '0';
+  const blur = _formatNumber(Number(effect.radius || 0)) || '0';
+  const spread = _formatNumber(Number(effect.spread || 0)) || '0';
+  const color = _formatColor(effect.color) || 'rgba(0, 0, 0, 0)';
+  return (type === 'INNER_SHADOW' ? 'inset ' : '') + x + 'px ' + y + 'px ' + blur + 'px ' + spread + 'px ' + color;
 }
 
 function _formatStop(stop) {
@@ -1195,31 +1286,73 @@ function _bodyShapes(DS) {
   return lines.join('\n');
 }
 
+function _rgbByAlias(DS) {
+  const result = new Map();
+  const ramps = DS.color && Array.isArray(DS.color.ramps) ? DS.color.ramps : [];
+  for (const ramp of ramps) {
+    const rampName = _rampName(ramp);
+    for (const row of ramp.steps || []) {
+      if (!Array.isArray(row) || row.length < 4) continue;
+      result.set('color/' + rampName + '/' + row[0], { r: Number(row[1]), g: Number(row[2]), b: Number(row[3]) });
+    }
+  }
+  return result;
+}
+
+function _contrastEvidence(DS, pair, modeName, rgbByAlias) {
+  const aliases = pair && pair[modeName] || {};
+  const bg = rgbByAlias.get(aliases.bg);
+  const text = rgbByAlias.get(aliases.text);
+  if (!bg || !text) return { wcag: null, apca: null };
+  return {
+    wcag: wcagContrastRatio(text, bg),
+    apca: Math.abs(apcaLc(text, bg)),
+  };
+}
+
+function _selectedContrastStatus(DS, pair, evidence) {
+  const algorithm = String(DS.color && DS.color.contrastAlgorithm || 'wcag').toLowerCase();
+  const note = pair && pair.note ? String(pair.note) : null;
+  if (algorithm === 'apca') {
+    if (pair.minLc === null) return 'Exempt' + (note ? ': ' + note : '');
+    const threshold = Number.isFinite(Number(pair.minLc)) ? Number(pair.minLc) : 75;
+    return evidence.apca == null ? 'Not resolved' : (evidence.apca >= threshold ? 'Pass' : 'Fail') + ' APCA Lc ' + threshold;
+  }
+  if (pair.min === null) return 'Exempt' + (note ? ': ' + note : '');
+  const threshold = Number.isFinite(Number(pair.min)) ? Number(pair.min) : 4.5;
+  return evidence.wcag == null ? 'Not resolved' : (evidence.wcag >= threshold ? 'Pass' : 'Fail') + ' WCAG ' + threshold + ':1';
+}
+
 function _bodyComponents(DS) {
   const pairs = DS.color && DS.color.semantics && Array.isArray(DS.color.semantics.pairs)
     ? DS.color.semantics.pairs
     : [];
   if (!pairs.length) return null;
-  const algo = DS.color && DS.color.contrastAlgorithm ? DS.color.contrastAlgorithm.toUpperCase() : 'APCA/WCAG';
+  const algo = DS.color && DS.color.contrastAlgorithm ? DS.color.contrastAlgorithm.toUpperCase() : 'WCAG';
+  const rgbByAlias = _rgbByAlias(DS);
   const lines = [
-    'Semantic background + text pairs validated against ' + algo + ' contrast. The `components` block in the front matter encodes the Light-mode relationship plus compatible `*-dark` variants when those aliases resolve to standard color tokens. The `figlets-extended` block below remains the lossless source for all Figlets-specific mode data.',
+    'The configured decision algorithm is ' + algo + '. Both WCAG contrast ratio and APCA Lc are reported for implementation review. An exempt pair is documented as exempt and is not described as universally validated. Standard `components` entries include only pairs with an explicit contrast requirement.',
     ''
   ];
-  lines.push('| Pair | Light bg / text | Dark bg / text |');
-  lines.push('|---|---|---|');
+  lines.push('| Pair | Mode | Background / text | WCAG ratio | APCA Lc | Configured result |');
+  lines.push('|---|---|---|---|---|---|');
   for (const pair of pairs) {
     if (!pair || (!pair.bg && !pair.text)) continue;
-    const name = (pair.bg || pair.text || '').replace(/^color\//, '');
-    const light = pair.Light || {};
-    const dark = pair.Dark || {};
-    const lightCell = (light.bg || '—') + ' / ' + (light.text || '—');
-    const darkCell = (dark.bg || '—') + ' / ' + (dark.text || '—');
-    lines.push('| ' + name + ' | ' + lightCell + ' | ' + darkCell + ' |');
+    const name = String(pair.bg || '').replace(/^color\//, '') + ' + ' + String(pair.text || '').replace(/^color\//, '');
+    for (const modeName of ['Light', 'Dark']) {
+      const aliases = pair[modeName] || {};
+      if (!aliases.bg && !aliases.text) continue;
+      const evidence = _contrastEvidence(DS, pair, modeName, rgbByAlias);
+      const wcag = evidence.wcag == null ? 'Not resolved' : (Math.round(evidence.wcag * 100) / 100) + ':1';
+      const apca = evidence.apca == null ? 'Not resolved' : String(Math.round(evidence.apca));
+      lines.push('| ' + _tableCell(name) + ' | ' + modeName + ' | ' + _tableCell((aliases.bg || '-') + ' / ' + (aliases.text || '-')) + ' | ' + wcag + ' | ' + apca + ' | ' + _tableCell(_selectedContrastStatus(DS, pair, evidence)) + ' |');
+    }
   }
   return lines.join('\n');
 }
 
-// --- Extended block (round-trip restoration) -------------------------------
+// Legacy inline block support is retained for old exports. New exports use a
+// verified sidecar so the standard DESIGN.md document remains normative.
 
 function _stripVolatile(ds) {
   // Clone and strip fields that are environment-dependent or generated.
@@ -1227,6 +1360,20 @@ function _stripVolatile(ds) {
   if (clone.source) delete clone.source;
   if (clone.primitives) delete clone.primitives;
   return clone;
+}
+
+function _sha256(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
+function _buildSidecar(DS, markdown, outputPath, options) {
+  return {
+    schemaVersion: '2',
+    generator: options && options.generator || 'figlets-mcp',
+    designMd: path.basename(outputPath),
+    designMdSha256: _sha256(markdown),
+    ds: _stripVolatile(DS),
+  };
 }
 
 function _buildExtendedBlock(DS, options) {
@@ -1295,15 +1442,14 @@ function dsConfigToDesignMd(ds, options) {
   pushSection('Shapes', _bodyShapes(DS));
   pushSection('Components', _bodyComponents(DS));
 
-  // Footer + round-trip block.
+  // Footer. Lossless Figlets data is written to an optional sibling sidecar by
+  // writeDesignMdFromDsConfig, not embedded in this standard document.
   const algo = DS.color && DS.color.contrastAlgorithm ? DS.color.contrastAlgorithm.toUpperCase() : null;
-  const footer = 'Generated by Figlets from `design-system.config.js`. Standard: Google DESIGN.md (alpha).'
+  const footer = 'Generated by Figlets from `design-system.config.js`. Standard: Google DESIGN.md 0.4.0.'
     + (algo ? ' Contrast algorithm: ' + algo + '.' : '');
   lines.push('---');
   lines.push('');
   lines.push(footer);
-  lines.push('');
-  lines.push(_buildExtendedBlock(DS, options));
   lines.push('');
 
   return lines.join('\n');
@@ -1318,9 +1464,37 @@ function writeDesignMdFromDsConfig(configPath, outputPath, options) {
   const ctx = {};
   vm.runInNewContext(src, ctx);
   if (!ctx.DS) throw new Error('Config must export a DS object');
-  const ds = ctx.DS;
-  const markdown = dsConfigToDesignMd(ds, Object.assign({}, options || {}, { sourcePath: resolvedConfig }));
-  fs.writeFileSync(resolvedOutput, markdown, 'utf8');
+  const artifacts = buildDesignMdArtifacts(
+    ctx.DS,
+    resolvedOutput,
+    Object.assign({}, options || {}, { sourcePath: resolvedConfig })
+  );
+  writeDesignMdArtifacts(artifacts, { writeSidecar: options && options.writeSidecar === true });
+  return resolvedOutput;
+}
+
+function buildDesignMdArtifacts(ds, outputPath, options) {
+  const resolvedOutput = path.resolve(outputPath);
+  const markdown = dsConfigToDesignMd(ds, options || {});
+  const sidecarPath = path.join(path.dirname(resolvedOutput), FIGLETS_SIDECAR_NAME);
+  const sidecar = _buildSidecar(ds, markdown, resolvedOutput, options);
+  return {
+    path: resolvedOutput,
+    markdown,
+    sidecar: {
+      path: sidecarPath,
+      contents: JSON.stringify(sidecar, null, 2) + '\n',
+    },
+  };
+}
+
+function writeDesignMdArtifacts(artifacts, options) {
+  const resolvedOutput = path.resolve(artifacts.path);
+  fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true });
+  fs.writeFileSync(resolvedOutput, artifacts.markdown, 'utf8');
+  if (options && options.writeSidecar === true && artifacts.sidecar) {
+    fs.writeFileSync(artifacts.sidecar.path, artifacts.sidecar.contents, 'utf8');
+  }
   return resolvedOutput;
 }
 
@@ -1331,6 +1505,9 @@ module.exports = {
   designMdToDsConfig,
   readDesignMdAsDsConfig,
   dsConfigToDesignMd,
+  buildDesignMdArtifacts,
+  writeDesignMdArtifacts,
   writeDesignMdFromDsConfig,
+  FIGLETS_SIDECAR_NAME,
   _readExtendedBlock: _readExtendedBlock
 };

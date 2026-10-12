@@ -9,11 +9,15 @@ const {
 const { bootstrapDsFromSnapshot } = require('../utils/bootstrap-ds-from-figma.js');
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require('../bridges/figma-data-source.js');
 const { handleSyncFigmaData } = require('./sync-figma-data.js');
-const { handleRefreshDsConfigFromFigma } = require('./refresh-ds-config-from-figma.js');
+const { handleRefreshDsConfigFromFigma, refreshDsConfigFromFigmaData } = require('./refresh-ds-config-from-figma.js');
+const {
+  prepareDesignMdArtifact,
+  writePreparedDesignMdArtifact,
+} = require('../utils/design-md-artifact.js');
 
 const exportDesignMdTool = {
   name: 'export_design_md',
-  description: 'Export a portable DESIGN.md describing the current design system. By default syncs the Figma file, refreshes design-system.config.js from the latest snapshot, then writes specs/DESIGN.md under project_path when provided, otherwise under the MCP server working directory. Falls back to DESIGN.md next to the config when that path is not writable. If no config exists yet, creates a local snapshot-derived config from Figma variables before exporting. Pass dry_run to preview without writing.',
+  description: 'Export a Google DESIGN.md 0.4.0 handoff plus an optional lossless figlets-design.json sidecar in the same folder. By default syncs the Figma file, refreshes design-system.config.js, validates the generated document, then writes specs/DESIGN.md under project_path. Export stops on Google errors or meaningful warnings while reporting tolerated orphaned-token warnings. Pass dry_run to preview without writing.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -29,6 +33,10 @@ const exportDesignMdTool = {
         type: 'string',
         description: 'Optional absolute path to the active code workspace/project root. Used for the default specs/DESIGN.md output when output_path is omitted.'
       },
+      design_system_name: {
+        type: 'string',
+        description: 'Exact design-system or product name to use when the stored project name is missing or a known placeholder such as Untitled.'
+      },
       figmaDataPath: {
         type: 'string',
         description: 'Optional path to a figma-data.json snapshot. When provided, the sync_figma_data step is skipped and this snapshot is used directly.'
@@ -40,6 +48,10 @@ const exportDesignMdTool = {
       dry_run: {
         type: 'boolean',
         description: 'When true, do not write design-system.config.js or DESIGN.md; report what would change.'
+      },
+      include_sidecar: {
+        type: 'boolean',
+        description: 'When true or omitted, write lossless figlets-design.json beside DESIGN.md. Set false for a standard-only export.'
       }
     },
     additionalProperties: false
@@ -60,6 +72,18 @@ function _loadDsConfigCore() {
   } catch (_) {
     return require("../figlets-core.js").dsConfig;
   }
+}
+
+function _repairPlaceholderProjectName(configPath, projectName, dryRun) {
+  projectName = String(projectName || '').trim();
+  if (!projectName || !fs.existsSync(configPath)) return null;
+  const core = _loadDsConfigCore();
+  const ds = core.readDsConfig(configPath);
+  const current = ds && ds.project && ds.project.name;
+  if (!core.designSystemPolicy.isPlaceholderProjectName(current)) return null;
+  ds.project = Object.assign({}, ds.project || {}, { name: projectName });
+  if (!dryRun) _writeDsConfig(configPath, ds);
+  return { kind: 'project-metadata', field: 'project.name', from: current || null, to: projectName };
 }
 
 function _statSyncedAt(filePath) {
@@ -200,7 +224,7 @@ function _refreshResultForBootstrap() {
   };
 }
 
-function _writeDesignMdFromConfig(intake, configPath, outputTarget, options) {
+function _writePreparedDesignMd(prepared, outputTarget, includeSidecar) {
   const attempts = [outputTarget.path];
   if (
     outputTarget.fallbackPath &&
@@ -213,10 +237,13 @@ function _writeDesignMdFromConfig(intake, configPath, outputTarget, options) {
   for (let i = 0; i < attempts.length; i++) {
     const attemptPath = attempts[i];
     try {
-      fs.mkdirSync(path.dirname(attemptPath), { recursive: true });
-      const writtenPath = intake.writeDesignMdFromDsConfig(configPath, attemptPath, options);
+      const written = writePreparedDesignMdArtifact(prepared, {
+        outputPath: attemptPath,
+        includeSidecar,
+      });
       return {
-        path: writtenPath,
+        path: written.path,
+        sidecarPath: written.sidecarPath,
         fallbackUsed: i > 0,
         requestedPath: outputTarget.requestedPath,
         fallbackPath: outputTarget.fallbackPath,
@@ -276,6 +303,8 @@ async function handleExportDesignMd(args) {
   let needsDesignerInput = [];
   let refresh = null;
   let latestFigmaData = null;
+  let workingDs = null;
+  const projectName = typeof args.design_system_name === 'string' ? args.design_system_name.trim() : null;
 
   if (!fs.existsSync(configPath)) {
     let dataSource = null;
@@ -295,16 +324,11 @@ async function handleExportDesignMd(args) {
     }
     latestFigmaData = dataSource.figmaData;
 
-    const ds = bootstrapDsFromSnapshot(dataSource.figmaData);
-    if (!dryRun) {
-      try {
-        _writeDsConfig(configPath, ds);
-      } catch (err) {
-        return { error: 'Failed to write snapshot-derived design-system.config.js: ' + err.message };
-      }
-    }
+    const ds = bootstrapDsFromSnapshot(dataSource.figmaData, { projectName });
+    workingDs = ds;
     bootstrap = {
-      created: !dryRun,
+      created: false,
+      wouldCreate: true,
       configPath,
       source: 'figma-snapshot-bootstrap',
       reason: 'missing-config',
@@ -318,7 +342,7 @@ async function handleExportDesignMd(args) {
   if (!refresh) {
     const refreshArgs = {
       config_path: configPath,
-      dry_run: dryRun,
+      dry_run: true,
     };
     if (snapshotPathForRefresh) refreshArgs.figmaDataPath = snapshotPathForRefresh;
 
@@ -329,6 +353,14 @@ async function handleExportDesignMd(args) {
         hint: refresh.hint || 'Verify the synced snapshot is current and the config matches.'
       };
     }
+  }
+
+  const projectMetadataChange = _repairPlaceholderProjectName(configPath, projectName, true);
+  if (projectMetadataChange) {
+    refresh.changes = (refresh.changes || []).concat([projectMetadataChange]);
+    refresh.summary = Object.assign({}, refresh.summary || {}, {
+      changedCount: Number(refresh.summary && refresh.summary.changedCount || 0) + 1,
+    });
   }
 
   const snapshotPath = (refresh.source && refresh.source.path ? refresh.source.path : null)
@@ -345,6 +377,9 @@ async function handleExportDesignMd(args) {
 
   let designMdPath = null;
   let written = false;
+  let sidecarPath = null;
+  let lint = null;
+  let preparedArtifact = null;
   let output = {
     requestedPath: outputTarget.requestedPath,
     fallbackPath: outputTarget.fallbackPath,
@@ -352,19 +387,76 @@ async function handleExportDesignMd(args) {
     defaultKind: outputTarget.defaultKind,
     writeError: null,
   };
+  const intake = _loadDesignMdIntake();
+  if (!intake || typeof intake.buildDesignMdArtifacts !== 'function') {
+    return { error: 'DESIGN.md exporter not available in figlets-core.' };
+  }
+  try {
+    if (!workingDs) workingDs = _loadDsConfigCore().readDsConfig(configPath);
+    if (latestFigmaData) {
+      workingDs = refreshDsConfigFromFigmaData(workingDs, latestFigmaData).ds;
+    }
+    if (projectMetadataChange) {
+      workingDs.project = Object.assign({}, workingDs.project || {}, { name: projectMetadataChange.to });
+    }
+    preparedArtifact = await prepareDesignMdArtifact({
+      ds: workingDs,
+      outputPath: outputTarget.path,
+      renderOptions: latestFigmaData ? { figmaData: latestFigmaData } : null,
+    });
+    lint = preparedArtifact.lint;
+    workingDs = preparedArtifact.ds;
+  } catch (err) {
+    return { error: 'Failed to validate generated DESIGN.md: ' + err.message };
+  }
+  if (!lint.passed) {
+    return {
+      error: 'DESIGN.md export blocked by DESIGN.md and accessibility validation.',
+      lint,
+      configPath,
+      dryRun,
+      refresh: {
+        changes: refresh.changes || [],
+        skipped: refresh.skipped || [],
+        summary: refresh.summary || {},
+      },
+      hint: lint.blockingFindings.some(finding => finding.rule === 'figlets-placeholder-project-name')
+        ? 'Supply the exact design_system_name and retry. Resolve any other errors or meaningful warnings. Orphaned-token warnings are already tolerated.'
+        : 'Resolve the reported errors or meaningful warnings. Orphaned-token warnings are already tolerated.',
+    };
+  }
+
   if (!dryRun) {
-    const intake = _loadDesignMdIntake();
-    if (!intake || typeof intake.writeDesignMdFromDsConfig !== 'function') {
-      return { error: 'DESIGN.md exporter not available in figlets-core.' };
+    if (bootstrap) {
+      try {
+        _writeDsConfig(configPath, workingDs);
+        bootstrap.created = true;
+      } catch (err) {
+        return { error: 'Failed to write snapshot-derived design-system.config.js: ' + err.message };
+      }
+    } else {
+      const applyRefreshArgs = { config_path: configPath, dry_run: false };
+      if (snapshotPathForRefresh) applyRefreshArgs.figmaDataPath = snapshotPathForRefresh;
+      refresh = handleRefreshDsConfigFromFigma(applyRefreshArgs);
+      if (refresh && refresh.error) {
+        return { error: 'Config refresh failed after export validation: ' + refresh.error, hint: refresh.hint };
+      }
+      const appliedProjectMetadataChange = _repairPlaceholderProjectName(configPath, projectName, false);
+      if (appliedProjectMetadataChange) {
+        refresh.changes = (refresh.changes || []).concat([appliedProjectMetadataChange]);
+        refresh.summary = Object.assign({}, refresh.summary || {}, {
+          changedCount: Number(refresh.summary && refresh.summary.changedCount || 0) + 1,
+        });
+      }
     }
     try {
-      const writeResult = _writeDesignMdFromConfig(
-        intake,
-        configPath,
+      const writeResult = _writePreparedDesignMd(
+        preparedArtifact,
         outputTarget,
-        latestFigmaData ? { figmaData: latestFigmaData } : null
+        args.include_sidecar !== false
       );
       designMdPath = writeResult.path;
+      sidecarPath = writeResult.sidecarPath;
       output = Object.assign(output, writeResult);
       written = true;
     } catch (err) {
@@ -380,8 +472,15 @@ async function handleExportDesignMd(args) {
     designMd: {
       path: designMdPath,
       written,
+      sidecar: {
+        path: sidecarPath || path.join(path.dirname(designMdPath), intake.FIGLETS_SIDECAR_NAME || 'figlets-design.json'),
+        written: Boolean(sidecarPath),
+        enabled: args.include_sidecar !== false,
+        optional: true,
+      },
       output,
     },
+    lint,
     sync: {
       attempted: shouldSync,
       completed: synced,
@@ -402,8 +501,8 @@ async function handleExportDesignMd(args) {
         : 'Export dry run complete. No files were written.')
       : (written
         ? (bootstrap
-          ? 'Snapshot-derived design-system.config.js created and DESIGN.md exported to ' + designMdPath
-          : 'DESIGN.md exported to ' + designMdPath)
+          ? 'Snapshot-derived design-system.config.js created and DESIGN.md exported to ' + designMdPath + (sidecarPath ? '. Lossless sidecar: ' + sidecarPath : '')
+          : 'DESIGN.md exported to ' + designMdPath + (sidecarPath ? '. Lossless sidecar: ' + sidecarPath : ''))
         : 'DESIGN.md export did not run.')
   };
 }

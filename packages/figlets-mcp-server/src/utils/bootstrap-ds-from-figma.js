@@ -1,5 +1,7 @@
 "use strict";
 
+const { getTouchSemanticDefaults } = require('../figlets-core.js').dsConfig;
+
 /**
  * Build a starter DS shape from a synced Figma snapshot. This is used both as
  * an in-memory fallback for repair planning and as the persisted file-scoped
@@ -110,14 +112,39 @@ function buildRampsFromSnapshot(figmaData) {
   }));
 }
 
-function detectBrand(ramps) {
+function _semanticBrandRamp(figmaData, ramps) {
+  const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
+  const byId = new Map(variables.filter(variable => variable && variable.id).map(variable => [variable.id, variable]));
+  const rampNames = new Set(ramps.map(ramp => String(ramp.folder || '').replace(/^color\//, '')));
+  const scores = new Map();
+
+  for (const variable of variables) {
+    if (!variable || !/(?:^|\/)(?:brand|primary)(?:\/|$)/i.test(String(variable.name || ''))) continue;
+    if (/^color\/[^/]+\/\d+$/.test(String(variable.name || ''))) continue;
+    for (const value of Object.values(variable.valuesByMode || {})) {
+      if (!value || value.type !== 'VARIABLE_ALIAS') continue;
+      const target = byId.get(value.id);
+      const match = String(target && target.name || '').match(/^color\/([^/]+)\/\d+$/);
+      if (!match || !rampNames.has(match[1])) continue;
+      scores.set(match[1], (scores.get(match[1]) || 0) + 1);
+    }
+  }
+
+  const ranked = Array.from(scores.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return ranked.length ? ramps.find(ramp => ramp.folder === 'color/' + ranked[0][0]) || null : null;
+}
+
+function detectBrand(ramps, figmaData) {
   if (!ramps.length) return [];
   const byShortName = (shortName) => ramps.find(r => r.folder === "color/" + shortName);
-  const candidate = byShortName("primary") || byShortName("brand") || ramps[0];
+  const candidate = byShortName("primary") || byShortName("brand") || _semanticBrandRamp(figmaData, ramps) || ramps[0];
   const name = candidate.folder.replace(/^color\//, "");
   const anchor = candidate.steps.reduce((best, entry) =>
     !best || Math.abs(entry[0] - 500) < Math.abs(best[0] - 500) ? entry : best, null);
-  return [{ name: name, role: "primary", step: anchor ? anchor[0] : 500 }];
+  const hex = anchor
+    ? '#' + anchor.slice(1, 4).map(value => Math.round(Math.max(0, Math.min(1, value)) * 255).toString(16).padStart(2, '0')).join('').toUpperCase()
+    : null;
+  return [{ name: name, role: "primary", step: anchor ? anchor[0] : 500, ...(hex ? { hex } : {}) }];
 }
 
 function _collectionFor(variable, collections) {
@@ -320,6 +347,7 @@ function inferTypographyFromSnapshot(figmaData) {
     }
     if (style.fontName && style.fontName.family) {
       familyCounts[style.fontName.family] = (familyCounts[style.fontName.family] || 0) + 1;
+      group.family = style.fontName.family;
     }
   }
 
@@ -332,6 +360,7 @@ function inferTypographyFromSnapshot(figmaData) {
       lineHeights: group.lineHeights || group.sizes.map(size => Math.round(size * 1.4)),
       weight: group.weight || 400,
       tracking: group.tracking || 0,
+      ...(group.family ? { family: group.family } : {}),
     };
   }
 
@@ -581,9 +610,14 @@ function inferSemanticsFromSnapshot(figmaData) {
 function bootstrapDsFromSnapshot(figmaData, opts) {
   opts = opts || {};
   const ramps = buildRampsFromSnapshot(figmaData);
-  const brand = detectBrand(ramps);
+  const brand = detectBrand(ramps, figmaData);
   const breakpoints = inferBreakpointsFromSnapshot(figmaData);
   const spacingInfo = inferSpacingFromSnapshot(figmaData);
+  spacingInfo.spacing.semantic = Object.assign(
+    {},
+    getTouchSemanticDefaults(breakpoints.modes && breakpoints.modes.length),
+    spacingInfo.spacing.semantic || {}
+  );
   const typography = inferTypographyFromSnapshot(figmaData);
   const elevation = inferElevationFromSnapshot(figmaData);
   const gridBase = inferGridBaseFromSnapshot(figmaData, spacingInfo.primitiveValues);
@@ -599,7 +633,7 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
     : inferredSemantics;
   return {
     project: {
-      name: (figmaData && figmaData.fileName) || "Imported Figma design system",
+      name: opts.projectName || (figmaData && figmaData.fileName) || "Imported Figma design system",
     },
     collections: inferCollectionsFromSnapshot(figmaData),
     grid: { base: gridBase },

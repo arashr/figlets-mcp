@@ -89,7 +89,7 @@ function postJson(url, body, timeoutMs) {
   }
 
   const written = writeFixtureConfig(args.configPath, { seed: args.seed });
-  const prepared = handlePrepareDsConfig({ config_path: written.configPath });
+  const prepared = await handlePrepareDsConfig({ config_path: written.configPath });
   if (prepared.error) throw new Error(prepared.error);
   if (!prepared.readyToBuild) throw new Error('Fixture config is not ready to build: ' + prepared.message);
 

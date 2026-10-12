@@ -5,6 +5,7 @@ const {
   getActiveFileConfigPath,
   getConfigPathGuardError,
 } = require("../utils/paths.js");
+const { detectBrand, inferTypographyFromSnapshot } = require("../utils/bootstrap-ds-from-figma.js");
 
 const refreshDsConfigFromFigmaTool = {
   name: "refresh_ds_config_from_figma",
@@ -153,6 +154,42 @@ function refreshDsConfigFromFigmaData(ds, figmaData = {}) {
   const varsById = new Map(variables.map(v => [v.id, v]));
   const changes = [];
   const skipped = [];
+
+  if (
+    ds && ds.figlets && ds.figlets.source === "figma-snapshot-bootstrap"
+    && ds.color && Array.isArray(ds.color.ramps)
+  ) {
+    const inferred = detectBrand(ds.color.ramps, figmaData);
+    const currentPrimary = Array.isArray(ds.color.brand)
+      ? ds.color.brand.find(entry => entry && entry.role === "primary")
+      : null;
+    const nextPrimary = inferred[0] || null;
+    if (nextPrimary && (!currentPrimary || currentPrimary.name !== nextPrimary.name)) {
+      changes.push({
+        kind: "brand-inference",
+        role: "primary",
+        from: currentPrimary && currentPrimary.name || null,
+        to: nextPrimary.name,
+        reason: "semantic brand aliases",
+      });
+      ds.color.brand = inferred;
+    }
+  }
+
+  if (ds && ds.figlets && ds.figlets.source === "figma-snapshot-bootstrap" && ds.typography && ds.typography.scale) {
+    const inferredTypography = inferTypographyFromSnapshot(figmaData);
+    for (const [role, inferredRole] of Object.entries(inferredTypography.scale || {})) {
+      const currentRole = ds.typography.scale[role];
+      if (!currentRole || !inferredRole.family || currentRole.family === inferredRole.family) continue;
+      changes.push({
+        kind: "typography-family",
+        role,
+        from: currentRole.family || ds.typography.families && ds.typography.families.sans || null,
+        to: inferredRole.family,
+      });
+      currentRole.family = inferredRole.family;
+    }
+  }
 
   if (ds.color && Array.isArray(ds.color.brand)) {
     for (const brand of ds.color.brand) {

@@ -158,7 +158,7 @@ module.exports = (async () => {
   }
 };\n`, "utf8");
 
-  const prepared = handlePrepareDsConfig({ config_path: configPath });
+  const prepared = await handlePrepareDsConfig({ config_path: configPath });
   assert.ok(!prepared.error, "generated setup should prepare");
   assert.strictEqual(prepared.readyToBuild, true, "generated setup should be build-ready on first pass");
   assert.strictEqual(prepared.semanticPairs.failCount, 0, "generated setup should not surface self-inflicted contrast failures");

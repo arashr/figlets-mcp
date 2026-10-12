@@ -114,6 +114,39 @@ module.exports = (() => {
   });
 
   {
+    const generated = {
+      figlets: { source: "figma-snapshot-bootstrap" },
+      typography: {
+        families: { sans: "Space Grotesk", display: "Bricolage Grotesque" },
+        scale: { "display/lg": { sizes: [48, 48, 48], lineHeights: [56, 56, 56], weight: 400, tracking: -0.02 } },
+      },
+      color: {
+        brand: [{ name: "blue", role: "primary", step: 500, hex: "#3B82F6" }],
+        ramps: [
+          { folder: "color/blue", steps: [[500, 0.23, 0.51, 0.96]] },
+          { folder: "color/grape", steps: [[500, 0.65, 0.29, 0.93]] },
+        ],
+      },
+    };
+    const snapshot = {
+      collections: [],
+      textStyles: [
+        { name: "type/display/lg", fontName: { family: "Bricolage Grotesque", style: "Regular" }, fontSize: 48, lineHeight: { unit: "PIXELS", value: 56 }, letterSpacing: { unit: "PIXELS", value: -0.02 } },
+      ],
+      variables: [
+        colorVar("blue-500", "color/blue/500", { default: { r: 0.23, g: 0.51, b: 0.96 } }),
+        colorVar("grape-500", "color/grape/500", { default: { r: 0.65, g: 0.29, b: 0.93 } }),
+        colorVar("bg-brand", "color/bg/brand", { light: { type: "VARIABLE_ALIAS", id: "grape-500" } }, "semantics"),
+      ],
+    };
+    const repaired = refreshDsConfigFromFigmaData(generated, snapshot);
+    assert.strictEqual(repaired.ds.color.brand[0].name, "grape", "generated bootstrap configs should repair stale first-ramp primary inference");
+    assert.ok(repaired.changes.some(change => change.kind === "brand-inference" && change.from === "blue" && change.to === "grape"));
+    assert.strictEqual(repaired.ds.typography.scale["display/lg"].family, "Bricolage Grotesque");
+    assert.ok(repaired.changes.some(change => change.kind === "typography-family" && change.role === "display/lg"));
+  }
+
+  {
     const noSemanticFields = makeDs();
     delete noSemanticFields.color.semantics.pairs[0].Light;
     delete noSemanticFields.color.semantics.pairs[0].Dark;

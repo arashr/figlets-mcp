@@ -32,7 +32,9 @@ const {
   handleApplyDsConfigContrastRepairs,
   handlePrepareDsConfig,
 } = require("../../packages/figlets-mcp-server/src/tools/prepare-ds-config.js");
-const result = handlePrepareDsConfig({ config_path: configPath });
+
+module.exports = (async () => {
+const result = await handlePrepareDsConfig({ config_path: configPath });
 
 assert.ok(!result.error, "prepare_ds_config should succeed");
 assert.ok(result.setupApprovalPreview, "prepare_ds_config should return a detailed setup approval preview");
@@ -75,6 +77,8 @@ assert.ok(fs.existsSync(result.setupPreview.svgPath), "setup preview SVG should 
 assert.ok(fs.readFileSync(result.setupPreview.svgPath, "utf8").includes("Semantic pairs"), "preview should include semantic pairs");
 assert.ok(result.designMdExport && result.designMdExport.path, "prepare_ds_config should return DESIGN.md export path");
 assert.ok(fs.existsSync(result.designMdExport.path), "DESIGN.md should be written next to the config");
+assert.strictEqual(result.designMdExport.lint.passed, true, "prepare_ds_config should use the shared DESIGN.md validation gate");
+assert.ok(fs.existsSync(result.designMdExport.sidecarPath), "prepare_ds_config should write the default lossless sidecar");
 assert.ok(fs.readFileSync(result.designMdExport.path, "utf8").includes("## Overview"), "DESIGN.md export should include portable agent context");
 
 function writeCustomTypographyConfig(filePath, textStylePattern) {
@@ -110,7 +114,7 @@ function writeCustomTypographyConfig(filePath, textStylePattern) {
 
 const customWithSizePath = path.join(tmp, "custom-with-size.config.js");
 writeCustomTypographyConfig(customWithSizePath, "type/{role}/{size}");
-const customWithSize = handlePrepareDsConfig({ config_path: customWithSizePath });
+const customWithSize = await handlePrepareDsConfig({ config_path: customWithSizePath });
 assert.ok(!customWithSize.error, "custom type config with {size} should prepare");
 assert.ok(
   customWithSize.setupApprovalPreview.typographySystem.textStyleExamples.includes("type/body/md"),
@@ -123,7 +127,7 @@ assert.ok(
 
 const customNoSizePath = path.join(tmp, "custom-no-size.config.js");
 writeCustomTypographyConfig(customNoSizePath, "text/{role}");
-const customNoSize = handlePrepareDsConfig({ config_path: customNoSizePath });
+const customNoSize = await handlePrepareDsConfig({ config_path: customNoSizePath });
 assert.ok(!customNoSize.error, "custom type config without {size} should prepare");
 assert.ok(
   customNoSize.setupApprovalPreview.typographySystem.textStyleExamples.includes("text/body/md"),
@@ -156,7 +160,7 @@ fs.writeFileSync(generatedPinkPath, `const DS = {
     elevation: '5. Elevation'
   }
 };\n`, "utf8");
-const generatedPink = handlePrepareDsConfig({ config_path: generatedPinkPath });
+const generatedPink = await handlePrepareDsConfig({ config_path: generatedPinkPath });
 assert.ok(!generatedPink.error, "generated pink setup config should prepare");
 assert.strictEqual(generatedPink.semanticPairs.failCount, 0, "generated setup pairs should not surface self-inflicted contrast repairs");
 assert.strictEqual(generatedPink.readyToBuild, true, "generated pink setup should be ready to build after first prepare");
@@ -205,7 +209,7 @@ fs.writeFileSync(generatedShortScalePinkPath, `const DS = {
     elevation: '5. Elevation'
   }
 };\n`, "utf8");
-const generatedShortScalePink = handlePrepareDsConfig({ config_path: generatedShortScalePinkPath });
+const generatedShortScalePink = await handlePrepareDsConfig({ config_path: generatedShortScalePinkPath });
 assert.ok(!generatedShortScalePink.error, "generated 100-900 pink setup config should prepare");
 assert.strictEqual(
   generatedShortScalePink.semanticPairs.failCount,
@@ -262,7 +266,7 @@ fs.writeFileSync(noOptionManualContrastPath, `const DS = {
     elevation: '5. Elevation'
   }
 };\n`, "utf8");
-const noOptionManualContrast = handlePrepareDsConfig({ config_path: noOptionManualContrastPath });
+const noOptionManualContrast = await handlePrepareDsConfig({ config_path: noOptionManualContrastPath });
 assert.ok(!noOptionManualContrast.error, "manual no-option contrast config should still prepare");
 assert.strictEqual(noOptionManualContrast.readyToBuild, false);
 assert.ok(noOptionManualContrast.semanticPairs.contrastRepairOptions.length > 0);
@@ -284,7 +288,7 @@ const appliedCombinedManualRepair = handleApplyDsConfigContrastRepairs({
   repairs: noOptionManualContrast.semanticPairs.contrastRepairOptions,
 });
 assert.ok(!appliedCombinedManualRepair.error, "combined background+text contrast repair should apply");
-const afterCombinedManualRepair = handlePrepareDsConfig({ config_path: noOptionManualContrastPath });
+const afterCombinedManualRepair = await handlePrepareDsConfig({ config_path: noOptionManualContrastPath });
 assert.strictEqual(afterCombinedManualRepair.readyToBuild, true, "combined repair should make the manual setup build-ready");
 
 const failingContrastPath = path.join(tmp, "failing-contrast.config.js");
@@ -319,7 +323,7 @@ fs.writeFileSync(failingContrastPath, `const DS = {
   }
 };\n`, "utf8");
 
-const failingContrast = handlePrepareDsConfig({ config_path: failingContrastPath });
+const failingContrast = await handlePrepareDsConfig({ config_path: failingContrastPath });
 assert.ok(!failingContrast.error, "failing contrast config should still prepare");
 assert.ok(failingContrast.semanticPairs.failCount > 0, "test fixture should fail contrast");
 assert.ok(
@@ -396,9 +400,10 @@ assert.ok(
   "contrast config repair should send agents back through prepare before build"
 );
 
-const afterContrastRepair = handlePrepareDsConfig({ config_path: failingContrastPath });
+const afterContrastRepair = await handlePrepareDsConfig({ config_path: failingContrastPath });
 assert.ok(!afterContrastRepair.error, "reprepare after approved contrast repair should succeed");
 assert.strictEqual(afterContrastRepair.semanticPairs.failCount, 0, "approved contrast repair should clear setup contrast failures");
 assert.strictEqual(afterContrastRepair.readyToBuild, true, "reprepared config should be build-ready after contrast repair");
 
 fs.rmSync(tmp, { recursive: true, force: true });
+})();

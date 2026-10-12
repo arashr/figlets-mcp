@@ -2175,3 +2175,13 @@ Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats`
 - Separating the "show the glyph" decision from the "pass WCAG AA" decision is cleaner: `forceIndicator` controls presence, the badge controls grading.
 
 **Consequence:** Icon swatches always show the indicator glyph. Non-icon swatches continue to gate on 4.5:1. The WCAG badge reflects true pass/fail for both.
+
+---
+
+## [2026-10-12] Composed scrim migration stays on the primitive repair boundary
+
+**Decision:** Generated setups create shared `opacity/*` FLOAT primitives with both `OPACITY` and `COLOR_OPACITY` scopes, then create existing `color/scrim/*` names as composed COLOR values. Existing files migrate through `inspect_ds_token_gaps` category `primitive-opacity` and the exact `opacity_repairs` payload on `update_ds_primitives`.
+
+**Why:** Scrims and their opacity prerequisites are config-backed Primitives collection assets. Keeping migration on `update_ds_primitives` preserves existing IDs and the established approval boundary. A generic operation batch would lose the specialized RGBA equivalence check and prerequisite handling.
+
+**Consequence:** No sync, health inspection, config refresh, or ordinary setup pass converts an existing scrim. The bridge prevalidates every approved scrim, mode signature, color source, opacity prerequisite, and scope signature before mutation. Partial approval filters whole repair entries and creates only their required opacity variables. TIMING, EASING, and arbitrary composed COLOR edits continue through `plan_ds_figma_operations` and `apply_ds_figma_operations`.

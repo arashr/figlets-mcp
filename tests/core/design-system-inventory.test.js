@@ -35,13 +35,24 @@ const {
 {
   const inventory = designSystemInventory({
     collections: [{ name: "Color" }],
-    variables: [{ name: "color/bg/default" }],
+    variables: [
+      { name: "color/bg/default", resolvedType: "COLOR" },
+      { name: "motion/duration/standard", resolvedType: "TIMING" },
+      { name: "motion/easing/standard", resolvedType: "EASING" },
+    ],
     textStyles: [],
     effectStyles: [],
+    capabilities: {
+      variableResolvedTypes: ["BOOLEAN", "COLOR", "EASING", "FLOAT", "STRING", "TIMING"],
+    },
   });
   assert.strictEqual(inventory.isEmpty, false);
   assert.strictEqual(inventory.state, "has-token-artifacts");
-  assert.strictEqual(inventory.designSystemArtifactCount, 1);
+  assert.strictEqual(inventory.designSystemArtifactCount, 3);
+  assert.strictEqual(inventory.counts.variableTypes.COLOR, 1);
+  assert.strictEqual(inventory.counts.variableTypes.TIMING, 1);
+  assert.strictEqual(inventory.counts.variableTypes.EASING, 1);
+  assert.deepStrictEqual(inventory.capabilities.variableResolvedTypes, ["BOOLEAN", "COLOR", "EASING", "FLOAT", "STRING", "TIMING"]);
   assert.strictEqual(emptyDesignSystemPrompt(inventory), null);
   assert.strictEqual(emptyDesignSystemMessage(inventory), null);
 }

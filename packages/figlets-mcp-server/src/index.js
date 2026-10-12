@@ -586,7 +586,8 @@ server.tool(
   updateDsPrimitivesTool.description,
   {
     config_path: z.string().describe("Absolute path to design-system.config.js (must have been prepared by prepare_ds_config)."),
-    categories: z.array(z.string()).optional().describe('Optional list of primitive categories to update. Supported today: "color", "spacing", "color-semantics", "primitive-typography", "primitive-shadow". Defaults to color, spacing, and color-semantics when omitted.'),
+    categories: z.array(z.string()).optional().describe('Optional list of primitive categories to update. Supported today: "color", "spacing", "color-semantics", "primitive-opacity", "primitive-typography", "primitive-shadow". Defaults to color, spacing, and color-semantics when omitted.'),
+    opacity_repairs: z.array(z.record(z.string(), z.any())).optional().describe("Exact primitive-opacity repair entries copied from inspect_ds_token_gaps. A designer-approved subset may filter whole entries without editing them."),
     create_missing: z.boolean().optional().describe("When true, create missing primitive or semantic variables inside existing collections before setting values. Existing variable IDs are preserved."),
     dry_run: z.boolean().optional().describe("When true, report variables that would be created or updated but do not mutate Figma. Use before create_missing repairs for designer confirmation."),
     prune_off_scale: z.boolean().optional().describe("When true, delete primitive color variables whose step number is not in the configured scale."),
@@ -677,7 +678,7 @@ server.tool(
   {
     config_path: z.string().optional().describe("Optional file-scoped design-system.config.js path. Defaults to the active file config."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."),
-    categories: z.array(z.string()).optional().describe("Optional config-backed categories to inspect. Phase 3A supports non-color token categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, elevation, and elevation-variables."),
+    categories: z.array(z.string()).optional().describe("Optional config-backed categories to inspect, including primitive-opacity, primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, elevation, and elevation-variables."),
     include_existing_updates: z.boolean().optional().describe("When true, preserve the request in update_ds_tokens preview/apply payloads. Phase 3B remains read-only and does not compare stale values.")
   },
   async (args) => {

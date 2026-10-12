@@ -30,22 +30,57 @@ function generatePrimitivesData(ds) {
     }
   }
 
-  // ── Scrims — rgba with alpha ─────────────────────────────────────────────────
-  const scrims = [
-    { name: 'color/scrim/black/4',  r: 0, g: 0, b: 0, a: 0.04 },
-    { name: 'color/scrim/black/8',  r: 0, g: 0, b: 0, a: 0.08 },
-    { name: 'color/scrim/black/12', r: 0, g: 0, b: 0, a: 0.12 },
-    { name: 'color/scrim/black/20', r: 0, g: 0, b: 0, a: 0.20 },
-    { name: 'color/scrim/black/40', r: 0, g: 0, b: 0, a: 0.40 },
-    { name: 'color/scrim/black/60', r: 0, g: 0, b: 0, a: 0.60 },
-    { name: 'color/scrim/white/8',  r: 1, g: 1, b: 1, a: 0.08 },
-    { name: 'color/scrim/white/12', r: 1, g: 1, b: 1, a: 0.12 },
-    { name: 'color/scrim/white/16', r: 1, g: 1, b: 1, a: 0.16 },
-    { name: 'color/scrim/white/20', r: 1, g: 1, b: 1, a: 0.20 },
+  function exactEndpointAlias(channel) {
+    const target = channel === 'white' ? 1 : 0;
+    const preferred = [];
+    const other = [];
+    for (const ramp of DS.color.ramps) {
+      const bucket = ramp.folder === 'color/neutral' ? preferred : other;
+      const steps = Array.isArray(ramp.steps) ? ramp.steps : [];
+      const endpoints = steps.length > 1 ? [steps[0], steps[steps.length - 1]] : steps;
+      for (const step of endpoints) {
+        if (step && step[1] === target && step[2] === target && step[3] === target) {
+          bucket.push(`${ramp.folder}/${step[0]}`);
+        }
+      }
+    }
+    return preferred[0] || other[0] || null;
+  }
+
+  const blackEndpoint = exactEndpointAlias('black');
+  const whiteEndpoint = exactEndpointAlias('white');
+  const scrimSpecs = [
+    ['black', 4],
+    ['black', 8],
+    ['black', 12],
+    ['black', 20],
+    ['black', 40],
+    ['black', 60],
+    ['white', 8],
+    ['white', 12],
+    ['white', 16],
+    ['white', 20],
   ];
+  const scrims = scrimSpecs.map(([channel, percentage]) => {
+    const raw = channel === 'white' ? { r: 1, g: 1, b: 1 } : { r: 0, g: 0, b: 0 };
+    const endpoint = channel === 'white' ? whiteEndpoint : blackEndpoint;
+    return {
+      name: `color/scrim/${channel}/${percentage}`,
+      r: raw.r,
+      g: raw.g,
+      b: raw.b,
+      a: percentage / 100,
+      color: endpoint ? { alias: endpoint } : raw,
+      opacity: { alias: `opacity/${percentage}` },
+    };
+  });
 
   // ── Floats: shadow + type + spacing ─────────────────────────────────────────
   const floats = [];
+
+  for (const value of [4, 8, 12, 16, 20, 40, 60]) {
+    floats.push({ name: `opacity/${value}`, value, scopes: ['OPACITY', 'COLOR_OPACITY'] });
+  }
 
   const SHADOWS = [
     { name: 'shadow/1/offset-y',       value: 1  },

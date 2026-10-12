@@ -1325,6 +1325,33 @@ module.exports = (() => {
   }
 
   {
+    const opacityDs = Object.assign({}, DS, {
+      collections: Object.assign({}, DS.collections, { primitives: "1. Primitives" }),
+    });
+    const primitiveOpacity = inspectDsTokenGapsFromConfigAndFigmaData(opacityDs, {
+      capabilities: { composedColorVariables: true, exactVariableWriteSupport: true },
+      collections: [{ id: "prim", name: "1. Primitives", modes: [{ modeId: "default", name: "Default" }] }],
+      variables: [
+        { id: "white", name: "color/neutral/0", resolvedType: "COLOR", variableCollectionId: "prim", valuesByMode: { default: { r: 1, g: 1, b: 1 } } },
+        { id: "black", name: "color/neutral/100", resolvedType: "COLOR", variableCollectionId: "prim", valuesByMode: { default: { r: 0, g: 0, b: 0 } } },
+        { id: "scrim-black-40", name: "color/scrim/black/40", resolvedType: "COLOR", variableCollectionId: "prim", valuesByMode: { default: { r: 0, g: 0, b: 0, a: 0.4 } }, scopes: ["ALL_FILLS"] },
+      ],
+      textStyles: [],
+      effectStyles: [],
+    }, {
+      configPath: "/tmp/design-system.config.js",
+      categories: ["primitive-opacity"],
+    });
+    assert.strictEqual(primitiveOpacity.repairPlan.primitiveRepairPlan.tool, "update_ds_primitives");
+    assert.deepStrictEqual(primitiveOpacity.repairPlan.primitiveRepairPlan.applyInput.categories, ["primitive-opacity"]);
+    assert.strictEqual(primitiveOpacity.repairPlan.primitiveRepairPlan.applyInput.opacity_repairs.length, 10);
+    const black40 = primitiveOpacity.repairPlan.primitiveRepairPlan.applyInput.opacity_repairs.find(entry => entry.scrim.name === "color/scrim/black/40");
+    assert.strictEqual(black40.scrim.id, "scrim-black-40");
+    assert.strictEqual(black40.opacity.name, "opacity/40");
+    assert.strictEqual(primitiveOpacity.repairPlan.reviewOptions.find(option => option.id === "primitive-opacity").tool, "update_ds_primitives");
+  }
+
+  {
     const shadowDs = Object.assign({}, DS, {
       color: {
         ramps: [{ folder: "color/neutral", steps: [[500, 0.5, 0.5, 0.5]] }],

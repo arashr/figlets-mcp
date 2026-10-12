@@ -41,11 +41,21 @@ module.exports = (async () => {
     assert.ok(updateDsPrimitivesTool.description.includes("dry_run"), "tool description should mention dry-run confirmation");
     assert.ok(updateDsPrimitivesTool.inputSchema.properties.create_missing, "tool schema should expose create_missing");
     assert.ok(updateDsPrimitivesTool.inputSchema.properties.dry_run, "tool schema should expose dry_run");
+    assert.ok(updateDsPrimitivesTool.inputSchema.properties.opacity_repairs, "tool schema should expose exact opacity repairs");
 
     // Missing config_path -> clear error
     {
       const result = await handleUpdateDsPrimitives({});
       assert.ok(result.error && /config_path/.test(result.error), "should error on missing config_path");
+    }
+
+    {
+      const result = await handleUpdateDsPrimitives({
+        config_path: configPath,
+        categories: ["primitive-opacity"],
+        dry_run: true,
+      });
+      assert.ok(result.error && /exact non-empty opacity_repairs/.test(result.error));
     }
 
     // Successful round trip - bridge hook returns a 200 with a result envelope.

@@ -31,14 +31,26 @@ module.exports = (async () => {
     variable("text-delete", "color/text/delete-me", "COLOR", "color", { light: alias("n50"), dark: alias("n950") }),
     variable("fill-danger", "color/fill/danger", "COLOR", "color", { light: alias("n50"), dark: alias("n950") }),
     variable("space-stack", "space/stack/md", "FLOAT", "spacing", { mobile: 16, tablet: 20 }),
+    variable("space-use", "space/component/card", "FLOAT", "spacing", { mobile: alias("space-stack"), tablet: alias("space-stack") }),
+    variable("opacity-40", "opacity/40", "FLOAT", "prim", { value: 40 }),
+    variable("scrim-composed", "color/scrim/composed", "COLOR", "color", {
+      light: { color: alias("n50"), opacity: alias("opacity-40") },
+      dark: { color: alias("n950"), opacity: alias("opacity-40") },
+    }),
     variable("obsolete-var", "obsolete/token", "FLOAT", "obsolete", { only: 1 }),
   ];
   const figmaData = {
+    capabilities: {
+      source: "figma-plugin",
+      variableResolvedTypes: ["BOOLEAN", "COLOR", "EASING", "FLOAT", "STRING", "TIMING"],
+      composedColorVariables: true,
+    },
     variables,
     collections: [
-      { id: "prim", name: "1. Primitives", modes: [{ modeId: "value", name: "Value" }], variableIds: ["n50", "n950"] },
-      { id: "color", name: "2. Color", modes: [{ modeId: "light", name: "Light" }, { modeId: "dark", name: "Dark" }], variableIds: ["text-existing", "text-old", "text-delete", "fill-danger"] },
-      { id: "spacing", name: "4. Spacing", modes: [{ modeId: "mobile", name: "Mobile" }, { modeId: "tablet", name: "Tablet" }], variableIds: ["space-stack"] },
+      { id: "prim", name: "1. Primitives", modes: [{ modeId: "value", name: "Value" }], variableIds: ["n50", "n950", "opacity-40"] },
+      { id: "color", name: "2. Color", modes: [{ modeId: "light", name: "Light" }, { modeId: "dark", name: "Dark" }], variableIds: ["text-existing", "text-old", "text-delete", "fill-danger", "scrim-composed"] },
+      { id: "spacing", name: "4. Spacing", modes: [{ modeId: "mobile", name: "Mobile" }, { modeId: "tablet", name: "Tablet" }], variableIds: ["space-stack", "space-use"] },
+      { id: "motion", name: "6. Motion", modes: [{ modeId: "default", name: "Default" }, { modeId: "reduced", name: "Reduced Motion" }], variableIds: [] },
       { id: "obsolete", name: "Delete Me", modes: [{ modeId: "only", name: "Only" }], variableIds: ["obsolete-var"] },
       { id: "oldColl", name: "Old Collection", modes: [{ modeId: "only", name: "Only" }], variableIds: [] },
     ],
@@ -135,6 +147,141 @@ module.exports = (async () => {
     "create_variable planner should accept values, modeValues, and mode_values payload shapes"
   );
 
+  const modernVariablePlan = planDsFigmaOperationsFromFigmaData(figmaData, {
+    operations: [
+      {
+        kind: "create_variable",
+        name: "motion/duration/standard",
+        collection: "6. Motion",
+        type: "TIMING",
+        values: { Default: { milliseconds: 200 }, "Reduced Motion": { milliseconds: 0 } },
+      },
+      {
+        kind: "create_variable",
+        name: "motion/easing/standard",
+        collection: "6. Motion",
+        type: "EASING",
+        values: {
+          Default: { type: "CUSTOM_CUBIC_BEZIER", easingFunctionCubicBezier: { x1: 0.2, y1: 0, x2: 0, y2: 1 } },
+          "Reduced Motion": { type: "LINEAR" },
+        },
+      },
+      {
+        kind: "create_variable",
+        name: "color/scrim/custom",
+        collection: "2. Color",
+        type: "COLOR",
+        values: {
+          Light: { color: { alias: "color/neutral/50" }, opacity: { alias: "opacity/40" } },
+          Dark: { color: { r: 0, g: 0, b: 0 }, opacity: { alias: "opacity/40" } },
+        },
+      },
+      {
+        kind: "create_variable",
+        name: "motion/duration/invalid",
+        collection: "6. Motion",
+        type: "TIMING",
+        values: { Default: { milliseconds: -1 } },
+      },
+      {
+        kind: "create_variable",
+        name: "color/scrim/raw-only",
+        collection: "2. Color",
+        type: "COLOR",
+        values: { Light: { color: { r: 0, g: 0, b: 0 }, opacity: 40 } },
+      },
+    ],
+  });
+  assert.strictEqual(modernVariablePlan.repairPlan.counts.ready, 3);
+  assert.strictEqual(modernVariablePlan.repairPlan.counts.blocked, 2);
+  const timingOperation = modernVariablePlan.repairPlan.applyInput.operations.find(operation => operation.type === "TIMING");
+  assert.deepStrictEqual(timingOperation.modeValues.map(item => item.value), [0.2, 0]);
+  assert.ok(
+    modernVariablePlan.repairPlan.designerPresentation.proposedChanges.some(change =>
+      change.summaryLine.includes("Default = 200 ms") && change.summaryLine.includes("Reduced Motion = 0 ms")
+    ),
+    "designer-facing timing previews should use milliseconds"
+  );
+  const easingOperation = modernVariablePlan.repairPlan.applyInput.operations.find(operation => operation.type === "EASING");
+  assert.strictEqual(easingOperation.modeValues[0].value.type, "CUSTOM_CUBIC_BEZIER");
+  const composedOperation = modernVariablePlan.repairPlan.applyInput.operations.find(operation => operation.name === "color/scrim/custom");
+  assert.deepStrictEqual(composedOperation.modeValues[0].value, {
+    color: alias("n50"),
+    opacity: alias("opacity-40"),
+  });
+  assert.strictEqual(
+    _validateApprovedOperations(modernVariablePlan.repairPlan.applyInput.operations, figmaData),
+    null,
+    "fresh modern variable operations should validate"
+  );
+
+  const legacyCapabilityPlan = planDsFigmaOperationsFromFigmaData(Object.assign({}, figmaData, { capabilities: {} }), {
+    operations: [{
+      kind: "create_variable",
+      name: "motion/duration/blocked",
+      collection: "6. Motion",
+      type: "TIMING",
+      values: { Default: { milliseconds: 100 } },
+    }],
+  });
+  assert.strictEqual(legacyCapabilityPlan.repairPlan.counts.blocked, 1);
+  assert.ok(legacyCapabilityPlan.repairPlan.designerPresentation.blocked[0].errors[0].includes("does not advertise TIMING"));
+
+  const easingVariants = [
+    "EASE_IN",
+    "EASE_OUT",
+    "EASE_IN_AND_OUT",
+    "LINEAR",
+    "EASE_IN_BACK",
+    "EASE_OUT_BACK",
+    "EASE_IN_AND_OUT_BACK",
+    "GENTLE",
+    "QUICK",
+    "BOUNCY",
+    "SLOW",
+    "HOLD",
+  ];
+  const easingVariantPlan = planDsFigmaOperationsFromFigmaData(figmaData, {
+    operations: easingVariants.map((type, index) => ({
+      kind: "create_variable",
+      name: `motion/easing/variant-${index}`,
+      collection: "6. Motion",
+      type: "EASING",
+      values: { Default: { type } },
+    })).concat([
+      {
+        kind: "create_variable",
+        name: "motion/easing/custom-cubic",
+        collection: "6. Motion",
+        type: "EASING",
+        values: { Default: { type: "CUSTOM_CUBIC_BEZIER", easingFunctionCubicBezier: { x1: 0, y1: -0.5, x2: 1, y2: 1.5 } } },
+      },
+      {
+        kind: "create_variable",
+        name: "motion/easing/custom-spring",
+        collection: "6. Motion",
+        type: "EASING",
+        values: { Default: { type: "CUSTOM_SPRING", easingFunctionSpring: { bounce: 0.5 } } },
+      },
+      {
+        kind: "create_variable",
+        name: "motion/easing/invalid-cubic",
+        collection: "6. Motion",
+        type: "EASING",
+        values: { Default: { type: "CUSTOM_CUBIC_BEZIER", easingFunctionCubicBezier: { x1: -0.1, y1: 0, x2: 1, y2: 1 } } },
+      },
+      {
+        kind: "create_variable",
+        name: "motion/easing/invalid-spring",
+        collection: "6. Motion",
+        type: "EASING",
+        values: { Default: { type: "CUSTOM_SPRING", easingFunctionSpring: { bounce: 1.1 } } },
+      },
+    ]),
+  });
+  assert.strictEqual(easingVariantPlan.repairPlan.counts.ready, easingVariants.length + 2);
+  assert.strictEqual(easingVariantPlan.repairPlan.counts.blocked, 2);
+
   const applyInput = {
     operations: plan.repairPlan.applyInput.operations.filter(operation =>
       ["create_variable", "update_variable", "rename_variable", "delete_variable", "create_mode"].includes(operation.kind)
@@ -217,6 +364,9 @@ module.exports = (async () => {
     null,
     "expanded high-level operations should validate against a fresh snapshot"
   );
+  const moveOperation = highLevelPlan.repairPlan.applyInput.operations.find(operation => operation.kind === "move_variable");
+  assert.strictEqual(moveOperation.aliasRefs.length, 2, "destructive moves should capture every alias reference");
+  assert.ok(moveOperation.aliasRefs.every(ref => JSON.stringify(ref.aliasPath) === "[]"));
   const staleStyleData = Object.assign({}, figmaData, {
     textStyles: figmaData.textStyles.map(style =>
       style.id === "txt-body"
@@ -246,6 +396,34 @@ module.exports = (async () => {
   assert.ok(
     suspiciousRenamePlan.repairPlan.agentInstruction.includes("do not use it to invent semantic naming migrations"),
     "generic operations guidance should preserve the semantic naming planner boundary"
+  );
+
+  const nestedRetargetPlan = planDsFigmaOperationsFromFigmaData(figmaData, {
+    operations: [
+      { kind: "retarget_variable_aliases", from: "color/neutral/50", to: "color/neutral/950" },
+    ],
+  });
+  const nestedRetarget = nestedRetargetPlan.repairPlan.applyInput.operations[0];
+  assert.ok(
+    nestedRetarget.aliasRefs.some(ref => ref.variableName === "color/scrim/composed" && JSON.stringify(ref.aliasPath) === JSON.stringify(["color"])),
+    "retarget planning should include nested composed-color aliases"
+  );
+  assert.strictEqual(_validateApprovedOperations([nestedRetarget], figmaData), null);
+
+  const referencedDeletePlan = planDsFigmaOperationsFromFigmaData(figmaData, {
+    operations: [{ kind: "delete_variable", name: "color/neutral/50" }],
+  });
+  assert.strictEqual(referencedDeletePlan.repairPlan.counts.blocked, 1);
+  assert.ok(referencedDeletePlan.repairPlan.designerPresentation.blocked[0].errors[0].includes("alias reference"));
+
+  const extraMoveAliasData = Object.assign({}, figmaData, {
+    variables: figmaData.variables.concat([
+      variable("space-use-new", "space/component/new", "FLOAT", "spacing", { mobile: alias("space-stack"), tablet: 24 }),
+    ]),
+  });
+  assert.ok(
+    _validateApprovedOperations([moveOperation], extraMoveAliasData).includes("Alias references for space/stack/md changed since approval"),
+    "new aliases should invalidate a destructive move approval"
   );
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "figlets-figma-operations-"));

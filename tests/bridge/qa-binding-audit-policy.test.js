@@ -588,7 +588,9 @@ assert.ok(
     code.includes("function _setVariableScopesForName(variable, name, type)") &&
     code.includes("async function _applyVariableScopesToCollection(collectionId, opts)") &&
     code.includes("if (opts.hideFromPickers)") &&
-    code.includes("if (_setVariableScopes(allVars[i], [])) scoped += 1;") &&
+    code.includes("var hiddenScopes = /^opacity\\//i.test(String(allVars[i].name || ''))") &&
+    code.includes("if (_setVariableScopes(allVars[i], hiddenScopes)) scoped += 1;") &&
+    code.includes("if (first === 'opacity') return ['OPACITY', 'COLOR_OPACITY'];") &&
     code.includes("if (second === 'radius') return ['CORNER_RADIUS'];") &&
     code.includes("if (second === 'border' || second === 'stroke') return ['STROKE_FLOAT'];") &&
     code.includes("return ['GAP'];") &&

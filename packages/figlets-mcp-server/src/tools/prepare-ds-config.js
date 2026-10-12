@@ -185,6 +185,8 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
     .map(item => ({ token: item.name, value: item.value }));
   const shadowPrimitives = primitiveFloats
     .filter(item => /^shadow\//.test(String(item.name || '')));
+  const opacityPrimitives = primitiveFloats
+    .filter(item => /^opacity\//.test(String(item.name || '')));
   const shadowPrimitiveExamples = shadowPrimitives
     .slice(0, 8)
     .map(item => ({ token: item.name, value: item.value }));
@@ -214,6 +216,7 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
         willCreate: {
           colors: _asArray(primitivesData && primitivesData.colors).length,
           floats: primitiveFloats.length,
+          opacity: opacityPrimitives.length,
           strings: _asArray(primitivesData && primitivesData.strings).length,
           scrims: _asArray(primitivesData && primitivesData.scrims).length,
         },
@@ -222,6 +225,13 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
           spacing: spacingPrimitiveExamples,
           typography: typePrimitiveExamples,
           shadow: shadowPrimitiveExamples,
+          opacity: opacityPrimitives.map(item => ({ token: item.name, value: `${item.value}%`, scopes: item.scopes })),
+          scrims: _asArray(primitivesData && primitivesData.scrims).map(item => ({
+            token: item.name,
+            color: item.color,
+            opacity: item.opacity,
+            resolvedRgba: { r: item.r, g: item.g, b: item.b, a: item.a },
+          })),
           fonts: _sample(primitivesData && primitivesData.strings, 4).map(item => ({ token: item.name, value: item.value })),
         },
       },
@@ -512,6 +522,7 @@ async function handlePrepareDsConfig({ config_path }) {
       counts: {
         colors:  primitivesData.colors.length,
         floats:  primitivesData.floats.length,
+        opacity: primitivesData.floats.filter(item => /^opacity\//.test(String(item && item.name || ''))).length,
         strings: primitivesData.strings.length,
         scrims:  primitivesData.scrims.length,
       },

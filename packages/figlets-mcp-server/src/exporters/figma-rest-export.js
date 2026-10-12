@@ -215,6 +215,13 @@ async function exportFigmaFile(input) {
   return {
     target: input.file,
     source: "figma-rest",
+    capabilities: {
+      source: "figma-rest",
+      variableResolvedTypes: ["BOOLEAN", "COLOR", "FLOAT", "STRING"],
+      unknownVariableResolvedTypes: ["EASING", "TIMING"],
+      composedColorVariables: true,
+      exactVariableWriteSupport: false,
+    },
     file: {
       key: fileKey,
       name: fileResponse.name || null,

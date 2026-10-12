@@ -1,7 +1,23 @@
 const { bridgeStatusError, requestBridgePost } = require("../bridges/bridge-request.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 
-const VARIABLE_TYPES = new Set(["COLOR", "FLOAT", "STRING", "BOOLEAN"]);
+const VARIABLE_TYPES = new Set(["COLOR", "FLOAT", "STRING", "BOOLEAN", "TIMING", "EASING"]);
+const EASING_TYPES = new Set([
+  "EASE_IN",
+  "EASE_OUT",
+  "EASE_IN_AND_OUT",
+  "LINEAR",
+  "EASE_IN_BACK",
+  "EASE_OUT_BACK",
+  "EASE_IN_AND_OUT_BACK",
+  "CUSTOM_CUBIC_BEZIER",
+  "GENTLE",
+  "QUICK",
+  "BOUNCY",
+  "SLOW",
+  "CUSTOM_SPRING",
+  "HOLD",
+]);
 const OP_KINDS = new Set([
   "create_collection",
   "rename_collection",
@@ -95,13 +111,7 @@ function _modeName(mode) {
 }
 
 function _valueSignature(value) {
-  if (value == null) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (value.type === "VARIABLE_ALIAS") return `alias:${value.id}`;
-  const keys = Object.keys(value).sort();
-  const out = {};
-  for (const key of keys) out[key] = value[key];
-  return JSON.stringify(out);
+  return _stableJson(value);
 }
 
 function _stableJson(value) {
@@ -124,11 +134,79 @@ function _parseHexColor(value) {
   };
 }
 
-function _normalizeLiteral(type, value) {
+function _normalizeEasing(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const easingType = String(value.type || "").toUpperCase();
+  if (!EASING_TYPES.has(easingType)) return null;
+  if (easingType === "CUSTOM_CUBIC_BEZIER") {
+    const curve = value.easingFunctionCubicBezier;
+    if (!curve || typeof curve !== "object" || Array.isArray(curve)) return null;
+    const normalized = {};
+    for (const key of ["x1", "y1", "x2", "y2"]) {
+      const number = Number(curve[key]);
+      if (!Number.isFinite(number)) return null;
+      normalized[key] = number;
+    }
+    if (normalized.x1 < 0 || normalized.x1 > 1 || normalized.x2 < 0 || normalized.x2 > 1) return null;
+    return { type: easingType, easingFunctionCubicBezier: normalized };
+  }
+  if (easingType === "CUSTOM_SPRING") {
+    const spring = value.easingFunctionSpring;
+    const bounce = spring && Number(spring.bounce);
+    if (!Number.isFinite(bounce) || bounce < 0 || bounce > 1) return null;
+    return { type: easingType, easingFunctionSpring: { bounce } };
+  }
+  return { type: easingType };
+}
+
+function _aliasName(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value.alias || value.targetName || value.variable || null;
+}
+
+function _normalizeComposedColor(value, ctx) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!Object.prototype.hasOwnProperty.call(value, "color") || !Object.prototype.hasOwnProperty.call(value, "opacity")) return null;
+
+  const colorAliasName = _aliasName(value.color);
+  const opacityAliasName = _aliasName(value.opacity);
+  let color;
+  let opacity;
+
+  if (colorAliasName) {
+    const target = ctx.varsByName.get(String(colorAliasName));
+    if (!target || target.resolvedType !== "COLOR") return null;
+    color = { type: "VARIABLE_ALIAS", id: target.id };
+  } else {
+    color = _normalizeLiteral("COLOR", value.color, ctx);
+    if (!color || (color.color && color.opacity)) return null;
+  }
+
+  if (opacityAliasName) {
+    const target = ctx.varsByName.get(String(opacityAliasName));
+    if (!target || target.resolvedType !== "FLOAT") return null;
+    opacity = { type: "VARIABLE_ALIAS", id: target.id };
+  } else {
+    const number = Number(value.opacity);
+    if (!Number.isFinite(number) || number < 0 || number > 100) return null;
+    opacity = number;
+  }
+
+  if (!colorAliasName && !opacityAliasName) return null;
+  return { color, opacity };
+}
+
+function _normalizeLiteral(type, value, ctx) {
   if (type === "FLOAT") {
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
   }
+  if (type === "TIMING") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const milliseconds = Number(value.milliseconds);
+    return Number.isFinite(milliseconds) && milliseconds >= 0 ? milliseconds / 1000 : null;
+  }
+  if (type === "EASING") return _normalizeEasing(value);
   if (type === "BOOLEAN") {
     if (value === true || value === false) return value;
     if (_norm(value) === "true") return true;
@@ -140,6 +218,8 @@ function _normalizeLiteral(type, value) {
     return String(value);
   }
   if (type === "COLOR") {
+    const composed = _normalizeComposedColor(value, ctx);
+    if (composed) return composed;
     if (value && typeof value === "object" && ["r", "g", "b"].every(k => Number.isFinite(Number(value[k])))) {
       const out = { r: Number(value.r), g: Number(value.g), b: Number(value.b) };
       if (Number.isFinite(Number(value.a))) out.a = Number(value.a);
@@ -181,12 +261,31 @@ function _context(figmaData = {}) {
     effectStylesByName,
     effectStylesById,
     collectionByVarId,
+    capabilities: figmaData.capabilities && typeof figmaData.capabilities === "object" ? figmaData.capabilities : {},
   };
 }
 
 function _collectionForVariable(variable, ctx) {
   if (!variable) return null;
   return ctx.collectionByVarId.get(variable.id) || ctx.collectionsById.get(variable.variableCollectionId) || null;
+}
+
+function _containsComposedColor(value) {
+  if (!value || typeof value !== "object") return false;
+  if (!Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, "color") && Object.prototype.hasOwnProperty.call(value, "opacity")) return true;
+  return Object.values(value).some(_containsComposedColor);
+}
+
+function _capabilityError(type, values, ctx) {
+  const capabilities = ctx.capabilities || {};
+  const supportedTypes = Array.isArray(capabilities.variableResolvedTypes) ? capabilities.variableResolvedTypes : [];
+  if ((type === "TIMING" || type === "EASING") && !supportedTypes.includes(type)) {
+    return `The synced bridge snapshot does not advertise ${type} variable support. Reload the current Figlets Bridge plugin and run sync_figma_data again.`;
+  }
+  if (type === "COLOR" && _containsComposedColor(values) && capabilities.composedColorVariables !== true) {
+    return "The synced bridge snapshot does not advertise composed color support. Reload the current Figlets Bridge plugin and run sync_figma_data again.";
+  }
+  return null;
 }
 
 function _modeForName(collection, name) {
@@ -269,34 +368,70 @@ function _parseStoredModeValues(sourceVariable, sourceCollection, targetCollecti
       });
       continue;
     }
+    if (!_isValidNativeValue(sourceVariable.resolvedType, rawValue, ctx)) {
+      errors.push(`Stored value for ${sourceVariable.name} in mode ${_modeName(sourceMode)} is not a valid ${sourceVariable.resolvedType} value.`);
+      continue;
+    }
     modeValues.push({
       mode: _modeName(targetMode),
       modeId: targetMode.modeId,
       sourceMode: _modeName(sourceMode),
       sourceModeId: sourceMode.modeId,
       kind: "literal",
-      value: rawValue == null ? null : rawValue,
+      value: rawValue,
     });
   }
   if (!modeValues.length) errors.push(`No mode values were usable for ${sourceVariable.name}.`);
   return { errors, modeValues };
 }
 
+function _aliasPaths(value, sourceId, path = []) {
+  if (!value || typeof value !== "object") return [];
+  if (value.type === "VARIABLE_ALIAS") return value.id === sourceId ? [path] : [];
+  const paths = [];
+  for (const key of Object.keys(value)) paths.push(..._aliasPaths(value[key], sourceId, path.concat(key)));
+  return paths;
+}
+
+function _valueAtPath(value, path) {
+  let current = value;
+  for (const segment of Array.isArray(path) ? path : []) {
+    if (!current || typeof current !== "object" || !Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
+    current = current[segment];
+  }
+  return current;
+}
+
 function _findAliasRefs(ctx, sourceId) {
   const refs = [];
   for (const variable of ctx.variables) {
     for (const [modeId, value] of Object.entries(variable.valuesByMode || {})) {
-      if (value && typeof value === "object" && value.type === "VARIABLE_ALIAS" && value.id === sourceId) {
+      for (const aliasPath of _aliasPaths(value, sourceId)) {
         refs.push({
           variableId: variable.id,
           variableName: variable.name,
           modeId,
+          aliasPath,
           expectedCurrentSignature: _valueSignature(value),
         });
       }
     }
   }
   return refs;
+}
+
+function _aliasRefIdentity(ref) {
+  return _stableJson({
+    variableId: ref && ref.variableId,
+    modeId: ref && ref.modeId,
+    aliasPath: ref && Array.isArray(ref.aliasPath) ? ref.aliasPath : [],
+  });
+}
+
+function _sameAliasRefSet(expected, current) {
+  const expectedKeys = (Array.isArray(expected) ? expected : []).map(_aliasRefIdentity).sort();
+  const currentKeys = (Array.isArray(current) ? current : []).map(_aliasRefIdentity).sort();
+  return _stableJson(expectedKeys) === _stableJson(currentKeys);
 }
 
 function _parseModeValues(values, type, collection, ctx, variable) {
@@ -340,7 +475,7 @@ function _parseModeValues(values, type, collection, ctx, variable) {
     const literalSource = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) && Object.prototype.hasOwnProperty.call(rawValue, "value")
       ? rawValue.value
       : rawValue;
-    const literal = _normalizeLiteral(type, literalSource);
+    const literal = _normalizeLiteral(type, literalSource, ctx);
     if (literal == null) {
       errors.push(`Value for ${modeName} is not a valid ${type} literal or alias.`);
       continue;
@@ -416,6 +551,13 @@ function _operationWarnings(operation) {
     if (duplicateSegment) warnings.push(duplicateSegment);
   }
   return warnings;
+}
+
+function _modeValueSummary(modeValue, type) {
+  if (modeValue.kind === "alias") return `${modeValue.mode} -> ${modeValue.targetName}`;
+  if (type === "TIMING") return `${modeValue.mode} = ${modeValue.value * 1000} ms`;
+  if (type === "EASING") return `${modeValue.mode} = ${modeValue.value.type}`;
+  return `${modeValue.mode} = ${JSON.stringify(modeValue.value)}`;
 }
 
 function _ready(input, operation, summaryLine) {
@@ -525,11 +667,13 @@ function _planOperation(input, ctx) {
     if (!targetCollectionName) errors.push("Collection name is required.");
     if (targetCollectionName && !targetCollection) errors.push(`Collection ${targetCollectionName} was not found.`);
     if (!VARIABLE_TYPES.has(type)) errors.push(`Unsupported variable type ${type || "(missing)"}.`);
+    const capabilityError = _capabilityError(type, _modeValueInput(input), ctx);
+    if (capabilityError) errors.push(capabilityError);
     if (errors.length) return _blocked(input, errors);
     const parsed = _parseModeValues(_modeValueInput(input), type, targetCollection, ctx, null);
     if (parsed.errors.length) return _blocked(input, parsed.errors);
     const operation = { kind, name, collection: targetCollection.name, collectionId: targetCollection.id, type, modeValues: parsed.modeValues };
-    return _ready(input, operation, `Create ${type} variable ${name} in ${targetCollection.name}.`);
+    return _ready(input, operation, `Create ${type} variable ${name} in ${targetCollection.name}: ${parsed.modeValues.map(value => _modeValueSummary(value, type)).join("; ")}.`);
   }
 
   if (["update_variable", "rename_variable", "delete_variable", "update_variable_metadata", "duplicate_variable", "move_variable", "deprecate_variable"].includes(kind)) {
@@ -541,6 +685,8 @@ function _planOperation(input, ctx) {
   if (kind === "update_variable") {
     const collection = _collectionForVariable(variable, ctx);
     if (!collection) return _blocked(input, [`Collection for ${variable.name} was not found.`]);
+    const capabilityError = _capabilityError(variable.resolvedType, _modeValueInput(input), ctx);
+    if (capabilityError) return _blocked(input, [capabilityError]);
     const parsed = _parseModeValues(_modeValueInput(input), variable.resolvedType, collection, ctx, variable);
     if (parsed.errors.length) return _blocked(input, parsed.errors);
     const operation = {
@@ -552,7 +698,7 @@ function _planOperation(input, ctx) {
       collection: collection.name,
       modeValues: parsed.modeValues,
     };
-    return _ready(input, operation, `Update ${variable.name}: ${parsed.modeValues.map(value => value.kind === "alias" ? `${value.mode} -> ${value.targetName}` : `${value.mode} = ${JSON.stringify(value.value)}`).join("; ")}.`);
+    return _ready(input, operation, `Update ${variable.name}: ${parsed.modeValues.map(value => _modeValueSummary(value, variable.resolvedType)).join("; ")}.`);
   }
 
   if (kind === "rename_variable") {
@@ -565,6 +711,10 @@ function _planOperation(input, ctx) {
   }
 
   if (kind === "delete_variable") {
+    const aliasRefs = _findAliasRefs(ctx, variable.id);
+    if (aliasRefs.length) {
+      return _blocked(input, [`Variable ${variable.name} still has ${aliasRefs.length} alias reference${aliasRefs.length === 1 ? "" : "s"}. Retarget those aliases before deleting it.`]);
+    }
     const operation = { kind, variableId: variable.id, expectedName: variable.name, type: variable.resolvedType, destructive: true };
     return _ready(input, operation, `Delete variable ${variable.name}.`);
   }
@@ -593,6 +743,8 @@ function _planOperation(input, ctx) {
     if (targetCollectionName && !targetCollection) errors.push(`Collection ${targetCollectionName} was not found.`);
     if (!newName) errors.push("newName is required.");
     if (newName && ctx.varsByName.has(newName)) errors.push(`Variable ${newName} already exists.`);
+    const capabilityError = _capabilityError(variable.resolvedType, variable.valuesByMode || {}, ctx);
+    if (capabilityError) errors.push(capabilityError);
     if (errors.length) return _blocked(input, errors);
     const parsed = _parseStoredModeValues(variable, sourceCollection, targetCollection, ctx);
     if (parsed.errors.length) return _blocked(input, parsed.errors);
@@ -609,6 +761,7 @@ function _planOperation(input, ctx) {
       modeValues: parsed.modeValues,
     };
     if (deleteOriginal) {
+      operation.aliasRefs = _findAliasRefs(ctx, variable.id);
       operation.deleteOriginal = true;
       operation.destructive = true;
     }
@@ -859,6 +1012,8 @@ function _validateApprovedOperations(operations, figmaData = {}) {
       if (!operation.name || ctx.varsByName.has(operation.name)) return `Variable ${operation.name || "(missing)"} already exists or is invalid.`;
       const collection = ctx.collectionsById.get(operation.collectionId);
       if (!collection || collection.name !== operation.collection) return `Collection for ${operation.name} is stale or missing.`;
+      const capabilityError = _capabilityError(operation.type, operation.modeValues, ctx);
+      if (capabilityError) return capabilityError;
       const error = _validateModeValues(operation, collection, ctx, null);
       if (error) return error;
       continue;
@@ -917,10 +1072,14 @@ function _validateApprovedOperations(operations, figmaData = {}) {
       const toVar = ctx.varsById.get(operation.toVariableId);
       if (!fromVar || fromVar.name !== operation.expectedFromName || fromVar.resolvedType !== operation.type) return `Source variable ${operation.expectedFromName || operation.fromVariableId} is stale or missing.`;
       if (!toVar || toVar.name !== operation.expectedToName || toVar.resolvedType !== operation.type) return `Target variable ${operation.expectedToName || operation.toVariableId} is stale or missing.`;
+      if (!_sameAliasRefSet(operation.aliasRefs, _findAliasRefs(ctx, operation.fromVariableId))) return `Alias references for ${operation.expectedFromName} changed since approval.`;
       for (const ref of operation.aliasRefs || []) {
         const refVar = ctx.varsById.get(ref.variableId);
         if (!refVar || refVar.name !== ref.variableName) return `Alias user ${ref.variableName || ref.variableId} is stale or missing.`;
-        if (_valueSignature((refVar.valuesByMode || {})[ref.modeId]) !== ref.expectedCurrentSignature) return `Alias user ${refVar.name} changed since approval.`;
+        const currentValue = (refVar.valuesByMode || {})[ref.modeId];
+        if (_valueSignature(currentValue) !== ref.expectedCurrentSignature) return `Alias user ${refVar.name} changed since approval.`;
+        const currentAlias = _valueAtPath(currentValue, ref.aliasPath);
+        if (!currentAlias || currentAlias.type !== "VARIABLE_ALIAS" || currentAlias.id !== operation.fromVariableId) return `Alias user ${refVar.name} no longer references ${operation.expectedFromName}.`;
       }
       continue;
     }
@@ -929,6 +1088,8 @@ function _validateApprovedOperations(operations, figmaData = {}) {
     if (kind === "update_variable") {
       const collection = ctx.collectionsById.get(operation.collectionId);
       if (!collection || collection.name !== operation.collection) return `Collection for ${operation.expectedName} is stale or missing.`;
+      const capabilityError = _capabilityError(operation.type, operation.modeValues, ctx);
+      if (capabilityError) return capabilityError;
       const error = _validateModeValues(operation, collection, ctx, variable);
       if (error) return error;
     } else if (kind === "update_variable_metadata") {
@@ -939,17 +1100,58 @@ function _validateApprovedOperations(operations, figmaData = {}) {
       if (!collection || collection.name !== operation.collection) return `Collection for ${operation.newName} is stale or missing.`;
       const sourceCollection = ctx.collectionsById.get(operation.sourceCollectionId);
       if (!sourceCollection || sourceCollection.name !== operation.sourceCollection) return `Source collection for ${operation.expectedName} is stale or missing.`;
+      const capabilityError = _capabilityError(operation.type, operation.modeValues, ctx);
+      if (capabilityError) return capabilityError;
       const error = _validateModeValues(operation, collection, ctx, null);
       if (error) return error;
+      if (operation.deleteOriginal) {
+        if (!_sameAliasRefSet(operation.aliasRefs, _findAliasRefs(ctx, operation.variableId))) return `Alias references for ${operation.expectedName} changed since approval.`;
+        for (const ref of operation.aliasRefs || []) {
+          const refVar = ctx.varsById.get(ref.variableId);
+          if (!refVar || refVar.name !== ref.variableName) return `Alias user ${ref.variableName || ref.variableId} is stale or missing.`;
+          const currentValue = (refVar.valuesByMode || {})[ref.modeId];
+          if (_valueSignature(currentValue) !== ref.expectedCurrentSignature) return `Alias user ${refVar.name} changed since approval.`;
+          const currentAlias = _valueAtPath(currentValue, ref.aliasPath);
+          if (!currentAlias || currentAlias.type !== "VARIABLE_ALIAS" || currentAlias.id !== operation.variableId) return `Alias user ${refVar.name} no longer references ${operation.expectedName}.`;
+        }
+      }
     } else if (kind === "deprecate_variable") {
       if (!operation.message) return `Variable ${operation.expectedName} deprecation message is missing.`;
     } else if (kind === "rename_variable") {
       if (!operation.newName || ctx.varsByName.has(operation.newName)) return `Target variable name ${operation.newName || "(missing)"} is invalid or already exists.`;
-    } else if (kind !== "delete_variable") {
+    } else if (kind === "delete_variable") {
+      if (_findAliasRefs(ctx, operation.variableId).length) return `Variable ${operation.expectedName} gained alias references since approval.`;
+    } else {
       return `Unhandled operation kind ${kind}.`;
     }
   }
   return null;
+}
+
+function _isValidAliasValue(value, expectedType, ctx) {
+  if (!value || typeof value !== "object" || value.type !== "VARIABLE_ALIAS" || !value.id) return false;
+  const target = ctx.varsById.get(value.id);
+  return Boolean(target && target.resolvedType === expectedType);
+}
+
+function _isValidNativeValue(type, value, ctx) {
+  if (type === "FLOAT") return typeof value === "number" && Number.isFinite(value);
+  if (type === "TIMING") return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  if (type === "BOOLEAN") return typeof value === "boolean";
+  if (type === "STRING") return typeof value === "string";
+  if (type === "EASING") return _normalizeEasing(value) !== null;
+  if (type === "COLOR") {
+    if (value && typeof value === "object" && ["r", "g", "b"].every(key => typeof value[key] === "number" && Number.isFinite(value[key]))) return true;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    if (!Object.prototype.hasOwnProperty.call(value, "color") || !Object.prototype.hasOwnProperty.call(value, "opacity")) return false;
+    const colorValid = _isValidAliasValue(value.color, "COLOR", ctx)
+      || (value.color && typeof value.color === "object" && ["r", "g", "b"].every(key => typeof value.color[key] === "number" && Number.isFinite(value.color[key])));
+    const opacityValid = _isValidAliasValue(value.opacity, "FLOAT", ctx)
+      || (typeof value.opacity === "number" && Number.isFinite(value.opacity) && value.opacity >= 0 && value.opacity <= 100);
+    const hasAlias = Boolean(value.color && value.color.type === "VARIABLE_ALIAS") || Boolean(value.opacity && value.opacity.type === "VARIABLE_ALIAS");
+    return colorValid && opacityValid && hasAlias;
+  }
+  return false;
 }
 
 function _validateModeValues(operation, collection, ctx, variable) {
@@ -965,7 +1167,11 @@ function _validateModeValues(operation, collection, ctx, variable) {
       if (!target || target.name !== modeValue.targetName || target.resolvedType !== operation.type) {
         return `${operation.name || operation.expectedName} alias target ${modeValue.targetName || modeValue.targetId} is stale, missing, or wrong type.`;
       }
-    } else if (modeValue.kind !== "literal") {
+    } else if (modeValue.kind === "literal") {
+      if (!_isValidNativeValue(operation.type, modeValue.value, ctx)) {
+        return `${operation.name || operation.expectedName} mode ${modeValue.mode} has an invalid ${operation.type} value.`;
+      }
+    } else {
       return `${operation.name || operation.expectedName} mode ${modeValue.mode} has invalid kind ${modeValue.kind}.`;
     }
   }

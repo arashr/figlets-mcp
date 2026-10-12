@@ -598,6 +598,10 @@ function makeDs(overrides) {
   assert.strictEqual(collectionName, '1. Primitives', 'Unexpected collectionName');
   assert.ok(colors.length >= 77, 'Expected ≥ 77 color vars (7 ramps × 11 steps)');
   assert.strictEqual(scrims.length, 10, 'Expected exactly 10 scrim vars');
+  const opacityFloats = floats.filter(f => /^opacity\//.test(f.name));
+  assert.deepStrictEqual(opacityFloats.map(f => f.value), [4, 8, 12, 16, 20, 40, 60], 'Expected shared opacity percentage primitives');
+  assert.ok(opacityFloats.every(f => JSON.stringify(f.scopes) === JSON.stringify(['OPACITY', 'COLOR_OPACITY'])), 'Opacity primitives should support layer and color opacity');
+  assert.ok(scrims.every(scrim => scrim.opacity && scrim.opacity.alias === `opacity/${scrim.name.split('/').pop()}`), 'Every scrim should bind its opacity channel');
   assert.ok(strings.length >= 2, 'Expected at least 2 font family strings');
   assert.ok(floats.find(f => f.name === 'shadow/1/offset-y'), 'Missing shadow/1/offset-y');
   assert.ok(floats.find(f => f.name === 'space/025' && f.value === 2), 'Missing space/025 primitive');
@@ -606,6 +610,18 @@ function makeDs(overrides) {
   assert.ok(floats.find(f => f.name === 'radius/full' && f.value === 9999), 'Missing radius/full primitive');
   assert.ok(floats.find(f => f.name === 'space/550'),          'Missing space/550 (touch target)');
   assert.ok(floats.find(f => f.name === 'type/weight/bold'),  'Missing type/weight/bold');
+
+  const exactEndpointDs = JSON.parse(JSON.stringify(ds));
+  const neutral = exactEndpointDs.color.ramps.find(ramp => ramp.folder === 'color/neutral');
+  neutral.steps[0][1] = 1;
+  neutral.steps[0][2] = 1;
+  neutral.steps[0][3] = 1;
+  neutral.steps[neutral.steps.length - 1][1] = 0;
+  neutral.steps[neutral.steps.length - 1][2] = 0;
+  neutral.steps[neutral.steps.length - 1][3] = 0;
+  const exactScrims = generatePrimitivesData(exactEndpointDs).scrims;
+  assert.strictEqual(exactScrims.find(item => item.name === 'color/scrim/black/40').color.alias, `color/neutral/${neutral.steps[neutral.steps.length - 1][0]}`);
+  assert.strictEqual(exactScrims.find(item => item.name === 'color/scrim/white/16').color.alias, `color/neutral/${neutral.steps[0][0]}`);
 }
 
 {

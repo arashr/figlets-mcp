@@ -5,9 +5,25 @@ function _count(input) {
 }
 
 function designSystemInventory(figmaData = {}) {
+  const variables = Array.isArray(figmaData.variables) ? figmaData.variables : [];
+  const variableTypes = {
+    BOOLEAN: 0,
+    COLOR: 0,
+    EASING: 0,
+    FLOAT: 0,
+    STRING: 0,
+    TIMING: 0,
+    UNKNOWN: 0,
+  };
+  for (const variable of variables) {
+    const type = variable && typeof variable.resolvedType === "string" ? variable.resolvedType : "UNKNOWN";
+    if (Object.prototype.hasOwnProperty.call(variableTypes, type)) variableTypes[type] += 1;
+    else variableTypes.UNKNOWN += 1;
+  }
   const counts = {
     collections: _count(figmaData.collections),
-    variables: _count(figmaData.variables),
+    variables: variables.length,
+    variableTypes,
     textStyles: _count(figmaData.textStyles),
     effectStyles: _count(figmaData.effectStyles),
     paintStyles: _count(figmaData.paintStyles),
@@ -26,6 +42,7 @@ function designSystemInventory(figmaData = {}) {
     state,
     hasFoundationShell,
     counts,
+    capabilities: figmaData.capabilities && typeof figmaData.capabilities === "object" ? figmaData.capabilities : null,
     designSystemArtifactCount: counts.designSystemArtifacts,
     foundationCollectionCount: counts.foundationCollections,
   };

@@ -296,6 +296,13 @@ figma.ui.onmessage = async (msg) => {
     const payload = {
       fileKey: _fileKey,
       fileName: figma.root ? figma.root.name : "",
+      capabilities: {
+        source: 'figma-plugin',
+        bridgeBuild: _bridgeBuild,
+        variableResolvedTypes: ['BOOLEAN', 'COLOR', 'EASING', 'FLOAT', 'STRING', 'TIMING'],
+        composedColorVariables: true,
+        exactVariableWriteSupport: true
+      },
       collections: collections.map(c => ({
         id: c.id,
         name: c.name,
@@ -5795,6 +5802,7 @@ function _scopeForVariableName(name, type) {
   }
 
   if (t === 'FLOAT') {
+    if (first === 'opacity') return ['OPACITY', 'COLOR_OPACITY'];
     if (first === 'space') {
       if (second === 'radius') return ['CORNER_RADIUS'];
       if (second === 'border' || second === 'stroke') return ['STROKE_FLOAT'];
@@ -5851,7 +5859,10 @@ async function _applyVariableScopesToCollection(collectionId, opts) {
   for (var i = 0; i < allVars.length; i++) {
     if (allVars[i].variableCollectionId === collectionId) {
       if (opts.hideFromPickers) {
-        if (_setVariableScopes(allVars[i], [])) scoped += 1;
+        var hiddenScopes = /^opacity\//i.test(String(allVars[i].name || ''))
+          ? _scopeForVariableName(allVars[i].name, allVars[i].resolvedType)
+          : [];
+        if (_setVariableScopes(allVars[i], hiddenScopes)) scoped += 1;
       } else if (_setVariableScopesForName(allVars[i], allVars[i].name, allVars[i].resolvedType)) {
         scoped += 1;
       }
@@ -6198,6 +6209,17 @@ async function _applyDsSetup(setupPayload) {
       _setVariableScopesForName(pcv, pc.name, 'COLOR');
       if (pc.hex) pcv.setValueForMode(primModeId, hexToRgb(pc.hex));
       else pcv.setValueForMode(primModeId, { r: pc.r, g: pc.g, b: pc.b, a: pc.a });
+      _primMergeMap[pc.name] = pcv.id;
+    }
+
+    for (var pfi = 0; pfi < preparedFloats.length; pfi++) {
+      var pf = preparedFloats[pfi] || {};
+      if (!pf.name || _primMergeMap[pf.name]) continue;
+      var pfv = await createSetupVariable(pf.name, primColl, 'FLOAT');
+      if (Array.isArray(pf.scopes)) _setVariableScopes(pfv, pf.scopes);
+      else _setVariableScopesForName(pfv, pf.name, 'FLOAT');
+      pfv.setValueForMode(primModeId, pf.value);
+      _primMergeMap[pf.name] = pfv.id;
     }
 
     for (var psci = 0; psci < preparedScrims.length; psci++) {
@@ -6205,15 +6227,24 @@ async function _applyDsSetup(setupPayload) {
       if (!psc.name || _primMergeMap[psc.name]) continue;
       var psv = await createSetupVariable(psc.name, primColl, 'COLOR');
       _setVariableScopesForName(psv, psc.name, 'COLOR');
-      psv.setValueForMode(primModeId, { r: psc.r, g: psc.g, b: psc.b, a: psc.a });
-    }
-
-    for (var pfi = 0; pfi < preparedFloats.length; pfi++) {
-      var pf = preparedFloats[pfi] || {};
-      if (!pf.name || _primMergeMap[pf.name]) continue;
-      var pfv = await createSetupVariable(pf.name, primColl, 'FLOAT');
-      _setVariableScopesForName(pfv, pf.name, 'FLOAT');
-      pfv.setValueForMode(primModeId, pf.value);
+      var pscColor = null;
+      if (psc.color && psc.color.alias && _primMergeMap[psc.color.alias]) {
+        pscColor = { type: 'VARIABLE_ALIAS', id: _primMergeMap[psc.color.alias] };
+      } else if (psc.color && typeof psc.color.r === 'number' && typeof psc.color.g === 'number' && typeof psc.color.b === 'number') {
+        pscColor = { r: psc.color.r, g: psc.color.g, b: psc.color.b };
+      }
+      var pscOpacity = null;
+      if (psc.opacity && psc.opacity.alias && _primMergeMap[psc.opacity.alias]) {
+        pscOpacity = { type: 'VARIABLE_ALIAS', id: _primMergeMap[psc.opacity.alias] };
+      } else if (typeof psc.opacity === 'number') {
+        pscOpacity = psc.opacity;
+      }
+      if (pscColor && pscOpacity !== null) {
+        psv.setValueForMode(primModeId, { color: pscColor, opacity: pscOpacity });
+      } else {
+        psv.setValueForMode(primModeId, { r: psc.r, g: psc.g, b: psc.b, a: psc.a });
+      }
+      _primMergeMap[psc.name] = psv.id;
     }
 
     for (var psti = 0; psti < preparedStrings.length; psti++) {
@@ -6222,6 +6253,7 @@ async function _applyDsSetup(setupPayload) {
       var psvs = await createSetupVariable(ps.name, primColl, 'STRING');
       _setVariableScopesForName(psvs, ps.name, 'STRING');
       psvs.setValueForMode(primModeId, ps.value);
+      _primMergeMap[ps.name] = psvs.id;
     }
 
     // Hide primitives from publishing
@@ -6882,6 +6914,9 @@ var UPDATE_PRIMITIVE_SPECS = {
   'primitive-shadow': function (DS) {
     return _primitiveShadowEntries(DS);
   },
+  'primitive-opacity': function () {
+    return null;
+  },
   'color-semantics': function () {
     return null;
   },
@@ -7108,6 +7143,77 @@ function _semanticColorEntries(DS) {
   return entries;
 }
 
+function _primitiveOpacitySignature(value) {
+  if (value == null) return 'null';
+  if (Array.isArray(value)) return '[' + value.map(_primitiveOpacitySignature).join(',') + ']';
+  if (typeof value !== 'object') return JSON.stringify(value);
+  var keys = Object.keys(value).sort();
+  var parts = [];
+  for (var i = 0; i < keys.length; i++) {
+    parts.push(JSON.stringify(keys[i]) + ':' + _primitiveOpacitySignature(value[keys[i]]));
+  }
+  return '{' + parts.join(',') + '}';
+}
+
+function _preflightPrimitiveOpacityRepairs(repairs, primColl, byName, allByName, allById) {
+  if (!Array.isArray(repairs) || !repairs.length) return { error: 'No exact opacity repairs were provided.' };
+  var modeById = {};
+  for (var mi = 0; mi < (primColl.modes || []).length; mi++) {
+    modeById[primColl.modes[mi].modeId] = primColl.modes[mi].name || primColl.modes[mi].modeId;
+  }
+  var opacityByName = {};
+  var prepared = [];
+  for (var ri = 0; ri < repairs.length; ri++) {
+    var repair = repairs[ri] || {};
+    var scrimPlan = repair.scrim || {};
+    var opacityPlan = repair.opacity || {};
+    if (!scrimPlan.name || !opacityPlan.name || !Array.isArray(scrimPlan.modes) || !Array.isArray(opacityPlan.modes)) {
+      return { error: 'Opacity repair entry ' + ri + ' is incomplete.' };
+    }
+    var scrim = byName[scrimPlan.name] || null;
+    var opacity = byName[opacityPlan.name] || null;
+    if (scrimPlan.id) {
+      if (!scrim || scrim.id !== scrimPlan.id || scrim.resolvedType !== 'COLOR') return { error: 'Scrim ' + scrimPlan.name + ' changed since approval.' };
+    } else if (scrim) {
+      return { error: 'Scrim ' + scrimPlan.name + ' was created since approval.' };
+    }
+    if (opacityPlan.id) {
+      if (!opacity || opacity.id !== opacityPlan.id || opacity.resolvedType !== 'FLOAT') return { error: 'Opacity variable ' + opacityPlan.name + ' changed since approval.' };
+      if (_primitiveOpacitySignature(opacity.scopes || []) !== opacityPlan.expectedScopesSignature) return { error: 'Opacity scopes for ' + opacityPlan.name + ' changed since approval.' };
+    } else if (opacity) {
+      return { error: 'Opacity variable ' + opacityPlan.name + ' was created since approval.' };
+    }
+    var smi;
+    for (smi = 0; smi < scrimPlan.modes.length; smi++) {
+      var scrimMode = scrimPlan.modes[smi] || {};
+      if (!modeById[scrimMode.modeId] || modeById[scrimMode.modeId] !== scrimMode.modeName) return { error: 'Primitive mode for ' + scrimPlan.name + ' changed since approval.' };
+      var currentScrimValue = scrim ? (scrim.valuesByMode || {})[scrimMode.modeId] : undefined;
+      var currentScrimSignature = scrim ? _primitiveOpacitySignature(currentScrimValue) : 'missing';
+      if (currentScrimSignature !== scrimMode.expectedCurrentSignature) return { error: 'Scrim value for ' + scrimPlan.name + ' changed since approval.' };
+    }
+    for (smi = 0; smi < opacityPlan.modes.length; smi++) {
+      var opacityMode = opacityPlan.modes[smi] || {};
+      if (!modeById[opacityMode.modeId] || modeById[opacityMode.modeId] !== opacityMode.modeName) return { error: 'Primitive mode for ' + opacityPlan.name + ' changed since approval.' };
+      var currentOpacityValue = opacity ? (opacity.valuesByMode || {})[opacityMode.modeId] : undefined;
+      var currentOpacitySignature = opacity ? _primitiveOpacitySignature(currentOpacityValue) : 'missing';
+      if (currentOpacitySignature !== opacityMode.expectedCurrentSignature) return { error: 'Opacity value for ' + opacityPlan.name + ' changed since approval.' };
+    }
+    var colorSource = scrimPlan.colorSource || {};
+    if (colorSource.kind === 'alias') {
+      var colorTarget = allById[colorSource.id];
+      if (!colorTarget || colorTarget.name !== colorSource.name || colorTarget.resolvedType !== 'COLOR') return { error: 'Color source for ' + scrimPlan.name + ' changed since approval.' };
+    } else if (colorSource.kind !== 'raw' || !colorSource.value) {
+      return { error: 'Color source for ' + scrimPlan.name + ' is invalid.' };
+    }
+    if (opacityByName[opacityPlan.name] && _primitiveOpacitySignature(opacityByName[opacityPlan.name].plan) !== _primitiveOpacitySignature(opacityPlan)) {
+      return { error: 'Opacity prerequisite ' + opacityPlan.name + ' has conflicting approved payloads.' };
+    }
+    opacityByName[opacityPlan.name] = { plan: opacityPlan, variable: opacity };
+    prepared.push({ repair: repair, scrim: scrim, opacityName: opacityPlan.name });
+  }
+  return { prepared: prepared, opacityByName: opacityByName };
+}
+
 async function _updateDsPrimitives(payload) {
   var DS = (payload && payload.DS) || {};
   var createMissing = !!(payload && payload.createMissing);
@@ -7135,9 +7241,11 @@ async function _updateDsPrimitives(payload) {
   var allVars = await figma.variables.getLocalVariablesAsync();
   var byName = {};
   var allByName = {};
+  var allById = {};
   for (var vi = 0; vi < allVars.length; vi++) {
     var v = allVars[vi];
     allByName[v.name] = v;
+    allById[v.id] = v;
     if (v.variableCollectionId === primColl.id) byName[v.name] = v;
   }
   var colorName = (DS.collections && DS.collections.color) ? DS.collections.color : '2. Color';
@@ -7152,11 +7260,164 @@ async function _updateDsPrimitives(payload) {
 
   var report = {};
   var unknown = [];
+  var opacityPreflight = null;
+  if (requested.indexOf('primitive-opacity') >= 0) {
+    opacityPreflight = _preflightPrimitiveOpacityRepairs(
+      payload && payload.opacityRepairs,
+      primColl,
+      byName,
+      allByName,
+      allById
+    );
+    if (opacityPreflight.error) {
+      var staleOpacityReport = {};
+      staleOpacityReport['primitive-opacity'] = {
+        dryRun: dryRun,
+        entries: 0,
+        created: 0,
+        updated: 0,
+        unchanged: 0,
+        blocked: [],
+        stale: [{ reason: opacityPreflight.error }],
+        unmatched: [],
+        typeMismatch: [],
+      };
+      return {
+        error: opacityPreflight.error,
+        dryRun: dryRun,
+        collection: primName,
+        categories: requested,
+        unknownCategories: [],
+        report: staleOpacityReport,
+        message: 'No primitive opacity changes were applied.',
+      };
+    }
+  }
 
   for (var ri2 = 0; ri2 < requested.length; ri2++) {
     var cat = requested[ri2];
     var spec = UPDATE_PRIMITIVE_SPECS[cat];
     if (!spec) { unknown.push(cat); continue; }
+
+    if (cat === 'primitive-opacity') {
+      var opacityNames = Object.keys(opacityPreflight.opacityByName);
+      var opacityWouldCreateNames = [];
+      var opacityCreatedNames = [];
+      var opacityUpdatedNames = [];
+      var opacityUnchangedNames = [];
+      var scrimWouldCreateNames = [];
+      var scrimCreatedNames = [];
+      var scrimConvertedNames = [];
+      var scrimUnchangedNames = [];
+      var oi;
+      for (oi = 0; oi < opacityNames.length; oi++) {
+        var opacityPrepared = opacityPreflight.opacityByName[opacityNames[oi]];
+        var opacityVariable = opacityPrepared.variable;
+        var opacityPlan = opacityPrepared.plan;
+        var opacityNeedsUpdate = !opacityVariable || _primitiveOpacitySignature(opacityVariable.scopes || []) !== _primitiveOpacitySignature(opacityPlan.scopes || []);
+        for (var opmi = 0; opmi < opacityPlan.modes.length; opmi++) {
+          var opacityModePlan = opacityPlan.modes[opmi];
+          if (!opacityVariable || (opacityVariable.valuesByMode || {})[opacityModePlan.modeId] !== opacityModePlan.value) opacityNeedsUpdate = true;
+        }
+        if (dryRun) {
+          if (opacityVariable) {
+            if (opacityNeedsUpdate) opacityUpdatedNames.push(opacityPlan.name);
+            else opacityUnchangedNames.push(opacityPlan.name);
+          } else {
+            opacityWouldCreateNames.push(opacityPlan.name);
+          }
+          continue;
+        }
+        if (!opacityVariable) {
+          opacityVariable = figma.variables.createVariable(opacityPlan.name, primColl, 'FLOAT');
+          byName[opacityPlan.name] = opacityVariable;
+          allByName[opacityPlan.name] = opacityVariable;
+          allById[opacityVariable.id] = opacityVariable;
+          opacityPrepared.variable = opacityVariable;
+          opacityCreatedNames.push(opacityPlan.name);
+        } else if (opacityNeedsUpdate) {
+          opacityUpdatedNames.push(opacityPlan.name);
+        } else {
+          opacityUnchangedNames.push(opacityPlan.name);
+        }
+        _setVariableScopes(opacityVariable, opacityPlan.scopes || []);
+        for (opmi = 0; opmi < opacityPlan.modes.length; opmi++) {
+          opacityModePlan = opacityPlan.modes[opmi];
+          if (dryRun) continue;
+          opacityVariable.setValueForMode(opacityModePlan.modeId, opacityModePlan.value);
+        }
+      }
+
+      for (oi = 0; oi < opacityPreflight.prepared.length; oi++) {
+        var preparedRepair = opacityPreflight.prepared[oi];
+        var repairPlan = preparedRepair.repair;
+        var scrimPlan = repairPlan.scrim;
+        var scrimVariable = preparedRepair.scrim;
+        if (dryRun) {
+          if (scrimVariable && scrimPlan.needsValueChange) scrimConvertedNames.push(scrimPlan.name);
+          else if (scrimVariable) scrimUnchangedNames.push(scrimPlan.name);
+          else scrimWouldCreateNames.push(scrimPlan.name);
+          continue;
+        }
+        var existingScrimBeforeApply = !!scrimVariable;
+        if (!scrimVariable) {
+          scrimVariable = figma.variables.createVariable(scrimPlan.name, primColl, 'COLOR');
+          _setVariableScopesForName(scrimVariable, scrimPlan.name, 'COLOR');
+          byName[scrimPlan.name] = scrimVariable;
+          allByName[scrimPlan.name] = scrimVariable;
+          allById[scrimVariable.id] = scrimVariable;
+          scrimCreatedNames.push(scrimPlan.name);
+        }
+        var prerequisite = opacityPreflight.opacityByName[preparedRepair.opacityName].variable;
+        var scrimDidChange = false;
+        for (var scmi = 0; scmi < scrimPlan.modes.length; scmi++) {
+          var scrimModePlan = scrimPlan.modes[scmi];
+          var colorSource = scrimPlan.colorSource;
+          var colorValue = colorSource.kind === 'alias'
+            ? { type: 'VARIABLE_ALIAS', id: colorSource.id }
+            : { r: colorSource.value.r, g: colorSource.value.g, b: colorSource.value.b };
+          var composedValue = {
+            color: colorValue,
+            opacity: { type: 'VARIABLE_ALIAS', id: prerequisite.id },
+          };
+          if (_primitiveOpacitySignature((scrimVariable.valuesByMode || {})[scrimModePlan.modeId]) === _primitiveOpacitySignature(composedValue)) {
+          } else {
+            scrimVariable.setValueForMode(scrimModePlan.modeId, composedValue);
+            scrimDidChange = true;
+          }
+        }
+        if (existingScrimBeforeApply && scrimDidChange) scrimConvertedNames.push(scrimPlan.name);
+        else if (existingScrimBeforeApply) scrimUnchangedNames.push(scrimPlan.name);
+      }
+
+      report[cat] = {
+        dryRun: dryRun,
+        entries: opacityPreflight.prepared.length,
+        created: opacityCreatedNames.length + scrimCreatedNames.length,
+        wouldCreate: opacityWouldCreateNames.length + scrimWouldCreateNames.length,
+        wouldCreateNames: opacityWouldCreateNames.concat(scrimWouldCreateNames),
+        updated: dryRun ? 0 : opacityUpdatedNames.length + scrimConvertedNames.length,
+        wouldUpdate: dryRun ? opacityUpdatedNames.length + scrimConvertedNames.length : 0,
+        unchanged: opacityUnchangedNames.length + scrimUnchangedNames.length,
+        unmatched: [],
+        typeMismatch: [],
+        blocked: [],
+        stale: [],
+        opacity: {
+          created: opacityCreatedNames,
+          wouldCreate: opacityWouldCreateNames,
+          updated: opacityUpdatedNames,
+          unchanged: opacityUnchangedNames,
+        },
+        scrims: {
+          created: scrimCreatedNames,
+          wouldCreate: scrimWouldCreateNames,
+          converted: scrimConvertedNames,
+          unchanged: scrimUnchangedNames,
+        },
+      };
+      continue;
+    }
 
     if (cat === 'color-semantics') {
       var semEntries = _semanticColorEntries(DS);
@@ -9167,13 +9428,75 @@ async function _applyFigmaOperations(payload) {
   }
 
   function _valueSignature(value) {
-    if (value == null) return 'null';
-    if (typeof value !== 'object') return JSON.stringify(value);
-    if (value.type === 'VARIABLE_ALIAS') return 'alias:' + value.id;
-    var keys = Object.keys(value).sort();
-    var out = {};
-    for (var ki = 0; ki < keys.length; ki++) out[keys[ki]] = value[keys[ki]];
-    return JSON.stringify(out);
+    function stable(item) {
+      if (item == null) return 'null';
+      if (Array.isArray(item)) return '[' + item.map(stable).join(',') + ']';
+      if (typeof item !== 'object') return JSON.stringify(item);
+      var keys = Object.keys(item).sort();
+      var parts = [];
+      for (var ki = 0; ki < keys.length; ki++) parts.push(JSON.stringify(keys[ki]) + ':' + stable(item[keys[ki]]));
+      return '{' + parts.join(',') + '}';
+    }
+    return stable(value);
+  }
+
+  function _cloneOperationValue(value) {
+    if (value == null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(_cloneOperationValue);
+    var copy = {};
+    var keys = Object.keys(value);
+    for (var ci = 0; ci < keys.length; ci++) copy[keys[ci]] = _cloneOperationValue(value[keys[ci]]);
+    return copy;
+  }
+
+  function _valueAtPath(value, path) {
+    var current = value;
+    var parts = Array.isArray(path) ? path : [];
+    for (var pi = 0; pi < parts.length; pi++) {
+      if (!current || typeof current !== 'object' || !Object.prototype.hasOwnProperty.call(current, parts[pi])) return undefined;
+      current = current[parts[pi]];
+    }
+    return current;
+  }
+
+  function _replaceAliasAtPath(value, path, targetId) {
+    var parts = Array.isArray(path) ? path : [];
+    if (!parts.length) return { type: 'VARIABLE_ALIAS', id: targetId };
+    var copy = _cloneOperationValue(value);
+    var current = copy;
+    for (var pi = 0; pi < parts.length - 1; pi++) {
+      if (!current || typeof current !== 'object') return null;
+      current = current[parts[pi]];
+    }
+    if (!current || typeof current !== 'object') return null;
+    current[parts[parts.length - 1]] = { type: 'VARIABLE_ALIAS', id: targetId };
+    return copy;
+  }
+
+  function _aliasPathsTo(value, targetId, path) {
+    var currentPath = Array.isArray(path) ? path : [];
+    if (!value || typeof value !== 'object') return [];
+    if (value.type === 'VARIABLE_ALIAS') return value.id === targetId ? [currentPath] : [];
+    var paths = [];
+    var keys = Object.keys(value);
+    for (var api = 0; api < keys.length; api++) {
+      paths = paths.concat(_aliasPathsTo(value[keys[api]], targetId, currentPath.concat(keys[api])));
+    }
+    return paths;
+  }
+
+  function _aliasRefKey(variableId, modeId, aliasPath) {
+    return String(variableId) + '|' + String(modeId) + '|' + _valueSignature(Array.isArray(aliasPath) ? aliasPath : []);
+  }
+
+  function _hasAliasTo(value, targetId) {
+    if (!value || typeof value !== 'object') return false;
+    if (value.type === 'VARIABLE_ALIAS') return value.id === targetId;
+    var keys = Object.keys(value);
+    for (var hi = 0; hi < keys.length; hi++) {
+      if (_hasAliasTo(value[keys[hi]], targetId)) return true;
+    }
+    return false;
   }
 
   function _collectionForVariable(variable) {
@@ -9206,7 +9529,7 @@ async function _applyFigmaOperations(payload) {
         value = { type: 'VARIABLE_ALIAS', id: target.id };
         detail = { mode: modeValue.mode, kind: 'alias', targetName: target.name };
       } else if (modeValue.kind === 'literal') {
-        value = modeValue.value;
+        value = _cloneOperationValue(modeValue.value);
         detail = { mode: modeValue.mode, kind: 'literal', value: modeValue.value };
       } else {
         return { error: 'Mode value kind must be alias or literal.' };
@@ -9489,6 +9812,23 @@ async function _applyFigmaOperations(payload) {
           unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable changed since approval.' });
           continue;
         }
+        var deleteAliasFound = false;
+        for (var davi = 0; davi < allVars.length && !deleteAliasFound; davi++) {
+          var deleteAliasVar = allVars[davi];
+          if (!deleteAliasVar || deleteAliasVar.removed) continue;
+          var deleteAliasValues = deleteAliasVar.valuesByMode || {};
+          var deleteAliasModeIds = Object.keys(deleteAliasValues);
+          for (var dami = 0; dami < deleteAliasModeIds.length; dami++) {
+            if (_aliasPathsTo(deleteAliasValues[deleteAliasModeIds[dami]], variable.id).length) {
+              deleteAliasFound = true;
+              break;
+            }
+          }
+        }
+        if (deleteAliasFound) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: 'Variable gained alias references since approval.' });
+          continue;
+        }
         variable.remove();
         allVars = allVars.filter(function (v) { return v && v.id !== op.variableId; });
         _reindex();
@@ -9517,6 +9857,54 @@ async function _applyFigmaOperations(payload) {
           unresolved.push({ kind: kind, name: op.expectedName, reason: 'Target collection changed since approval.' });
           continue;
         }
+        var moveRefs = op.deleteOriginal && Array.isArray(op.aliasRefs) ? op.aliasRefs : [];
+        var moveRefFailure = null;
+        if (op.deleteOriginal) {
+          var approvedMoveRefKeys = [];
+          for (var amri = 0; amri < moveRefs.length; amri++) {
+            approvedMoveRefKeys.push(_aliasRefKey(moveRefs[amri].variableId, moveRefs[amri].modeId, moveRefs[amri].aliasPath));
+          }
+          approvedMoveRefKeys.sort();
+          var liveMoveRefKeys = [];
+          for (var lmvi = 0; lmvi < allVars.length; lmvi++) {
+            var liveMoveVar = allVars[lmvi];
+            if (!liveMoveVar || liveMoveVar.removed) continue;
+            var liveMoveValues = liveMoveVar.valuesByMode || {};
+            var liveMoveModeIds = Object.keys(liveMoveValues);
+            for (var lmmi = 0; lmmi < liveMoveModeIds.length; lmmi++) {
+              var liveMoveModeId = liveMoveModeIds[lmmi];
+              var liveMovePaths = _aliasPathsTo(liveMoveValues[liveMoveModeId], variable.id);
+              for (var lmpi = 0; lmpi < liveMovePaths.length; lmpi++) {
+                liveMoveRefKeys.push(_aliasRefKey(liveMoveVar.id, liveMoveModeId, liveMovePaths[lmpi]));
+              }
+            }
+          }
+          liveMoveRefKeys.sort();
+          if (_valueSignature(approvedMoveRefKeys) !== _valueSignature(liveMoveRefKeys)) {
+            moveRefFailure = 'Alias references changed since approval.';
+          }
+          for (var mvri = 0; mvri < moveRefs.length && !moveRefFailure; mvri++) {
+            var moveRef = moveRefs[mvri] || {};
+            var moveRefVar = varsById[moveRef.variableId];
+            if (!moveRefVar || moveRefVar.name !== moveRef.variableName) {
+              moveRefFailure = 'Alias user changed since approval.';
+              break;
+            }
+            var moveRefValue = moveRefVar.valuesByMode ? moveRefVar.valuesByMode[moveRef.modeId] : null;
+            if (_valueSignature(moveRefValue) !== moveRef.expectedCurrentSignature) {
+              moveRefFailure = 'Alias value changed since approval for ' + moveRefVar.name + '.';
+              break;
+            }
+            var moveApprovedAlias = _valueAtPath(moveRefValue, moveRef.aliasPath);
+            if (!moveApprovedAlias || moveApprovedAlias.type !== 'VARIABLE_ALIAS' || moveApprovedAlias.id !== variable.id) {
+              moveRefFailure = 'Alias path changed since approval for ' + moveRefVar.name + '.';
+            }
+          }
+        }
+        if (moveRefFailure) {
+          unresolved.push({ kind: kind, name: op.expectedName, reason: moveRefFailure });
+          continue;
+        }
         var copiedVar = figma.variables.createVariable(op.newName, collection, op.type);
         _setVariableScopesForName(copiedVar, op.newName, op.type);
         var setCopied = _setModeValues(copiedVar, collection, op.modeValues || [], op.type, false);
@@ -9528,6 +9916,35 @@ async function _applyFigmaOperations(payload) {
         allVars.push(copiedVar);
         var duplicateReport = { kind: kind, from: op.expectedName, to: op.newName, id: copiedVar.id, collection: collection.name, modeValues: setCopied.modeValues };
         if (op.deleteOriginal) {
+          var movedAliasBackups = [];
+          for (var mwri = 0; mwri < moveRefs.length; mwri++) {
+            var moveWriteRef = moveRefs[mwri] || {};
+            var moveWriteVar = varsById[moveWriteRef.variableId];
+            var moveWriteValue = moveWriteVar && moveWriteVar.valuesByMode ? moveWriteVar.valuesByMode[moveWriteRef.modeId] : null;
+            var moveReplacement = _replaceAliasAtPath(moveWriteValue, moveWriteRef.aliasPath, copiedVar.id);
+            if (!moveWriteVar || !moveReplacement) {
+              moveRefFailure = 'Alias path could not be updated.';
+              break;
+            }
+            movedAliasBackups.push({ variable: moveWriteVar, modeId: moveWriteRef.modeId, value: _cloneOperationValue(moveWriteValue) });
+            try {
+              moveWriteVar.setValueForMode(moveWriteRef.modeId, moveReplacement);
+            } catch (moveWriteError) {
+              moveRefFailure = moveWriteError && moveWriteError.message ? moveWriteError.message : 'Alias update failed.';
+              break;
+            }
+          }
+          if (moveRefFailure) {
+            for (var mbri = 0; mbri < movedAliasBackups.length; mbri++) {
+              try { movedAliasBackups[mbri].variable.setValueForMode(movedAliasBackups[mbri].modeId, movedAliasBackups[mbri].value); } catch (_) {}
+            }
+            try { copiedVar.remove(); } catch (_) {}
+            allVars = allVars.filter(function (v) { return v && v.id !== copiedVar.id; });
+            _reindex();
+            unresolved.push({ kind: kind, name: op.expectedName, reason: moveRefFailure });
+            continue;
+          }
+          duplicateReport.retargetedAliasReferences = moveRefs.length;
           try {
             variable.remove();
             allVars = allVars.filter(function (v) { return v && v.id !== op.variableId; });
@@ -9579,6 +9996,11 @@ async function _applyFigmaOperations(payload) {
             refFailed = 'Alias value changed since approval for ' + refVar.name + '.';
             break;
           }
+          var approvedAlias = _valueAtPath(refVar.valuesByMode ? refVar.valuesByMode[ref.modeId] : null, ref.aliasPath);
+          if (!approvedAlias || approvedAlias.type !== 'VARIABLE_ALIAS' || approvedAlias.id !== fromVar.id) {
+            refFailed = 'Alias path changed since approval for ' + refVar.name + '.';
+            break;
+          }
         }
         if (refFailed) {
           unresolved.push({ kind: kind, from: op.expectedFromName, to: op.expectedToName, reason: refFailed });
@@ -9587,8 +10009,23 @@ async function _applyFigmaOperations(payload) {
         for (var rwi = 0; rwi < refs.length; rwi++) {
           var writeRef = refs[rwi] || {};
           var writeVar = varsById[writeRef.variableId];
-          writeVar.setValueForMode(writeRef.modeId, { type: 'VARIABLE_ALIAS', id: toVar.id });
-          changedRefs.push({ variable: writeVar.name, modeId: writeRef.modeId });
+          var currentRefValue = writeVar.valuesByMode ? writeVar.valuesByMode[writeRef.modeId] : null;
+          var currentAlias = _valueAtPath(currentRefValue, writeRef.aliasPath);
+          if (!currentAlias || currentAlias.type !== 'VARIABLE_ALIAS' || currentAlias.id !== fromVar.id) {
+            refFailed = 'Alias path changed since approval for ' + writeVar.name + '.';
+            break;
+          }
+          var replacementValue = _replaceAliasAtPath(currentRefValue, writeRef.aliasPath, toVar.id);
+          if (!replacementValue) {
+            refFailed = 'Alias path could not be updated for ' + writeVar.name + '.';
+            break;
+          }
+          writeVar.setValueForMode(writeRef.modeId, replacementValue);
+          changedRefs.push({ variable: writeVar.name, modeId: writeRef.modeId, aliasPath: writeRef.aliasPath || [] });
+        }
+        if (refFailed) {
+          unresolved.push({ kind: kind, from: op.expectedFromName, to: op.expectedToName, reason: refFailed });
+          continue;
         }
         var retargetReport = { kind: kind, from: fromVar.name, to: toVar.name, changed: changedRefs.length, refs: changedRefs };
         if (op.deleteOld) {
@@ -9600,7 +10037,7 @@ async function _applyFigmaOperations(payload) {
               var scanModeIds = Object.keys(scanVar.valuesByMode || {});
               for (var ram = 0; ram < scanModeIds.length; ram++) {
                 var scanValue = scanVar.valuesByMode[scanModeIds[ram]];
-                if (scanValue && typeof scanValue === 'object' && scanValue.type === 'VARIABLE_ALIAS' && scanValue.id === fromVar.id) {
+                if (_hasAliasTo(scanValue, fromVar.id)) {
                   remainingAliasUsers.push(scanVar.name);
                   break;
                 }

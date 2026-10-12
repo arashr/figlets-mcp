@@ -17,11 +17,12 @@ const {
   resolvePrimitiveAliasTarget,
   withEffectiveSpacingSemantic,
 } = require("./semantic-alias-repair.js");
+const { planPrimitiveOpacityRepairs } = require("./primitive-opacity-repair.js");
 
 const inspectDsTokenGapsTool = {
   name: "inspect_ds_token_gaps",
   description:
-    "Read-only planner for config-backed non-color token gaps in the active Figma snapshot. Compares design-system.config.js to existing variables/styles, reports missing typography, spacing, radius, border-width, shadow, and elevation items, and emits update_ds_tokens dry-run/apply input plus apply_ds_foundation_repairs input when required collections are absent. Never mutates Figma, config, or bridge state.",
+    "Read-only planner for config-backed token gaps in the active Figma snapshot. Compares design-system.config.js to existing variables/styles, reports missing opacity, typography, spacing, radius, border-width, shadow, and elevation items, and emits exact update_ds_primitives or update_ds_tokens dry-run/apply input plus apply_ds_foundation_repairs input when required collections are absent. Never mutates Figma, config, or bridge state.",
   inputSchema: {
     type: "object",
     properties: {
@@ -36,7 +37,7 @@ const inspectDsTokenGapsTool = {
       categories: {
         type: "array",
         items: { type: "string" },
-        description: "Optional config-backed categories to inspect. Phase 3A supports non-color categories such as primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, typography-styles, elevation, elevation-variables, and elevation-styles."
+        description: "Optional config-backed categories to inspect, including primitive-opacity, primitive-typography, primitive-shadow, spacing-semantics, radius, border-width, typography, typography-variables, typography-styles, elevation, elevation-variables, and elevation-styles."
       },
       include_existing_updates: {
         type: "boolean",
@@ -88,6 +89,7 @@ const applyDsConfigResponsiveSpacingRepairsTool = {
 
 const DEFAULT_CATEGORIES = [
   "primitive-spacing",
+  "primitive-opacity",
   "primitive-typography",
   "primitive-shadow",
   "spacing-semantics",
@@ -101,7 +103,7 @@ const SUPPORTED_CATEGORIES = new Set(DEFAULT_CATEGORIES.concat(["typography-vari
 const KNOWN_COLOR_CATEGORIES = new Set(["primitive-color", "color-semantics"]);
 const APPLY_CATEGORIES = new Set(["radius", "border-width", "spacing-semantics", "typography-variables", "typography-styles", "elevation-variables", "elevation-styles"]);
 const ORCHESTRATION_APPLY_CATEGORIES = new Set(["typography", "elevation"]);
-const PRIMITIVE_APPLY_CATEGORIES = new Set(["primitive-typography", "primitive-shadow"]);
+const PRIMITIVE_APPLY_CATEGORIES = new Set(["primitive-opacity", "primitive-typography", "primitive-shadow"]);
 
 function _typographyApplySlices(context) {
   const hasTypographyVariableWork = (context.missingVariables || []).some(gap => gap.category === "typography")
@@ -524,7 +526,7 @@ function _collectionNameSet(figmaData) {
 }
 
 function _requiredCollectionForCategory(ds, category) {
-  if (category === "primitive-spacing" || category === "primitive-typography" || category === "primitive-shadow") {
+  if (category === "primitive-spacing" || category === "primitive-opacity" || category === "primitive-typography" || category === "primitive-shadow") {
     return ds && ds.collections && ds.collections.primitives || "1. Primitives";
   }
   if (category === "spacing-semantics" || category === "radius" || category === "border-width") {
@@ -536,7 +538,7 @@ function _requiredCollectionForCategory(ds, category) {
 }
 
 function _foundationKindForCategory(category) {
-  if (category === "primitive-spacing" || category === "primitive-typography" || category === "primitive-shadow") return "primitives";
+  if (category === "primitive-spacing" || category === "primitive-opacity" || category === "primitive-typography" || category === "primitive-shadow") return "primitives";
   if (category === "spacing-semantics" || category === "radius" || category === "border-width") return "spacing";
   if (category === "typography" || category === "typography-variables" || category === "typography-styles") return "typography";
   if (category === "elevation" || category === "elevation-variables" || category === "elevation-styles") return "elevation";
@@ -850,6 +852,7 @@ function _expectedElevationTokens(ds, options = {}) {
 }
 
 function _expectedForCategory(ds, category) {
+  if (category === "primitive-opacity") return [];
   if (category === "primitive-spacing" || category === "primitive-typography" || category === "primitive-shadow") {
     return _expectedPrimitiveTokens(ds, category);
   }
@@ -1065,6 +1068,34 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     }
   }
 
+  const opacityRepairPlan = categories.indexOf("primitive-opacity") >= 0
+    ? planPrimitiveOpacityRepairs(ds, figmaData)
+    : { collection: null, entries: [], blocked: [] };
+  if (opacityRepairPlan.entries.length) {
+    supportedCategoriesWithGaps.add("primitive-opacity");
+    for (const entry of opacityRepairPlan.entries) {
+      tokenGaps.push({
+        category: "primitive-opacity",
+        kind: "variable-migration",
+        name: entry.scrim.name,
+        prerequisite: entry.opacity.name,
+        collection: opacityRepairPlan.collection && opacityRepairPlan.collection.name,
+        gapType: "primitive-opacity-repair",
+        reason: "Convert the scrim to a composed color and ensure its shared opacity prerequisite has the approved value and scopes.",
+      });
+    }
+  }
+  for (const blocked of opacityRepairPlan.blocked || []) {
+    missingCapabilityNotes.push({
+      kind: "primitive-opacity-incompatible",
+      category: "primitive-opacity",
+      token: blocked.name || null,
+      prerequisite: blocked.prerequisite || null,
+      reason: blocked.reason,
+      productGap: false,
+    });
+  }
+
   if (categories.indexOf("spacing-semantics") >= 0) {
     const spacingGapNames = new Set(
       tokenGaps.filter(gap => gap.category === "spacing-semantics").map(gap => gap.name)
@@ -1173,6 +1204,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
   const missingStyles = tokenGaps.filter(gap => gap.gapType === "missing-style");
   const staleStyles = tokenGaps.filter(gap => gap.gapType === "raw-effect-style-bindings");
   const typeMismatches = tokenGaps.filter(gap => gap.gapType === "type-mismatch");
+  const opacityRepairGaps = tokenGaps.filter(gap => gap.gapType === "primitive-opacity-repair");
   const spacingAliasRepairGaps = tokenGaps.filter(gap => gap.gapType === "spacing-alias-repair");
   const spacingAliasConfigDriftGaps = tokenGaps.filter(gap => gap.gapType === "spacing-alias-config-drift");
   const categoriesWithGaps = Array.from(supportedCategoriesWithGaps).sort();
@@ -1197,6 +1229,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     missingStyles,
     staleStyles,
     typeMismatches,
+    opacityRepairEntries: opacityRepairPlan.entries,
+    opacityRepairGaps,
     spacingAliasRepairs: spacingAliasRepairGaps,
     spacingAliasConfigDrift: spacingAliasConfigDriftGaps,
     semanticAliasRepairModel: SEMANTIC_ALIAS_REPAIR_MODEL,
@@ -1230,6 +1264,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     missingStyleCount: missingStyles.length,
     staleStyleCount: staleStyles.length,
     typeMismatchCount: typeMismatches.length,
+    opacityMigrationCount: opacityRepairGaps.length,
     unsupportedCategoryCount: unsupportedCategories.length,
     inspectedCategoryCount: supportedCategories.length,
     plannedCategoryCount: categoriesWithGaps.length,
@@ -1239,7 +1274,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
 
   const gapTotal = summary.missingVariableCount + summary.missingStyleCount + summary.staleStyleCount
     + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount
-    + summary.touchPolicyDriftCount;
+    + summary.opacityMigrationCount + summary.touchPolicyDriftCount;
   return {
     message: _composeMessage(summary),
     semanticAliasRepairModel: spacingAliasPlan.model || SEMANTIC_ALIAS_REPAIR_MODEL,
@@ -1252,6 +1287,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
       missingStyles: missingStyles.slice(0, 10),
       staleStyles: staleStyles.slice(0, 10),
       typeMismatches: typeMismatches.slice(0, 10),
+      opacityRepairs: opacityRepairGaps.slice(0, 10),
       spacingAliasRepairs: spacingAliasRepairGaps.slice(0, 10),
       spacingAliasConfigDrift: spacingAliasConfigDriftGaps.slice(0, 10),
       spacingResponsiveModeAdvisories: (spacingAliasPlan.unvalidatedDuplicatedResponsiveModeValues || []).slice(0, 10),
@@ -1309,12 +1345,14 @@ function _buildRepairPlan(context) {
     .filter(category =>
       (context.missingVariables || []).some(gap => gap.category === category)
       || (context.typeMismatches || []).some(gap => gap.category === category)
+      || (context.opacityRepairEntries || []).length && category === "primitive-opacity"
     )
     .sort();
   const total = (context.missingVariables || []).length
     + (context.missingStyles || []).length
     + (context.staleStyles || []).length
     + (context.typeMismatches || []).length
+    + (context.opacityRepairEntries || []).length
     + (context.spacingAliasRepairs || []).length
     + (context.touchPolicyReview ? context.touchPolicyReview.changes.length : 0);
   const advisoryTotal = (context.spacingResponsiveModeAdvisories || []).length;
@@ -1373,12 +1411,17 @@ function _buildRepairPlan(context) {
       },
       counts: {
         categories: primitiveApplyCategories.length,
+        opacityRepairs: (context.opacityRepairEntries || []).length,
       },
-      designerSummary: "Figlets can create or update primitive typography variables in "
+      designerSummary: "Figlets can create or update approved primitive variables in "
         + (context.configPath ? "the configured Primitives collection" : "Primitives")
         + " for: " + primitiveApplyCategories.join(", ") + ".",
     }
     : null;
+  if (primitiveRepairPlan && primitiveApplyCategories.indexOf("primitive-opacity") >= 0) {
+    primitiveRepairPlan.previewInput.opacity_repairs = context.opacityRepairEntries || [];
+    primitiveRepairPlan.applyInput.opacity_repairs = context.opacityRepairEntries || [];
+  }
   const reviewOptions = _buildReviewOptions({
     context,
     applyCategories,
@@ -1435,6 +1478,7 @@ function _buildRepairPlan(context) {
       staleStyles: (context.staleStyles || []).length,
       effectStyleRepairs: effectStyleRepairs.length,
       typeMismatches: (context.typeMismatches || []).length,
+      opacityRepairs: (context.opacityRepairEntries || []).length,
       spacingAliasConfigDrift: (context.spacingAliasConfigDrift || []).length,
       touchPolicyDrift: context.touchPolicyReview ? context.touchPolicyReview.changes.length : 0,
       total,
@@ -1551,14 +1595,21 @@ function _buildReviewOptions({
   }
 
   if (primitiveRepairPlan) {
+    const primitiveCategories = primitiveRepairPlan.applyInput.categories || [];
+    const opacityOnly = primitiveCategories.length === 1 && primitiveCategories[0] === "primitive-opacity";
+    const typographyOnly = primitiveCategories.length === 1 && primitiveCategories[0] === "primitive-typography";
     options.push(_reviewOption(
-      "primitive-typography",
-      "Review primitive typography variables",
+      opacityOnly ? "primitive-opacity" : typographyOnly ? "primitive-typography" : "primitive-variables",
+      opacityOnly ? "Review shared opacity and scrim migration" : typographyOnly ? "Review primitive typography variables" : "Review primitive variables",
       "primitive-token",
       "update_ds_primitives",
       primitiveRepairPlan.previewInput,
       primitiveRepairPlan.applyInput,
-      "Creates or updates primitive typography variables in the configured Primitives collection only."
+      opacityOnly
+        ? "Creates or updates only the listed shared opacity prerequisites and converts only the listed scrims to composed colors. Existing scrim IDs remain unchanged."
+        : typographyOnly
+          ? "Creates or updates primitive typography variables in the configured Primitives collection only."
+          : "Creates or updates only the listed primitive variables in the configured Primitives collection."
     ));
   }
 
@@ -1928,6 +1979,7 @@ function _buildDesignerPresentation(context, total) {
   const spacingResponsiveModeAdvisories = context.spacingResponsiveModeAdvisories || [];
   const responsiveSpacingReview = context.responsiveSpacingReview || null;
   const touchPolicyReview = context.touchPolicyReview || null;
+  const opacityRepairEntries = context.opacityRepairEntries || [];
   const notes = context.missingCapabilityNotes || [];
   const foundationRepairs = context.foundationRepairs || [];
   const emptyDesignSystem = context.emptyDesignSystem || null;
@@ -1958,7 +2010,13 @@ function _buildDesignerPresentation(context, total) {
     lines.unshift(
       "Read-only plan only. I will dry-run the updates first and wait for your explicit approval before changing Figma."
     );
-    lines.push(`I found ${total} config-backed non-color token gap${total === 1 ? "" : "s"} Figlets can plan for a future approved update.`);
+    lines.push(`I found ${total} config-backed token gap${total === 1 ? "" : "s"} Figlets can plan for a future approved update.`);
+    if (opacityRepairEntries.length) {
+      sections.push({
+        title: "Shared opacity and composed scrims",
+        message: `Figlets can preview ${opacityRepairEntries.length} exact scrim conversion${opacityRepairEntries.length === 1 ? "" : "s"}. Each entry includes its required opacity variable, expected current signatures, color source, modes, percentage value, and scopes. Existing scrim IDs remain unchanged.`,
+      });
+    }
     if (missingVariables.length) {
       sections.push({
         title: "Ready to preview",
@@ -2146,7 +2204,7 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 function _composeMessage(summary) {
   const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount
     + (summary.staleVariableCount || 0) + (summary.staleStyleCount || 0) + (summary.configDriftCount || 0)
-    + (summary.touchPolicyDriftCount || 0);
+    + (summary.opacityMigrationCount || 0) + (summary.touchPolicyDriftCount || 0);
   if (summary.emptyDesignSystem) {
     const setupMessage = "This file has no design-system variables or local styles yet. Ask whether the designer wants to set up or continue the design-system foundation before presenting ordinary token-gap repair choices.";
     if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
@@ -2158,7 +2216,7 @@ function _composeMessage(summary) {
     ].join(" ");
   }
   if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
-    return "No config-backed non-color token gaps found in the inspected categories.";
+    return "No config-backed token gaps found in the inspected categories.";
   }
   const parts = [];
   if (summary.missingVariableCount) parts.push(`${summary.missingVariableCount} missing variable${summary.missingVariableCount === 1 ? "" : "s"}`);
@@ -2167,6 +2225,7 @@ function _composeMessage(summary) {
   if (summary.typeMismatchCount) parts.push(`${summary.typeMismatchCount} type mismatch${summary.typeMismatchCount === 1 ? "" : "es"}`);
   if (summary.staleVariableCount) parts.push(`${summary.staleVariableCount} alias repair${summary.staleVariableCount === 1 ? "" : "s"}`);
   if (summary.configDriftCount) parts.push(`${summary.configDriftCount} config drift mode${summary.configDriftCount === 1 ? "" : "s"}`);
+  if (summary.opacityMigrationCount) parts.push(`${summary.opacityMigrationCount} composed scrim migration${summary.opacityMigrationCount === 1 ? "" : "s"}`);
   if (summary.touchPolicyDriftCount) parts.push(`${summary.touchPolicyDriftCount} outdated touch-target mode value${summary.touchPolicyDriftCount === 1 ? "" : "s"}`);
   if (summary.responsiveSpacingAdvisoryCount) parts.push(`${summary.responsiveSpacingAdvisoryCount} responsive spacing advisory${summary.responsiveSpacingAdvisoryCount === 1 ? "" : "ies"}`);
   if (summary.unsupportedCategoryCount) parts.push(`${summary.unsupportedCategoryCount} unsupported categor${summary.unsupportedCategoryCount === 1 ? "y" : "ies"}`);

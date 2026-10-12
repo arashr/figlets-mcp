@@ -15,7 +15,7 @@
  * Use this when ramps or other primitive values change but the rest of the
  * design system has not. For first-time creation, use apply_ds_setup.
  *
- * Categories supported today: "color", "spacing", "color-semantics", "primitive-typography", "primitive-shadow".
+ * Categories supported today: "color", "spacing", "color-semantics", "primitive-opacity", "primitive-typography", "primitive-shadow".
  * The plugin's UPDATE_PRIMITIVE_SPECS map is the source of truth for the full
  * set; unknown categories are reported back, never silently ignored.
  */
@@ -27,7 +27,7 @@ const { getConfigPathGuardError } = require('../utils/paths.js');
 const updateDsPrimitivesTool = {
   name: 'update_ds_primitives',
   description:
-    'Update existing variable values and semantic aliases in place, without recreating collections or breaking bindings. Pass dry_run=true first to report proposed updates and missing variables for designer confirmation. Pass a prepared design-system.config.js path and an optional list of categories (e.g. ["color"], ["spacing"], ["color-semantics"], ["primitive-typography"], ["primitive-shadow"]). Use after re-running prepare_ds_config to push changed primitive values, primitive typography and shadow tokens in the Primitives collection, and Color collection aliases into Figma.',
+    'Update existing variable values and semantic aliases in place, without recreating collections or breaking bindings. Pass dry_run=true first to report proposed updates and missing variables for designer confirmation. Pass a prepared design-system.config.js path and an optional list of categories, including primitive-opacity with the exact opacity_repairs emitted by inspect_ds_token_gaps. Use after re-running prepare_ds_config to push approved primitive values and Color collection aliases into Figma.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -38,7 +38,12 @@ const updateDsPrimitivesTool = {
       categories: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Optional list of categories to update. Supported today: "color", "spacing", "color-semantics", "primitive-typography", "primitive-shadow". Defaults to color, spacing, and color-semantics when omitted.',
+        description: 'Optional list of categories to update. Supported today: "color", "spacing", "color-semantics", "primitive-opacity", "primitive-typography", "primitive-shadow". Defaults to color, spacing, and color-semantics when omitted.',
+      },
+      opacity_repairs: {
+        type: 'array',
+        items: { type: 'object' },
+        description: 'Exact approval payload emitted by inspect_ds_token_gaps for primitive-opacity. A designer-approved subset may filter whole entries without editing them.',
       },
       create_missing: {
         type: 'boolean',
@@ -68,6 +73,7 @@ function handleUpdateDsPrimitives(args) {
   const dryRun           = !!(args && args.dry_run);
   const pruneOffScale    = !!(args && args.prune_off_scale);
   const pruneUnusedRamps = !!(args && args.prune_unused_ramps);
+  const opacityRepairs   = args && Array.isArray(args.opacity_repairs) ? args.opacity_repairs : undefined;
 
   if (!configPath) {
     return Promise.resolve({ error: 'config_path is required.' });
@@ -101,6 +107,7 @@ function handleUpdateDsPrimitives(args) {
   const needsSpacing = requestedCategories.includes('spacing');
   const needsPrimitiveTypography = requestedCategories.includes('primitive-typography');
   const needsPrimitiveShadow = requestedCategories.includes('primitive-shadow');
+  const needsPrimitiveOpacity = requestedCategories.includes('primitive-opacity');
   const needsPrimitiveGenerator = needsPrimitiveTypography || needsPrimitiveShadow;
 
   if (needsColor && (!ds.color || !ds.color.ramps || !ds.color.ramps.length)) {
@@ -112,6 +119,12 @@ function handleUpdateDsPrimitives(args) {
   if (needsPrimitiveTypography && (!ds.typography || !ds.typography.scale)) {
     return Promise.resolve({ error: 'Config is missing DS.typography.scale. Run prepare_ds_config first.' });
   }
+  if (needsPrimitiveOpacity && (!opacityRepairs || !opacityRepairs.length)) {
+    return Promise.resolve({
+      error: 'primitive-opacity requires the exact non-empty opacity_repairs payload from inspect_ds_token_gaps.',
+      hint: 'Rerun inspect_ds_token_gaps for primitive-opacity, preview the returned primitiveRepairPlan, and pass its approved payload unchanged. For a subset, filter whole opacity_repairs entries only.',
+    });
+  }
 
   return requestBridgePost('/request-update-primitives', {
     DS: ds,
@@ -120,6 +133,7 @@ function handleUpdateDsPrimitives(args) {
     dryRun: dryRun,
     pruneOffScale: pruneOffScale,
     pruneUnusedRamps: pruneUnusedRamps,
+    opacityRepairs: opacityRepairs,
   }, {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
@@ -137,6 +151,9 @@ function handleUpdateDsPrimitives(args) {
         pruned: result.pruned || 0,
         wouldPrune: result.wouldPrune || 0,
         message: result.message || 'Primitives update complete.',
+        verificationInstruction: requestedCategories.includes('primitive-opacity')
+          ? 'After an approved primitive-opacity apply, run sync_figma_data and inspect_ds_token_gaps again before reporting the migration complete.'
+          : undefined,
         configPath: resolvedPath,
         error: result.error,
       };

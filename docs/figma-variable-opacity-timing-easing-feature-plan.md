@@ -4,11 +4,19 @@
 
 Planning document created on 2026-10-12.
 
-Implementation has not started. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
+Phases 0 and 1 automated implementation are complete. Phase 2 core operations are implemented. Live Figma verification and the remaining Phase 2 result contract are pending. Phases 3 and 4 are deferred at the current checkpoint. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
 
 Target release: next Figlets minor release after 1.3.0.
 
-Current repository baseline: the full test suite passes 123 test files on the current dirty working tree. Later implementation must preserve unrelated changes and must record a fresh baseline before editing overlapping files.
+Current repository checkpoint: the full test suite passes 126 of 126 test files with the Phase 0, Phase 1, and Phase 2 core implementation. `git diff --check` passes. Live disposable-file verification has not run. The earlier DESIGN.md work and the initial plan are committed separately. Later implementation must preserve this checkpoint and must record a fresh baseline before editing overlapping files.
+
+### Checkpoint summary
+
+- Implemented and covered by automated tests: all six variable types, TIMING conversion, EASING validation, composed colors, nested alias traversal, bridge capability reporting, generated opacity primitives, composed scrims, and approval-gated existing-file opacity migration.
+- Implemented but not release-verified in Figma: live TIMING, EASING, composed-color writes, and live opacity migration.
+- Partially complete: exact-operation batch result reporting and atomic failure behavior.
+- Deferred: optional motion foundation configuration, CSS and DESIGN.md export work for the new types, component documentation enhancements, and Motion API work.
+- Safe next step: perform the two disposable-file live tests, finish the Phase 2 batch result contract, then decide whether Phase 3 and Phase 4 belong in the same minor release.
 
 ## Product Goal
 
@@ -155,35 +163,35 @@ The main gaps are:
 
 Priority: P0
 
-Status: not started
+Status: automated implementation complete, live verification pending
 
 Goal: make every read-only and exact-operation path understand the new value shapes before enabling specialized writes.
 
 Work:
 
-- [ ] Add `TIMING` and `EASING` to the canonical supported variable type set.
-- [ ] Add shared validation and normalization helpers for every variable type.
-- [ ] Preserve Figma-native timing seconds in snapshots and bridge payloads.
-- [ ] Accept timing operation input in milliseconds.
-- [ ] Convert milliseconds to seconds only in the normalized approved operation sent to the bridge.
-- [ ] Display timing values in milliseconds in summaries and previews.
-- [ ] Validate finite, non-negative timing values.
-- [ ] Validate all current `MotionEasing` discriminants.
-- [ ] Validate custom cubic-bezier control points.
-- [ ] Validate normalized custom spring bounce from 0 to 1.
-- [ ] Preserve named spring and named easing variants without flattening them.
-- [ ] Add composed-color normalization with separate color and opacity channels.
-- [ ] Require at least one composed-color channel to be an alias.
-- [ ] Validate raw opacity values from 0 to 100.
-- [ ] Validate COLOR aliases for the color channel.
-- [ ] Validate FLOAT aliases for the opacity channel.
-- [ ] Make stable signatures recursive so nested object key order does not affect stale checks.
-- [ ] Traverse nested aliases in composed colors during delete, duplicate, move, and retarget planning.
-- [ ] Preserve the exact composed value during variable duplication and movement.
-- [ ] Add explicit source-capability metadata to snapshots.
-- [ ] Mark REST timing and easing coverage as unknown.
-- [ ] Add bridge capability reporting for supported variable types and composed colors.
-- [ ] Block writes with actionable update or reload guidance when the bridge is outdated.
+- [x] Add `TIMING` and `EASING` to the canonical supported variable type set.
+- [x] Add shared validation and normalization helpers for every variable type.
+- [x] Preserve Figma-native timing seconds in snapshots and bridge payloads.
+- [x] Accept timing operation input in milliseconds.
+- [x] Convert milliseconds to seconds only in the normalized approved operation sent to the bridge.
+- [x] Display timing values in milliseconds in summaries and previews.
+- [x] Validate finite, non-negative timing values.
+- [x] Validate all current `MotionEasing` discriminants.
+- [x] Validate custom cubic-bezier control points.
+- [x] Validate normalized custom spring bounce from 0 to 1.
+- [x] Preserve named spring and named easing variants without flattening them.
+- [x] Add composed-color normalization with separate color and opacity channels.
+- [x] Require at least one composed-color channel to be an alias.
+- [x] Validate raw opacity values from 0 to 100.
+- [x] Validate COLOR aliases for the color channel.
+- [x] Validate FLOAT aliases for the opacity channel.
+- [x] Make stable signatures recursive so nested object key order does not affect stale checks.
+- [x] Traverse nested aliases in composed colors during delete, duplicate, move, and retarget planning.
+- [x] Preserve the exact composed value during variable duplication and movement.
+- [x] Add explicit source-capability metadata to snapshots.
+- [x] Mark REST timing and easing coverage as unknown.
+- [x] Add bridge capability reporting for supported variable types and composed colors.
+- [x] Block writes with actionable update or reload guidance when the bridge is outdated.
 
 Exit criteria:
 
@@ -197,7 +205,7 @@ Exit criteria:
 
 Priority: P0
 
-Status: not started
+Status: automated implementation complete, live verification pending
 
 Goal: ship the first designer-visible feature without renaming or recreating existing scrim variables.
 
@@ -247,13 +255,13 @@ Do not treat a nearly black or nearly white ramp endpoint as an exact match.
 
 #### New setup behavior
 
-- [ ] Update primitive generation to return opacity primitives and composed scrim plans.
-- [ ] Update setup preview to list exact opacity variables and composed scrims.
-- [ ] Create opacity variables before setting composed scrim values.
-- [ ] Apply both opacity scopes.
-- [ ] Keep semantic overlay, state, and shadow aliases unchanged.
-- [ ] Preserve existing setup behavior when rerun against a partially populated Primitives collection.
-- [ ] Make setup idempotent.
+- [x] Update primitive generation to return opacity primitives and composed scrim plans.
+- [x] Update setup preview to list exact opacity variables and composed scrims.
+- [x] Create opacity variables before setting composed scrim values.
+- [x] Apply both opacity scopes.
+- [x] Keep semantic overlay, state, and shadow aliases unchanged.
+- [x] Preserve existing setup behavior when rerun against a partially populated Primitives collection.
+- [x] Make setup idempotent.
 
 #### Existing-file migration
 
@@ -297,7 +305,7 @@ Exit criteria:
 
 Priority: P1
 
-Status: not started
+Status: core implementation complete, atomic batch result contract and live verification pending
 
 Goal: extend the existing exact-operation surface for all six variable types.
 
@@ -328,21 +336,21 @@ They also accept raw RGB for `color` or a raw percentage for `opacity`, provided
 
 #### Planner behavior
 
-- [ ] Resolve every alias by exact variable name.
-- [ ] Require compatible alias types.
-- [ ] Normalize TIMING to seconds in `repairPlan.applyInput`.
-- [ ] Keep designer presentation in milliseconds.
-- [ ] Preserve `MotionEasing` without lossy conversion.
-- [ ] Include recursive stale signatures for updates.
-- [ ] Mark destructive lifecycle operations exactly as the current planner does.
-- [ ] Include nested composed-color references in affected-variable summaries.
+- [x] Resolve every alias by exact variable name.
+- [x] Require compatible alias types.
+- [x] Normalize TIMING to seconds in `repairPlan.applyInput`.
+- [x] Keep designer presentation in milliseconds.
+- [x] Preserve `MotionEasing` without lossy conversion.
+- [x] Include recursive stale signatures for updates.
+- [x] Mark destructive lifecycle operations exactly as the current planner does.
+- [x] Include nested composed-color references in affected-variable summaries.
 
 #### Apply behavior
 
-- [ ] Revalidate every normalized value and stale signature.
-- [ ] Create `TIMING` and `EASING` variables through the existing bridge operation route.
-- [ ] Set composed color values with resolved variable aliases.
-- [ ] Reject an older bridge that lacks the required capability.
+- [x] Revalidate every normalized value and stale signature.
+- [x] Create `TIMING` and `EASING` variables through the existing bridge operation route.
+- [x] Set composed color values with resolved variable aliases.
+- [x] Reject an older bridge that lacks the required capability.
 - [ ] Preserve atomic behavior for each approved operation batch.
 - [ ] Return exact created, updated, unchanged, blocked, and failed results.
 
@@ -366,7 +374,7 @@ Exit criteria:
 
 Priority: P1
 
-Status: not started
+Status: partially implemented through the shared Phase 0 model; export and documentation work not started
 
 Goal: provide useful timing and easing foundations only when the designer asks for them.
 
@@ -433,8 +441,8 @@ Goal: make the new variable data visible and portable without weakening existing
 
 #### Inventory and analysis
 
-- [ ] Count all six resolved variable types.
-- [ ] Report snapshot source capability and coverage.
+- [x] Count all six resolved variable types.
+- [x] Report snapshot source capability and coverage.
 - [ ] Preserve composed color channel provenance.
 - [ ] Resolve composed colors for presentation without replacing their stored source structure.
 - [ ] Treat the shared `OPACITY` and `COLOR_OPACITY` scopes as intentional for generated opacity primitives.
@@ -548,42 +556,42 @@ Never represent source limitations as a confirmed empty inventory.
 
 ### Core value tests
 
-- [ ] All six variable types normalize correctly.
-- [ ] Invalid timing values are rejected.
-- [ ] Timing milliseconds convert to exact seconds.
-- [ ] Every supported easing discriminant round-trips.
-- [ ] Invalid cubic-bezier and spring data is rejected.
-- [ ] Composed colors require at least one alias.
-- [ ] Color and opacity channel alias types are enforced.
-- [ ] Opacity clamps are not performed silently.
-- [ ] Recursive signatures are deterministic.
-- [ ] Nested aliases are found by lifecycle analysis.
+- [x] All six variable types normalize correctly.
+- [x] Invalid timing values are rejected.
+- [x] Timing milliseconds convert to exact seconds.
+- [x] Every supported easing discriminant round-trips.
+- [x] Invalid cubic-bezier and spring data is rejected.
+- [x] Composed colors require at least one alias.
+- [x] Color and opacity channel alias types are enforced.
+- [x] Opacity clamps are not performed silently.
+- [x] Recursive signatures are deterministic.
+- [x] Nested aliases are found by lifecycle analysis.
 
 ### Bridge and generic-operation tests
 
-- [ ] Create and update TIMING variables.
-- [ ] Create and update EASING variables.
-- [ ] Create and update composed COLOR variables.
-- [ ] Duplicate and move every new value shape.
-- [ ] Retarget nested composed-color aliases.
-- [ ] Reject deletion when nested references remain.
-- [ ] Reject stale nested values.
-- [ ] Reject writes through an outdated bridge capability set.
+- [x] Create and update TIMING variables in automated bridge tests.
+- [x] Create and update EASING variables in automated bridge tests.
+- [x] Create and update composed COLOR variables in automated bridge tests.
+- [x] Duplicate and move every new value shape.
+- [x] Retarget nested composed-color aliases.
+- [x] Reject deletion when nested references remain.
+- [x] Reject stale nested values.
+- [x] Reject writes through an outdated bridge capability set.
 
 ### Opacity setup and migration tests
 
-- [ ] Generate all seven opacity primitives.
-- [ ] Apply both opacity scopes.
-- [ ] Reuse exact black and white neutral endpoints.
-- [ ] Prefer the configured neutral ramp when exact duplicates exist.
-- [ ] Fall back to raw black or white when no exact endpoint exists.
-- [ ] Preserve every existing scrim name and ID.
-- [ ] Preserve descriptions, code syntax, publishing state, and downstream aliases.
-- [ ] Prove resolved RGBA parity before and after migration.
-- [ ] Prove migration idempotence.
-- [ ] Reject stale migration payloads.
-- [ ] Apply only approved partial migration entries and required prerequisites.
-- [ ] Leave unselected entries untouched.
+- [x] Generate all seven opacity primitives.
+- [x] Apply both opacity scopes.
+- [x] Reuse exact black and white neutral endpoints.
+- [x] Prefer the configured neutral ramp when exact duplicates exist.
+- [x] Fall back to raw black or white when no exact endpoint exists.
+- [x] Preserve every existing scrim name and ID in automated migration tests.
+- [x] Preserve descriptions, code syntax, publishing state, and downstream aliases.
+- [x] Prove resolved RGBA parity before and after migration.
+- [x] Prove migration idempotence.
+- [x] Reject stale migration payloads.
+- [x] Apply only approved partial migration entries and required prerequisites.
+- [x] Leave unselected entries untouched.
 
 ### Motion profile tests
 
@@ -611,9 +619,9 @@ Never represent source limitations as a confirmed empty inventory.
 
 ### Release verification
 
-- [ ] Run focused tests after each phase.
-- [ ] Run the full repository test suite before completing a phase.
-- [ ] Run the repository whitespace check before completing a phase.
+- [x] Run focused tests after each implemented phase.
+- [x] Run the full repository test suite for the current checkpoint.
+- [x] Run the repository whitespace check for the current checkpoint.
 - [ ] Perform a disposable-file opacity migration smoke test.
 - [ ] Perform a disposable-file timing and easing variable smoke test.
 - [ ] Record bridge build identity and Figma API behavior used by each live smoke test.
@@ -735,3 +743,78 @@ Verification:
 Next step:
 
 - Start Phase 0 with the shared variable value model and focused unit tests.
+
+### 2026-10-12: Phase 0 automated implementation
+
+Status: automated implementation complete, live verification pending
+
+Scope:
+
+- Added first-class planner and bridge handling for all six variable types.
+- Added millisecond input and preview handling with second-based native TIMING payloads.
+- Added validation for named easings, cubic-bezier curves, named springs, and normalized custom springs.
+- Added composed COLOR values with independently validated COLOR and FLOAT alias channels.
+- Added recursive signatures and nested alias traversal.
+- Extended destructive move, delete, and retarget safeguards to reject changed alias sets before mutation.
+- Added bridge and REST capability metadata so incomplete snapshots cannot silently imply support or absence.
+- Extended design-system inventory counts to include TIMING, EASING, and UNKNOWN values.
+
+Files and areas:
+
+- `packages/figlets-mcp-server/src/tools/figma-operations.js`
+- `packages/figma-bridge-plugin/code.js`
+- `packages/figlets-mcp-server/src/exporters/figma-rest-export.js`
+- `packages/figlets-core/src/design-system-inventory.js`
+- focused server, bridge, inventory, and REST tests
+
+Verification:
+
+- JavaScript syntax checks passed for the operation planner and bridge plugin.
+- Focused modern-value, lifecycle, inventory, and REST tests passed.
+- Full `npm test` passed: 124 of 124 test files.
+- `git diff --check` passed before the plan update and must be rerun at handoff.
+
+Remaining risk:
+
+- A disposable live Figma file has not yet verified bridge snapshots and writes for TIMING, EASING, and composed COLOR values.
+- Phase 0 remains open for live verification. Phase 1 implementation can use the verified automated value model, but release readiness still requires the live checks.
+
+Next step:
+
+- Begin Phase 1 with config-backed opacity primitives and composed scrim generation, while keeping existing-file migration approval-gated.
+
+### 2026-10-12: Phase 1 and Phase 2 core checkpoint
+
+Status: automated checkpoint complete, live verification pending
+
+Scope:
+
+- Added seven shared FLOAT opacity primitives with `OPACITY` and `COLOR_OPACITY` scopes.
+- Replaced generated baked-alpha scrims with composed colors while preserving existing names and semantic alias targets.
+- Added exact neutral endpoint reuse with raw black or white fallback.
+- Added approval-gated `primitive-opacity` inspection and apply payloads for existing-file migration.
+- Added stale, identity, prerequisite, and compatibility validation before migration mutation.
+- Extended exact Figma operations for TIMING, EASING, and composed COLOR values.
+- Added automated coverage for setup idempotence, resolved RGBA parity, partial migration, nested aliases, and outdated bridge capabilities.
+- Updated inventory and snapshot capability reporting for all six variable types.
+
+Verification:
+
+- Focused Phase 1 and Phase 2 tests passed.
+- Full `npm test` passed: 126 of 126 test files.
+- `git diff --check` passed.
+- Live disposable-file verification was not run.
+
+Deferred at this checkpoint:
+
+- Phase 2 atomic batch failure behavior and exact created, updated, unchanged, blocked, and failed result reporting.
+- Phase 3 optional motion foundation profile.
+- Phase 4 CSS, DESIGN.md, sidecar, Make guidance, and component documentation work beyond the inventory and capability foundation already implemented.
+- Disposable-file opacity migration and TIMING or EASING write verification.
+
+Next safe step:
+
+- Start by reading this checkpoint and rerunning the full suite.
+- Perform the two disposable-file live tests against the recorded bridge build.
+- Finish the Phase 2 batch result contract.
+- Decide whether Phases 3 and 4 remain in the next minor release or move to a later release before implementing either phase.

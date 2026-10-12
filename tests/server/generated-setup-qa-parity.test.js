@@ -124,6 +124,9 @@ async function buildSetupSnapshot(ds) {
   vm.createContext(context);
   vm.runInContext(source, context, { filename: "generated-setup-qa-parity.vm.js" });
   await context.module.exports._applyDsSetup({ DS: ds, primitivesData: generatePrimitivesData(ds) });
+  const firstIds = variables.map(variable => variable.id);
+  await context.module.exports._applyDsSetup({ DS: ds, primitivesData: generatePrimitivesData(ds) });
+  assert.deepStrictEqual(variables.map(variable => variable.id), firstIds, "repeated setup should preserve every generated variable ID");
   return { variables, collections };
 }
 
@@ -162,6 +165,13 @@ module.exports = (async () => {
   assert.ok(!prepared.error, "generated setup should prepare");
   assert.strictEqual(prepared.readyToBuild, true, "generated setup should be build-ready on first pass");
   assert.strictEqual(prepared.semanticPairs.failCount, 0, "generated setup should not surface self-inflicted contrast failures");
+  assert.deepStrictEqual(
+    prepared.setupApprovalPreview.collections[0].sampleTokens.opacity.map(item => item.token),
+    ["opacity/4", "opacity/8", "opacity/12", "opacity/16", "opacity/20", "opacity/40", "opacity/60"],
+    "setup preview should list every shared opacity primitive"
+  );
+  assert.strictEqual(prepared.setupApprovalPreview.collections[0].sampleTokens.scrims.length, 10);
+  assert.ok(prepared.setupApprovalPreview.collections[0].sampleTokens.scrims.every(item => item.color && item.opacity && item.resolvedRgba));
 
   const ds = readDsConfig(configPath);
   const brandPair = ds.color.semantics.pairs.find(pair => pair.bg === "color/bg/brand");
@@ -172,6 +182,22 @@ module.exports = (async () => {
   assert.strictEqual(mutedPair.min, null, "generated muted pair should preserve its WCAG contrast exemption");
 
   const snapshot = await buildSetupSnapshot(ds);
+  const primitiveCollection = snapshot.collections.find(collection => collection.name === "1. Primitives");
+  const primitiveModeId = primitiveCollection.modes[0].modeId;
+  const primitiveByName = new Map(snapshot.variables
+    .filter(variable => variable.variableCollectionId === primitiveCollection.id)
+    .map(variable => [variable.name, variable]));
+  for (const value of [4, 8, 12, 16, 20, 40, 60]) {
+    const opacity = primitiveByName.get(`opacity/${value}`);
+    assert.ok(opacity, `opacity/${value} should be created during setup`);
+    assert.strictEqual(opacity.valuesByMode[primitiveModeId], value);
+    assert.strictEqual(JSON.stringify(opacity.scopes), JSON.stringify(["OPACITY", "COLOR_OPACITY"]));
+  }
+  const blackScrim = primitiveByName.get("color/scrim/black/40");
+  assert.ok(blackScrim, "black scrim should retain its stable name");
+  assert.strictEqual(blackScrim.valuesByMode[primitiveModeId].opacity.type, "VARIABLE_ALIAS");
+  assert.strictEqual(blackScrim.valuesByMode[primitiveModeId].opacity.id, primitiveByName.get("opacity/40").id);
+  assert.ok(blackScrim.valuesByMode[primitiveModeId].color, "black scrim should use a composed color channel");
   const health = inspectDsSetupGapsFromFigmaData(snapshot, {
     existingDs: ds,
     algorithm: ds.color.contrastAlgorithm,

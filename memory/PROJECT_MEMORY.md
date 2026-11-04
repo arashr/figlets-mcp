@@ -4,6 +4,14 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Actual-file motion run saved the profile and reused existing variables
+
+**Result:** On user request, saved the default motion profile in `.local/local_mw2a0qj0_dmp11v0f/design-system.config.js`, applied the exact motion plan to `6. Motion`, and verified eight unchanged, zero created/updated/failed. Current sync preserved the saved profile. Full config preparation still blocks DESIGN.md export because the project name is the placeholder Untitled; broad setup was not applied.
+
+**Live naming fix:** Sparse bootstrap config omitted Elevation and initially proposed 5. Motion. Preview naming now consults its sibling snapshot to reuse the actual 6. Motion, includes all live collection numbers, and rejects ambiguous multiple Motion collections. No duplicate collection was created. The connected MCP process remains stale; restart it before using the new flow.
+
+---
+
 ### [2026-11-04] Optional motion config and staged setup implemented
 
 **Behavior:** Explicit `prepare_ds_config({ motion_profile: "default" })` requests return an editable read-only eight-token proposal. Exact `saveInput` with config/proposal fingerprint saves only DS.motion and its collection name; reprepare follows. Normal intake/configs remain unchanged. Shared core helpers validate named Default/Reduced Motion values, millisecond durations, and easing curves, and are reused by the exact-operation planner.

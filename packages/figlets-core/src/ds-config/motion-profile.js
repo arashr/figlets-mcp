@@ -27,10 +27,15 @@ function normalizeMotionEasing(value) {
   return { type };
 }
 
-function motionCollectionName(collections = {}) {
+function motionCollectionName(collections = {}, snapshotCollections = []) {
   if (collections.motion) return String(collections.motion);
-  if (!Object.values(collections).length) return '6. Motion';
-  const numbered = Object.values(collections).map(name => /^(\d+)\.\s+/.exec(String(name))).filter(Boolean);
+  const liveNames = snapshotCollections.map(collection => collection && collection.name).filter(Boolean);
+  const existingMotion = liveNames.filter(name => /^(?:\d+\.\s*)?Motion$/i.test(name));
+  if (existingMotion.length > 1) throw new Error('Multiple motion collections exist. Choose the exact motion_collection name.');
+  if (existingMotion.length === 1) return existingMotion[0];
+  const names = [...Object.values(collections), ...liveNames];
+  if (!names.length) return '6. Motion';
+  const numbered = names.map(name => /^(\d+)\.\s+/.exec(String(name))).filter(Boolean);
   return numbered.length ? `${Math.max(...numbered.map(match => Number(match[1]))) + 1}. Motion` : 'Motion';
 }
 

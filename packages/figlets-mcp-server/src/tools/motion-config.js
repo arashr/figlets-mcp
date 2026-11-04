@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const crypto = require('crypto');
+const path = require('path');
 const core = require('../figlets-core.js').dsConfig;
 
 function prepareMotionConfig(configPath, args) {
@@ -11,7 +12,12 @@ function prepareMotionConfig(configPath, args) {
   const raw = args.motion_profile === 'default' ? core.defaultMotionProfile() : args.motion_profile;
   const normalized = core.normalizeMotionProfile(raw);
   if (normalized.errors.length) return { error: normalized.errors.join(' ') };
-  const collection = args.motion_collection || core.motionCollectionName(ds.collections);
+  let collection;
+  try {
+    const snapshotPath = path.join(path.dirname(configPath), 'figma-data.json');
+    const snapshot = fs.existsSync(snapshotPath) ? JSON.parse(fs.readFileSync(snapshotPath, 'utf8')) : {};
+    collection = args.motion_collection || core.motionCollectionName(ds.collections, snapshot.collections || []);
+  } catch (error) { return { error: error.message }; }
   if (typeof collection !== 'string' || !collection.trim()) return { error: 'Motion collection name must be non-empty.' };
   if (Object.entries(ds.collections || {}).some(([role, name]) => role !== 'motion' && name === collection)) return { error: 'Motion must use a separate collection from other configured foundations.' };
   const candidate = { ...ds, collections: { ...ds.collections, motion: collection }, motion: normalized.profile };

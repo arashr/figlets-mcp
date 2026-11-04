@@ -85,5 +85,12 @@ module.exports = (async () => {
     const invalidDuration = core.defaultMotionProfile(); invalidDuration.durations['motion/duration/fast'].Default = -1;
     assert.ok(core.normalizeMotionProfile(invalidDuration).errors.length);
     assert.strictEqual(core.motionProfilePreview(original), null, 'ordinary configs must not receive motion defaults');
+    const sparse = { primitives: '1. Primitives', spacing: '4. Spacing' };
+    assert.strictEqual(core.motionCollectionName(sparse, [{ name: '5. Elevation' }, { name: '6. Motion' }]), '6. Motion', 'reuse the existing live collection even when bootstrap config omits elevation');
+    assert.strictEqual(core.motionCollectionName(sparse, [{ name: '5. Elevation' }]), '6. Motion');
+    assert.throws(() => core.motionCollectionName(sparse, [{ name: '6. Motion' }, { name: '7. Motion' }]), /Multiple motion/);
+    core.writeDsConfig(configPath, { ...original, collections: sparse });
+    const reusePreview = await handlePrepareDsConfig({ config_path: configPath, motion_profile: 'default' });
+    assert.strictEqual(reusePreview.motion.collection, '6. Motion', 'the actual preview must inspect its sibling snapshot for existing motion collections');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 })();

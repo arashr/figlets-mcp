@@ -1,23 +1,9 @@
 const { bridgeStatusError, requestBridgePost } = require("../bridges/bridge-request.js");
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 
+const { normalizeMotionEasing, motionProfilePreview, readDsConfig } = require("../figlets-core.js").dsConfig;
+
 const VARIABLE_TYPES = new Set(["COLOR", "FLOAT", "STRING", "BOOLEAN", "TIMING", "EASING"]);
-const EASING_TYPES = new Set([
-  "EASE_IN",
-  "EASE_OUT",
-  "EASE_IN_AND_OUT",
-  "LINEAR",
-  "EASE_IN_BACK",
-  "EASE_OUT_BACK",
-  "EASE_IN_AND_OUT_BACK",
-  "CUSTOM_CUBIC_BEZIER",
-  "GENTLE",
-  "QUICK",
-  "BOUNCY",
-  "SLOW",
-  "CUSTOM_SPRING",
-  "HOLD",
-]);
 const OP_KINDS = new Set([
   "create_collection",
   "rename_collection",
@@ -56,7 +42,7 @@ const OP_KINDS = new Set([
 const planDsFigmaOperationsTool = {
   name: "plan_ds_figma_operations",
   description:
-    "Read-only planner for exact high-level Figma design-system operations: create/update/rename/delete variables, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers. For TIMING/EASING creation with a missing collection, returns collection setup and an explicit sync/replan continuation instead of a missing-collection error. Validates against the synced snapshot and returns an exact approved-apply payload. Never mutates Figma.",
+    "Read-only planner for exact high-level Figma design-system operations. Accepts explicit operations or motion_config_path for an approved optional motion profile. Stages missing motion collections/modes before atomic variable values. Validates against the synced snapshot and returns an exact approved-apply payload. Never mutates Figma.",
   inputSchema: {
     type: "object",
     properties: {
@@ -68,9 +54,10 @@ const planDsFigmaOperationsTool = {
       figmaDataPath: {
         type: "string",
         description: "Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data."
-      }
+      },
+      motion_config_path: { type: "string", description: "Optional approved file-scoped config with DS.motion. Plans staged collection/mode setup and atomic motion values. Use instead of operations." }
     },
-    required: ["operations"],
+    required: [],
     additionalProperties: false
   }
 };
@@ -135,28 +122,7 @@ function _parseHexColor(value) {
 }
 
 function _normalizeEasing(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const easingType = String(value.type || "").toUpperCase();
-  if (!EASING_TYPES.has(easingType)) return null;
-  if (easingType === "CUSTOM_CUBIC_BEZIER") {
-    const curve = value.easingFunctionCubicBezier;
-    if (!curve || typeof curve !== "object" || Array.isArray(curve)) return null;
-    const normalized = {};
-    for (const key of ["x1", "y1", "x2", "y2"]) {
-      const number = Number(curve[key]);
-      if (!Number.isFinite(number)) return null;
-      normalized[key] = number;
-    }
-    if (normalized.x1 < 0 || normalized.x1 > 1 || normalized.x2 < 0 || normalized.x2 > 1) return null;
-    return { type: easingType, easingFunctionCubicBezier: normalized };
-  }
-  if (easingType === "CUSTOM_SPRING") {
-    const spring = value.easingFunctionSpring;
-    const bounce = spring && Number(spring.bounce);
-    if (!Number.isFinite(bounce) || bounce < 0 || bounce > 1) return null;
-    return { type: easingType, easingFunctionSpring: { bounce } };
-  }
-  return { type: easingType };
+  return normalizeMotionEasing(value);
 }
 
 function _aliasName(value) {
@@ -1025,11 +991,48 @@ function planDsFigmaOperationsFromFigmaData(figmaData = {}, input = {}) {
 }
 
 function handlePlanDsFigmaOperations(input = {}) {
+  if (!input.motion_config_path && !Array.isArray(input.operations)) return { error: "Provide explicit operations or motion_config_path." };
   const dataSource = _loadDataSource(input);
   if (!dataSource) {
     return { error: "No synced Figma snapshot found.", hint: "Run sync_figma_data first, then plan Figma operations again." };
   }
-  const result = planDsFigmaOperationsFromFigmaData(dataSource.figmaData, input);
+  let result;
+  if (input.motion_config_path) {
+    if (Array.isArray(input.operations) && input.operations.length) return { error: "Use motion_config_path or explicit operations, not both." };
+    const path = require('path').resolve(input.motion_config_path);
+    const guardError = require('../utils/paths.js').getConfigPathGuardError(path);
+    if (guardError) return guardError;
+    let motion;
+    try { motion = motionProfilePreview(readDsConfig(path)); } catch (error) { return { error: error.message }; }
+    if (!motion) return { error: "No motion profile is enabled in this config. Preview and save an explicit motion profile with prepare_ds_config first." };
+    const ctx = _context(dataSource.figmaData);
+    for (const token of motion.tokens) {
+      const error = _capabilityError(token.type, token.values, ctx);
+      if (error) return { error };
+    }
+    if (!ctx.capabilities.atomicVariableValueBatches) return { error: "Reload the current bridge and sync before planning config-backed motion setup; atomic variable batches are required." };
+    const collection = ctx.collectionsByName.get(motion.collection);
+    const missingModes = collection ? motion.modes.filter(mode => !_modeForName(collection, mode)) : [];
+    if (!collection || missingModes.length) {
+      const operations = collection ? missingModes.map(mode => ({ kind: "create_mode", collection: motion.collection, mode })) : [{ kind: "create_collection", name: motion.collection, modes: motion.modes }];
+      result = planDsFigmaOperationsFromFigmaData(dataSource.figmaData, { operations });
+      result.phase = "motion_foundation_setup";
+      result.continuation = { after: "successful_apply_then_sync_figma_data", tool: "plan_ds_figma_operations", input: { motion_config_path: path } };
+      result.repairPlan.agentInstruction = "Present and approve the exact motion collection/modes separately from variables. Apply only repairPlan.applyInput. If any mode creation fails or remains unresolved, stop and report the exact blocker. Never drop Reduced Motion or continue to values. After successful apply, sync, then replan continuation.input and obtain separate approval for the variable stage.";
+    } else {
+      const operations = [];
+      for (const token of motion.tokens) {
+        const matches = Array.from(ctx.varsById.values()).filter(variable => variable.name === token.name);
+        if (matches.length > 1 || (matches.length && _collectionForVariable(matches[0], ctx)?.id !== collection.id)) return { error: `Motion token ${token.name} has an ambiguous name or exists outside ${motion.collection}. Resolve the exact target before setup.` };
+        if (matches.length && matches[0].resolvedType !== token.type) return { error: `Motion token ${token.name} is ${matches[0].resolvedType}, not ${token.type}. Existing IDs will not be replaced.` };
+        const values = Object.fromEntries(Object.entries(token.values).map(([mode, value]) => [mode, token.type === 'TIMING' ? { milliseconds: value } : value]));
+        operations.push(matches.length ? { kind: 'update_variable', name: token.name, values } : { kind: 'create_variable', name: token.name, collection: motion.collection, type: token.type, values });
+      }
+      result = planDsFigmaOperationsFromFigmaData(dataSource.figmaData, { operations });
+      result.phase = 'motion_variables';
+    }
+    result.motion = motion;
+  } else result = planDsFigmaOperationsFromFigmaData(dataSource.figmaData, input);
   result.source = {
     kind: dataSource.kind,
     target: dataSource.target,

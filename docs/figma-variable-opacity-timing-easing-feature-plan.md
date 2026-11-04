@@ -4,7 +4,7 @@
 
 Planning document created on 2026-10-12.
 
-Phases 0 and 1 implementation and disposable-file smoke verification are complete. Phase 2 variable-value batches now preflight all entries, roll back attempted writes on failure, and report exact outcomes. Automated injected-failure tests and live success/stale-race tests pass. Native Figma write-failure rollback has not been forced live. Structural/lifecycle operations remain separate and are not covered by this rollback contract. Phases 3 and 4 remain incomplete. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
+Phases 0 and 1 implementation and disposable-file smoke verification are complete. Phase 2 variable-value batches now preflight all entries, roll back attempted writes on failure, and report exact outcomes. Automated injected-failure tests and live success/stale-race tests pass. Native Figma setter-failure rollback has not been forced live. Structural/lifecycle operations remain separate and are not covered by this rollback contract. Phase 3 optional config and staged setup are implemented and verified; Phase 4 export/documentation work remains incomplete. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
 
 Target release: next Figlets minor release after 1.3.0.
 
@@ -17,8 +17,9 @@ Saved checkpoint: `0175064` contains the migration and missing-motion-collection
 - Live-verified opacity migration: ten scrims converted with IDs and RGBA preserved; partial approval changed only the selected scrim and its prerequisite; seven shared opacity variables created; subsequent current-code inspection found zero migrations or blockers.
 - Fixed live-discovered defects: missing collection identity in sync, blocked migration summary omissions, and repeated migrations caused by Figma normalizing raw composed color channels with `a: 1`.
 - Implemented for variable create/update batches: full live preflight, rollback journal, exact per-operation results, unchanged-value detection, and explicit rollback-failure reporting. Mixed motion/composed-value and structural edits must be planned separately.
-- Deferred: optional motion foundation configuration, CSS and DESIGN.md export work for the new types, component documentation enhancements, and Motion API work.
-- Phase 2 specialized review is complete and its must-fix findings are resolved. Next: decide whether Phase 3 and Phase 4 belong in the same minor release. Additional native setter-failure rollback smoke would strengthen the automated failure evidence.
+- Implemented optional motion configuration: explicit editable preview, fingerprinted local save, reprepare, configured foundation/mode setup, and atomic motion values. Full suite now passes 130 test files.
+- Next: Phase 4 CSS and DESIGN.md export work for the new types and component documentation enhancements. Motion API authoring remains deferred.
+- Phase 2 specialized review is complete and its must-fix findings are resolved. The new Phase 3 slice has not had a specialized subagent review. Additional native setter-failure rollback smoke would strengthen the automated failure evidence.
 
 ## Product Goal
 
@@ -376,7 +377,7 @@ Exit criteria:
 
 Priority: P1
 
-Status: exact missing-collection setup continuation implemented and live-verified; optional config-backed profile, export, and documentation work remain incomplete
+Status: optional config profile and staged setup implemented; automated tests and existing-token live flow passed. Export/documentation remains Phase 4.
 
 Goal: provide useful timing and easing foundations only when the designer asks for them.
 
@@ -413,16 +414,16 @@ Easings:
 
 #### Intake and approval behavior
 
-- [ ] Do not add a motion question to ordinary new-system intake.
-- [ ] Trigger the profile only from an explicit timing, easing, transition-token, or motion-foundation request.
-- [ ] Show exact collection, modes, token names, values, and curves.
-- [ ] Let the designer edit the proposal.
-- [ ] Ask for approval before writing local config.
-- [ ] Reprepare the config after the approved config write.
-- [ ] Ask separately before writing Figma.
-- [ ] Do not report missing motion config as a setup or health defect.
-- [ ] State that reduced-motion variables do not prove runtime accessibility.
-- [ ] Offer springs only as an optional addition.
+- [x] Do not add a motion question to ordinary new-system intake.
+- [x] Trigger the profile only from an explicit timing, easing, transition-token, or motion-foundation request.
+- [x] Show exact collection, modes, token names, values, and curves.
+- [x] Let the designer edit the proposal.
+- [x] Ask for approval before writing local config.
+- [x] Reprepare the config after the approved config write.
+- [x] Ask separately before writing Figma.
+- [x] Do not report missing motion config as a setup or health defect.
+- [x] State that reduced-motion variables do not prove runtime accessibility.
+- [x] Offer springs only as an optional addition.
 
 If the Figma plan cannot create a second mode, stop and report the blocker. Do not silently produce a single-mode profile. A single-mode alternative requires an explicit designer request and an accessibility warning.
 
@@ -601,13 +602,13 @@ Never represent source limitations as a confirmed empty inventory.
 
 ### Motion profile tests
 
-- [ ] Configs without motion remain unchanged.
-- [ ] Ordinary intake does not ask about motion.
-- [ ] Explicit motion requests produce the lean proposal.
-- [ ] Default and Reduced Motion modes use exact named maps.
-- [ ] Duration and easing values match the locked profile.
-- [ ] Missing second-mode capability blocks the default profile.
-- [ ] Config and Figma approvals remain separate.
+- [x] Configs without motion remain unchanged.
+- [x] Ordinary intake does not ask about motion.
+- [x] Explicit motion requests produce the lean proposal.
+- [x] Default and Reduced Motion modes use exact named maps.
+- [x] Duration and easing values match the locked profile.
+- [x] Missing second-mode capability blocks the default profile.
+- [x] Config and Figma approvals remain separate.
 
 ### Analysis and export tests
 
@@ -976,3 +977,30 @@ Verification and live cleanup:
 Next step:
 
 - Decide the next release scope. Optional config-backed motion setup and new-type export/documentation work remain incomplete.
+
+### 2026-11-04: Phase 3 optional motion configuration and setup
+
+Status: implemented; 130 test files pass; live saved-profile existing-token flow verified
+
+Architecture and approval:
+
+- Extended existing `prepare_ds_config` and `plan_ds_figma_operations` rather than adding a public tool or parallel mutation path. Shared core motion helpers provide the default profile, naming, named-map validation, preview, and easing normalization; exact variable operations reuse that easing helper.
+- An explicit `motion_profile: default` or edited object returns a read-only proposal and exact `saveInput`. Fingerprints include current config bytes and the normalized profile/collection, so stale config changes or unapproved proposal edits cannot be saved.
+- Approved save modifies only `DS.motion` and `DS.collections.motion`, then returns a normal reprepare input. Ordinary intake and configs without motion remain unchanged. Bootstrap refresh preserves an existing approved profile and collection name.
+- Motion config stores complete token names and named Default/Reduced Motion maps. Durations are milliseconds; conversion to native seconds remains in the existing exact-operation codec. Springs require explicit edited values and are absent from the default.
+- `plan_ds_figma_operations({ motion_config_path })` returns collection/mode prerequisites first, with a sync/replan continuation. Variable creation or updates follow as a separately approved atomic batch. Existing IDs are preserved; wrong types or ambiguous/out-of-collection names block instead of being replaced.
+- Broad setup exposes motion in its preview and returns `motionPending` plus a `nextStep`; it does not falsely claim optional motion was built by the five-foundation bridge route.
+- If required mode creation fails, the agent stops instead of silently dropping Reduced Motion. Generic collection creation removes its newly created shell when required modes fail. A native mode-limit failure was not forced live; this failure path is tested in the bridge harness.
+
+Verification:
+
+- Full supported-runtime suite passed 130/130. Focused config flow, registered MCP schema, setup export/handoff, exact operations, and bridge mode-limit cleanup tests passed. Syntax and whitespace checks passed.
+- Preview produced no file changes; edited proposals required fresh fingerprints; approved profiles survived reprepare and bootstrap refresh. Tests covered missing collection, missing Reduced Motion, eight-token planning, and existing wrong-type protection.
+- Live verification used an isolated local config named `Motion setup verification`, not a rename or rewrite of the user's design-system config. Preview/save/reprepare produced `readyToBuild: true`, then config-backed planning reused `6. Motion` and its eight existing tokens.
+- Live session: `figlets-mw2a0qin-97pl0`, file key `local_mw2a0qj0_dmp11v0f`, bridge label `1.3.0`. Apply returned committed with eight unchanged and zero created/updated/failed. Final synced variables and collections exactly matched the baseline.
+- Current repository handlers were used because the connected MCP process still caches earlier schemas. Restart the MCP connection and reload the bridge before using the new host-exposed flow.
+- This new slice has not had a specialized subagent review. Previous Phase 2 review approval does not cover it.
+
+Next step:
+
+- Implement Phase 4 new-type export and documentation, keeping native motion timeline authoring deferred.

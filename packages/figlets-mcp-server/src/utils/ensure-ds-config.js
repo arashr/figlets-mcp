@@ -83,6 +83,10 @@ function ensureActiveDsConfig(input = {}) {
     }
     if (existingDs.grid) ds.grid = existingDs.grid;
     if (existingDs.typography) ds.typography = existingDs.typography;
+    if (existingDs.motion) {
+      ds.motion = existingDs.motion;
+      ds.collections = Object.assign({}, ds.collections, { motion: existingDs.collections && existingDs.collections.motion });
+    }
   }
   ds.figlets = Object.assign({}, ds.figlets || {}, {
     fileKey: getActiveFileKey() || dataSource.meta && dataSource.meta.fileKey || dataSource.figmaData.fileKey || null,

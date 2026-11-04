@@ -254,3 +254,9 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 - Never invent missing setup choices for a new design system — ask intake questions before `prepare_ds_config`
 - Never draft a full setup proposal, palette, or token plan before intake — ask questions first
 - Never skip showing the semantic pairs table before building — the user must confirm contrast ratios before any collections are created
+
+### Optional motion foundations
+
+Only after an explicit motion, transition-token, timing, or easing request, call `prepare_ds_config` with `motion_profile: "default"` (or an edited profile) for a read-only proposal. Show the exact collection, named Default/Reduced Motion maps, token names, durations in milliseconds, curves, and accessibility note. Do not add a motion question to ordinary intake or treat missing motion as a health defect. Springs are optional, not default.
+
+Get approval before passing the exact `saveInput` back to `prepare_ds_config`. This writes only local config. Run the returned `nextInput` to reprepare, then call `plan_ds_figma_operations` with `motion_config_path`. Collection/mode creation and atomic variable values have separate previews and approvals. Sync and follow the continuation after successful foundation apply. If any mode is unresolved, stop and report it; never drop Reduced Motion or claim an empty collection completes the request. When broad setup returns `motionPending`, follow its `nextStep` before reporting setup complete.

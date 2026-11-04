@@ -7,6 +7,7 @@ const { generatePrimitivesData } = require('./generate-primitives-data');
 const semanticContrast           = require('./semantic-contrast');
 const designMdIntake             = require('./design-md-intake');
 const designSystemPolicy         = require('./design-system-policy');
+const motionProfile = require('./motion-profile');
 
 /**
  * readDsConfig(configPath) — reads and evaluates a design-system.config.js file.
@@ -58,6 +59,7 @@ function writeDsConfig(configPath, ds) {
  */
 function runDsPipeline(configPath) {
   let ds = readDsConfig(configPath);
+  if (ds.motion) motionProfile.motionProfilePreview(ds);
 
   // Step 1 — spacing + typography
   const step1 = computeDsConfig(ds);
@@ -131,6 +133,7 @@ function runDsPipeline(configPath) {
 }
 
 module.exports = {
+  ...motionProfile,
   computeDsConfig,
   getTouchSemanticDefaults,
   normalizeTypographyPreset,

@@ -66,6 +66,11 @@ module.exports = new Promise((resolve, reject) => {
       assert.ok(listResponse, "tools/list response should be present");
       assert.ok(!listResponse.error, `tools/list should not error: ${JSON.stringify(listResponse.error)}`);
       const toolNames = listResponse.result.tools.map(tool => tool.name);
+      const prepareConfig = listResponse.result.tools.find(tool => tool.name === 'prepare_ds_config');
+      for (const field of ['motion_profile', 'motion_collection', 'save_motion_profile', 'motion_profile_fingerprint']) assert.ok(prepareConfig.inputSchema.properties[field], `registered prepare schema must expose ${field}`);
+      const motionPlanner = listResponse.result.tools.find(tool => tool.name === 'plan_ds_figma_operations');
+      assert.ok(motionPlanner.inputSchema.properties.motion_config_path);
+      assert.ok(!(motionPlanner.inputSchema.required || []).includes('operations'), 'config-backed planning must not require explicit operations');
       assert.ok(toolNames.indexOf("figlets_start") >= 0, "tools/list should expose figlets_start");
       assert.ok(toolNames.indexOf("figlets_route_intent") >= 0, "tools/list should expose figlets_route_intent");
       const routeIntent = listResponse.result.tools.find(tool => tool.name === "figlets_route_intent");

@@ -223,6 +223,8 @@ async function handleApplyDsSetup({ config_path }) {
       hint: 'Run prepare_ds_config first to compute and validate the config.',
     };
   }
+  let motion;
+  try { motion = core.motionProfilePreview(ds); } catch (err) { return { error: err.message }; }
 
   // Verify the config is ready — must have color ramps and no failing pairs
   if (!ds.color || !ds.color.ramps || !ds.color.ramps.length) {
@@ -299,11 +301,13 @@ async function handleApplyDsSetup({ config_path }) {
   if (response.statusCode === 200) {
     const parsed = response.data || {};
     const result = parsed.result || {};
+    if (result.error) return { error: result.error, collections: result.collections || [], motionPending: Boolean(motion) };
     const written = writePreparedDesignMdArtifact(preparedArtifact, { includeSidecar: true });
     return {
       collections: result.collections || [],
       skipped:     result.skipped || [],
-      message:     result.message || 'DS setup complete.',
+      message:     motion ? 'Base foundations are set up. Continue the configured motion collection/modes and variable stages before reporting the full setup complete.' : (result.message || 'DS setup complete.'),
+      ...(motion ? { motionPending: true, motion, nextStep: { tool: 'plan_ds_figma_operations', input: { motion_config_path: resolvedPath }, approvalRequired: true } } : {}),
       designMdExport: {
         path: written.path,
         sidecarPath: written.sidecarPath,

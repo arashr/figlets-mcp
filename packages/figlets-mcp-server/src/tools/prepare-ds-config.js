@@ -418,10 +418,12 @@ function _writeSetupPreview(configPath, ds) {
   return previewPath;
 }
 
-async function handlePrepareDsConfig({ config_path }) {
+async function handlePrepareDsConfig(args) {
+  const { config_path } = args;
   const resolvedPath = path.resolve(config_path);
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return guardError;
+  if (args.motion_profile !== undefined || args.save_motion_profile || args.motion_collection !== undefined) return require('./motion-config.js').prepareMotionConfig(resolvedPath, args);
 
   let runDsPipeline;
   try {
@@ -465,6 +467,11 @@ async function handlePrepareDsConfig({ config_path }) {
     derivedColors,
     pairSuggestions: pairRepairSuggestions || pairSuggestions,
   });
+  const motion = require('../figlets-core.js').dsConfig.motionProfilePreview(ds);
+  if (motion) {
+    setupApprovalPreview.motion = motion;
+    setupApprovalPreview.collections.push({ name: motion.collection, purpose: 'Optional motion variables, built through separate approved collection/mode and atomic value stages.', modes: motion.modes, tokens: motion.tokens });
+  }
   const contrastRepairOptions = _contrastRepairOptions(pairRepairSuggestions || pairSuggestions);
   let designMdExport = null;
   try {
@@ -528,6 +535,7 @@ async function handlePrepareDsConfig({ config_path }) {
       },
     },
     setupApprovalPreview,
+    ...(motion ? { motion, motionPlanInput: { motion_config_path: resolvedPath } } : {}),
     setupPreview: previewPath ? { svgPath: previewPath } : null,
     designMdExport,
     configPath: resolvedPath,

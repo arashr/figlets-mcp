@@ -15,8 +15,9 @@ function extract(name, async = false) {
   throw new Error(`Cannot extract ${name}`);
 }
 
-function harness({ failWrite = false, failRollback = false, failRemove = false, nativeNumbers = false } = {}) {
+function harness({ failWrite = false, failRollback = false, failRemove = false, nativeNumbers = false, failMode = false } = {}) {
   const collection = { id: "motion", name: "6. Motion", modes: [{ modeId: "d", name: "Default" }, { modeId: "r", name: "Reduced Motion" }], variableIds: ["timing"] };
+  const collections = [collection];
   const writes = [];
   const variables = [];
   let threw = false;
@@ -41,7 +42,15 @@ function harness({ failWrite = false, failRollback = false, failRemove = false, 
   variables.push(timing);
   const figma = {
     variables: {
-      async getLocalVariableCollectionsAsync() { return [collection]; },
+      async getLocalVariableCollectionsAsync() { return collections.filter(c => !c.removed); },
+      createVariableCollection(name) {
+        const created = { id: 'new-collection', name, variableIds: [], modes: [{ modeId: 'first', name: 'Mode 1' }],
+          renameMode(id, name) { this.modes.find(mode => mode.modeId === id).name = name; },
+          addMode(name) { if (failMode) throw new Error('Plan permits only one mode'); const id = `mode-${this.modes.length}`; this.modes.push({ modeId: id, name }); return id; },
+          remove() { this.removed = true; },
+        };
+        collections.push(created); return created;
+      },
       async getLocalVariablesAsync() { return variables.filter(v => !v.removed); },
       createVariable(name, target, type) { const v = make(`new-${variables.length}`, name, type); variables.push(v); return v; },
     },
@@ -50,7 +59,7 @@ function harness({ failWrite = false, failRollback = false, failRemove = false, 
   const context = { figma, module: { exports: {} } };
   vm.createContext(context);
   vm.runInContext(["_scopeForVariableName", "_sameVariableScopes", "_setVariableScopes", "_setVariableScopesForName"].map(name => extract(name)).join("\n") + "\n" + extract("_applyFigmaOperations", true) + "\nmodule.exports = _applyFigmaOperations;", context);
-  return { apply: context.module.exports, variables, timing, writes, make };
+  return { apply: context.module.exports, variables, timing, writes, make, collections };
 }
 
 const update = value => ({ kind: "update_variable", variableId: "timing", expectedName: "motion/duration/standard", type: "TIMING", collectionId: "motion", collection: "6. Motion", modeValues: [
@@ -152,4 +161,11 @@ module.exports = (async () => {
   assert.strictEqual(result.results[1].rollback, "restored");
   assert.ok(result.rollbackErrors.every(error => error.index === 0 && error.variableId === "timing"));
   assert.strictEqual(duplicate.valuesByMode.d, Math.fround(0.2));
+
+  h = harness({ failMode: true });
+  result = await h.apply({ operations: [{ kind: 'create_collection', name: 'Motion Limited', modes: ['Default', 'Reduced Motion'] }] });
+  assert.strictEqual(result.applied.length, 0);
+  assert.strictEqual(result.unresolved.length, 1);
+  assert.ok(result.unresolved[0].reason.includes('only one mode'));
+  assert.strictEqual(h.collections.filter(c => !c.removed).length, 1, 'a failed second-mode creation must remove the new collection shell');
 })();

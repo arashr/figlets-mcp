@@ -498,9 +498,13 @@ server.tool(
 // --- prepare_ds_config ---
 server.tool(
   "prepare_ds_config",
-  "Run the DS computation pipeline on an existing design-system.config.js: generates spacing scale, color ramps with WCAG/APCA analysis, validates semantic bg+text pair contrast, prepares primitives, and returns setupApprovalPreview with concrete collection groups, modes, sample aliases, token examples, assumptions, structured contrastRepairOptions, and the no-write approval boundary. Must be called after intake and before apply_ds_setup.",
+  "Prepare an existing design-system.config.js for setup. On explicit motion requests, motion_profile previews an editable optional profile without writes; only the separately approved saveInput saves it locally. Ordinary preparation computes spacing, color, contrast, primitives, setupApprovalPreview, and configured motion handoff. Must be called after intake and before apply_ds_setup.",
   {
-    config_path: z.string().describe("Absolute path to design-system.config.js (created during intake).")
+    config_path: z.string().describe("Absolute path to design-system.config.js (created during intake)."),
+    motion_profile: z.union([z.literal("default"), z.record(z.string(), z.any())]).optional().describe("Explicit optional motion request: preview the lean default or an edited profile. Preview does not write config or Figma."),
+    motion_collection: z.string().optional().describe("Optional collection name for the motion proposal; follows the configured naming pattern by default."),
+    save_motion_profile: z.boolean().optional().describe("Save only after approval of the motion preview, using its exact saveInput. This writes local config only."),
+    motion_profile_fingerprint: z.string().optional().describe("Exact fingerprint from the approved motion profile preview; stale proposals are rejected.")
   },
   async (args) => {
     try {
@@ -959,7 +963,8 @@ server.tool(
   planDsFigmaOperationsTool.name,
   planDsFigmaOperationsTool.description,
   {
-    operations: z.array(z.record(z.string(), z.any())).describe("Exact high-level Figma operations to validate. Supported kinds: create_collection, rename_collection, delete_collection, create_mode, rename_mode, delete_mode, create_variable, update_variable, rename_variable, delete_variable."),
+    operations: z.array(z.record(z.string(), z.any())).optional().describe("Exact high-level Figma operations to validate. Use operations or motion_config_path."),
+    motion_config_path: z.string().optional().describe("Approved file-scoped config with DS.motion. Plans collection/mode prerequisites followed by atomic motion variables."),
     figmaDataPath: z.string().optional().describe("Optional path to a figma-data.json snapshot. Defaults to the active file-scoped snapshot from sync_figma_data.")
   },
   async (args) => {

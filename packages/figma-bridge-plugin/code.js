@@ -9883,11 +9883,18 @@ async function _applyFigmaOperations(payload) {
           continue;
         }
         var createdCollection = figma.variables.createVariableCollection(op.name);
-        allColls.push(createdCollection);
-        if (createdCollection.modes && createdCollection.modes.length && modes[0]) {
-          createdCollection.renameMode(createdCollection.modes[0].modeId, modes[0]);
+        try {
+          if (createdCollection.modes && createdCollection.modes.length && modes[0]) {
+            createdCollection.renameMode(createdCollection.modes[0].modeId, modes[0]);
+          }
+          for (var cm = 1; cm < modes.length; cm++) createdCollection.addMode(modes[cm]);
+        } catch (modeError) {
+          var cleanupError = '';
+          try { createdCollection.remove(); } catch (removeError) { cleanupError = ' Collection cleanup also failed: ' + removeError.message; }
+          unresolved.push({ kind: kind, name: op.name, reason: 'Required collection modes could not be created: ' + modeError.message + cleanupError });
+          continue;
         }
-        for (var cm = 1; cm < modes.length; cm++) createdCollection.addMode(modes[cm]);
+        allColls.push(createdCollection);
         _reindex();
         applied.push({ kind: kind, name: op.name, id: createdCollection.id, modes: modes });
         continue;

@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Optional motion config and staged setup implemented
+
+**Behavior:** Explicit `prepare_ds_config({ motion_profile: "default" })` requests return an editable read-only eight-token proposal. Exact `saveInput` with config/proposal fingerprint saves only DS.motion and its collection name; reprepare follows. Normal intake/configs remain unchanged. Shared core helpers validate named Default/Reduced Motion values, millisecond durations, and easing curves, and are reused by the exact-operation planner.
+
+**Execution:** `plan_ds_figma_operations({ motion_config_path })` plans missing collection/modes before atomic motion token values, with separate approvals and sync/replan. Wrong-type/ambiguous tokens block rather than being recreated. Broad setup returns motionPending plus a continuation. Bootstrap config refresh preserves approved motion. Required mode failures stop setup and remove newly created collection shells where possible.
+
+**Verification:** Full suite passed 130/130. Coverage includes preview no-writes, stale save rejection, edited-profile persistence, reprepare, missing collection/modes, existing-ID protection, sync preservation, exposed MCP schemas, broad-setup handoff, and mode-limit cleanup. Live isolated-config preview/save/reprepare planned all eight existing Motion tokens; apply returned eight unchanged. Final Figma variables and collections matched the baseline exactly. New MCP schemas require connection restart. Exports/documentation remain next; this new slice has not had a specialized subagent review.
+
+---
+
 ### [2026-11-04] Specialized batch review findings fixed and approved
 
 **Review:** A dedicated subagent requested four fixes on `3599768`: fractional FLOAT/raw opacity readback, stale capability dispatch to an older live bridge, incomplete/contradictory result envelopes, and rollback failures conflated by duplicate names. A follow-up evidence gap for failed updates was fixed in the same review cycle. Final verdict: approve; no remaining must-fix findings.

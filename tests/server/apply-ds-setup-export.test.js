@@ -108,6 +108,17 @@ module.exports = (async () => {
     assert.ok(fs.existsSync(result.designMdExport.path), 'DESIGN.md export should be written after setup');
     assert.strictEqual(result.designMdExport.lint.passed, true, 'apply_ds_setup should use the shared DESIGN.md validation gate');
     assert.ok(fs.existsSync(result.designMdExport.sidecarPath), 'apply_ds_setup should write the default lossless sidecar');
+    assert.strictEqual(result.motionPending, undefined, 'ordinary setup must not add motion');
+    const motionCore = require('../../packages/figlets-core/src/ds-config');
+    readyDs.motion = motionCore.defaultMotionProfile();
+    motionCore.writeDsConfig(configPath, readyDs);
+    const withMotion = await handleApplyDsSetup({ config_path: configPath });
+    assert.ok(!withMotion.error, withMotion.error);
+    assert.strictEqual(withMotion.motionPending, true);
+    assert.strictEqual(withMotion.motion.collection, '6. Motion');
+    assert.strictEqual(withMotion.nextStep.tool, 'plan_ds_figma_operations');
+    assert.strictEqual(withMotion.nextStep.input.motion_config_path, configPath);
+    assert.ok(withMotion.message.includes('before reporting the full setup complete'));
     assert.ok(fs.readFileSync(result.designMdExport.path, 'utf8').includes('Apply Export'), 'export should use DS project name');
   } finally {
     await new Promise(resolve => server.close(resolve));

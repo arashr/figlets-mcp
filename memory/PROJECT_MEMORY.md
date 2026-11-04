@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Live Phase 4 test found remote alias dependencies and a test setup mistake
+
+**Fixes:** Card-C uses variables from a different library design system. Figlets loaded directly bound remote variables but not their alias dependencies, leaving values unresolved and mode previews missing. Added recursive dependency fetching across all alias/channel modes before resolving collections, with cycle-safe traversal. Also moved component metadata out of an accidentally matched token stale-alias branch into component binding rows, and preserved variableBindings through the MCP response. Full suite passes 132/132. Specialized follow-up review passed.
+
+**Live evidence:** After reloading, Card-C documentation resolves every observed binding and shows five visual mode previews across two collections. No missing alias IDs remain. Generated Card-C spec is on Page 1 in Documentation; six-section token showcase is on 00 · Tokens. Fresh sync exported 16 motion mode values and ten composed colors without resolution errors. DESIGN.md still blocks on Untitled and Desktop touch/min 32px. UI access was denied, so no screenshot-based layout verification was performed.
+
+**Test setup mistake and pending recovery:** Changed two Card-C fill bindings to the disposable file's local black60 scrim for a composed-color test: Sold Out Badge 4:3283 and Image slot 4:3282. This mixed the component's source library DS with the disposable local DS. User explicitly warned the component uses a different DS. Library token values were not changed. The original badge fill was not captured, so do not guess a restoration or match tokens by name. Asked the user to replace the modified Card-C with a clean source copy and select it. Regenerate documentation without changing any source bindings after they reply ready. Keep the visible docs/showcase and .local/phase4-live-results evidence. The mixed-system composed result is diagnostic evidence only.
+
+**Next:** Complete the clean-component recovery, then release readiness. Avoid more test binding changes on the foreign-DS component.
+
+---
+
 ### [2026-11-04] Phase 4 exports and documentation reviewed
 
 **Result:** Existing CSS/Make exports now support opacity percentages, composed colors, TIMING milliseconds, portable EASING values, and explicit spring omissions. Make schema 4 includes lossless variable JSON. DESIGN.md keeps standard Google 0.4.0 front matter and readable summaries; sidecar schema 3 retains exact native values, aliases, scopes, collections, and modes. Imported archive reuse requires an unchanged config signature. Component docs preserve observed native binding values and nested color channel paths without Motion timeline inspection.

@@ -9200,10 +9200,6 @@ async function _applyDsSetupRepairs(payload) {
         var currentTarget = currentVal && currentVal.type === 'VARIABLE_ALIAS' ? byId[currentVal.id] : null;
         updateUnresolved.push({
           token: tokenName,
-          variableId: b.varId,
-          variableType: v && v.resolvedType,
-          valuesByMode: v && v.valuesByMode,
-          scopes: v && v.scopes,
           mode: modeName,
           reason: 'Current alias changed since approval.',
           expected: expectedName,
@@ -10612,6 +10608,33 @@ function _docFormatTextStyleResolvedValue(style) {
   return parts.length ? parts.join('; ') : '—';
 }
 
+async function _docLoadVariableAliases(ids, varById, loadVariable) {
+  const queue = ids.slice();
+  const visited = {};
+  const missing = [];
+  function collect(value) {
+    if (!value || typeof value !== 'object') return;
+    if (value.type === 'VARIABLE_ALIAS' && value.id) queue.push(value.id);
+    else {
+      if (value.color) collect(value.color);
+      if (value.opacity) collect(value.opacity);
+    }
+  }
+  for (let index = 0; index < queue.length; index++) {
+    const id = queue[index];
+    if (!id || visited[id]) continue;
+    visited[id] = true;
+    if (!varById[id]) {
+      try { varById[id] = await loadVariable(id); } catch (e) {}
+    }
+    const variable = varById[id];
+    if (!variable) { missing.push(id); continue; }
+    const values = variable.valuesByMode || {};
+    Object.keys(values).forEach(function (modeId) { collect(values[modeId]); });
+  }
+  return missing;
+}
+
 function _docResolveVariableValue(varId, modeId, varById, collectionById, seen, modeName) {
   const variable = varById && varById[varId];
   if (!variable) return null;
@@ -11773,18 +11796,11 @@ async function _buildComponentDoc(opts) {
 
   // Pre-fetch any varIds we don't have locally (library/remote variables).
   // figma.variables.getVariableByIdAsync resolves both local and library vars.
-  const _missingIds = {};
-  for (let i = 0; i < _allComponentRawBinds.length; i++) {
-    const id = _allComponentRawBinds[i].varId;
-    if (id && !varById[id]) _missingIds[id] = true;
-  }
-  const _missingIdList = Object.keys(_missingIds);
-  for (let i = 0; i < _missingIdList.length; i++) {
-    try {
-      const remote = await figma.variables.getVariableByIdAsync(_missingIdList[i]);
-      if (remote) varById[_missingIdList[i]] = remote;
-    } catch (e) {}
-  }
+  const _missingAliasIds = await _docLoadVariableAliases(
+    _allComponentRawBinds.map(function (binding) { return binding.varId; }).filter(Boolean),
+    varById,
+    function (id) { return figma.variables.getVariableByIdAsync(id); }
+  );
   const _missingCollectionIds = {};
   const _boundVariableIds = Object.keys(varById);
   for (let i = 0; i < _boundVariableIds.length; i++) {
@@ -11849,6 +11865,10 @@ async function _buildComponentDoc(opts) {
           node: b.node,
           property: b.property,
           token: tokenName,
+          variableId: b.varId,
+          variableType: v && v.resolvedType,
+          valuesByMode: v && v.valuesByMode,
+          scopes: v && v.scopes,
           context: _variableContext(b.varId),
           resolvedVal: _resolvedVariableValueSummary(b.varId, b.property)
             + (b.paintDetails ? '; ' + b.paintDetails : '')
@@ -12187,6 +12207,8 @@ async function _buildComponentDoc(opts) {
   const _docBindingWarningSet = {};
   const _docBindingDiagnostics = {
     implementation: 'bnn-40-shared-color-role-bindings-v2',
+    variableValueImplementation: 'native-variable-values-v1',
+    missingAliasIds: _missingAliasIds,
     badgeTextVariable: _vBadgeText ? _vBadgeText.name : null,
     firstBadgeTextFillVariable: null,
     firstBadgeTextFillColor: null

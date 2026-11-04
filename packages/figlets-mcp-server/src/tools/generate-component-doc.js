@@ -177,6 +177,7 @@ function handleGenerateComponentDoc(args) {
           markdown: markdown,
           componentMeta: result.componentMeta || {},
           bindingsCount: result.bindingsCount || 0,
+          variableBindings: Array.isArray(result.variableBindings) ? result.variableBindings : [],
           bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
           bindingDiagnostics: result.bindingDiagnostics || {},
           accessibilityNotes: Array.isArray(result.accessibilityNotes) ? result.accessibilityNotes : [],

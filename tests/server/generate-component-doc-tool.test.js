@@ -112,6 +112,7 @@ module.exports = (async () => {
             path: "component-specs/Button.md",
             componentMeta: { type: "COMPONENT_SET", variantCount: 4, width: 120, height: 40, propertyCount: 2 },
             bindingsCount: 7,
+            variableBindings: [{ variableId: 'timing', type: 'TIMING', valuesByMode: { d: 0.2 } }],
             accessibilityNotes: [
               "Provide alt text for informative icons.",
               "Preserve keyboard focus behavior."
@@ -147,6 +148,7 @@ module.exports = (async () => {
       assert.strictEqual(parsed.path, "component-specs/Button.md");
       assert.ok(parsed.markdown.startsWith("# Button"));
       assert.strictEqual(parsed.bindingsCount, 7);
+      assert.deepStrictEqual(parsed.variableBindings, [{ variableId: 'timing', type: 'TIMING', valuesByMode: { d: 0.2 } }]);
       assert.strictEqual(parsed.pathWritten, true);
       const expectedWrittenPath = path.join(fs.realpathSync(outputDir), "component-specs", "Button.md");
       assert.strictEqual(parsed.writtenPath, expectedWrittenPath);

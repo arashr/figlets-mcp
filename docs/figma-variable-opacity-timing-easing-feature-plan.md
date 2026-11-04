@@ -1042,3 +1042,12 @@ Next step:
 - Fresh specialized review found three P2 issues: inherited alternate CSS easing, stale archived config values, and nested reference paths. All were fixed with regressions. Re-review: approved, no remaining must-fix findings.
 - Verification: 132/132 test files, workspace build/lint commands, and whitespace checks pass. Build/lint currently have no workspace-specific scripts. Direct export of the saved disposable-file snapshot resolved all 16 motion mode values with expected CSS. This is saved-snapshot evidence, not a fresh live bridge run.
 - Next: reload the updated bridge once and verify live component documentation plus exports. The actual file still has the placeholder project name Untitled, which blocks full DESIGN.md readiness. Do not rename it without a designer decision. Release checks follow live verification.
+
+
+### 2026-11-04: Live export and component smoke follow-up
+
+- Fresh Figlets sync/export resolved 16 motion mode values and ten composed colors. Make preview lint passed. DESIGN.md correctly blocked on Untitled and Desktop touch/min 32px.
+- Built the six-section token showcase on 00 · Tokens and Card-C documentation on Page 1 / Documentation.
+- Card-C uses remote library variables from a different DS. Live testing exposed missing transitive alias hydration. Fixed dependency fetching, misplaced component metadata, and response passthrough. Full suite 132/132; specialized follow-up review approved. Live regenerated spec has zero unresolved bindings and five mode previews across two collections.
+- Test setup mistake: bound the Sold Out badge 4:3283 and Image slot 4:3282 to the disposable local black60 scrim. This mixed systems. Library token values were not changed. User warned about the foreign DS; asked for a clean source replacement because the original badge fill was not captured. Do not guess restoration from a shared name.
+- Remaining: user clean-copy recovery, regenerate docs without changing source bindings, and preserve output. Figma UI access was denied, so visual layout remains unverified. Local evidence: .local/phase4-live-results.

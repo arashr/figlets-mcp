@@ -25,7 +25,7 @@ function extractFunction(src, name) {
 }
 
 const groupModes = new Function(
-  extractFunction(code, "_docComparableVariableModeValue")
+  extractFunction(code, "_docResolveVariableValue") + "\n" + extractFunction(code, "_docComparableVariableModeValue")
   + "\n"
   + extractFunction(code, "_docVariableChangesAcrossModes")
   + "\n"

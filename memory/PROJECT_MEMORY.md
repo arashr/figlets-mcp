@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Phase 4 exports and documentation reviewed
+
+**Result:** Existing CSS/Make exports now support opacity percentages, composed colors, TIMING milliseconds, portable EASING values, and explicit spring omissions. Make schema 4 includes lossless variable JSON. DESIGN.md keeps standard Google 0.4.0 front matter and readable summaries; sidecar schema 3 retains exact native values, aliases, scopes, collections, and modes. Imported archive reuse requires an unchanged config signature. Component docs preserve observed native binding values and nested color channel paths without Motion timeline inspection.
+
+**Review:** Fresh specialized subagent found three P2 issues. Fixed alternate-mode easing inheritance, stale archive precedence, and nested reference path loss. Re-review approved with no remaining must-fix findings.
+
+**Verification:** Full suite passes 132/132. Workspace build/lint commands and whitespace checks pass. Saved disposable-file snapshot exports all 16 motion mode values correctly. No fresh live bridge execution or visual documentation verification in this slice. Existing Untitled project-name blocker still applies to full DESIGN.md readiness.
+
+**Next:** Fresh live export/component-documentation smoke after loading updated bridge, then release readiness. No PR or Linear issue is associated with this local checkpoint.
+
+---
+
 ### [2026-11-04] Fresh specialized motion-config review approved
 
 **Review:** Restarted the requested specialized review after the first subagent hit a usage limit without a verdict. The fresh reviewer reproduced three P2 issues: implicit collection-name drift during sync, foundation writes proposed before known token conflicts, and duplicate collection names selecting the last ID. Fixed all three with regressions. Final re-review verdict: approve, no remaining must-fix findings.

@@ -43,6 +43,9 @@ function designSystemInventory(figmaData = {}) {
     hasFoundationShell,
     counts,
     capabilities: figmaData.capabilities && typeof figmaData.capabilities === "object" ? figmaData.capabilities : null,
+    modernVariableValues: require('./variable-values.js').variableSnapshot(figmaData).presentation.filter(item =>
+      ['TIMING', 'EASING'].includes(item.type) || (item.rawValue && typeof item.rawValue === 'object' && Object.hasOwn(item.rawValue, 'color') && Object.hasOwn(item.rawValue, 'opacity'))
+    ),
     designSystemArtifactCount: counts.designSystemArtifacts,
     foundationCollectionCount: counts.foundationCollections,
   };

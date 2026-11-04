@@ -4,7 +4,7 @@
 
 Planning document created on 2026-10-12.
 
-Phases 0 and 1 implementation and disposable-file smoke verification are complete. Phase 2 variable-value batches now preflight all entries, roll back attempted writes on failure, and report exact outcomes. Automated injected-failure tests and live success/stale-race tests pass. Native Figma setter-failure rollback has not been forced live. Structural/lifecycle operations remain separate and are not covered by this rollback contract. Phase 3 optional config and staged setup are implemented and verified; Phase 4 export/documentation work remains incomplete. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
+Phases 0 and 1 implementation and disposable-file smoke verification are complete. Phase 2 variable-value batches now preflight all entries, roll back attempted writes on failure, and report exact outcomes. Automated injected-failure tests and live success/stale-race tests pass. Native Figma setter-failure rollback has not been forced live. Structural/lifecycle operations remain separate and are not covered by this rollback contract. Phase 3 optional config and staged setup are implemented and verified; Phase 4 export/documentation implementation and specialized review are complete; fresh live plugin verification remains pending. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
 
 Target release: next Figlets minor release after 1.3.0.
 
@@ -18,7 +18,7 @@ Saved checkpoint: `0175064` contains the migration and missing-motion-collection
 - Fixed live-discovered defects: missing collection identity in sync, blocked migration summary omissions, and repeated migrations caused by Figma normalizing raw composed color channels with `a: 1`.
 - Implemented for variable create/update batches: full live preflight, rollback journal, exact per-operation results, unchanged-value detection, and explicit rollback-failure reporting. Mixed motion/composed-value and structural edits must be planned separately.
 - Implemented optional motion configuration: explicit editable preview, fingerprinted local save, reprepare, configured foundation/mode setup, and atomic motion values. Full suite now passes 130 test files.
-- Next: Phase 4 CSS and DESIGN.md export work for the new types and component documentation enhancements. Motion API authoring remains deferred.
+- Next: fresh live export and component documentation smoke verification, then release readiness. Motion API authoring remains deferred.
 - Phase 2 and Phase 3 specialized reviews are complete and their must-fix findings are resolved. Additional native setter-failure rollback smoke would strengthen the automated failure evidence.
 
 ## Product Goal
@@ -438,7 +438,7 @@ Exit criteria:
 
 Priority: P1
 
-Status: not started
+Status: implemented and specialized review approved; 132 test files pass. Fresh live plugin verification remains pending.
 
 Goal: make the new variable data visible and portable without weakening existing standards contracts.
 
@@ -446,40 +446,40 @@ Goal: make the new variable data visible and portable without weakening existing
 
 - [x] Count all six resolved variable types.
 - [x] Report snapshot source capability and coverage.
-- [ ] Preserve composed color channel provenance.
-- [ ] Resolve composed colors for presentation without replacing their stored source structure.
-- [ ] Treat the shared `OPACITY` and `COLOR_OPACITY` scopes as intentional for generated opacity primitives.
-- [ ] Do not report missing timing or easing collections as defects.
-- [ ] Show timing in milliseconds in designer-facing output.
-- [ ] Show readable easing names and exact custom parameters.
+- [x] Preserve composed color channel provenance.
+- [x] Resolve composed colors for presentation without replacing their stored source structure.
+- [x] Treat the shared `OPACITY` and `COLOR_OPACITY` scopes as intentional for generated opacity primitives.
+- [x] Do not report missing timing or easing collections as defects.
+- [x] Show timing in milliseconds in designer-facing output.
+- [x] Show readable easing names and exact custom parameters.
 
 #### CSS and Make guidance
 
-- [ ] Serialize opacity primitives as percentages.
-- [ ] Resolve composed colors to portable CSS color values.
-- [ ] Preserve exact channel aliases in provenance and sidecar data.
-- [ ] Serialize timing as milliseconds.
-- [ ] Serialize linear and cubic-bezier easing when a valid CSS representation exists.
-- [ ] Do not invent CSS for a spring easing.
-- [ ] Keep springs in lossless data and emit a clear portability warning.
+- [x] Serialize opacity primitives as percentages.
+- [x] Resolve composed colors to portable CSS color values.
+- [x] Preserve exact channel aliases in provenance and sidecar data.
+- [x] Serialize timing as milliseconds.
+- [x] Serialize linear and cubic-bezier easing when a valid CSS representation exists.
+- [x] Do not invent CSS for a spring easing.
+- [x] Keep springs in lossless data and emit a clear portability warning.
 
 Portable resolved CSS is the default. The CSS output does not need to preserve a live two-variable channel relationship when doing so would require unstable or poorly supported syntax. The lossless sidecar remains the exact source for round-trip reconstruction.
 
 #### DESIGN.md and Figlets artifacts
 
-- [ ] Keep standard front matter compatible with the supported Google DESIGN.md schema.
-- [ ] Do not add unsupported standard token types.
-- [ ] Store exact timing, easing, composed color, scopes, modes, and aliases in `figlets-extended`.
-- [ ] Store the same exact model in `figlets-design.json`.
-- [ ] Preserve round-trip behavior.
-- [ ] Add prose summaries only when they are factual and useful.
+- [x] Keep standard front matter compatible with the supported Google DESIGN.md schema.
+- [x] Do not add unsupported standard token types.
+- [x] Retain legacy `figlets-extended` intake without generating new inline blocks, per the settled sidecar contract.
+- [x] Store the same exact model in `figlets-design.json`.
+- [x] Preserve round-trip behavior.
+- [x] Add prose summaries only when they are factual and useful.
 
 #### Component documentation
 
-- [ ] Display composed opacity bindings when they are observed.
-- [ ] Display timing and easing variable references when they are observed.
-- [ ] Keep current static prototype reaction and transition reporting unchanged.
-- [ ] Do not inspect Motion timelines in this release.
+- [x] Display composed opacity bindings when they are observed.
+- [x] Display timing and easing variable references when they are observed.
+- [x] Keep current static prototype reaction and transition reporting unchanged.
+- [x] Do not inspect Motion timelines in this release.
 
 Exit criteria:
 
@@ -1030,3 +1030,15 @@ Status: approved after fixes; no remaining must-fix findings
 Next step:
 
 - Implement Phase 4 export/documentation for TIMING, EASING, and composed COLOR. Preserve portable CSS and lossless provenance separately, retain DESIGN.md compatibility, and document observed bindings without authoring Motion timelines.
+
+
+### 2026-11-04: Phase 4 export and documentation checkpoint
+
+- Extended existing CSS/Make, DESIGN.md/sidecar, inventory, and component documentation surfaces. No public tool or mutation path was added.
+- CSS emits opacity percentages, resolved composed colors, millisecond timings, and portable easing values. Unsupported easing modes clear inherited declarations and appear in explicit omission guidance. Exact source values remain in JSON.
+- Sidecar schema 3 retains original variables, collections, modes, scopes, metadata, channel aliases, and resolved presentation. Standard front matter remains compatible with Google 0.4.0. Generated inline extensions remain disabled.
+- Imported snapshots are reused only while the configuration matches its recorded stable signature. Edited configs cannot silently export stale archived values.
+- Component handoffs preserve observed native types and values, opacity units, timing/easing details, and nested channel reference paths. Static prototype reporting remains unchanged. No Motion timelines are inspected.
+- Fresh specialized review found three P2 issues: inherited alternate CSS easing, stale archived config values, and nested reference paths. All were fixed with regressions. Re-review: approved, no remaining must-fix findings.
+- Verification: 132/132 test files, workspace build/lint commands, and whitespace checks pass. Build/lint currently have no workspace-specific scripts. Direct export of the saved disposable-file snapshot resolved all 16 motion mode values with expected CSS. This is saved-snapshot evidence, not a fresh live bridge run.
+- Next: reload the updated bridge once and verify live component documentation plus exports. The actual file still has the placeholder project name Untitled, which blocks full DESIGN.md readiness. Do not rename it without a designer decision. Release checks follow live verification.

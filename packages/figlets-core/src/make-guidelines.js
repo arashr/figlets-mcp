@@ -3,7 +3,8 @@
 const crypto = require("crypto");
 const path = require("path");
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
+const variableValues = require("./variable-values.js");
 const FIGMA_DOCS_REVIEWED_AT = "2026-07-23";
 const PROFILE_KEYS = new Set([
   "productPurpose",
@@ -133,6 +134,8 @@ function _rgbFromHex(hex) {
 }
 
 function snapshotFromDsConfig(inputDs) {
+  const archived = variableValues.archivedSnapshot(inputDs);
+  if (archived && Array.isArray(archived.variables) && Array.isArray(archived.collections)) return { ...JSON.parse(JSON.stringify(archived)), source: 'verified-sidecar-snapshot' };
   const dsCore = require("./ds-config/index.js");
   let ds = JSON.parse(JSON.stringify(inputDs || {}));
   if (!ds.color || !Array.isArray(ds.color.ramps) || !ds.color.ramps.length || !ds.primitives || !ds.primitives.spacing) {
@@ -157,7 +160,9 @@ function snapshotFromDsConfig(inputDs) {
   const addVariable = (collection, name, resolvedType, valuesByMode) => {
     const id = `figlets-config-${++variableCounter}`;
     collection.variableIds.push(id);
-    variables.push({ id, name, resolvedType, variableCollectionId: collection.id, valuesByMode });
+    const variable = { id, name, resolvedType, variableCollectionId: collection.id, valuesByMode };
+    variables.push(variable);
+    return variable;
   };
   const singleMode = [{ modeId: "default", name: "Default" }];
   const primitiveCollection = addCollection(
@@ -172,18 +177,22 @@ function snapshotFromDsConfig(inputDs) {
     primitiveValues.set(item.name, value);
     addVariable(primitiveCollection, item.name, "COLOR", { default: value });
   }
-  for (const item of primitives.scrims || []) {
-    const value = { r: item.r, g: item.g, b: item.b, a: item.a };
-    primitiveValues.set(item.name, value);
-    addVariable(primitiveCollection, item.name, "COLOR", { default: value });
-  }
   for (const item of primitives.floats || []) {
     primitiveValues.set(item.name, item.value);
-    addVariable(primitiveCollection, item.name, "FLOAT", { default: item.value });
+    const variable = addVariable(primitiveCollection, item.name, "FLOAT", { default: item.value });
+    if (item.scopes) variable.scopes = item.scopes.slice();
   }
   for (const item of primitives.strings || []) {
     primitiveValues.set(item.name, item.value);
     addVariable(primitiveCollection, item.name, "STRING", { default: item.value });
+  }
+
+  const primitiveByName = new Map(variables.map(variable => [variable.name, variable]));
+  for (const item of primitives.scrims || []) {
+    const color = item.color && item.color.alias ? { type: "VARIABLE_ALIAS", id: primitiveByName.get(item.color.alias).id } : item.color;
+    const opacity = { type: "VARIABLE_ALIAS", id: primitiveByName.get(item.opacity.alias).id };
+    addVariable(primitiveCollection, item.name, "COLOR", { default: { color, opacity } });
+    primitiveValues.set(item.name, { r: item.r, g: item.g, b: item.b, a: item.a });
   }
 
   const semanticModes = [{ modeId: "light", name: "Light" }, { modeId: "dark", name: "Dark" }];
@@ -246,6 +255,15 @@ function snapshotFromDsConfig(inputDs) {
   }
   for (const [name, value] of Object.entries(typography.families || {})) addVariable(typographyCollection, `font/${name}`, "STRING", responsiveValues(value));
 
+  if (ds.motion) {
+    const motion = dsCore.motionProfilePreview(ds);
+    const modes = motion.modes.map((name, index) => ({ name, modeId: `motion-${index}` }));
+    const collection = addCollection('figlets-config-motion', motion.collection, modes);
+    for (const token of motion.tokens) {
+      addVariable(collection, token.name, token.type, Object.fromEntries(modes.map(mode => [mode.modeId, token.type === 'TIMING' ? token.values[mode.name] / 1000 : token.values[mode.name]])));
+    }
+  }
+
   return {
     fileName: ds.project && ds.project.name ? ds.project.name : "Design system",
     source: "figlets-config-derived",
@@ -272,50 +290,6 @@ function _collectionIndex(figmaData) {
 function _modeName(collection, modeId) {
   const mode = (collection && collection.modes || []).find(item => item.modeId === modeId);
   return mode ? mode.name : modeId;
-}
-
-function _targetModeId(variable, desiredModeName, collectionIndex) {
-  const collection = collectionIndex.byId.get(variable.variableCollectionId)
-    || collectionIndex.variableToCollection.get(variable.id);
-  const modes = collection && Array.isArray(collection.modes) ? collection.modes : [];
-  const sameName = modes.find(mode => String(mode.name).toLowerCase() === String(desiredModeName).toLowerCase());
-  if (sameName && Object.prototype.hasOwnProperty.call(variable.valuesByMode || {}, sameName.modeId)) return sameName.modeId;
-  return Object.keys(variable.valuesByMode || {})[0];
-}
-
-function _resolveValue(variable, modeId, modeName, variablesById, collectionIndex, seen) {
-  if (!variable || !modeId) return undefined;
-  const marker = `${variable.id}:${modeId}`;
-  if (seen.has(marker)) return undefined;
-  seen.add(marker);
-  const values = variable.valuesByMode || {};
-  const value = Object.prototype.hasOwnProperty.call(values, modeId)
-    ? values[modeId]
-    : values[Object.keys(values)[0]];
-  if (value && typeof value === "object" && value.type === "VARIABLE_ALIAS") {
-    const target = variablesById.get(value.id);
-    const targetModeId = target ? _targetModeId(target, modeName, collectionIndex) : null;
-    return _resolveValue(target, targetModeId, modeName, variablesById, collectionIndex, seen);
-  }
-  return value;
-}
-
-function _hexByte(value) {
-  const normalized = Math.max(0, Math.min(1, Number(value)));
-  return Math.round(normalized * 255).toString(16).padStart(2, "0").toUpperCase();
-}
-
-function _cssValue(value, resolvedType) {
-  if (value === undefined || value === null) return null;
-  if (resolvedType === "COLOR" && _plainObject(value) && value.r !== undefined && value.g !== undefined && value.b !== undefined) {
-    const alpha = value.a === undefined ? 1 : Number(value.a);
-    if (alpha >= 0.999) return `#${_hexByte(value.r)}${_hexByte(value.g)}${_hexByte(value.b)}`;
-    return `rgba(${Math.round(value.r * 255)}, ${Math.round(value.g * 255)}, ${Math.round(value.b * 255)}, ${Math.round(alpha * 1000) / 1000})`;
-  }
-  if (resolvedType === "FLOAT" && Number.isFinite(value)) return String(value);
-  if (resolvedType === "BOOLEAN" && typeof value === "boolean") return value ? "true" : "false";
-  if (resolvedType === "STRING" && typeof value === "string") return JSON.stringify(value);
-  return null;
 }
 
 function _webCustomProperty(variable) {
@@ -367,16 +341,15 @@ function serializeStylesheet(figmaData, librarySlug) {
   figmaData = figmaData || {};
   const collectionIndex = _collectionIndex(figmaData);
   const variables = (Array.isArray(figmaData.variables) ? figmaData.variables : [])
-    .filter(variable => variable && !variable.hiddenFromPublishing && ["COLOR", "FLOAT", "STRING", "BOOLEAN"].includes(variable.resolvedType))
+    .filter(variable => variable && !variable.hiddenFromPublishing && ["COLOR", "FLOAT", "STRING", "BOOLEAN", "TIMING", "EASING"].includes(variable.resolvedType))
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  const variablesById = new Map((Array.isArray(figmaData.variables) ? figmaData.variables : [])
-    .filter(variable => variable && variable.id)
-    .map(variable => [variable.id, variable]));
   const nameMap = _assignCssNames(variables);
   const cssNameById = new Map(nameMap.map(row => [row.variableId, row.cssName]));
+  const resolver = variableValues.createVariableResolver(figmaData);
   const base = [];
   const alternate = new Map();
   const omitted = [];
+  const emittedVariables = new Set();
 
   for (const variable of variables) {
     const collection = collectionIndex.byId.get(variable.variableCollectionId)
@@ -390,13 +363,19 @@ function serializeStylesheet(figmaData, librarySlug) {
     const effectiveModes = modes.length ? modes : Object.keys(variable.valuesByMode || {}).map(modeId => ({ modeId, name: modeId }));
     for (let index = 0; index < effectiveModes.length; index += 1) {
       const mode = effectiveModes[index];
-      const resolved = _resolveValue(variable, mode.modeId, mode.name, variablesById, collectionIndex, new Set());
-      const cssValue = _cssValue(resolved, variable.resolvedType);
+      const resolved = resolver.resolve(variable, mode.modeId, mode.name);
+      const cssValue = resolved.error ? null : variableValues.cssValue(resolved.value, variable.resolvedType, variable);
       if (cssValue === null) {
-        omitted.push({ variableName: variable.name, mode: mode.name, reason: "unsupported-or-unresolved-value" });
+        omitted.push({ variableName: variable.name, mode: mode.name, easingType: variable.resolvedType === 'EASING' && resolved.value && resolved.value.type, reason: resolved.error || (variable.resolvedType === "EASING" ? "no-portable-css-easing" : "unsupported-or-unresolved-value") });
+        if (index > 0) {
+          const modeSlug = slugify(mode.name, mode.modeId);
+          if (!alternate.has(modeSlug)) alternate.set(modeSlug, { name: mode.name, rows: [] });
+          alternate.get(modeSlug).rows.push(`  ${cssNameById.get(variable.id)}: initial; /* No portable value in this mode. */`);
+        }
         continue;
       }
       const row = `  ${cssNameById.get(variable.id)}: ${cssValue};`;
+      emittedVariables.add(variable.id);
       if (index === 0) base.push(row);
       else {
         const modeSlug = slugify(mode.name, mode.modeId);
@@ -418,9 +397,14 @@ function serializeStylesheet(figmaData, librarySlug) {
     lines.push("", `/* Figma mode: ${group.name} */`, `[data-figma-mode="${modeSlug}"] {`, ...group.rows, "}");
   }
   lines.push("");
+  for (const row of nameMap) {
+    row.emitted = emittedVariables.has(row.variableId);
+    row.omittedModes = omitted.filter(item => item.variableName === row.variableName).map(item => item.mode);
+  }
   return {
     css: lines.join("\n"),
     nameMap,
+    variableData: variableValues.variableSnapshot(figmaData),
     omitted,
     variableCount: variables.length,
     declarationCount: base.length + [...alternate.values()].reduce((sum, group) => sum + group.rows.length, 0),
@@ -529,7 +513,10 @@ function _variableFacts(figmaData, nameMap) {
       scopes: Array.isArray(variable.scopes) ? variable.scopes.slice() : [],
       cssName: cssById.get(variable.id).cssName,
       cssNameSource: cssById.get(variable.id).source,
+      cssExported: cssById.get(variable.id).emitted,
+      omittedModes: cssById.get(variable.id).omittedModes,
       modes: Object.keys(variable.valuesByMode || {}),
+      valuesByMode: JSON.parse(JSON.stringify(variable.valuesByMode || {})),
     }));
 }
 
@@ -636,6 +623,8 @@ function buildMakeGuidelinesModel(input) {
       typographyVariables,
       spacingVariables,
       elevationVariables,
+      motionVariables: variables.filter(variable => ["TIMING", "EASING"].includes(variable.type)),
+      opacityVariables: variables.filter(variable => variableValues.isOpacity({ ...variable, resolvedType: variable.type })),
       textStyles: Array.isArray(figmaData.textStyles) ? figmaData.textStyles : [],
       effectStyles: Array.isArray(figmaData.effectStyles) ? figmaData.effectStyles : [],
       paintStyles: Array.isArray(figmaData.paintStyles) ? figmaData.paintStyles : [],
@@ -655,15 +644,15 @@ function buildMakeGuidelinesModel(input) {
       css: stylesheet.css,
       variableCount: stylesheet.variableCount,
       declarationCount: stylesheet.declarationCount,
+      variableData: stylesheet.variableData,
     },
     rules,
     prohibitions,
     provenance,
     blockingGaps: [],
     suggestions,
-    warnings: stylesheet.omitted.length
-      ? [`${stylesheet.omitted.length} variable mode values could not be serialized to CSS.`]
-      : [],
+    warnings: (stylesheet.omitted.length ? [`${stylesheet.omitted.length} variable mode values could not be serialized to CSS.`] : [])
+      .concat(stylesheet.omitted.filter(item => item.reason === 'no-portable-css-easing').map(item => `${item.variableName} [${item.mode}] uses ${item.easingType}; no portable CSS easing is emitted. Its exact value remains in figlets-variables.json.`)),
   };
 }
 
@@ -724,9 +713,10 @@ function renderMakeGuidelinesBundle(model) {
     const fallbackRows = model.styleContext.nameMap.filter(row => row.source !== "codeSyntax.WEB");
     add("guidelines/styles.md", _lines("Stylesheet usage", [
       `The global stylesheet is \`../src/${slug}/styles.css\`.`,
-      "Numeric Figma variables are emitted as raw numbers. For CSS dimensions, use `calc(var(--token) * 1px)` unless the consuming property is unitless.",
+      "Figma dimensions are emitted as raw numbers. Opacity variables use percentages and timing variables use milliseconds. For CSS dimensions, use `calc(var(--token) * 1px)` unless the consuming property is unitless.",
       "Color values are emitted as valid hex or rgba values. String values are quoted. Boolean values are `true` or `false`.",
-      "Prefer the exact CSS custom-property names in the stylesheet. Figlets uses valid Figma Web code syntax first and a deterministic path-based fallback otherwise.",
+      "Composed colors are resolved for portable CSS. Read the sibling figlets-variables.json for exact channel aliases, types, scopes, modes, and original values. Spring easings remain in that file and are not approximated as CSS.",
+    "Prefer the exact CSS custom-property names in the stylesheet. Figlets uses valid Figma Web code syntax first and a deterministic path-based fallback otherwise.",
       fallbackRows.length ? "## Fallback CSS names" : null,
       fallbackRows.length ? _mdTable(["Figma variable", "CSS property"], fallbackRows.map(row => [row.variableName, row.cssName])) : null,
     ]));
@@ -739,6 +729,7 @@ function renderMakeGuidelinesBundle(model) {
       "Do not invent CSS variable names that are not present in `styles.css`.",
     ]));
     add(`src/${slug}/styles.css`, model.styleContext.css);
+    add(`src/${slug}/figlets-variables.json`, JSON.stringify(model.styleContext.variableData, null, 2) + "\n");
   }
 
   add("guidelines/tokens.md", _lines("Token selection", [
@@ -770,6 +761,11 @@ function renderMakeGuidelinesBundle(model) {
     "Use confirmed spacing, radius, and border variables instead of hardcoded values.",
     "Numeric variables are unitless in the generated stylesheet; multiply dimensions by `1px` with `calc()`.",
     _mdTable(["Figma variable", "CSS property", "Description"], f.spacingVariables.map(item => [item.name, item.cssName, item.description])),
+  ]));
+  if (f.motionVariables.length) add("guidelines/foundations/motion.md", _lines("Motion", [
+    "Timing values use milliseconds. Reduced-motion tokens do not prove runtime accessibility; implementations must respect user motion preferences.",
+    "Use only the CSS easings present in the stylesheet. Springs have no portable CSS representation here and remain in figlets-variables.json without an invented approximation.",
+    _mdTable(["Figma variable", "Type", "CSS property", "Modes without portable CSS"], f.motionVariables.map(item => [item.name, item.type, item.cssExported ? item.cssName : 'Not exported', item.omittedModes.join(', ') || 'None'])),
   ]));
   if (f.modes.length) add("guidelines/foundations/modes.md", _lines("Modes", [
     `Observed Figma mode names: ${f.modes.join(", ")}.`,

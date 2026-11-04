@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { wcagContrastRatio, apcaLc } = require('./semantic-contrast.js');
+const { variableSnapshot, configSignature, archivedSnapshot } = require('../variable-values.js');
 
 const FIGLETS_SIDECAR_NAME = 'figlets-design.json';
 
@@ -711,6 +712,10 @@ function readDesignMdAsDsConfig(designMdPath, options) {
       const expectedHash = _sha256(markdown);
       if (sidecar && sidecar.designMdSha256 === expectedHash && sidecar.ds && typeof sidecar.ds === 'object') {
         const ds = sidecar.ds;
+        if (sidecar.variableData && Array.isArray(sidecar.variableData.variables) && Array.isArray(sidecar.variableData.collections)) {
+          ds.figlets = Object.assign({}, ds.figlets, { variableData: sidecar.variableData });
+          ds.figlets.variableDataConfigSignature = configSignature(ds);
+        }
         if (!ds.source) {
           ds.source = { type: 'design.md', path: resolved, version: parseDesignMd(markdown).tokens.version || null };
         }
@@ -1367,12 +1372,18 @@ function _sha256(value) {
 }
 
 function _buildSidecar(DS, markdown, outputPath, options) {
+  const source = options && options.figmaData || archivedSnapshot(DS);
+  const ds = _stripVolatile(DS);
+  if (ds.figlets && ds.figlets.variableData) delete ds.figlets.variableData;
+  if (ds.figlets) delete ds.figlets.variableDataConfigSignature;
+  if (ds.figlets && !Object.keys(ds.figlets).length) delete ds.figlets;
   return {
-    schemaVersion: '2',
+    schemaVersion: '3',
     generator: options && options.generator || 'figlets-mcp',
     designMd: path.basename(outputPath),
     designMdSha256: _sha256(markdown),
-    ds: _stripVolatile(DS),
+    ds,
+    ...(source ? { variableData: variableSnapshot(source) } : {}),
   };
 }
 
@@ -1441,6 +1452,17 @@ function dsConfigToDesignMd(ds, options) {
   pushSection('Additional Effect Styles', _bodyObservedEffectStyles(DS, options));
   pushSection('Shapes', _bodyShapes(DS));
   pushSection('Components', _bodyComponents(DS));
+  const sourceVariables = options.figmaData || archivedSnapshot(DS);
+  const modernValues = sourceVariables ? variableSnapshot(sourceVariables).presentation.filter(row => ['TIMING', 'EASING'].includes(row.type) || (row.rawValue && row.rawValue.color && row.rawValue.opacity !== undefined)) : [];
+  if (modernValues.length) {
+    const cell = value => String(value == null ? '' : value).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+    pushSection('Variable Values', 'Observed Figma variable values. Exact types, channel aliases, scopes, modes, and original values are retained in the verified figlets-design.json sidecar. Springs are not approximated as CSS.\n\n'
+      + '| Token | Type | Mode | Resolved value | References |\n| --- | --- | --- | --- | --- |\n'
+      + modernValues.map(row => '| ' + [row.name, row.type, row.modeName, row.display, row.references.map(ref => `${ref.path.join('.') || 'value'}: ${ref.name}`).join('; ')].map(cell).join(' | ') + ' |').join('\n'));
+  } else if (DS.motion) {
+    const motion = require('./motion-profile.js').motionProfilePreview(DS);
+    pushSection('Motion', motion.tokens.map(token => `${token.name}: ` + Object.entries(token.values).map(([mode, value]) => `${mode} ${token.type === 'TIMING' ? value + ' ms' : JSON.stringify(value)}`).join('; ')).join('\n\n') + '\n\n' + motion.accessibilityNote);
+  }
 
   // Footer. Lossless Figlets data is written to an optional sibling sidecar by
   // writeDesignMdFromDsConfig, not embedded in this standard document.

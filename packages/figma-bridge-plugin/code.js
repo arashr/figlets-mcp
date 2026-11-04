@@ -9200,6 +9200,10 @@ async function _applyDsSetupRepairs(payload) {
         var currentTarget = currentVal && currentVal.type === 'VARIABLE_ALIAS' ? byId[currentVal.id] : null;
         updateUnresolved.push({
           token: tokenName,
+          variableId: b.varId,
+          variableType: v && v.resolvedType,
+          valuesByMode: v && v.valuesByMode,
+          scopes: v && v.scopes,
           mode: modeName,
           reason: 'Current alias changed since approval.',
           expected: expectedName,
@@ -10608,13 +10612,63 @@ function _docFormatTextStyleResolvedValue(style) {
   return parts.length ? parts.join('; ') : '—';
 }
 
+function _docResolveVariableValue(varId, modeId, varById, collectionById, seen, modeName) {
+  const variable = varById && varById[varId];
+  if (!variable) return null;
+  const collection = collectionById && collectionById[variable.variableCollectionId];
+  const modes = collection && collection.modes || [];
+  const named = modes.find(function (mode) { return String(mode.name).toLowerCase() === String(modeName).toLowerCase(); });
+  const values = variable.valuesByMode || {};
+  const selected = Object.prototype.hasOwnProperty.call(values, modeId) ? modeId
+    : named && Object.prototype.hasOwnProperty.call(values, named.modeId) ? named.modeId
+      : collection && Object.prototype.hasOwnProperty.call(values, collection.defaultModeId) ? collection.defaultModeId : Object.keys(values)[0];
+  const marker = varId + ':' + selected;
+  const visited = Array.isArray(seen) ? seen : [];
+  if (visited.indexOf(marker) >= 0 || visited.length > 64) return null;
+  const nextSeen = visited.concat(marker);
+  const selectedMode = modes.find(function (mode) { return mode.modeId === selected; });
+  const desiredName = modeName || (selectedMode && selectedMode.name);
+  const refs = [];
+  function resolveChannel(raw, expectedType, path) {
+    if (raw && raw.type === 'VARIABLE_ALIAS') {
+      const target = varById[raw.id];
+      if (!target || target.resolvedType !== expectedType) return null;
+      const targetCollection = collectionById && collectionById[target.variableCollectionId];
+      const targetMode = targetCollection && (targetCollection.modes || []).find(function (mode) { return mode.name === desiredName; });
+      const resolved = _docResolveVariableValue(raw.id, targetMode ? targetMode.modeId : '', varById, collectionById, nextSeen, desiredName);
+      if (!resolved) return null;
+      refs.push({ path: path, id: raw.id, name: target.name });
+      for (let i = 0; i < (resolved.references || []).length; i++) {
+        const ref = resolved.references[i];
+        refs.push(Object.assign({}, ref, { path: path && ref.path ? path + '.' + ref.path : path || ref.path }));
+      }
+      return resolved.val;
+    }
+    if (expectedType === 'COLOR' && raw && raw.color && raw.opacity !== undefined) {
+      const color = resolveChannel(raw.color, 'COLOR', path ? path + '.color' : 'color');
+      const opacity = resolveChannel(raw.opacity, 'FLOAT', path ? path + '.opacity' : 'opacity');
+      if (!color || typeof opacity !== 'number' || !isFinite(opacity) || opacity < 0 || opacity > 100) return null;
+      return { r: color.r, g: color.g, b: color.b, a: opacity / 100 };
+    }
+    return raw;
+  }
+  const raw = values[selected];
+  const value = resolveChannel(raw, variable.resolvedType, '');
+  if (value === null || value === undefined) return null;
+  const opacityScope = variable.resolvedType === 'FLOAT' && ((variable.scopes || []).indexOf('OPACITY') >= 0 || (variable.scopes || []).indexOf('COLOR_OPACITY') >= 0 || /^opacity\//.test(variable.name));
+  return { type: variable.resolvedType, val: value, raw: raw, references: refs, unit: opacityScope ? '%' : '' };
+}
+
 function _docFormatResolvedVariableValue(property, res, colorFormatter) {
   if (!res) return '—';
-  if (res.type === 'COLOR') return colorFormatter(res.val.r, res.val.g, res.val.b, res.val.a);
+  if (res.type === 'COLOR') return colorFormatter(res.val.r, res.val.g, res.val.b, res.val.a) + (res.references && res.references.length ? '; ' + res.references.map(function (ref) { return (ref.path || 'value') + ': ' + ref.name; }).join('; ') : '');
+  if (res.type === 'TIMING') return String(_docFormatNumber(res.val * 1000)) + ' ms';
+  if (res.type === 'EASING') return res.val.type + (res.val.easingFunctionCubicBezier ? ' ' + JSON.stringify(res.val.easingFunctionCubicBezier) : res.val.easingFunctionSpring ? ' ' + JSON.stringify(res.val.easingFunctionSpring) : '');
   if (res.type === 'STRING') return String(res.val);
   if (res.type === 'BOOLEAN') return res.val ? 'true' : 'false';
   if (res.type !== 'FLOAT') return '—';
   const prop = String(property || '').toLowerCase();
+  if (res.unit === '%' || prop === 'opacity') return String(_docFormatNumber(res.val)) + '%';
   if (prop === 'fontweight' || prop === 'font weight') return String(_docFormatNumber(res.val));
   if (prop === 'fontfamily' || prop === 'font family') return String(res.val);
   return String(_docFormatNumber(res.val)) + 'px';
@@ -11109,38 +11163,22 @@ function _docVariantPreviewOutset(node, effectStyleById) {
   return max;
 }
 
-function _docComparableVariableModeValue(varId, modeId, varById, depth) {
-  if (!varId || !varById || depth > 8) return 'unresolved';
-  const variable = varById[varId];
-  if (!variable) return 'unresolved:' + varId;
-  const values = variable.valuesByMode || {};
-  const modeIds = Object.keys(values);
-  const raw = Object.prototype.hasOwnProperty.call(values, modeId)
-    ? values[modeId]
-    : (modeIds.length ? values[modeIds[0]] : undefined);
-  if (raw && raw.type === 'VARIABLE_ALIAS' && raw.id) {
-    return _docComparableVariableModeValue(raw.id, modeId, varById, depth + 1);
+function _docComparableVariableModeValue(varId, modeId, varById, depth, collectionById) {
+  const resolved = _docResolveVariableValue(varId, modeId, varById, collectionById, []);
+  function stable(value) {
+    if (!value || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+    return '{' + Object.keys(value).sort().map(function (key) { return JSON.stringify(key) + ':' + stable(value[key]); }).join(',') + '}';
   }
-  if (raw && typeof raw === 'object' && raw.r !== undefined) {
-    return [
-      'color',
-      Number(raw.r),
-      Number(raw.g),
-      Number(raw.b),
-      raw.a === undefined ? 1 : Number(raw.a)
-    ].join(':');
-  }
-  if (raw === undefined) return 'undefined';
-  if (raw === null) return 'null';
-  return typeof raw + ':' + String(raw);
+  return resolved ? resolved.type + ':' + stable(resolved.val) : 'unresolved';
 }
 
-function _docVariableChangesAcrossModes(varId, collection, varById) {
+function _docVariableChangesAcrossModes(varId, collection, varById, collectionById) {
   const modes = collection && Array.isArray(collection.modes) ? collection.modes : [];
   if (modes.length <= 1) return false;
-  const first = _docComparableVariableModeValue(varId, modes[0].modeId, varById, 0);
+  const first = _docComparableVariableModeValue(varId, modes[0].modeId, varById, 0, collectionById);
   for (let i = 1; i < modes.length; i++) {
-    if (_docComparableVariableModeValue(varId, modes[i].modeId, varById, 0) !== first) return true;
+    if (_docComparableVariableModeValue(varId, modes[i].modeId, varById, 0, collectionById) !== first) return true;
   }
   return false;
 }
@@ -11193,7 +11231,7 @@ function _docComponentVariableModeGroups(rawBinds, varById, collectionById) {
     return group;
   }).filter(function (group) {
     for (let i = 0; i < group.bindings.length; i++) {
-      if (_docVariableChangesAcrossModes(group.bindings[i].varId, group.collection, varById)) return true;
+      if (_docVariableChangesAcrossModes(group.bindings[i].varId, group.collection, varById, collectionById)) return true;
     }
     return false;
   }).sort(function (a, b) {
@@ -11327,36 +11365,11 @@ async function _buildComponentDoc(opts) {
   }
 
   function _resolveAlias(varId) {
-    let depth = 0;
-    let cur = varById[varId];
-    while (cur && depth < 8) {
-      const modes = Object.keys(cur.valuesByMode);
-      if (modes.length === 0) return null;
-      const raw = cur.valuesByMode[modes[0]];
-      if (raw && raw.type === 'VARIABLE_ALIAS') {
-        cur = varById[raw.id];
-        depth++;
-        continue;
-      }
-      if (raw && typeof raw === 'object' && raw.r !== undefined) return { type: 'COLOR', val: raw };
-      if (typeof raw === 'number') return { type: 'FLOAT', val: raw };
-      if (typeof raw === 'string') return { type: 'STRING', val: raw };
-      return null;
-    }
-    return null;
+    return _docResolveVariableValue(varId, '', varById, collectionById, []);
   }
 
   function _resolveAliasForMode(varId, modeId, depth) {
-    const cur = varById[varId];
-    if (!cur || depth > 8) return null;
-    const raw = cur.valuesByMode ? cur.valuesByMode[modeId] : undefined;
-    const fallbackModes = Object.keys(cur.valuesByMode || {});
-    const val = raw !== undefined ? raw : (fallbackModes.length ? cur.valuesByMode[fallbackModes[0]] : undefined);
-    if (val && val.type === 'VARIABLE_ALIAS') return _resolveAliasForMode(val.id, modeId, depth + 1);
-    if (val && typeof val === 'object' && val.r !== undefined) return { type: 'COLOR', val: val };
-    if (typeof val === 'number') return { type: 'FLOAT', val: val };
-    if (typeof val === 'string') return { type: 'STRING', val: val };
-    return null;
+    return _docResolveVariableValue(varId, modeId, varById, collectionById, []);
   }
 
   function _variableContext(varId) {
@@ -11525,7 +11538,7 @@ async function _buildComponentDoc(opts) {
       ['fontFamily', 'fontFamily'], ['fontSize', 'fontSize'], ['fontWeight', 'fontWeight'],
       ['lineHeight', 'lineHeight'], ['letterSpacing', 'letterSpacing'],
       ['topLeftRadius', 'cornerRadius'],
-      ['strokeTopWeight', 'strokeWeight']
+      ['strokeTopWeight', 'strokeWeight'], ['opacity', 'opacity']
     ];
     for (let i = 0; i < _props.length; i++) {
       const key = _props[i][0], label = _props[i][1];
@@ -11538,6 +11551,11 @@ async function _buildComponentDoc(opts) {
         const e = Array.isArray(bv[key]) ? bv[key][0] : bv[key];
         if (e && e.id) acc.push({ node: node.name, property: label, varId: e.id });
       }
+    }
+    const handled = _props.map(function (pair) { return pair[0]; });
+    for (const field of Object.keys(bv)) {
+      const ref = bv[field];
+      if (handled.indexOf(field) < 0 && ref && ref.type === 'VARIABLE_ALIAS' && ref.id) acc.push({ node: node.name, property: field, varId: ref.id });
     }
     if (node.type === 'TEXT' && node.textStyleId) {
       acc.push({ node: node.name, property: 'textStyle', styleId: node.textStyleId });
@@ -11882,7 +11900,7 @@ async function _buildComponentDoc(opts) {
         if (result) {
           return _docFormatResolvedVariableValue(
             binding.property,
-            { type: result.resolvedType, val: result.value },
+            Object.assign({}, _docResolveVariableValue(binding.varId, modeId, varById, collectionById, []) || {}, { type: result.resolvedType, val: result.value }),
             _toHex
           );
         }
@@ -13002,6 +13020,7 @@ async function _buildComponentDoc(opts) {
   for (let i = 0; i < Math.min(5, resolved.length); i++) _pushSpecBinding(resolved[i]);
   for (let i = 0; i < allResolved.length; i++) {
     if (allResolved[i].paintDetails || allResolved[i].effectDetails) _pushSpecBinding(allResolved[i]);
+    if (allResolved[i].variableType === 'TIMING' || allResolved[i].variableType === 'EASING' || (allResolved[i].scopes || []).some(function (scope) { return scope === 'OPACITY' || scope === 'COLOR_OPACITY'; })) _pushSpecBinding(allResolved[i]);
   }
   let _tokensForSpec = '';
   for (let i = 0; i < _specBindingRows.length; i++) {
@@ -13553,6 +13572,9 @@ async function _buildComponentDoc(opts) {
       };
     }),
     bindingsCount: resolved.length,
+    variableBindings: allResolved.filter(function (binding) { return !!binding.variableId; }).map(function (binding) {
+      return { node: binding.node, property: binding.property, variableId: binding.variableId, name: binding.token, type: binding.variableType, valuesByMode: binding.valuesByMode, scopes: binding.scopes, display: binding.resolvedVal };
+    }),
     bindingWarnings: _docBindingWarnings,
     bindingDiagnostics: _docBindingDiagnostics,
     accessibilityNotes: _accessibilityNotes,

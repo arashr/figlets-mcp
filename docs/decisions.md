@@ -2217,3 +2217,12 @@ Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats`
 **Why:** Scrims and their opacity prerequisites are config-backed Primitives collection assets. Keeping migration on `update_ds_primitives` preserves existing IDs and the established approval boundary. A generic operation batch would lose the specialized RGBA equivalence check and prerequisite handling.
 
 **Consequence:** No sync, health inspection, config refresh, or ordinary setup pass converts an existing scrim. The bridge prevalidates every approved scrim, mode signature, color source, opacity prerequisite, and scope signature before mutation. Partial approval filters whole repair entries and creates only their required opacity variables. TIMING, EASING, and arbitrary composed COLOR edits continue through `plan_ds_figma_operations` and `apply_ds_figma_operations`.
+
+
+## [2026-11-04] Modern variable exports separate portable presentation from exact source data
+
+**Decision:** Extend existing export and component-documentation surfaces. CSS resolves composed colors, emits percentage opacity and millisecond timing, and emits only portable easing representations. Unsupported alternate-mode values reset the custom property to its initial value rather than inheriting a misleading default. Make schema 4 exposes mode omissions and includes lossless variable JSON. DESIGN.md adds factual body summaries without unsupported standard token types; sidecar schema 3 stores original variables, collections, metadata, modes, scopes, and aliases. New inline extensions remain disabled.
+
+**Archive freshness:** Verified DESIGN.md intake records a stable signature of its config, excluding source, generated primitives, and archive fields. Archived variable data can drive exports only while this signature matches. Config edits fall back to current config generation. The Markdown fingerprint still governs sidecar intake.
+
+**Component scope:** Document only observed bindings. Preserve native TIMING/EASING types and raw values, opacity units, and nested composed-color reference paths. Existing prototype reaction reporting remains unchanged. Motion timeline inspection and authoring remain deferred.

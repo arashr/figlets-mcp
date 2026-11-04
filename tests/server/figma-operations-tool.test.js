@@ -455,6 +455,41 @@ module.exports = (async () => {
     assert.ok(result.verificationInstruction.includes("sync_figma_data"));
     const body = readBridgeHookCapture(capturePath);
     assert.deepStrictEqual(body.operations, applyInput.operations);
+
+    const valueOperations = modernVariablePlan.repairPlan.applyInput.operations;
+    const oldBridge = await handleApplyDsFigmaOperations({ figmaDataPath: snapPath, operations: valueOperations });
+    assert.strictEqual(oldBridge.batchStatus, "blocked");
+    assert.strictEqual(oldBridge.blocked.length, valueOperations.length);
+    assert.ok(oldBridge.error.includes("does not advertise atomic"));
+
+    fs.writeFileSync(snapPath, JSON.stringify({ ...figmaData, capabilities: { ...figmaData.capabilities, atomicVariableValueBatches: true } }));
+    const exactResult = {
+      atomic: true, batchStatus: "rolled_back", error: "Native write failed", applied: [], skipped: [], unresolved: [],
+      results: [{ index: 0, status: "rolledBack" }, { index: 1, status: "failed" }, { index: 2, status: "blocked" }],
+      created: [], updated: [], unchanged: [], rolledBack: [{ index: 0 }], failed: [{ index: 1 }], blocked: [{ index: 2 }],
+      rollbackErrors: [], counts: { created: 0, updated: 0, unchanged: 0, rolledBack: 1, failed: 1, blocked: 1 },
+    };
+    setBridgeHookRoute(hookPath, "/request-figma-operations", { json: { success: false, result: exactResult } });
+    const failedResult = await handleApplyDsFigmaOperations({ figmaDataPath: snapPath, operations: valueOperations });
+    for (const key of ["atomic", "batchStatus", "error", "results", "created", "updated", "unchanged", "rolledBack", "failed", "blocked", "rollbackErrors", "counts"]) assert.deepStrictEqual(failedResult[key], exactResult[key], `MCP must preserve ${key}`);
+
+    const mixed = [valueOperations[0], { kind: "delete_variable", variableId: "text-delete", expectedName: "color/text/delete-me", type: "COLOR" }];
+    assert.ok(_validateApprovedOperations(mixed, figmaData).includes("separately"));
+    const mixedPlan = planDsFigmaOperationsFromFigmaData(figmaData, { operations: [
+      { kind: "create_variable", name: "motion/new", type: "TIMING", collection: "6. Motion", values: { Default: { milliseconds: 10 } } },
+      { kind: "delete_variable", name: "color/text/delete-me" },
+    ] });
+    assert.strictEqual(mixedPlan.repairPlan.counts.ready, 0);
+    assert.strictEqual(mixedPlan.repairPlan.counts.blocked, 2);
+    const inferredTypeMixed = planDsFigmaOperationsFromFigmaData({ ...figmaData, variables: [...figmaData.variables, variable("timing", "motion/existing", "TIMING", "motion", { default: 0.2, reduced: 0 })] }, { operations: [
+      { kind: "update_variable", name: "motion/existing", values: { Default: { milliseconds: 300 } } },
+      { kind: "delete_variable", name: "color/text/delete-me" },
+    ] });
+    assert.strictEqual(inferredTypeMixed.repairPlan.counts.ready, 0, "mixed-motion detection must infer the existing update variable type");
+    setBridgeHookRoute(hookPath, "/request-figma-operations", { statusCode: 504, json: { error: "Timed out after dispatch" } });
+    const unknown = await handleApplyDsFigmaOperations({ figmaDataPath: snapPath, operations: valueOperations });
+    assert.strictEqual(unknown.batchStatus, "unknown", "a lost response must not imply rollback or no writes");
+    assert.strictEqual(unknown.requiresInspection, true);
   } finally {
     uninstall();
     fs.rmSync(tmp, { recursive: true, force: true });

@@ -4,6 +4,18 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Variable batch failure handling and exact results implemented
+
+**Checkpoint:** Saved the prior live-verified migration and missing-collection work in `0175064` before starting this task.
+
+**Behavior:** Pure create/update variable batches now use full live preflight and a write journal. Failed writes stop the batch, restore original values, and remove newly created variables. Partial cleanup failures are reported as `rollback_failed`; lost responses as `unknown`. Results distinguish created, updated, unchanged, blocked, failed, and rolledBack. TIMING/color/easing normalization prevents false unchanged-value updates; stale signatures stay exact.
+
+**Boundary:** Motion/composed-value batches cannot mix with structural/lifecycle edits. Structural operations retain explicit best-effort semantics. Snapshot capability `atomicVariableValueBatches` prevents using an older bridge for the new contract. No new public tool or bridge route was introduced.
+
+**Verification:** Full suite passed 129/129, including injected write, restore, and remove failures, all six variable types, mixed-batch rejection, and MCP result forwarding. Live updated/unchanged counts and stale-race rejection passed. All variables and collections were restored exactly to the baseline after the live test. Native Figma write-failure rollback was not forced live. Detailed runtime evidence is in the feature plan. Source changes require MCP process refresh; the current repository handler was used for live exact-result verification.
+
+---
+
 ### [2026-11-04] Missing motion collection becomes a setup prerequisite
 
 **Behavior:** Exact TIMING/EASING requests no longer end at a valid missing target collection. The operations planner validates the pending variables, returns exact collection creation plus a sync/replan continuation, then uses real IDs for the variable stage. Existing foundation and variable approvals remain separate. No new public tool or bridge route.

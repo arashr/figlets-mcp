@@ -166,7 +166,12 @@ module.exports = (async () => {
     },
   ];
 
-  const result = await context.module.exports._applyFigmaOperations({ operations });
+  const valuesResult = await context.module.exports._applyFigmaOperations({ operations: operations.slice(0, 3) });
+  assert.strictEqual(valuesResult.atomic, true);
+  assert.strictEqual(valuesResult.batchStatus, "committed");
+  assert.strictEqual(valuesResult.created.length, 3);
+  const lifecycleResult = await context.module.exports._applyFigmaOperations({ operations: operations.slice(3) });
+  const result = { error: valuesResult.error || lifecycleResult.error, applied: valuesResult.applied.concat(lifecycleResult.applied) };
   assert.ok(!result.error, result.error);
   assert.strictEqual(result.applied.length, 5);
 

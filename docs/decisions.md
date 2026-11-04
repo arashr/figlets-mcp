@@ -1,5 +1,15 @@
 # Decisions
 
+## [2026-11-04] Variable value batches preflight and journal their writes
+
+**Decision:** Extend the existing `apply_ds_figma_operations` route for batches containing only `create_variable` and `update_variable`. The bridge revalidates every live identity, mode, expected signature, alias, and value before writing. It snapshots original mode values, records created variables before initializing them, stops on a write failure, restores updates, and removes created variables. Exact outcomes include created, updated, unchanged, blocked, failed, and rolledBack. A failed restore produces `rollback_failed` with exact cleanup errors rather than claiming atomic success. Lost responses produce `unknown` and require inspection.
+
+**Approval and capability:** Modern motion/composed-value requests containing structural/lifecycle/style/binding edits must be split before planning/apply. Structural operations retain their explicit best-effort contract; deleting an existing variable is not reversible while preserving its ID. The server requires the live snapshot's `atomicVariableValueBatches` capability before value-batch apply. No new public tool or bridge route is added.
+
+**Normalization:** Unchanged TIMING and color/easing values account for native float32 readback, opaque alpha defaults, and named easing metadata. Stale approval checks still compare exact snapshot signatures. No editor-wide Undo command is used; rollback touches only variables journaled by this batch. Figma documents Undo as editor history rather than a variable-specific transaction: https://developers.figma.com/docs/plugins/api/figma/.
+
+**Verification boundary:** Automated native-write and rollback-failure injection passes. Live success, unchanged reporting, and a stale-value race blocking the entire batch pass. A native Figma write failure has not been forced live.
+
 ## [2026-11-04] Missing motion collections are staged setup prerequisites
 
 **Decision:** Extend `plan_ds_figma_operations` for exact TIMING/EASING creation requests. If the target collection is absent, validate the requested variables first, then return an exact collection creation plan plus `continuation.input` preserving the pending variable requests. Apply the approved collection plan, sync real Figma collection/mode IDs, and replan the pending variables for their own approval. Do not report a valid missing-collection request as a terminal error or stop at an empty collection.

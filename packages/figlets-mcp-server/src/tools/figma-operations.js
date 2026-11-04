@@ -924,7 +924,16 @@ function _defaultMotionCollection(ctx) {
   return numbered.length ? `${Math.max(...numbered.map(match => Number(match[1]))) + 1}. Motion` : "Motion";
 }
 
+function _isValueOperation(operation) {
+  return operation && ["create_variable", "update_variable"].includes(operation.kind);
+}
+
+function _isModernValueOperation(operation) {
+  return _isValueOperation(operation) && (["TIMING", "EASING"].includes(String(operation.type || "").toUpperCase()) || _containsComposedColor(_modeValueInput(operation)));
+}
+
 function _planMotionCollectionPrerequisites(operations, ctx) {
+  if (!operations.every(_isValueOperation)) return null;
   const missing = new Map();
   for (const operation of operations) {
     if (!operation || operation.kind !== "create_variable" || !["TIMING", "EASING"].includes(String(operation.type || "").toUpperCase())) continue;
@@ -970,7 +979,13 @@ function planDsFigmaOperationsFromFigmaData(figmaData = {}, input = {}) {
     plan.repairPlan.agentInstruction = "Present the missing collection and exact modes as a foundation setup step, together with continuation.input.operations so the designer can see the pending variable names and values. Do not call the missing collection an error or ask the designer to create it manually. After approval, apply only repairPlan.applyInput, run sync_figma_data, then call continuation.tool with continuation.input. Present and obtain approval for the fresh variable plan before applying it. Do not invent collection IDs or mode IDs, and do not report the variable request complete after creating only the collection.";
     return plan;
   }
-  const planned = operations.map(operation => _planOperation(operation, ctx));
+  const mixedModernBatch = operations.some(operation => {
+    const variable = operation && ctx.varsByName.get(operation.name);
+    return _isModernValueOperation(operation) || (operation && operation.kind === "update_variable" && variable && _isModernValueOperation(Object.assign({}, operation, { type: variable.resolvedType })));
+  }) && !operations.every(_isValueOperation);
+  const planned = operations.map(operation => mixedModernBatch
+    ? _blocked(operation, ["Plan variable creation and value updates separately from collection, lifecycle, style, and binding edits so the value batch can roll back safely."])
+    : _planOperation(operation, ctx));
   const ready = planned.filter(item => item.status === "ready");
   const blocked = planned.filter(item => item.status !== "ready");
   const destructiveCount = ready.filter(item => item.operation && item.operation.destructive).length;
@@ -978,6 +993,7 @@ function planDsFigmaOperationsFromFigmaData(figmaData = {}, input = {}) {
   return {
     message: `Figma operations dry-run: ${ready.length} ready, ${blocked.length} blocked${destructiveCount ? `, ${destructiveCount} destructive` : ""}${warningCount ? `, ${warningCount} warning${warningCount === 1 ? "" : "s"}` : ""}.`,
     dryRun: true,
+    batchPolicy: operations.length && operations.every(_isValueOperation) ? "atomic-variable-values" : "best-effort-structural-operations",
     requestedCount: operations.length,
     planned,
     repairPlan: {
@@ -1027,6 +1043,7 @@ function _normalizeOperations(items) {
 }
 
 function _validateApprovedOperations(operations, figmaData = {}) {
+  if (operations.some(_isModernValueOperation) && !operations.every(_isValueOperation)) return "Apply variable values separately from collection, lifecycle, style, and binding edits.";
   const ctx = _context(figmaData);
   const keys = new Set();
   for (const operation of operations) {
@@ -1232,12 +1249,26 @@ function _validateModeValues(operation, collection, ctx, variable) {
 function handleApplyDsFigmaOperations(args = {}) {
   const operations = _normalizeOperations(args.operations);
   if (!operations.length) return Promise.resolve({ error: "Provide operations copied from plan_ds_figma_operations.repairPlan.applyInput." });
+  if (!Array.isArray(args.operations) || operations.length !== args.operations.length) return Promise.resolve({ error: "Invalid operations must be replanned; no subset was applied." });
+  const valueBatch = operations.every(_isValueOperation);
+  const blockedBatch = error => {
+    const blocked = operations.map((operation, index) => ({ index, kind: operation.kind, name: operation.name || operation.expectedName, status: "blocked", reason: error }));
+    return {
+      error, atomic: valueBatch, batchStatus: "blocked", results: blocked, applied: [], skipped: [], unresolved: blocked,
+      created: [], updated: [], unchanged: [], failed: [], rolledBack: [], rollbackErrors: [],
+      blocked,
+      counts: { created: 0, updated: 0, unchanged: 0, failed: 0, rolledBack: 0, blocked: operations.length },
+    };
+  };
   const dataSource = _loadDataSource(args);
   if (!dataSource) {
     return Promise.resolve({ error: "No synced Figma snapshot found. Run sync_figma_data, then rerun plan_ds_figma_operations and apply the fresh repairPlan.applyInput." });
   }
   const validationError = _validateApprovedOperations(operations, dataSource.figmaData);
-  if (validationError) return Promise.resolve({ error: `Invalid Figma operations payload: ${validationError}` });
+  if (validationError) return Promise.resolve(blockedBatch(`Invalid Figma operations payload: ${validationError}`));
+  if (valueBatch && !(dataSource.figmaData.capabilities && dataSource.figmaData.capabilities.atomicVariableValueBatches === true)) {
+    return Promise.resolve(blockedBatch("The synced bridge does not advertise atomic variable batches. Reload the current Figlets Bridge plugin and run sync_figma_data before applying."));
+  }
   return requestBridgePost("/request-figma-operations", { operations }, {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
@@ -1247,20 +1278,32 @@ function handleApplyDsFigmaOperations(args = {}) {
     if (statusCode === 200) {
       const result = parsed.result || {};
       return {
+        atomic: result.atomic === true,
+        batchStatus: result.batchStatus || (valueBatch ? "unknown" : undefined),
+        results: result.results,
+        counts: result.counts,
+        created: result.created || [],
+        updated: result.updated || [],
+        unchanged: result.unchanged || [],
+        blocked: result.blocked || [],
+        failed: result.failed || [],
+        rolledBack: result.rolledBack || [],
+        rollbackErrors: result.rollbackErrors || [],
         applied: result.applied || [],
         skipped: result.skipped || [],
         unresolved: result.unresolved || [],
         message: `${result.message || "Figma operations complete."} Rerun sync_figma_data and the relevant read-only inspection before summarizing remaining work.`,
         verificationInstruction: "After apply, rerun sync_figma_data and the relevant Figlets read-only inspection. Report only fresh remaining findings.",
-        error: result.error,
+        error: result.error || (valueBatch && result.atomic !== true ? "The bridge did not confirm atomic variable-batch handling. Sync and inspect before retrying." : undefined),
       };
     }
-    return bridgeStatusError(response, {
+    const error = bridgeStatusError(response, {
       action: "Figma operations",
       includeActiveSession: false,
       timeoutError: "Figma operations timed out.",
       conflictError: "The connected plugin does not advertise Figma operations. Reload the Figlets Bridge plugin.",
     });
+    return Object.assign({}, error, valueBatch ? { batchStatus: "unknown", requiresInspection: true } : {});
   });
 }
 

@@ -4,11 +4,11 @@
 
 Planning document created on 2026-10-12.
 
-Phases 0 and 1 implementation and disposable-file smoke verification are complete. Phase 2 core operations are implemented and live smoke passed timing, easing, and composed-color creation/update/readback. The remaining Phase 2 atomic batch result contract is pending. Phases 3 and 4 are deferred at the current checkpoint. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
+Phases 0 and 1 implementation and disposable-file smoke verification are complete. Phase 2 variable-value batches now preflight all entries, roll back attempted writes on failure, and report exact outcomes. Automated injected-failure tests and live success/stale-race tests pass. Native Figma write-failure rollback has not been forced live. Structural/lifecycle operations remain separate and are not covered by this rollback contract. Phases 3 and 4 remain incomplete. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
 
 Target release: next Figlets minor release after 1.3.0.
 
-Current repository checkpoint: the full test suite passes 127 of 127 test files with the Phase 0, Phase 1, Phase 2 core implementation, and live-discovered migration fixes, rerun on 2026-11-04. `git diff --check` passes. The two disposable-file smoke tests passed as recorded below. The earlier DESIGN.md work and the initial plan are committed separately. Later implementation must preserve this checkpoint and must record a fresh baseline before editing overlapping files.
+Saved checkpoint: `0175064` contains the migration and missing-motion-collection fixes verified by 128 test files and live smoke. The Phase 2 follow-up passes 129 test files on 2026-11-04. `git diff --check` passes. The earlier DESIGN.md work and the initial plan are committed separately. Later implementation must preserve this checkpoint and must record a fresh baseline before editing overlapping files.
 
 ### Checkpoint summary
 
@@ -16,9 +16,9 @@ Current repository checkpoint: the full test suite passes 127 of 127 test files 
 - Live-verified on 2026-11-04: TIMING, EASING, and composed-color create/update/readback, plus stale TIMING approval rejection.
 - Live-verified opacity migration: ten scrims converted with IDs and RGBA preserved; partial approval changed only the selected scrim and its prerequisite; seven shared opacity variables created; subsequent current-code inspection found zero migrations or blockers.
 - Fixed live-discovered defects: missing collection identity in sync, blocked migration summary omissions, and repeated migrations caused by Figma normalizing raw composed color channels with `a: 1`.
-- Partially complete: exact-operation batch result reporting and atomic failure behavior.
+- Implemented for variable create/update batches: full live preflight, rollback journal, exact per-operation results, unchanged-value detection, and explicit rollback-failure reporting. Mixed motion/composed-value and structural edits must be planned separately.
 - Deferred: optional motion foundation configuration, CSS and DESIGN.md export work for the new types, component documentation enhancements, and Motion API work.
-- Safe next step: finish the Phase 2 batch result contract, then decide whether Phase 3 and Phase 4 belong in the same minor release.
+- Safe next step: review the Phase 2 diff and decide whether Phase 3 and Phase 4 belong in the same minor release. Additional native write-failure rollback smoke would strengthen the automated failure evidence.
 
 ## Product Goal
 
@@ -307,7 +307,7 @@ Exit criteria:
 
 Priority: P1
 
-Status: core implementation and live successful-write smoke complete; atomic batch result contract pending
+Status: variable-value batch implementation complete; automated failure tests and live success/stale-race tests pass; native runtime-failure rollback remains unforced live
 
 Goal: extend the existing exact-operation surface for all six variable types.
 
@@ -353,8 +353,8 @@ They also accept raw RGB for `color` or a raw percentage for `opacity`, provided
 - [x] Create `TIMING` and `EASING` variables through the existing bridge operation route.
 - [x] Set composed color values with resolved variable aliases.
 - [x] Reject an older bridge that lacks the required capability.
-- [ ] Preserve atomic behavior for each approved operation batch.
-- [ ] Return exact created, updated, unchanged, blocked, and failed results.
+- [x] Preflight each approved create/update variable batch and roll back attempted changes on failure. Report rollback failure explicitly; structural/lifecycle edits are separate batches.
+- [x] Return exact created, updated, unchanged, blocked, failed, and rolled-back variable results.
 
 #### Spring boundary
 
@@ -579,6 +579,10 @@ Never represent source limitations as a confirmed empty inventory.
 - [x] Reject deletion when nested references remain.
 - [x] Reject stale nested values.
 - [x] Reject writes through an outdated bridge capability set.
+- [x] Block a complete value batch before mutation if a later operation or mode is stale.
+- [x] Inject write failure and verify earlier updates restore their original values and partial creates are removed.
+- [x] Report rollback failures and lost responses without claiming no changes remain.
+- [x] Preserve exact result fields through the MCP apply handler.
 
 ### Opacity setup and migration tests
 
@@ -912,3 +916,33 @@ Status: staged collection prerequisite and variable continuation verified
 - Full supported-runtime `npm test`: 128/128 passed. Focused prerequisite and operation-planner tests and whitespace checks passed. Implementation remains uncommitted.
 - The connected MCP planner process still needs a restart to load these source changes; the prerequisite test used the current repository's planner entrypoint. No bridge reload was needed for this planner-only change.
 - This completes the missing-collection error recovery slice. Config-backed profile persistence and full motion setup orchestration are not implemented by this change. Phase 2 atomic batch result handling remains pending.
+
+### 2026-11-04: Phase 2 variable batch failure and result contract
+
+Status: implementation and automated failure tests complete; live success and stale-race tests passed
+
+Checkpoint and architecture:
+
+- Saved the previous verified work in `0175064` before starting this task.
+- Extended the existing generic planner/apply surface. No new public tool or bridge route.
+- Pure `create_variable`/`update_variable` batches use `atomic-variable-values`. Structural/lifecycle/style/binding batches retain explicit best-effort semantics. Motion/composed-value operations mixed with those edits are rejected with instructions to split the approvals.
+- All live collection/variable identities, mode names/IDs, exact stale signatures, aliases, and normalized values are checked before the first write. Multiple operations against one variable must be merged and replanned.
+- The write journal preserves original mode values and records new variables before their initialization. Failure stops later entries, restores updates, removes creates, verifies restored values, and reports any cleanup failure.
+- Per-operation outcomes and counts distinguish created, updated, unchanged, blocked, failed, and rolledBack. Failed entries include rollback state. `rollback_failed` never claims all changes were removed. A lost bridge response is `unknown`, requiring inspection before retry.
+- Value-batch apply requires `atomicVariableValueBatches: true` in the synced snapshot. Stale connected MCP processes must restart to load the current handler. Older bridge results are not silently labeled atomic.
+- Unchanged-value comparison tolerates native float32 timing/color/curve readback and named easing metadata; expected-current signatures remain exact.
+
+Verification:
+
+- Full supported-runtime `npm test`: 129/129 passed. Focused tests cover later-mode staleness before any writes, failed initialization cleanup, earlier update restoration, unattempted trailing entries, rollback/remove failure reporting, duplicate-target rejection, all six variable types, mixed-batch rejection, exact MCP result forwarding, and lost-response handling.
+- JavaScript syntax and whitespace checks passed.
+- User reloaded the bridge during the test. Unsaved file keys changed from `local_mw24112y_q2izzd4k` to `local_mw241mwd_0lk2mqnx`; the Motion collection remained `VariableCollectionId:3:15`. The latter session is `figlets-mw241mw5-m9k0l`, build label `1.3.0`, with the atomic capability advertised.
+- Live batch changed `motion/duration/fast` from 100 to 125 ms and requested the existing 200 ms standard duration. Exact output was one updated, one unchanged, zero failures, `committed`.
+- After syncing, planned a batch with standard 300 ms first and fast 175 ms second. A separate approved write changed fast to 150 ms without updating that snapshot. Applying the earlier batch passed the server's snapshot validation but the live bridge blocked both operations before writing because the second value had changed. Fresh readback kept standard at 200 ms and fast at 150 ms.
+- Restored fast to 100 ms through a fresh approved operation. Final synced variables and collections exactly matched the pre-test baseline, with no extra assets left.
+- The current repository handler called the existing bridge route for exact-result live tests, because the connected MCP process retains the earlier result adapter.
+- Native Figma runtime write-failure rollback was not forced live. Runtime and cleanup failure coverage is injected in the automated bridge harness; do not present it as native live evidence.
+
+Next step:
+
+- Review this implementation before release. Decide the scope of optional motion config and export/documentation phases independently.

@@ -301,7 +301,8 @@ figma.ui.onmessage = async (msg) => {
         bridgeBuild: _bridgeBuild,
         variableResolvedTypes: ['BOOLEAN', 'COLOR', 'EASING', 'FLOAT', 'STRING', 'TIMING'],
         composedColorVariables: true,
-        exactVariableWriteSupport: true
+        exactVariableWriteSupport: true,
+        atomicVariableValueBatches: true
       },
       collections: collections.map(c => ({
         id: c.id,
@@ -9668,6 +9669,191 @@ async function _applyFigmaOperations(payload) {
 
   _reindex();
 
+  function _atomicValueBatch() {
+    var results = operations.map(function (op, index) {
+      return { index: index, kind: op.kind, name: op.name || op.expectedName, status: 'blocked' };
+    });
+    var prepared = [];
+    var targets = {};
+    var journal = [];
+    var rollbackErrors = [];
+
+    function finish(status, error) {
+      var output = {
+        atomic: true, batchStatus: status, results: results,
+        created: [], updated: [], unchanged: [], blocked: [], failed: [], rolledBack: [],
+        applied: [], skipped: [], unresolved: [], rollbackErrors: rollbackErrors
+      };
+      for (var ri = 0; ri < results.length; ri++) {
+        var item = results[ri];
+        if (output[item.status]) output[item.status].push(item);
+        if (item.status === 'created' || item.status === 'updated') output.applied.push(item);
+        else if (item.status === 'unchanged') output.skipped.push(item);
+        else output.unresolved.push(item);
+      }
+      output.counts = {};
+      ['created', 'updated', 'unchanged', 'blocked', 'failed', 'rolledBack'].forEach(function (key) { output.counts[key] = output[key].length; });
+      if (error) output.error = error;
+      output.message = status === 'committed'
+        ? output.created.length + ' created, ' + output.updated.length + ' updated, ' + output.unchanged.length + ' unchanged.'
+        : status === 'blocked' ? 'Batch blocked before any variable write.'
+          : status === 'rolled_back' ? 'Batch failed; all attempted variable changes were rolled back.'
+            : 'Batch failed and rollback was incomplete. Sync and inspect before any retry.';
+      return output;
+    }
+
+    function validValue(type, value) {
+      if (value && value.type === 'VARIABLE_ALIAS') return !!varsById[value.id] && varsById[value.id].resolvedType === type;
+      if (type === 'TIMING' || type === 'FLOAT') return typeof value === 'number' && isFinite(value) && (type !== 'TIMING' || value >= 0);
+      if (type === 'STRING') return typeof value === 'string';
+      if (type === 'BOOLEAN') return typeof value === 'boolean';
+      if (type === 'EASING') {
+        if (!value || ['EASE_IN', 'EASE_OUT', 'EASE_IN_AND_OUT', 'LINEAR', 'EASE_IN_BACK', 'EASE_OUT_BACK', 'EASE_IN_AND_OUT_BACK', 'CUSTOM_CUBIC_BEZIER', 'GENTLE', 'QUICK', 'BOUNCY', 'SLOW', 'CUSTOM_SPRING', 'HOLD'].indexOf(value.type) === -1) return false;
+        if (value.type === 'CUSTOM_CUBIC_BEZIER') {
+          var curve = value.easingFunctionCubicBezier;
+          return !!curve && ['x1', 'y1', 'x2', 'y2'].every(function (key) { return typeof curve[key] === 'number' && isFinite(curve[key]); }) && curve.x1 >= 0 && curve.x1 <= 1 && curve.x2 >= 0 && curve.x2 <= 1;
+        }
+        if (value.type === 'CUSTOM_SPRING') return typeof value.easingFunctionSpring === 'object' && value.easingFunctionSpring !== null && typeof value.easingFunctionSpring.bounce === 'number' && isFinite(value.easingFunctionSpring.bounce) && value.easingFunctionSpring.bounce >= 0 && value.easingFunctionSpring.bounce <= 1;
+        return true;
+      }
+      if (type !== 'COLOR' || !value || typeof value !== 'object') return false;
+      if (Object.prototype.hasOwnProperty.call(value, 'color')) {
+        return validValue('COLOR', value.color)
+          && ((value.opacity && value.opacity.type === 'VARIABLE_ALIAS' && validValue('FLOAT', value.opacity)) || (typeof value.opacity === 'number' && isFinite(value.opacity) && value.opacity >= 0 && value.opacity <= 100))
+          && ((value.color && value.color.type === 'VARIABLE_ALIAS') || (value.opacity && value.opacity.type === 'VARIABLE_ALIAS'));
+      }
+      return ['r', 'g', 'b'].every(function (key) { return typeof value[key] === 'number' && isFinite(value[key]) && value[key] >= 0 && value[key] <= 1; }) && (value.a === undefined || (typeof value.a === 'number' && isFinite(value.a) && value.a >= 0 && value.a <= 1));
+    }
+
+    function sameValue(type, current, desired) {
+      if (current && desired && (current.type === 'VARIABLE_ALIAS' || desired.type === 'VARIABLE_ALIAS')) return _valueSignature(current) === _valueSignature(desired);
+      if (type === 'TIMING') return typeof current === 'number' && Math.fround(current) === Math.fround(desired);
+      if (type === 'EASING') {
+        if (!current || !desired || current.type !== desired.type) return false;
+        if (desired.type === 'CUSTOM_CUBIC_BEZIER') return ['x1', 'y1', 'x2', 'y2'].every(function (key) { return current.easingFunctionCubicBezier && Math.fround(current.easingFunctionCubicBezier[key]) === Math.fround(desired.easingFunctionCubicBezier[key]); });
+        if (desired.type === 'CUSTOM_SPRING') return !!current.easingFunctionSpring && Math.fround(current.easingFunctionSpring.bounce) === Math.fround(desired.easingFunctionSpring.bounce);
+        return true;
+      }
+      if (type === 'COLOR' && current && desired) {
+        if (desired.color) return !!current.color && sameValue('COLOR', current.color, desired.color) && sameValue('FLOAT', current.opacity, desired.opacity);
+        return ['r', 'g', 'b', 'a'].every(function (key) { var a = key === 'a' && current[key] === undefined ? 1 : current[key]; var b = key === 'a' && desired[key] === undefined ? 1 : desired[key]; return typeof a === 'number' && Math.fround(a) === Math.fround(b); });
+      }
+      return _valueSignature(current) === _valueSignature(desired);
+    }
+
+    // Resolve and validate the entire batch before touching any variable.
+    for (var pi = 0; pi < operations.length; pi++) {
+      var op = operations[pi];
+      try {
+        var collection = collectionsById[op.collectionId];
+        var variable = op.kind === 'update_variable' ? varsById[op.variableId] : null;
+        var name = op.name || op.expectedName;
+        if (!collection || collection.name !== op.collection) throw new Error('Collection changed since approval.');
+        if (['BOOLEAN', 'COLOR', 'EASING', 'FLOAT', 'STRING', 'TIMING'].indexOf(op.type) === -1) throw new Error('Invalid variable type.');
+        if (op.kind === 'create_variable' && (!name || varsByName[name])) throw new Error('Variable already exists or name is invalid.');
+        if (op.kind === 'update_variable' && (!variable || variable.name !== op.expectedName || variable.resolvedType !== op.type || variable.variableCollectionId !== collection.id)) throw new Error('Variable changed since approval.');
+        var targetKey = op.kind === 'create_variable' ? 'name:' + name : 'id:' + variable.id;
+        if (targets[targetKey]) throw new Error('Multiple operations target the same variable. Replan as one operation.');
+        targets[targetKey] = true;
+        if (!Array.isArray(op.modeValues) || !op.modeValues.length) throw new Error('Mode values are required.');
+        var modesSeen = {};
+        var values = [];
+        var changed = op.kind === 'create_variable';
+        for (var mi = 0; mi < op.modeValues.length; mi++) {
+          var mv = op.modeValues[mi];
+          var mode = _modeById(collection, mv.modeId);
+          if (!mode || _modeName(mode) !== mv.mode || modesSeen[mv.modeId]) throw new Error('Mode changed, missing, or duplicated.');
+          modesSeen[mv.modeId] = true;
+          var current = variable ? variable.valuesByMode[mv.modeId] : undefined;
+          if (variable && _valueSignature(current) !== mv.expectedCurrentSignature) throw new Error('Current value for ' + mv.mode + ' changed since approval.');
+          var value;
+          if (mv.kind === 'alias') {
+            var aliasTarget = varsById[mv.targetId];
+            if (!aliasTarget || aliasTarget.name !== mv.targetName || aliasTarget.resolvedType !== op.type) throw new Error('Alias target changed since approval.');
+            value = { type: 'VARIABLE_ALIAS', id: aliasTarget.id };
+          } else if (mv.kind === 'literal') value = _cloneOperationValue(mv.value);
+          else throw new Error('Invalid mode value kind.');
+          if (!validValue(op.type, value)) throw new Error('Invalid or stale ' + op.type + ' value.');
+          if (!sameValue(op.type, current, value)) changed = true;
+          values.push({ modeId: mv.modeId, value: value, before: _cloneOperationValue(current) });
+        }
+        prepared.push({ index: pi, op: op, collection: collection, variable: variable, values: values, changed: changed });
+      } catch (preflightError) {
+        results[pi].reason = preflightError.message;
+      }
+    }
+    if (prepared.length !== operations.length) {
+      for (var bi = 0; bi < results.length; bi++) if (!results[bi].reason) results[bi].reason = 'Another operation blocked the batch.';
+      return finish('blocked', 'Variable batch preflight failed.');
+    }
+
+    var activeIndex = -1;
+    try {
+      for (var ai = 0; ai < prepared.length; ai++) {
+        activeIndex = ai;
+        var entry = prepared[ai];
+        var result = results[ai];
+        result.type = entry.op.type;
+        result.collection = entry.collection.name;
+        result.modeValues = entry.op.modeValues.map(function (mv) {
+          return mv.kind === 'alias' ? { mode: mv.mode, kind: mv.kind, targetName: mv.targetName } : { mode: mv.mode, kind: mv.kind, value: mv.value };
+        });
+        if (!entry.changed) { result.status = 'unchanged'; result.id = entry.variable.id; continue; }
+        if (entry.op.kind === 'create_variable') {
+          entry.variable = figma.variables.createVariable(entry.op.name, entry.collection, entry.op.type);
+          journal.push(entry);
+          result.id = entry.variable.id;
+          _setVariableScopesForName(entry.variable, entry.op.name, entry.op.type);
+        } else { journal.push(entry); result.id = entry.variable.id; }
+        for (var wi = 0; wi < entry.values.length; wi++) {
+          entry.variable.setValueForMode(entry.values[wi].modeId, entry.values[wi].value);
+          if (!sameValue(entry.op.type, entry.variable.valuesByMode[entry.values[wi].modeId], entry.values[wi].value)) throw new Error('Variable write readback does not match the approved value.');
+        }
+        result.id = entry.variable.id;
+        result.status = entry.op.kind === 'create_variable' ? 'created' : 'updated';
+      }
+      return finish('committed');
+    } catch (writeError) {
+      results[activeIndex].status = 'failed';
+      results[activeIndex].reason = writeError.message || 'Variable write failed.';
+      for (var ji = journal.length - 1; ji >= 0; ji--) {
+        var undo = journal[ji];
+        var priorRollbackErrors = rollbackErrors.length;
+        if (undo.op.kind === 'create_variable') {
+          try { undo.variable.remove(); }
+          catch (removeError) { rollbackErrors.push({ name: undo.op.name, reason: removeError.message || 'Created variable cleanup failed.' }); }
+        } else {
+          for (var ui = 0; ui < undo.values.length; ui++) {
+            try {
+              undo.variable.setValueForMode(undo.values[ui].modeId, undo.values[ui].before);
+              if (!sameValue(undo.op.type, undo.variable.valuesByMode[undo.values[ui].modeId], undo.values[ui].before)) throw new Error('Rollback readback does not match the original value.');
+            } catch (rollbackError) {
+              rollbackErrors.push({ name: undo.op.expectedName, modeId: undo.values[ui].modeId, reason: rollbackError.message || 'Rollback failed.' });
+            }
+          }
+        }
+        results[undo.index].rollback = rollbackErrors.length === priorRollbackErrors ? 'restored' : 'failed';
+      }
+      for (var fi = 0; fi < results.length; fi++) {
+        if (results[fi].status === 'created' || results[fi].status === 'updated') {
+          var rollbackFailed = rollbackErrors.some(function (item) { return item.name === results[fi].name; });
+          results[fi].status = rollbackFailed ? 'failed' : 'rolledBack';
+          if (rollbackFailed) results[fi].reason = 'Rollback failed; this variable may retain changes.';
+        }
+        else if (results[fi].status === 'blocked') results[fi].reason = 'Not attempted because another operation failed.';
+      }
+      return finish(rollbackErrors.length ? 'rollback_failed' : 'rolled_back', writeError.message || 'Variable batch failed.');
+    }
+  }
+
+  var valueBatch = operations.every(function (op) { return op && (op.kind === 'create_variable' || op.kind === 'update_variable'); });
+  if (valueBatch) return _atomicValueBatch();
+  var hasModernValues = operations.some(function (op) { return op && (op.kind === 'create_variable' || op.kind === 'update_variable') && (op.type === 'TIMING' || op.type === 'EASING' || (op.modeValues || []).some(function (mv) { return mv.value && mv.value.color && mv.value.opacity !== undefined; })); });
+  if (hasModernValues) {
+    var mixedBlocked = operations.map(function (op, index) { return { index: index, kind: op.kind, name: op.name || op.expectedName, status: 'blocked', reason: 'Mixed motion/value and lifecycle batches must be split before apply.' }; });
+    return { error: 'Apply variable values separately from collection, lifecycle, style, and binding edits.', atomic: true, batchStatus: 'blocked', applied: [], skipped: [], unresolved: mixedBlocked, results: mixedBlocked, blocked: mixedBlocked, created: [], updated: [], unchanged: [], failed: [], rolledBack: [], rollbackErrors: [], counts: { created: 0, updated: 0, unchanged: 0, failed: 0, rolledBack: 0, blocked: mixedBlocked.length } };
+  }
+
   var applied = [];
   var skipped = [];
   var unresolved = [];
@@ -10223,6 +10409,7 @@ async function _applyFigmaOperations(payload) {
   if (skipped.length) msgParts.push(skipped.length + ' skipped');
   if (unresolved.length) msgParts.push(unresolved.length + ' unresolved');
   return {
+    atomic: false,
     applied: applied,
     skipped: skipped,
     unresolved: unresolved,

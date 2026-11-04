@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Specialized batch review findings fixed and approved
+
+**Review:** A dedicated subagent requested four fixes on `3599768`: fractional FLOAT/raw opacity readback, stale capability dispatch to an older live bridge, incomplete/contradictory result envelopes, and rollback failures conflated by duplicate names. A follow-up evidence gap for failed updates was fixed in the same review cycle. Final verdict: approve; no remaining must-fix findings.
+
+**Fixes:** Compare all numeric channels using finite native float32 equivalence while preserving exact stale signatures. Send a versioned atomic envelope without top-level operations so older bridges fail before writes. Validate full result identity/index/status/array/count/cleanup consistency and require failed-update restoration evidence. Unknown results require inspection and contain no invented empty outcome arrays or success text. Attribute cleanup errors to operation index/variable ID.
+
+**Verification:** Focused reviewer checks passed, including its reproduction against the actual `0175064` plugin with zero writes. Full suite passed 129/129. Native FLOAT 1.1 and composed opacity 12.1 creation and repeated unchanged updates passed after the fix. Both temporary variables were removed and synced variables/collections exactly matched the baseline. Native setter-failure rollback remains covered by injected tests, not forced native failure. The execution log records the live session and reviewer verdict.
+
+---
+
 ### [2026-11-04] Variable batch failure handling and exact results implemented
 
 **Checkpoint:** Saved the prior live-verified migration and missing-collection work in `0175064` before starting this task.

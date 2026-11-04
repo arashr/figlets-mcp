@@ -1246,6 +1246,53 @@ function _validateModeValues(operation, collection, ctx, variable) {
   return null;
 }
 
+function _validateAtomicBatchResult(result, operations) {
+  if (!result || result.atomic !== true) return "The bridge did not confirm atomic variable-batch handling.";
+  const statuses = ["created", "updated", "unchanged", "blocked", "failed", "rolledBack"];
+  if (!["committed", "blocked", "rolled_back", "rollback_failed"].includes(result.batchStatus)) return "The bridge returned an unknown or missing batch status.";
+  if (!Array.isArray(result.results) || result.results.length !== operations.length) return "The bridge returned an incomplete operation result list.";
+  if (!Array.isArray(result.rollbackErrors)) return "The bridge omitted rollback details.";
+  const indices = new Set();
+  for (const item of result.results) {
+    if (!item || !Number.isInteger(item.index) || item.index < 0 || item.index >= operations.length || indices.has(item.index)) return "The bridge returned invalid or duplicate result indices.";
+    indices.add(item.index);
+    const operation = operations[item.index];
+    if (item.kind !== operation.kind || item.name !== (operation.name || operation.expectedName) || !statuses.includes(item.status)) return "The bridge returned mismatched operation identities or statuses.";
+    if ((item.status === "created" && operation.kind !== "create_variable") || (["updated", "unchanged"].includes(item.status) && operation.kind !== "update_variable")) return "The bridge returned an impossible variable result status.";
+    if (["created", "updated", "unchanged", "rolledBack"].includes(item.status) && (typeof item.id !== "string" || !item.id || (operation.kind === "update_variable" && item.id !== operation.variableId))) return "The bridge returned a missing or mismatched variable ID.";
+    if (item.status === "rolledBack" && item.rollback !== "restored") return "The bridge did not confirm restoration for a rolled-back entry.";
+    if (item.status === "failed") {
+      if (operation.kind === "update_variable" && (item.id !== operation.variableId || !["restored", "failed"].includes(item.rollback))) return "The bridge did not establish the failed update's identity and rollback state.";
+      if (Object.prototype.hasOwnProperty.call(item, "id") && (typeof item.id !== "string" || !item.id || !["restored", "failed"].includes(item.rollback))) return "The bridge did not establish cleanup for a failed create.";
+      if (!Object.prototype.hasOwnProperty.call(item, "id") && item.rollback) return "The bridge reported cleanup without a variable identity.";
+    }
+    if (item.rollback && !["restored", "failed"].includes(item.rollback)) return "The bridge returned an invalid rollback state.";
+    if (item.rollback && !["failed", "rolledBack"].includes(item.status)) return "The bridge reported rollback for an unattempted or committed entry.";
+  }
+  for (const status of statuses) {
+    const entries = result.results.filter(item => item.status === status);
+    if (!Array.isArray(result[status]) || _stableJson(result[status]) !== _stableJson(entries) || !result.counts || result.counts[status] !== entries.length) return "The bridge returned inconsistent result arrays or counts.";
+  }
+  for (const error of result.rollbackErrors) {
+    const entry = error && result.results.find(item => item.index === error.index);
+    if (!entry || entry.status !== "failed" || entry.rollback !== "failed" || error.variableId !== entry.id || typeof error.reason !== "string" || !error.reason) return "The bridge returned cleanup errors without matching operation identities.";
+  }
+  if (result.results.some(item => item.rollback === "failed" && !result.rollbackErrors.some(error => error.index === item.index))) return "The bridge omitted cleanup errors for a failed restore.";
+  const expectedApplied = result.results.filter(item => ["created", "updated"].includes(item.status));
+  const expectedSkipped = result.results.filter(item => item.status === "unchanged");
+  const expectedUnresolved = result.results.filter(item => !["created", "updated", "unchanged"].includes(item.status));
+  if (_stableJson(result.applied) !== _stableJson(expectedApplied) || _stableJson(result.skipped) !== _stableJson(expectedSkipped) || _stableJson(result.unresolved) !== _stableJson(expectedUnresolved)) return "The bridge returned contradictory compatibility results.";
+  if (result.batchStatus === "committed") {
+    if (result.error || result.rollbackErrors.length || result.results.some(item => !["created", "updated", "unchanged"].includes(item.status) || item.rollback)) return "The bridge reported commit with failed or rolled-back operations.";
+  } else {
+    if (typeof result.error !== "string" || !result.error || result.results.some(item => ["created", "updated"].includes(item.status))) return "The bridge reported failure with missing error details or committed mutations.";
+    if (result.batchStatus === "blocked" && (result.blocked.length !== operations.length || result.rollbackErrors.length)) return "The bridge reported a blocked batch with attempted operations.";
+    if (result.batchStatus === "rolled_back" && (!result.failed.length || result.rollbackErrors.length || result.results.some(item => item.rollback === "failed"))) return "The bridge reported restoration despite missing failures or cleanup errors.";
+    if (result.batchStatus === "rollback_failed" && (!result.failed.length || !result.rollbackErrors.length)) return "The bridge omitted failed-rollback evidence.";
+  }
+  return null;
+}
+
 function handleApplyDsFigmaOperations(args = {}) {
   const operations = _normalizeOperations(args.operations);
   if (!operations.length) return Promise.resolve({ error: "Provide operations copied from plan_ds_figma_operations.repairPlan.applyInput." });
@@ -1269,7 +1316,10 @@ function handleApplyDsFigmaOperations(args = {}) {
   if (valueBatch && !(dataSource.figmaData.capabilities && dataSource.figmaData.capabilities.atomicVariableValueBatches === true)) {
     return Promise.resolve(blockedBatch("The synced bridge does not advertise atomic variable batches. Reload the current Figlets Bridge plugin and run sync_figma_data before applying."));
   }
-  return requestBridgePost("/request-figma-operations", { operations }, {
+  // Older plugins only read top-level operations. An atomic envelope therefore
+  // fails closed before any write if the live plugin changed after the snapshot.
+  const bridgePayload = valueBatch ? { atomicVariableBatch: { version: 1, operations } } : { operations };
+  return requestBridgePost("/request-figma-operations", bridgePayload, {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
   }).then(response => {
@@ -1277,6 +1327,12 @@ function handleApplyDsFigmaOperations(args = {}) {
     const statusCode = response.statusCode;
     if (statusCode === 200) {
       const result = parsed.result || {};
+      const resultError = valueBatch && _validateAtomicBatchResult(result, operations);
+      if (resultError) return {
+        error: `${resultError} Sync and inspect before retrying.`,
+        batchStatus: "unknown", requiresInspection: true,
+        message: "The bridge response did not establish the final variable state. Sync and inspect before retrying.",
+      };
       return {
         atomic: result.atomic === true,
         batchStatus: result.batchStatus || (valueBatch ? "unknown" : undefined),
@@ -1292,7 +1348,12 @@ function handleApplyDsFigmaOperations(args = {}) {
         applied: result.applied || [],
         skipped: result.skipped || [],
         unresolved: result.unresolved || [],
-        message: `${result.message || "Figma operations complete."} Rerun sync_figma_data and the relevant read-only inspection before summarizing remaining work.`,
+        message: `${valueBatch
+          ? (result.batchStatus === "committed" ? `${result.counts.created} created, ${result.counts.updated} updated, ${result.counts.unchanged} unchanged.`
+            : result.batchStatus === "blocked" ? "Batch blocked before any variable write."
+              : result.batchStatus === "rolled_back" ? "Batch failed; attempted changes were restored."
+                : "Batch failed and rollback was incomplete. Sync and inspect before retrying.")
+          : (result.message || "Figma operations complete.")} Rerun sync_figma_data and the relevant read-only inspection before summarizing remaining work.`,
         verificationInstruction: "After apply, rerun sync_figma_data and the relevant Figlets read-only inspection. Report only fresh remaining findings.",
         error: result.error || (valueBatch && result.atomic !== true ? "The bridge did not confirm atomic variable-batch handling. Sync and inspect before retrying." : undefined),
       };

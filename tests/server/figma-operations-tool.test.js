@@ -463,15 +463,59 @@ module.exports = (async () => {
     assert.ok(oldBridge.error.includes("does not advertise atomic"));
 
     fs.writeFileSync(snapPath, JSON.stringify({ ...figmaData, capabilities: { ...figmaData.capabilities, atomicVariableValueBatches: true } }));
+    const entries = valueOperations.map((operation, index) => ({ index, kind: operation.kind, name: operation.name, status: ["rolledBack", "failed", "blocked"][index], ...(index < 2 ? { id: `created-${index}`, rollback: "restored" } : {}) }));
     const exactResult = {
       atomic: true, batchStatus: "rolled_back", error: "Native write failed", applied: [], skipped: [], unresolved: [],
-      results: [{ index: 0, status: "rolledBack" }, { index: 1, status: "failed" }, { index: 2, status: "blocked" }],
-      created: [], updated: [], unchanged: [], rolledBack: [{ index: 0 }], failed: [{ index: 1 }], blocked: [{ index: 2 }],
+      results: entries,
+      created: [], updated: [], unchanged: [], rolledBack: [entries[0]], failed: [entries[1]], blocked: [entries[2]],
       rollbackErrors: [], counts: { created: 0, updated: 0, unchanged: 0, rolledBack: 1, failed: 1, blocked: 1 },
     };
+    exactResult.unresolved = entries;
     setBridgeHookRoute(hookPath, "/request-figma-operations", { json: { success: false, result: exactResult } });
     const failedResult = await handleApplyDsFigmaOperations({ figmaDataPath: snapPath, operations: valueOperations });
     for (const key of ["atomic", "batchStatus", "error", "results", "created", "updated", "unchanged", "rolledBack", "failed", "blocked", "rollbackErrors", "counts"]) assert.deepStrictEqual(failedResult[key], exactResult[key], `MCP must preserve ${key}`);
+    const unconfirmedCreate = { ...entries[1] };
+    delete unconfirmedCreate.rollback;
+    const corruptResults = [
+      { atomic: true },
+      { ...exactResult, results: entries.slice(1) },
+      { ...exactResult, results: [entries[0], entries[0], entries[2]] },
+      { ...exactResult, counts: { ...exactResult.counts, failed: 0 } },
+      { ...exactResult, applied: [entries[0]] },
+      { ...exactResult, batchStatus: "committed", error: undefined },
+      { ...exactResult, blocked: [] },
+      { ...exactResult, results: [{ ...entries[0], name: "wrong-name" }, entries[1], entries[2]] },
+      { ...exactResult, results: [entries[0], unconfirmedCreate, entries[2]], failed: [unconfirmedCreate], unresolved: [entries[0], unconfirmedCreate, entries[2]] },
+    ];
+    for (const corrupt of corruptResults) {
+      setBridgeHookRoute(hookPath, "/request-figma-operations", { json: { result: corrupt } });
+      const invalid = await handleApplyDsFigmaOperations({ figmaDataPath: snapPath, operations: valueOperations });
+      assert.strictEqual(invalid.batchStatus, "unknown");
+      assert.strictEqual(invalid.requiresInspection, true);
+      assert.ok(invalid.error);
+      assert.ok(!invalid.message.includes("operations complete"));
+      assert.ok(!Object.hasOwn(invalid, "created"), "unknown outcome must not invent empty outcome arrays");
+    }
+
+    const updateOperations = planDsFigmaOperationsFromFigmaData(figmaData, { operations: [{ kind: "update_variable", name: "color/text/existing", values: { Light: { alias: "color/neutral/950" } } }] }).repairPlan.applyInput.operations;
+    const missingRestore = { index: 0, kind: "update_variable", name: "color/text/existing", status: "failed" };
+    const unconfirmedUpdate = { atomic: true, batchStatus: "rolled_back", error: "Native write failed", results: [missingRestore], applied: [], skipped: [], unresolved: [missingRestore], created: [], updated: [], unchanged: [], blocked: [], rolledBack: [], failed: [missingRestore], rollbackErrors: [], counts: { created: 0, updated: 0, unchanged: 0, blocked: 0, rolledBack: 0, failed: 1 } };
+    setBridgeHookRoute(hookPath, "/request-figma-operations", { json: { result: unconfirmedUpdate } });
+    const incompleteRestore = await handleApplyDsFigmaOperations({ figmaDataPath: snapPath, operations: updateOperations });
+    assert.strictEqual(incompleteRestore.batchStatus, "unknown");
+    assert.strictEqual(incompleteRestore.requiresInspection, true);
+
+    let legacyMutationCount = 0;
+    const oldLiveBridge = await handleApplyDsFigmaOperations({ figmaDataPath: snapPath, operations: valueOperations, bridgeTransport: ({ body }) => {
+      assert.strictEqual(body.operations, undefined, "old live plugins must not receive legacy operations for atomic batches");
+      assert.deepStrictEqual(body.atomicVariableBatch, { version: 1, operations: valueOperations });
+      // The pre-atomic plugin reads only top-level operations before any write.
+      const legacyOperations = Array.isArray(body.operations) ? body.operations : [];
+      legacyMutationCount += legacyOperations.length;
+      return { statusCode: 200, data: { result: { error: "No approved Figma operations provided." } } };
+    } });
+    assert.strictEqual(legacyMutationCount, 0);
+    assert.strictEqual(oldLiveBridge.batchStatus, "unknown");
 
     const mixed = [valueOperations[0], { kind: "delete_variable", variableId: "text-delete", expectedName: "color/text/delete-me", type: "COLOR" }];
     assert.ok(_validateApprovedOperations(mixed, figmaData).includes("separately"));

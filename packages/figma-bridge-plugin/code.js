@@ -9373,7 +9373,9 @@ async function _applySemanticNamingConsolidation(payload) {
 }
 
 async function _applyFigmaOperations(payload) {
-  var operations = (payload && Array.isArray(payload.operations)) ? payload.operations : [];
+  var atomicBatch = payload && payload.atomicVariableBatch;
+  if (atomicBatch && (atomicBatch.version !== 1 || !Array.isArray(atomicBatch.operations) || !atomicBatch.operations.every(function (op) { return op && (op.kind === 'create_variable' || op.kind === 'update_variable'); }))) return { error: 'Invalid atomic variable batch envelope.' };
+  var operations = atomicBatch ? atomicBatch.operations : ((payload && Array.isArray(payload.operations)) ? payload.operations : []);
   if (!operations.length) return { error: 'No approved Figma operations provided.' };
 
   var allColls = await figma.variables.getLocalVariableCollectionsAsync();
@@ -9725,18 +9727,26 @@ async function _applyFigmaOperations(payload) {
       return ['r', 'g', 'b'].every(function (key) { return typeof value[key] === 'number' && isFinite(value[key]) && value[key] >= 0 && value[key] <= 1; }) && (value.a === undefined || (typeof value.a === 'number' && isFinite(value.a) && value.a >= 0 && value.a <= 1));
     }
 
+    function sameNativeNumber(current, desired) {
+      if (typeof current !== 'number' || typeof desired !== 'number' || !isFinite(current) || !isFinite(desired)) return false;
+      if (current === desired) return true;
+      var a = Math.fround(current);
+      var b = Math.fround(desired);
+      return isFinite(a) && isFinite(b) && a === b;
+    }
+
     function sameValue(type, current, desired) {
       if (current && desired && (current.type === 'VARIABLE_ALIAS' || desired.type === 'VARIABLE_ALIAS')) return _valueSignature(current) === _valueSignature(desired);
-      if (type === 'TIMING') return typeof current === 'number' && Math.fround(current) === Math.fround(desired);
+      if (type === 'TIMING' || type === 'FLOAT') return sameNativeNumber(current, desired);
       if (type === 'EASING') {
         if (!current || !desired || current.type !== desired.type) return false;
-        if (desired.type === 'CUSTOM_CUBIC_BEZIER') return ['x1', 'y1', 'x2', 'y2'].every(function (key) { return current.easingFunctionCubicBezier && Math.fround(current.easingFunctionCubicBezier[key]) === Math.fround(desired.easingFunctionCubicBezier[key]); });
-        if (desired.type === 'CUSTOM_SPRING') return !!current.easingFunctionSpring && Math.fround(current.easingFunctionSpring.bounce) === Math.fround(desired.easingFunctionSpring.bounce);
+        if (desired.type === 'CUSTOM_CUBIC_BEZIER') return ['x1', 'y1', 'x2', 'y2'].every(function (key) { return current.easingFunctionCubicBezier && sameNativeNumber(current.easingFunctionCubicBezier[key], desired.easingFunctionCubicBezier[key]); });
+        if (desired.type === 'CUSTOM_SPRING') return !!current.easingFunctionSpring && sameNativeNumber(current.easingFunctionSpring.bounce, desired.easingFunctionSpring.bounce);
         return true;
       }
       if (type === 'COLOR' && current && desired) {
         if (desired.color) return !!current.color && sameValue('COLOR', current.color, desired.color) && sameValue('FLOAT', current.opacity, desired.opacity);
-        return ['r', 'g', 'b', 'a'].every(function (key) { var a = key === 'a' && current[key] === undefined ? 1 : current[key]; var b = key === 'a' && desired[key] === undefined ? 1 : desired[key]; return typeof a === 'number' && Math.fround(a) === Math.fround(b); });
+        return ['r', 'g', 'b', 'a'].every(function (key) { var a = key === 'a' && current[key] === undefined ? 1 : current[key]; var b = key === 'a' && desired[key] === undefined ? 1 : desired[key]; return sameNativeNumber(a, b); });
       }
       return _valueSignature(current) === _valueSignature(desired);
     }
@@ -9821,14 +9831,14 @@ async function _applyFigmaOperations(payload) {
         var priorRollbackErrors = rollbackErrors.length;
         if (undo.op.kind === 'create_variable') {
           try { undo.variable.remove(); }
-          catch (removeError) { rollbackErrors.push({ name: undo.op.name, reason: removeError.message || 'Created variable cleanup failed.' }); }
+          catch (removeError) { rollbackErrors.push({ index: undo.index, variableId: undo.variable.id, name: undo.op.name, reason: removeError.message || 'Created variable cleanup failed.' }); }
         } else {
           for (var ui = 0; ui < undo.values.length; ui++) {
             try {
               undo.variable.setValueForMode(undo.values[ui].modeId, undo.values[ui].before);
               if (!sameValue(undo.op.type, undo.variable.valuesByMode[undo.values[ui].modeId], undo.values[ui].before)) throw new Error('Rollback readback does not match the original value.');
             } catch (rollbackError) {
-              rollbackErrors.push({ name: undo.op.expectedName, modeId: undo.values[ui].modeId, reason: rollbackError.message || 'Rollback failed.' });
+              rollbackErrors.push({ index: undo.index, variableId: undo.variable.id, name: undo.op.expectedName, modeId: undo.values[ui].modeId, reason: rollbackError.message || 'Rollback failed.' });
             }
           }
         }
@@ -9836,7 +9846,7 @@ async function _applyFigmaOperations(payload) {
       }
       for (var fi = 0; fi < results.length; fi++) {
         if (results[fi].status === 'created' || results[fi].status === 'updated') {
-          var rollbackFailed = rollbackErrors.some(function (item) { return item.name === results[fi].name; });
+          var rollbackFailed = results[fi].rollback === 'failed';
           results[fi].status = rollbackFailed ? 'failed' : 'rolledBack';
           if (rollbackFailed) results[fi].reason = 'Rollback failed; this variable may retain changes.';
         }

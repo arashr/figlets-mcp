@@ -18,7 +18,7 @@ Saved checkpoint: `0175064` contains the migration and missing-motion-collection
 - Fixed live-discovered defects: missing collection identity in sync, blocked migration summary omissions, and repeated migrations caused by Figma normalizing raw composed color channels with `a: 1`.
 - Implemented for variable create/update batches: full live preflight, rollback journal, exact per-operation results, unchanged-value detection, and explicit rollback-failure reporting. Mixed motion/composed-value and structural edits must be planned separately.
 - Deferred: optional motion foundation configuration, CSS and DESIGN.md export work for the new types, component documentation enhancements, and Motion API work.
-- Safe next step: review the Phase 2 diff and decide whether Phase 3 and Phase 4 belong in the same minor release. Additional native write-failure rollback smoke would strengthen the automated failure evidence.
+- Phase 2 specialized review is complete and its must-fix findings are resolved. Next: decide whether Phase 3 and Phase 4 belong in the same minor release. Additional native setter-failure rollback smoke would strengthen the automated failure evidence.
 
 ## Product Goal
 
@@ -946,3 +946,33 @@ Verification:
 Next step:
 
 - Review this implementation before release. Decide the scope of optional motion config and export/documentation phases independently.
+
+### 2026-11-04: Specialized code review completed with fixes
+
+Status: approved by the dedicated review subagent; no remaining must-fix findings
+
+Scope and findings:
+
+- Reviewed `3599768` against checkpoint `0175064`, with no external PR or Linear issue associated with this local review.
+- Initial verdict was request changes. Four reproduced findings were fixed: native fractional FLOAT/raw opacity readback, stale-snapshot capability allowing an older live bridge to perform partial writes, incomplete/contradictory atomic result envelopes, and cleanup failures associated by duplicate variable names.
+- Re-review identified missing failed-update rollback evidence. That gap was fixed and regression-tested before final approval.
+
+Fixes:
+
+- A finite float32 equivalence helper covers FLOAT, TIMING, composed numeric opacity, color channels, and easing curves. Overflowed projections cannot falsely compare equal. Exact stale signatures are unchanged.
+- Value batches now use `atomicVariableBatch: { version: 1, operations }` on the existing route, without top-level `operations`. The reviewer reran the actual `0175064` bridge against the current sender and confirmed zero writes. No new public tool or route was introduced.
+- The server validates batch status, complete per-operation identities/indices, status legality, variable IDs, partition arrays/counts, compatibility arrays, and rollback/error consistency before claiming an outcome. Incomplete evidence becomes `unknown` with required inspection, no invented zero-outcome arrays, and no success text.
+- Failed updates require their original ID and restored/failed rollback evidence. Failed creates that returned an ID require cleanup evidence. Cleanup errors and classifications use operation index/variable ID instead of names.
+
+Verification and live cleanup:
+
+- Full supported-runtime suite passed 129/129; syntax and whitespace checks passed. Focused tests now normalize native fractional readback and cover duplicate names, incomplete results, contradictory commit states, missing failed-update restoration evidence, and older-plugin dispatch.
+- Before the fix, a real FLOAT 1.1 test reproduced the false readback failure. The real handler removed the temporary variable and a sync confirmed the complete baseline was preserved.
+- After the user reloaded the plugin, live session `figlets-mw29l2ns-vw37g`, file key `local_mw29l2o5_yf8qya25`, accepted FLOAT 1.1 and composed opacity 12.1. Figma stored `Math.fround(1.1)` and `Math.fround(12.1)` as expected.
+- A repeat update returned exactly two unchanged outcomes. Removed `motion/review/fraction` and `motion/review/opacity` through the existing planner/apply flow. Final synced variable and collection arrays exactly matched the pre-test baseline.
+- Final reviewer verdict: approve the current fixes; no remaining must-fix findings. Reviewer ran atomic bridge, server operation, motion prerequisite, and whitespace checks. No source edits or external comments were made by the reviewer.
+- Native setter-failure rollback remains unforced live. Automated injected-failure coverage remains the evidence for that path.
+
+Next step:
+
+- Decide the next release scope. Optional config-backed motion setup and new-type export/documentation work remain incomplete.

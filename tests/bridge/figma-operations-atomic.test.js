@@ -15,11 +15,16 @@ function extract(name, async = false) {
   throw new Error(`Cannot extract ${name}`);
 }
 
-function harness({ failWrite = false, failRollback = false, failRemove = false } = {}) {
+function harness({ failWrite = false, failRollback = false, failRemove = false, nativeNumbers = false } = {}) {
   const collection = { id: "motion", name: "6. Motion", modes: [{ modeId: "d", name: "Default" }, { modeId: "r", name: "Reduced Motion" }], variableIds: ["timing"] };
   const writes = [];
   const variables = [];
   let threw = false;
+  function nativeValue(value) {
+    if (typeof value === "number") return Math.fround(value);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, nativeValue(item)]));
+  }
   function make(id, name, type, values = {}) {
     return {
       id, name, resolvedType: type, variableCollectionId: "motion", scopes: [], valuesByMode: { ...values },
@@ -27,7 +32,7 @@ function harness({ failWrite = false, failRollback = false, failRemove = false }
         writes.push({ name: this.name, modeId, value });
         if (failWrite && !threw && this.name === "motion/easing/new" && modeId === "r") { threw = true; throw new Error("Injected write failure"); }
         if (failRollback && threw && this.id === "timing") throw new Error("Injected restore failure");
-        this.valuesByMode[modeId] = value;
+        this.valuesByMode[modeId] = nativeNumbers ? nativeValue(value) : value;
       },
       remove() { if (failRemove) throw new Error("Injected remove failure"); this.removed = true; },
     };
@@ -45,7 +50,7 @@ function harness({ failWrite = false, failRollback = false, failRemove = false }
   const context = { figma, module: { exports: {} } };
   vm.createContext(context);
   vm.runInContext(["_scopeForVariableName", "_sameVariableScopes", "_setVariableScopes", "_setVariableScopesForName"].map(name => extract(name)).join("\n") + "\n" + extract("_applyFigmaOperations", true) + "\nmodule.exports = _applyFigmaOperations;", context);
-  return { apply: context.module.exports, variables, timing, writes };
+  return { apply: context.module.exports, variables, timing, writes, make };
 }
 
 const update = value => ({ kind: "update_variable", variableId: "timing", expectedName: "motion/duration/standard", type: "TIMING", collectionId: "motion", collection: "6. Motion", modeValues: [
@@ -120,4 +125,31 @@ module.exports = (async () => {
   result = await h.apply({ operations: extra });
   assert.strictEqual(result.batchStatus, "committed");
   assert.strictEqual(result.created.length, 4, "atomic create supports the other four variable types");
+
+  h = harness({ nativeNumbers: true });
+  const fraction = { ...create(), name: "motion/fraction", type: "FLOAT", modeValues: [{ modeId: "d", mode: "Default", kind: "literal", value: 1.1 }] };
+  result = await h.apply({ atomicVariableBatch: { version: 1, operations: [fraction] } });
+  assert.strictEqual(result.batchStatus, "committed");
+  const storedFraction = h.variables.find(v => v.name === fraction.name);
+  assert.strictEqual(storedFraction.valuesByMode.d, Math.fround(1.1));
+  const repeatFraction = { ...fraction, kind: "update_variable", variableId: storedFraction.id, expectedName: storedFraction.name, modeValues: [{ ...fraction.modeValues[0], expectedCurrentSignature: JSON.stringify(Math.fround(1.1)) }] };
+  result = await h.apply({ operations: [repeatFraction] });
+  assert.strictEqual(result.unchanged.length, 1);
+
+  h.variables.push(h.make("base-color", "motion/base-color", "COLOR", { d: { r: 0, g: 0, b: 0, a: 1 } }));
+  const composed = { ...fraction, name: "motion/composed-fraction", type: "COLOR", modeValues: [{ modeId: "d", mode: "Default", kind: "literal", value: { color: { type: "VARIABLE_ALIAS", id: "base-color" }, opacity: 12.1 } }] };
+  result = await h.apply({ operations: [composed] });
+  assert.strictEqual(result.batchStatus, "committed", "raw composed opacity must accept native fractional readback");
+  assert.strictEqual(h.variables.find(v => v.name === composed.name).valuesByMode.d.opacity, Math.fround(12.1));
+
+  h = harness({ failWrite: true, failRollback: true });
+  const duplicate = h.make("timing-duplicate", h.timing.name, "TIMING", { d: Math.fround(0.2), r: 0 });
+  h.variables.push(duplicate);
+  result = await h.apply({ operations: [update(0.3), { ...update(0.4), variableId: duplicate.id }, create()] });
+  assert.strictEqual(result.batchStatus, "rollback_failed");
+  assert.strictEqual(result.results[0].status, "failed");
+  assert.strictEqual(result.results[1].status, "rolledBack", "same-named variables must have independent rollback results");
+  assert.strictEqual(result.results[1].rollback, "restored");
+  assert.ok(result.rollbackErrors.every(error => error.index === 0 && error.variableId === "timing"));
+  assert.strictEqual(duplicate.valuesByMode.d, Math.fround(0.2));
 })();

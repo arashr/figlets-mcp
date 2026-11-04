@@ -85,7 +85,8 @@ function ensureActiveDsConfig(input = {}) {
     if (existingDs.typography) ds.typography = existingDs.typography;
     if (existingDs.motion) {
       ds.motion = existingDs.motion;
-      ds.collections = Object.assign({}, ds.collections, { motion: existingDs.collections && existingDs.collections.motion });
+      const { motionCollectionName } = require('../figlets-core.js').dsConfig;
+      ds.collections = Object.assign({}, ds.collections, { motion: motionCollectionName(existingDs.collections) });
     }
   }
   ds.figlets = Object.assign({}, ds.figlets || {}, {

@@ -70,15 +70,36 @@ module.exports = (async () => {
     const duration = variables.repairPlan.applyInput.operations.find(operation => operation.name === 'motion/duration/standard');
     assert.strictEqual(duration.modeValues[0].value, 0.25);
     assert.strictEqual(duration.modeValues[1].value, 0);
+    snapshot.collections.push({ ...motionCollection, id: 'duplicate-motion' });
+    fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
+    const duplicateCollections = handlePlanDsFigmaOperations({ motion_config_path: configPath, figmaDataPath: snapshotPath });
+    assert.ok(duplicateCollections.error.includes('ambiguous'));
+    assert.strictEqual(duplicateCollections.repairPlan, undefined, 'an exact name cannot disambiguate multiple target collection IDs');
+    snapshot.collections.pop();
 
     snapshot.variables.push({ id: 'conflict', name: 'motion/duration/standard', variableCollectionId: 'motion', resolvedType: 'FLOAT', valuesByMode: { d: 250, r: 0 } });
     fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
     assert.ok(handlePlanDsFigmaOperations({ motion_config_path: configPath, figmaDataPath: snapshotPath }).error.includes('not TIMING'));
+    motionCollection.modes = [{ name: 'Default', modeId: 'd' }];
+    fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
+    const conflictBeforeMode = handlePlanDsFigmaOperations({ motion_config_path: configPath, figmaDataPath: snapshotPath });
+    assert.ok(conflictBeforeMode.error.includes('not TIMING'));
+    assert.strictEqual(conflictBeforeMode.repairPlan, undefined, 'known token conflicts must block before proposing foundation mutation');
+    snapshot.collections = snapshot.collections.filter(collection => collection.id !== 'motion');
+    fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
+    const conflictBeforeCollection = handlePlanDsFigmaOperations({ motion_config_path: configPath, figmaDataPath: snapshotPath });
+    assert.ok(conflictBeforeCollection.error.includes('outside'));
+    assert.strictEqual(conflictBeforeCollection.repairPlan, undefined);
+    snapshot.collections.push(motionCollection);
     snapshot.variables = [];
     const refresh = ensureActiveDsConfig({ configPath, refreshGenerated: true, dataSource: { figmaData: snapshot, meta: {} } });
     assert.ok(!refresh.error);
     assert.strictEqual(core.readDsConfig(configPath).motion.durations['motion/duration/standard'].Default, 250, 'sync bootstrap must preserve the approved profile');
     assert.strictEqual(core.readDsConfig(configPath).collections.motion, '6. Motion');
+    core.writeDsConfig(configPath, { ...original, motion: edited });
+    assert.strictEqual(core.motionProfilePreview(core.readDsConfig(configPath)).collection, '6. Motion');
+    ensureActiveDsConfig({ configPath, refreshGenerated: true, dataSource: { figmaData: snapshot, meta: {} } });
+    assert.strictEqual(core.readDsConfig(configPath).collections.motion, '6. Motion', 'sync must materialize and preserve the pre-sync implicit name');
 
     const invalid = core.defaultMotionProfile(); invalid.modes = ['Default'];
     assert.ok(core.normalizeMotionProfile(invalid).errors.length);

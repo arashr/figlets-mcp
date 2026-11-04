@@ -12,6 +12,8 @@
 
 **Boundary:** Local-config approval and Figma approval are separate. Reduced-motion variables do not prove runtime accessibility. Export and documentation changes remain Phase 4 work.
 
+**Review hardening:** Sync materializes the pre-refresh resolved motion collection name when no override exists, preserving the meaning of an implicit default. Config-backed planning validates known token identity/type/location conflicts before proposing foundation writes, and rejects multiple collection IDs sharing the configured target name. A name is not an ID-level disambiguation.
+
 ## [2026-11-04] Variable value batches preflight and journal their writes
 
 **Decision:** Extend the existing `apply_ds_figma_operations` route for batches containing only `create_variable` and `update_variable`. The bridge revalidates every live identity, mode, expected signature, alias, and value before writing. It snapshots original mode values, records created variables before initializing them, stops on a write failure, restores updates, and removes created variables. Exact outcomes include created, updated, unchanged, blocked, failed, and rolledBack. A failed restore produces `rollback_failed` with exact cleanup errors rather than claiming atomic success. Lost responses produce `unknown` and require inspection.

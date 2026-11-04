@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Fresh specialized motion-config review approved
+
+**Review:** Restarted the requested specialized review after the first subagent hit a usage limit without a verdict. The fresh reviewer reproduced three P2 issues: implicit collection-name drift during sync, foundation writes proposed before known token conflicts, and duplicate collection names selecting the last ID. Fixed all three with regressions. Final re-review verdict: approve, no remaining must-fix findings.
+
+**Verification:** Full suite passed 130/130. Reviewer passed config flow, collection prerequisites, config preparation, atomic bridge, registered schemas, and whitespace checks. Refreshed the independently managed Figlets connection with receiver enabled; real MCP sync passed and current motion planning returned 6. Motion, eight ready, zero blocked. The app-managed connection is unchanged. No Figma variables were written during this review. Native mode-limit failure cleanup remains automated-test evidence rather than a forced live failure.
+
+**Next:** Phase 4 new-type export and documentation: portable CSS plus lossless data, DESIGN.md/sidecar compatibility, then observed bindings in component handoffs.
+
+---
+
 ### [2026-11-04] Actual-file motion run saved the profile and reused existing variables
 
 **Result:** On user request, saved the default motion profile in `.local/local_mw2a0qj0_dmp11v0f/design-system.config.js`, applied the exact motion plan to `6. Motion`, and verified eight unchanged, zero created/updated/failed. Current sync preserved the saved profile. Full config preparation still blocks DESIGN.md export because the project name is the placeholder Untitled; broad setup was not applied.

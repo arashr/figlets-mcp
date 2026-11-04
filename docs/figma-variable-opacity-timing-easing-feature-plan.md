@@ -4,19 +4,21 @@
 
 Planning document created on 2026-10-12.
 
-Phases 0 and 1 automated implementation are complete. Phase 2 core operations are implemented. Live Figma verification and the remaining Phase 2 result contract are pending. Phases 3 and 4 are deferred at the current checkpoint. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
+Phases 0 and 1 implementation and disposable-file smoke verification are complete. Phase 2 core operations are implemented and live smoke passed timing, easing, and composed-color creation/update/readback. The remaining Phase 2 atomic batch result contract is pending. Phases 3 and 4 are deferred at the current checkpoint. This document is the durable source for scope, priorities, approval boundaries, phased delivery, verification, and later execution notes.
 
 Target release: next Figlets minor release after 1.3.0.
 
-Current repository checkpoint: the full test suite passes 126 of 126 test files with the Phase 0, Phase 1, and Phase 2 core implementation. `git diff --check` passes. Live disposable-file verification has not run. The earlier DESIGN.md work and the initial plan are committed separately. Later implementation must preserve this checkpoint and must record a fresh baseline before editing overlapping files.
+Current repository checkpoint: the full test suite passes 127 of 127 test files with the Phase 0, Phase 1, Phase 2 core implementation, and live-discovered migration fixes, rerun on 2026-11-04. `git diff --check` passes. The two disposable-file smoke tests passed as recorded below. The earlier DESIGN.md work and the initial plan are committed separately. Later implementation must preserve this checkpoint and must record a fresh baseline before editing overlapping files.
 
 ### Checkpoint summary
 
 - Implemented and covered by automated tests: all six variable types, TIMING conversion, EASING validation, composed colors, nested alias traversal, bridge capability reporting, generated opacity primitives, composed scrims, and approval-gated existing-file opacity migration.
-- Implemented but not release-verified in Figma: live TIMING, EASING, composed-color writes, and live opacity migration.
+- Live-verified on 2026-11-04: TIMING, EASING, and composed-color create/update/readback, plus stale TIMING approval rejection.
+- Live-verified opacity migration: ten scrims converted with IDs and RGBA preserved; partial approval changed only the selected scrim and its prerequisite; seven shared opacity variables created; subsequent current-code inspection found zero migrations or blockers.
+- Fixed live-discovered defects: missing collection identity in sync, blocked migration summary omissions, and repeated migrations caused by Figma normalizing raw composed color channels with `a: 1`.
 - Partially complete: exact-operation batch result reporting and atomic failure behavior.
 - Deferred: optional motion foundation configuration, CSS and DESIGN.md export work for the new types, component documentation enhancements, and Motion API work.
-- Safe next step: perform the two disposable-file live tests, finish the Phase 2 batch result contract, then decide whether Phase 3 and Phase 4 belong in the same minor release.
+- Safe next step: finish the Phase 2 batch result contract, then decide whether Phase 3 and Phase 4 belong in the same minor release.
 
 ## Product Goal
 
@@ -163,7 +165,7 @@ The main gaps are:
 
 Priority: P0
 
-Status: automated implementation complete, live verification pending
+Status: automated implementation and disposable-file smoke verification complete
 
 Goal: make every read-only and exact-operation path understand the new value shapes before enabling specialized writes.
 
@@ -205,7 +207,7 @@ Exit criteria:
 
 Priority: P0
 
-Status: automated implementation complete, live verification pending
+Status: automated implementation and disposable-file smoke verification complete
 
 Goal: ship the first designer-visible feature without renaming or recreating existing scrim variables.
 
@@ -305,7 +307,7 @@ Exit criteria:
 
 Priority: P1
 
-Status: core implementation complete, atomic batch result contract and live verification pending
+Status: core implementation and live successful-write smoke complete; atomic batch result contract pending
 
 Goal: extend the existing exact-operation surface for all six variable types.
 
@@ -374,7 +376,7 @@ Exit criteria:
 
 Priority: P1
 
-Status: partially implemented through the shared Phase 0 model; export and documentation work not started
+Status: exact missing-collection setup continuation implemented and live-verified; optional config-backed profile, export, and documentation work remain incomplete
 
 Goal: provide useful timing and easing foundations only when the designer asks for them.
 
@@ -622,9 +624,9 @@ Never represent source limitations as a confirmed empty inventory.
 - [x] Run focused tests after each implemented phase.
 - [x] Run the full repository test suite for the current checkpoint.
 - [x] Run the repository whitespace check for the current checkpoint.
-- [ ] Perform a disposable-file opacity migration smoke test.
-- [ ] Perform a disposable-file timing and easing variable smoke test.
-- [ ] Record bridge build identity and Figma API behavior used by each live smoke test.
+- [x] Perform a disposable-file opacity migration smoke test.
+- [x] Perform a disposable-file timing and easing variable smoke test.
+- [x] Record bridge build identity and Figma API behavior used by the 2026-11-04 live smoke and migration rerun.
 
 ## Known Risks
 
@@ -818,3 +820,95 @@ Next safe step:
 - Perform the two disposable-file live tests against the recorded bridge build.
 - Finish the Phase 2 batch result contract.
 - Decide whether Phases 3 and 4 remain in the next minor release or move to a later release before implementing either phase.
+
+### 2026-11-04: Disposable-file live verification
+
+Status: generic modern-value smoke passed; opacity migration blocked by snapshot defect
+
+Runtime and scope:
+
+- Active disposable file: `Untitled`, file key `local_mw22unhf_glia46i5`.
+- Bridge session: `figlets-mw22undj-fhoyf`; reported bridge build: `1.3.0`.
+- Synced capabilities report all six variable types, composed colors, and exact variable writes. The build label does not distinguish this development implementation from the 1.3.0 release.
+- Test assets are isolated in `Figlets Live Test 2026-11-04`, collection `VariableCollectionId:3:2`, with five `figlets-live/*` variables. Assets remain for inspection. Original design-system variables were not changed.
+
+Passed live checks:
+
+- Created TIMING values of 200 ms and 0 ms in Default and Reduced Motion. Updated Default to 350 ms and preserved Reduced Motion at 0. Figma readback uses floating-point seconds (`0.20000000298023224`, then `0.3499999940395355`).
+- Created custom cubic-bezier EASING and LINEAR values, then updated Default to EASE_IN_AND_OUT. Figma readback preserves easing types and returns normalized curve data.
+- Created composed COLOR with COLOR and FLOAT alias channels in Default, and raw RGB plus an opacity alias in Reduced Motion. Updated Default to aliased color plus raw opacity 60; the second mode and variable ID were preserved.
+- Synced after each apply and asserted the final stored values and alias IDs. Replaying the earlier TIMING approval failed closed with `value for Default changed since approval`.
+
+Failed or blocked live checks:
+
+- `inspect_ds_token_gaps({ categories: ["primitive-opacity"] })` reports zero migrations and ten incompatible scrims because every synced variable omits `variableCollectionId`. The same snapshot's Primitives collection lists all ten scrim IDs in `variableIds`, proving these are in Primitives rather than outside it.
+- The plugin sync serializer near `code.js:314` omits collection identity, while `primitive-opacity-repair.js` requires `variable.variableCollectionId`. No snapshot modification or implementation patch was used to bypass the failure.
+- The tool's headline says no config-backed token gaps despite these ten blocked migration notes. This is misleading and must be corrected alongside the collection-identity defect.
+- Opacity migration writes, RGBA parity, ID preservation, partial approval, and idempotence remain unverified live because no valid specialized repair payload was emitted.
+- Atomic batch failure behavior and exact result reporting remain incomplete and were not certified by the successful-write tests.
+
+Next safe step:
+
+- Fix and regression-test collection identity in real synced snapshots and the blocked-migration summary, reload the bridge, then rerun the opacity migration smoke against this disposable file.
+- Finish the Phase 2 batch result contract before release. Keep Phases 3 and 4 deferred until an explicit release-scope decision.
+
+### 2026-11-04: Migration defects fixed and live rerun passed
+
+Status: snapshot, blocked-summary, and normalized-color comparison fixes verified
+
+Changes:
+
+- Sync now serializes `variableCollectionId` for each variable.
+- Token-gap summaries count blocked opacity migration findings and expose their reasons in the designer presentation, without inventing apply payloads.
+- Desired-value comparison treats an opaque raw composed color channel with Figma's added `a: 1` as equivalent to RGB input. Expected-current signatures remain exact for stale approval rejection.
+- Added a regression that executes the actual sync serializer and passes its payload to the migration planner. Added blocked-summary and normalized-color idempotence coverage.
+- Extended existing sync and inspection surfaces; no new public tool, mutation route, or repair path.
+
+Live runtime:
+
+- User reloaded the local bridge after the serializer change.
+- The unsaved file's local key changed to `local_mw23468w_vsavtww1`, session `figlets-mw23468k-oj7fc`, build label `1.3.0`. All 386 pre-migration variable IDs and names matched the previous snapshot; this is the same disposable file.
+- Fresh snapshot included collection identity on every variable. Ten migrations were planned without incompatible notes.
+- The connected MCP process still holds the earlier planner module. Post-fix planning and final idempotence checks used the current repository's `handleInspectDsTokenGaps` entrypoint directly. Preview, apply, and sync ran through the connected Figlets tools. Restart the MCP host before evaluating the updated planner through its registered tool.
+
+Passed checks:
+
+- Previewed and applied only `color/scrim/black/4`. Synced readback proved only that variable changed and only `opacity/4` was created.
+- This exposed the Figma `a: 1` normalization defect, which was fixed before the remaining apply. The current planner then emitted nine remaining migrations.
+- Previewed and applied those nine entries unchanged from the fresh planner. Six further opacity prerequisites were created, for seven total.
+- All ten original scrim IDs and collection IDs were preserved. Their readback RGB and resolved alpha matched pre-migration RGBA within `1e-6`.
+- All other existing variables, including semantic aliases and the five isolated modern-value test assets, remained unchanged.
+- Current-code reinspection returned zero opacity migrations, zero blockers, and no primitive apply plan.
+- Replaying the original partial approval was rejected because `opacity/4` had been created since approval. No migration was applied.
+- Full `npm test`: 127/127 test files passed after the comparison fix. Plugin syntax and whitespace checks passed.
+
+File state left for inspection:
+
+- Ten migrated scrims and seven shared opacity variables remain in the disposable file.
+- The five `figlets-live/*` variables in `Figlets Live Test 2026-11-04` remain.
+- Implementation changes are uncommitted. No release or publication was performed.
+
+Next step:
+
+- Complete Phase 2 atomic batch failure behavior and exact operation result reporting. Successful migrations do not certify atomic failure behavior.
+- Keep Phases 3 and 4 deferred until the release-scope decision.
+
+### 2026-11-04: Test collection naming corrected
+
+- At the user's request, renamed `Figlets Live Test 2026-11-04` to `6. Motion` through the existing exact-operation planner/apply flow. Synced readback confirmed collection ID `VariableCollectionId:3:2`, five existing test variables, and Default/Reduced Motion modes were preserved.
+- The earlier collection name was supplied by the live test, not a production default. `6. Motion` matches the file's numbered foundation collections and the planned `DS.collections.motion` default.
+- Current exact variable creation requires an existing target collection and blocks when it is absent. Automatic config-backed motion foundation setup remains Phase 3 work; the renamed test assets do not constitute that implementation.
+
+### 2026-11-04: Deleted motion collection recovery implemented
+
+Status: staged collection prerequisite and variable continuation verified
+
+- The user deleted the motion collection and requested product behavior that creates it instead of ending with an error.
+- Extended the existing exact-operation planner, not the bridge: valid TIMING/EASING creation targeting a missing collection now returns `phase: create_missing_motion_collections`, an exact `create_collection` apply payload, and `continuation.input` retaining the pending variables. Invalid values/capabilities do not cause foundation writes.
+- Explicit collection names are honored. An omitted name reuses an existing Motion collection or follows the file's numbered naming pattern; this file gets `6. Motion`.
+- Foundation creation and fresh variable approval remain separate. After apply and sync, the continuation uses real collection/mode IDs. Workflow guidance requires completing this continuation rather than claiming an empty collection is the completed request.
+- Live test began with the collection absent. The current repository planner generated the prerequisite; the connected Figlets apply/sync tools created collection `VariableCollectionId:3:15` named `6. Motion` with Default and Reduced Motion modes. The fresh continuation created four duration tokens (0/100/200/300 ms) and four easing tokens (linear/standard/enter/exit) from the recorded lean profile.
+- Synced readback confirmed all eight types and values, zero durations and LINEAR easing in Reduced Motion. A subsequent current-code plan reused the collection rather than proposing a duplicate. The eight `motion/*` variables remain for inspection; the prior five `figlets-live/*` test variables were removed when the user deleted their collection.
+- Full supported-runtime `npm test`: 128/128 passed. Focused prerequisite and operation-planner tests and whitespace checks passed. Implementation remains uncommitted.
+- The connected MCP planner process still needs a restart to load these source changes; the prerequisite test used the current repository's planner entrypoint. No bridge reload was needed for this planner-only change.
+- This completes the missing-collection error recovery slice. Config-backed profile persistence and full motion setup orchestration are not implemented by this change. Phase 2 atomic batch result handling remains pending.

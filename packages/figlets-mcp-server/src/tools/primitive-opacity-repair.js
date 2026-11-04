@@ -33,6 +33,17 @@ function sameRgb(color, target) {
   return color && ["r", "g", "b"].every(key => sameNumber(color[key], target));
 }
 
+function composedSignature(value) {
+  // Figma adds a: 1 to raw composed color channels on readback.
+  // Keep stale-value signatures exact; normalize only desired-value comparison.
+  if (value && value.color && value.color.a === 1 && value.color.type !== "VARIABLE_ALIAS") {
+    const color = Object.assign({}, value.color);
+    delete color.a;
+    return stableJson(Object.assign({}, value, { color }));
+  }
+  return stableJson(value);
+}
+
 function variableMaps(figmaData) {
   const variables = Array.isArray(figmaData && figmaData.variables) ? figmaData.variables : [];
   return {
@@ -203,7 +214,7 @@ function planPrimitiveOpacityRepairs(ds, figmaData) {
         color: endpoint ? alias(endpoint.id) : { r: target, g: target, b: target },
         opacity: opacity ? alias(opacity.id) : { prerequisite: opacityName },
       };
-      if (scrim && stableJson(current) !== stableJson(desired)) needsScrimChange = true;
+      if (scrim && composedSignature(current) !== composedSignature(desired)) needsScrimChange = true;
       scrimModes.push({
         modeId: mode.modeId,
         modeName: mode.modeName,

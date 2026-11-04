@@ -71,4 +71,22 @@ module.exports = (() => {
   const blocked = planPrimitiveOpacityRepairs(ds, outdated);
   assert.strictEqual(blocked.entries.length, 0);
   assert.ok(blocked.blocked[0].reason.includes("Reload"));
+
+  const migrated = snapshot();
+  migrated.variables = migrated.variables.filter(item => item.id !== "white" && item.id !== "black");
+  const percentages = [4, 8, 12, 16, 20, 40, 60];
+  for (const percentage of percentages) {
+    migrated.variables.push(variable(`opacity-${percentage}`, `opacity/${percentage}`, "FLOAT", percentage, ["OPACITY", "COLOR_OPACITY"]));
+  }
+  for (const scrim of migrated.variables.filter(item => item.resolvedType === "COLOR")) {
+    const previous = scrim.valuesByMode.default;
+    const percentage = Number(scrim.name.split("/").pop());
+    scrim.valuesByMode.default = {
+      color: { r: previous.r, g: previous.g, b: previous.b, a: 1 },
+      opacity: { type: "VARIABLE_ALIAS", id: `opacity-${percentage}` },
+    };
+  }
+  const repeated = planPrimitiveOpacityRepairs(ds, migrated);
+  assert.deepStrictEqual(repeated.blocked, []);
+  assert.deepStrictEqual(repeated.entries, [], "Figma-normalized opaque color channels must not trigger repeated migration");
 })();

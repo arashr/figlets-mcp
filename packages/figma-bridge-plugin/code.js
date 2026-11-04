@@ -314,6 +314,7 @@ figma.ui.onmessage = async (msg) => {
       variables: variables.map(v => ({
         id: v.id,
         name: v.name,
+        variableCollectionId: v.variableCollectionId,
         resolvedType: v.resolvedType,
         valuesByMode: v.valuesByMode,
         description: v.description || "",

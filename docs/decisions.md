@@ -1,5 +1,13 @@
 # Decisions
 
+## [2026-11-04] Missing motion collections are staged setup prerequisites
+
+**Decision:** Extend `plan_ds_figma_operations` for exact TIMING/EASING creation requests. If the target collection is absent, validate the requested variables first, then return an exact collection creation plan plus `continuation.input` preserving the pending variable requests. Apply the approved collection plan, sync real Figma collection/mode IDs, and replan the pending variables for their own approval. Do not report a valid missing-collection request as a terminal error or stop at an empty collection.
+
+**Naming:** Honor an explicitly requested collection. If omitted, reuse the sole `Motion` or numbered `Motion` collection. Otherwise suggest `Motion` for an unnumbered file or the next number followed by `. Motion` for a numbered file. The current five-foundation file uses `6. Motion`. Test/date labels are not product defaults.
+
+**Architecture:** Use the existing collection and variable planner/apply paths with a staged continuation. No new public tool, bridge mutation branch, synthetic IDs in approval payloads, or implicit variable write is introduced. Missing non-motion collections and invalid variable values retain their existing validation behavior. Optional config-backed motion profiles remain separate work.
+
 ## [2026-09-22] Standard DESIGN.md is normative and lossless Figlets data uses a verified sidecar
 
 **Decision:** Supersede the 2026-05-13 decision that made the fenced `figlets-extended` block canonical. New exports conform to pinned `@google/design.md` 0.4.0 and keep standard YAML plus prose normative. Responsive typography and spacing values are emitted as mode-specific standard tokens instead of collapsing to the last breakpoint. Full radii, including pill radius, are retained. Lossless Figlets-only data is written by default to optional `figlets-design.json` in the same directory as `DESIGN.md`.

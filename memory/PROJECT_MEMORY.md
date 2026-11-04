@@ -4,6 +4,30 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-04] Missing motion collection becomes a setup prerequisite
+
+**Behavior:** Exact TIMING/EASING requests no longer end at a valid missing target collection. The operations planner validates the pending variables, returns exact collection creation plus a sync/replan continuation, then uses real IDs for the variable stage. Existing foundation and variable approvals remain separate. No new public tool or bridge route.
+
+**Naming:** Preserve explicit target names. Without one, reuse Motion or numbered Motion; otherwise follow the current numbered pattern or use Motion in an unnumbered file. The active file uses `6. Motion`.
+
+**Live evidence:** User deleted the earlier collection. The current planner and connected apply/sync tools recreated `6. Motion` (`VariableCollectionId:3:15`) with Default/Reduced Motion and eight correctly named `motion/*` tokens using the recorded lean profile. Synced timing/easing readback and existing-collection reuse passed. Full suite passed 128/128. MCP planner process still needs restart to load current code; current-code entrypoint was used for the initial prerequisite plan. Config-backed profile persistence and Phase 2 batch atomicity remain unfinished.
+
+---
+
+### [2026-11-04] Modern variable live smoke and opacity migration verified
+
+**Status:** Modern-value create/update/readback and disposable-file opacity migration passed. The variable foundations feature plan is the continuation source. Phase 2 atomic batch failure handling and exact result reporting remain unfinished; Phases 3 and 4 remain deferred.
+
+**Live fixes:** Bridge sync now includes each variable's `variableCollectionId`. Token-gap inspection surfaces blocked opacity migration counts and reasons. Desired composed-color comparison tolerates Figma adding `a: 1` to raw RGB color channels, while retaining exact stale signatures.
+
+**Evidence:** Ten scrims migrated in place, with seven shared opacity prerequisites. Partial approval changed only the selected scrim and its required opacity variable. Synced readback preserved IDs, RGBA within `1e-6`, and every unrelated existing variable. Fresh current-code inspection returned zero remaining migrations or blockers. Original approval replay was rejected as stale.
+
+**Runtime:** Disposable `Untitled` file changed local key after bridge reload from `local_mw22unhf_glia46i5` to `local_mw23468w_vsavtww1`; all 386 existing variable IDs/names matched. Reloaded session `figlets-mw23468k-oj7fc`, build label `1.3.0`. Connected MCP still cached the earlier planner, so final inspections used the current repository tool handler directly. Restart the MCP host before testing the updated planner through registered MCP calls.
+
+**Verification:** Full supported-runtime suite passed 127/127. Changes remain uncommitted. Live successful-write evidence does not certify atomic batch failure handling.
+
+---
+
 ### [2026-09-22] DESIGN.md 0.4.0 export is standard-first, verified, and lossless by sidecar
 
 **Shipped contract:** New exports use pinned Google DESIGN.md 0.4.0. Standard YAML and prose are normative. Responsive typography and spacing are emitted per mode, pill radius is retained, elevation is shown as CSS `box-shadow`, and semantic color evidence includes both WCAG ratio and APCA Lc. The configured contrast algorithm still controls pass or fail. Exempt pairs remain explicitly exempt.

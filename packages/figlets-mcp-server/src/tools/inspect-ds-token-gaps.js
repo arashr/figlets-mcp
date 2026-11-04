@@ -1265,6 +1265,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     staleStyleCount: staleStyles.length,
     typeMismatchCount: typeMismatches.length,
     opacityMigrationCount: opacityRepairGaps.length,
+    blockedOpacityMigrationCount: opacityRepairPlan.blocked.length,
     unsupportedCategoryCount: unsupportedCategories.length,
     inspectedCategoryCount: supportedCategories.length,
     plannedCategoryCount: categoriesWithGaps.length,
@@ -2106,6 +2107,14 @@ function _buildDesignerPresentation(context, total) {
   }
 
   if (notes.length) {
+    const blockedOpacityNotes = notes.filter(note => note.kind === "primitive-opacity-incompatible");
+    if (blockedOpacityNotes.length) {
+      lines.push(`${blockedOpacityNotes.length} opacity migration finding${blockedOpacityNotes.length === 1 ? " is" : "s are"} blocked. Review the reasons before migration.`);
+      sections.push({
+        title: "Opacity migration blocked",
+        message: blockedOpacityNotes.map(note => (note.token ? note.token + ": " : "") + note.reason).join("; "),
+      });
+    }
     const productGapNotes = notes.filter(note => note.productGap);
     if (foundationRepairs.length) {
       lines.push(`${foundationRepairs.length} missing foundation collection or mode repair${foundationRepairs.length === 1 ? "" : "s"} can be created as a separate option. Approval for this step must apply only foundationRepairPlan.applyInput; after sync/reinspect, stop before any token apply.`);
@@ -2207,7 +2216,7 @@ function _composeMessage(summary) {
     + (summary.opacityMigrationCount || 0) + (summary.touchPolicyDriftCount || 0);
   if (summary.emptyDesignSystem) {
     const setupMessage = "This file has no design-system variables or local styles yet. Ask whether the designer wants to set up or continue the design-system foundation before presenting ordinary token-gap repair choices.";
-    if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
+    if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount && !summary.blockedOpacityMigrationCount) {
       return `${setupMessage} Read-only inspection only; no Figma write is implied.`;
     }
     return [
@@ -2215,7 +2224,7 @@ function _composeMessage(summary) {
       "Read-only inspection. Do not call apply_ds_foundation_repairs, update_ds_primitives, or update_ds_tokens with dry_run:false until the designer explicitly approves after seeing the separated foundation/token options.",
     ].join(" ");
   }
-  if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount) {
+  if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount && !summary.blockedOpacityMigrationCount) {
     return "No config-backed token gaps found in the inspected categories.";
   }
   const parts = [];
@@ -2226,6 +2235,7 @@ function _composeMessage(summary) {
   if (summary.staleVariableCount) parts.push(`${summary.staleVariableCount} alias repair${summary.staleVariableCount === 1 ? "" : "s"}`);
   if (summary.configDriftCount) parts.push(`${summary.configDriftCount} config drift mode${summary.configDriftCount === 1 ? "" : "s"}`);
   if (summary.opacityMigrationCount) parts.push(`${summary.opacityMigrationCount} composed scrim migration${summary.opacityMigrationCount === 1 ? "" : "s"}`);
+  if (summary.blockedOpacityMigrationCount) parts.push(`${summary.blockedOpacityMigrationCount} blocked opacity migration finding${summary.blockedOpacityMigrationCount === 1 ? "" : "s"} (see repairPlan.missingCapabilityNotes for reasons)`);
   if (summary.touchPolicyDriftCount) parts.push(`${summary.touchPolicyDriftCount} outdated touch-target mode value${summary.touchPolicyDriftCount === 1 ? "" : "s"}`);
   if (summary.responsiveSpacingAdvisoryCount) parts.push(`${summary.responsiveSpacingAdvisoryCount} responsive spacing advisory${summary.responsiveSpacingAdvisoryCount === 1 ? "" : "ies"}`);
   if (summary.unsupportedCategoryCount) parts.push(`${summary.unsupportedCategoryCount} unsupported categor${summary.unsupportedCategoryCount === 1 ? "y" : "ies"}`);

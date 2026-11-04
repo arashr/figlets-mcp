@@ -56,7 +56,7 @@ const OP_KINDS = new Set([
 const planDsFigmaOperationsTool = {
   name: "plan_ds_figma_operations",
   description:
-    "Read-only planner for exact high-level Figma design-system operations: create/update/rename/delete variables, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers. Validates against the synced snapshot and returns an exact approved-apply payload. Never mutates Figma.",
+    "Read-only planner for exact high-level Figma design-system operations: create/update/rename/delete variables, collections, modes, local styles, exact node bindings, metadata, and token lifecycle helpers. For TIMING/EASING creation with a missing collection, returns collection setup and an explicit sync/replan continuation instead of a missing-collection error. Validates against the synced snapshot and returns an exact approved-apply payload. Never mutates Figma.",
   inputSchema: {
     type: "object",
     properties: {
@@ -916,9 +916,60 @@ function _planOperation(input, ctx) {
   return _blocked(input, [`Unhandled operation kind ${kind}.`]);
 }
 
+function _defaultMotionCollection(ctx) {
+  const collections = Array.from(ctx.collectionsByName.values());
+  const existing = collections.filter(collection => /^(?:\d+\.\s*)?Motion$/i.test(collection.name));
+  if (existing.length === 1) return existing[0].name;
+  const numbered = collections.map(collection => /^(\d+)\.\s+/.exec(collection.name)).filter(Boolean);
+  return numbered.length ? `${Math.max(...numbered.map(match => Number(match[1]))) + 1}. Motion` : "Motion";
+}
+
+function _planMotionCollectionPrerequisites(operations, ctx) {
+  const missing = new Map();
+  for (const operation of operations) {
+    if (!operation || operation.kind !== "create_variable" || !["TIMING", "EASING"].includes(String(operation.type || "").toUpperCase())) continue;
+    if (ctx.collectionsByName.has(operation.collection)) continue;
+    const values = _coerceModeValuesInput(_modeValueInput(operation));
+    const modes = values && typeof values === "object" && !Array.isArray(values) ? Object.keys(values) : [];
+    if (!missing.has(operation.collection)) missing.set(operation.collection, new Set());
+    for (const mode of modes) missing.get(operation.collection).add(mode);
+  }
+  if (!missing.size) return null;
+
+  // Validate the complete request before proposing any foundation write.
+  // Temporary mode IDs are used only for validation and never leave this helper.
+  const validationCtx = Object.assign({}, ctx, { collectionsByName: new Map(ctx.collectionsByName) });
+  for (const [name, modes] of missing) {
+    validationCtx.collectionsByName.set(name, {
+      name, id: "pending-collection",
+      modes: Array.from(modes).map((mode, index) => ({ name: mode, modeId: `pending-mode-${index}` })),
+    });
+  }
+  const validation = operations.map(operation => _planOperation(operation, validationCtx));
+  if (validation.some(item => item.status !== "ready")) return null;
+
+  return Array.from(missing, ([name, modes]) => ({ kind: "create_collection", name, modes: Array.from(modes) }));
+}
+
 function planDsFigmaOperationsFromFigmaData(figmaData = {}, input = {}) {
-  const operations = Array.isArray(input.operations) ? input.operations : [];
   const ctx = _context(figmaData);
+  const operations = (Array.isArray(input.operations) ? input.operations : []).map(operation => {
+    if (operation && operation.kind === "create_variable" && !operation.collection && ["TIMING", "EASING"].includes(String(operation.type || "").toUpperCase())) {
+      return Object.assign({}, operation, { collection: _defaultMotionCollection(ctx) });
+    }
+    return operation;
+  });
+  const prerequisites = _planMotionCollectionPrerequisites(operations, ctx);
+  if (prerequisites) {
+    const plan = planDsFigmaOperationsFromFigmaData(figmaData, { operations: prerequisites });
+    plan.requestedCount = operations.length;
+    plan.phase = "create_missing_motion_collections";
+    plan.message = "The motion collection is not set up yet. Figlets can create the listed collection and modes, then continue the requested variables after syncing.";
+    plan.continuation = { after: "apply_then_sync_figma_data", tool: "plan_ds_figma_operations", input: { operations } };
+    plan.repairPlan.designerPresentation.pendingVariables = operations.filter(operation => operation.kind === "create_variable").map(operation => ({ name: operation.name, collection: operation.collection, type: operation.type, values: _modeValueInput(operation) }));
+    plan.repairPlan.agentInstruction = "Present the missing collection and exact modes as a foundation setup step, together with continuation.input.operations so the designer can see the pending variable names and values. Do not call the missing collection an error or ask the designer to create it manually. After approval, apply only repairPlan.applyInput, run sync_figma_data, then call continuation.tool with continuation.input. Present and obtain approval for the fresh variable plan before applying it. Do not invent collection IDs or mode IDs, and do not report the variable request complete after creating only the collection.";
+    return plan;
+  }
   const planned = operations.map(operation => _planOperation(operation, ctx));
   const ready = planned.filter(item => item.status === "ready");
   const blocked = planned.filter(item => item.status !== "ready");

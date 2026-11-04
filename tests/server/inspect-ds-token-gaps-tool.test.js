@@ -1352,6 +1352,28 @@ module.exports = (() => {
   }
 
   {
+    const blockedData = {
+      capabilities: { composedColorVariables: true, exactVariableWriteSupport: true },
+      collections: [{ id: "prim", name: "1. Primitives", modes: [{ modeId: "default", name: "Default" }] }],
+      variables: ["black/4", "black/8", "black/12", "black/20", "black/40", "black/60", "white/8", "white/12", "white/16", "white/20"].map(name => ({
+        id: name, name: "color/scrim/" + name, resolvedType: "COLOR",
+        valuesByMode: { default: { r: 0, g: 0, b: 0, a: 0.4 } },
+      })),
+    };
+    const blocked = inspectDsTokenGapsFromConfigAndFigmaData(DS, blockedData, { categories: ["primitive-opacity"] });
+    assert.strictEqual(blocked.summary.opacityMigrationCount, 0);
+    assert.strictEqual(blocked.summary.blockedOpacityMigrationCount, 10);
+    assert.ok(blocked.message.includes("10 blocked opacity migration findings"));
+    assert.ok(!blocked.message.includes("No config-backed token gaps"));
+    assert.ok(blocked.repairPlan.designerPresentation.sections.some(section => section.title === "Opacity migration blocked"));
+    assert.strictEqual(blocked.repairPlan.primitiveRepairPlan, null);
+
+    const outdated = inspectDsTokenGapsFromConfigAndFigmaData(DS, Object.assign({}, blockedData, { capabilities: {} }), { categories: ["primitive-opacity"] });
+    assert.strictEqual(outdated.summary.blockedOpacityMigrationCount, 1);
+    assert.ok(outdated.message.includes("1 blocked opacity migration finding"));
+  }
+
+  {
     const shadowDs = Object.assign({}, DS, {
       color: {
         ramps: [{ folder: "color/neutral", steps: [[500, 0.5, 0.5, 0.5]] }],

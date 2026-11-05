@@ -25,7 +25,10 @@ function makeDs(semantic, modes) {
     'touch/min': [44, 44, 32],
     'touch/comfortable': [48, 48, 40],
   }));
-  assert.ok(findings.some(finding => finding.rule === 'figlets-touch-target-minimum'));
+  const advisory = findings.find(finding => finding.rule === 'figlets-touch-target-minimum');
+  assert.ok(advisory);
+  assert.strictEqual(advisory.blocking, false);
+  assert.match(advisory.message, /For AAA accessibility standards/);
 }
 
 {
@@ -53,5 +56,5 @@ function makeDs(semantic, modes) {
 
 {
   const findings = designSystemPolicy.validateDesignSystemPolicy(makeDs({}));
-  assert.ok(findings.some(finding => finding.rule === 'figlets-touch-target-required'));
+  assert.ok(findings.some(finding => finding.rule === 'figlets-touch-target-required' && finding.blocking === false));
 }

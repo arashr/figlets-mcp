@@ -2235,3 +2235,12 @@ Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats`
 **Imported systems:** Newly bootstrapped configs record figlets.projectNameSource as file-name-suggestion unless a name was explicitly supplied. This also covers configs created by sync before export. Export asks the designer to confirm that candidate or provide a different name. Confirmation saves designer-confirmed provenance, so later exports do not ask again. Existing authored configs retain their identity. Lower-level artifact validation still requires a meaningful name; intake resolves it before artifact creation.
 
 **Touch policy clarification:** The current hardcoded 44px Figlets minimum is unchanged. It is a product policy aligned with the enhanced WCAG target-size dimension, not the general WCAG 2.2 AA minimum. WCAG 2.2 criterion 2.5.8 AA uses 24 by 24 CSS pixels with exceptions; 2.5.5 AAA uses 44 by 44 with exceptions. A token alone does not establish runtime compliance. References: https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum and https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.
+
+
+## [2026-11-05] Target-size AAA guidance does not block documentation
+
+**Decision:** Supersede the earlier hard 44px export gate. The 44 CSS pixel threshold is labeled for AAA accessibility standards, WCAG 2.2 target size (enhanced), with exceptions. Below-threshold and absent touch/min findings remain visible warnings with blocking false. Shared artifact validation respects this flag for warnings; errors remain blocking. Numeric mode coverage and inconsistent minimum/comfortable ordering retain their existing validation behavior.
+
+**Generation and existing files:** Historical presets before 8861162 explicitly generated touch/min as 44/44/32 and comfortable as 48/48/40. Current shared defaults generate 44/44/44 and 48/48/48. Snapshot import can retain existing values. Documentation must report configured values and must not assert every system uses a 44px minimum or infer runtime nonconformance from a token alone. No Figma variables are changed by this validation update.
+
+**Verification:** Full suite 132/132 passes, including an export at 44/44/32 that writes successfully, retains the configured values, and reports a nonblocking AAA advisory. Missing touch/min also produces a nonblocking AAA advisory. Existing default-generation tests continue to pass.

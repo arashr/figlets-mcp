@@ -1117,7 +1117,7 @@ function _bodyLayout(DS) {
     }
     if (semantic['touch/compact']) {
       lines.push('');
-      lines.push('`touch/min` is the minimum interactive target. `touch/compact` is for intentional dense visual sizing and does not reduce the 44px interactive target.');
+      lines.push('`touch/min` records the configured minimum target size; `touch/compact` records dense visual sizing. For AAA accessibility standards, WCAG 2.2 target size (enhanced) specifies 44 by 44 CSS pixels, subject to its exceptions. Verify actual interactive hit areas in implementation; token values alone do not establish conformance.');
     }
   }
   const border = DS.spacing && DS.spacing.border ? DS.spacing.border : null;

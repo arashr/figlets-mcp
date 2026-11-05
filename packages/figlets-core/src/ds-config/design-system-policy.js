@@ -1,6 +1,6 @@
 'use strict';
 
-const FIGLETS_TOUCH_MINIMUM_PX = 44;
+const WCAG_AAA_TARGET_SIZE_PX = 44;
 
 function isPlaceholderProjectName(value) {
   return !value || /^(?:untitled|imported figma design system|figlets design system)$/i.test(String(value).trim());
@@ -40,8 +40,9 @@ function validateDesignSystemPolicy(ds) {
     findings.push({
       severity: 'warning',
       path: 'spacing.touch/min',
-      message: 'touch/min is missing. Figlets requires a 44px minimum interactive target in every mode.',
+      message: 'touch/min is missing. For AAA accessibility standards, WCAG 2.2 target size (enhanced) specifies 44 by 44 CSS pixels, subject to its exceptions. Verify actual interactive targets in implementation.',
       rule: 'figlets-touch-target-required',
+      blocking: false,
     });
     return findings;
   }
@@ -61,15 +62,16 @@ function validateDesignSystemPolicy(ds) {
       findings.push({
         severity: 'warning',
         path: 'spacing.touch/min.' + modes[index],
-        message: 'touch/min has no numeric value for ' + modes[index] + '. Figlets requires 44px in every mode.',
+        message: 'touch/min has no numeric value for ' + modes[index] + '; its configured value cannot be verified.',
         rule: 'figlets-touch-target-mode-coverage',
       });
-    } else if (value < FIGLETS_TOUCH_MINIMUM_PX) {
+    } else if (value < WCAG_AAA_TARGET_SIZE_PX) {
       findings.push({
         severity: 'warning',
         path: 'spacing.touch/min.' + modes[index],
-        message: 'touch/min is ' + value + 'px in ' + modes[index] + '; the Figlets accessibility minimum is 44px. Use touch/compact for an intentional dense visual treatment while preserving a 44px interactive target.',
+        message: 'touch/min is ' + value + 'px in ' + modes[index] + '. For AAA accessibility standards, WCAG 2.2 target size (enhanced) specifies 44 by 44 CSS pixels, subject to its exceptions. This token alone does not establish an accessibility failure; verify the actual interactive target.',
         rule: 'figlets-touch-target-minimum',
+        blocking: false,
       });
     }
   }
@@ -100,7 +102,8 @@ function validateDesignSystemPolicy(ds) {
 }
 
 module.exports = {
-  FIGLETS_TOUCH_MINIMUM_PX,
+  WCAG_AAA_TARGET_SIZE_PX,
+  FIGLETS_TOUCH_MINIMUM_PX: WCAG_AAA_TARGET_SIZE_PX,
   isPlaceholderProjectName,
   validateDesignSystemPolicy,
 };

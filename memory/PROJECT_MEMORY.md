@@ -4,6 +4,14 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-05] AAA target-size advice no longer blocks DESIGN.md
+
+**Origin:** Older compute-ds-config presets before 8861162 generated touch/min 44/44/32 and comfortable 48/48/40. Current defaults are 44/44/44 and 48/48/48. Existing snapshot/config values can outlive that default change.
+
+**Behavior:** On user instruction, below-44 and absent touch/min warnings are labeled for AAA accessibility standards with WCAG exceptions and blocking false. Shared artifact validation allows those warnings while retaining real errors and unrelated data integrity validation. DESIGN.md prose reports configured sizing without claiming a mandatory 44px minimum. Existing 32px configs export successfully without value changes. Full suite132/132 passes. No Figma values were mutated.
+
+---
+
 ### [2026-11-05] Config-owned DESIGN.md naming and visual confirmation
 
 **User confirmation:** The user accepted the generated documentation visually. On the clean selected Button 5:4212, Figlets generated Button · Spec on Page 1 / Documentation with five mode previews and no missing aliases. No source binding mutations were run for that clean Button. Earlier mixed-DS Card-C evidence is not a valid clean-component result; original Card-C restoration was not independently verified.

@@ -138,7 +138,7 @@ module.exports = (async () => {
       assert.strictEqual(result.lint.passed, true);
       const md = fs.readFileSync(result.designMd.path, 'utf8');
       assert.ok(md.includes('Export MD Test'), 'DESIGN.md should embed DS project name');
-      assert.ok(md.includes('touch/compact` is for intentional dense visual sizing'), 'DESIGN.md should prevent compact sizing from replacing the interactive minimum');
+      assert.ok(md.includes('For AAA accessibility standards') && md.includes('Verify actual interactive hit areas'), 'DESIGN.md should distinguish AAA guidance from token conformance');
       assert.strictEqual(result.sync.attempted, false, 'sync should be skipped when figmaDataPath is provided');
       assert.ok(Array.isArray(result.refresh.changes), 'refresh.changes should be an array');
       // The snapshot's primary/500 differs from the config's [0,0,0], so refresh should have updated the ramp step + brand hex.
@@ -167,7 +167,7 @@ module.exports = (async () => {
     }
   }
 
-  // --- Accessibility guard blocks a weakened touch minimum
+  // --- AAA touch-size guidance is visible without blocking export
   {
     const ws = makeWorkspace('touch-min-block');
     try {
@@ -180,9 +180,11 @@ module.exports = (async () => {
         config_path: ws.configPath,
         figmaDataPath: ws.snapshotPath,
       }));
-      assert.ok(result.error, 'export should block when touch/min drops below 44px');
-      assert.ok(result.lint.blockingFindings.some(finding => finding.rule === 'figlets-touch-target-minimum'));
-      assert.ok(!fs.existsSync(projectDesignMdPath(ws.tmp)), 'blocked export must not write DESIGN.md');
+      assert.ok(!result.error, 'AAA advice must not block export');
+      assert.ok(result.lint.findings.some(finding => finding.rule === 'figlets-touch-target-minimum' && finding.blocking === false));
+      assert.ok(!result.lint.blockingFindings.some(finding => finding.rule === 'figlets-touch-target-minimum'));
+      assert.ok(fs.existsSync(projectDesignMdPath(ws.tmp)), 'advisory export must write DESIGN.md');
+      assert.ok(fs.readFileSync(projectDesignMdPath(ws.tmp), 'utf8').includes('44 / 44 / 32 px'), 'export must preserve configured values');
     } finally {
       fs.rmSync(ws.tmp, { recursive: true, force: true });
     }

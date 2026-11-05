@@ -10,7 +10,7 @@ function _blockingFindings(findings) {
   const toleratedRules = new Set(['orphaned-tokens']);
   return findings.filter(finding =>
     finding.severity === 'error'
-      || (finding.severity === 'warning' && !toleratedRules.has(finding.rule))
+      || (finding.severity === 'warning' && finding.blocking !== false && !toleratedRules.has(finding.rule))
   );
 }
 

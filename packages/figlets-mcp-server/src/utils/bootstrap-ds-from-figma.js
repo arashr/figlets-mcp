@@ -649,6 +649,7 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
     ...(Object.keys(elevation).length ? { elevation } : {}),
     figlets: {
       source: "figma-snapshot-bootstrap",
+      projectNameSource: opts.projectName ? "designer-confirmed" : "file-name-suggestion",
       createdBy: "figlets-mcp",
       createdAt: opts.createdAt || new Date().toISOString(),
       fileKey: (figmaData && figmaData.fileKey) || null,

@@ -42,7 +42,7 @@
 
 **Accessibility:** The configured APCA or WCAG algorithm remains the design-system decision. The exported Components section reports both WCAG contrast ratio and APCA Lc for every resolved semantic background and text pairing. The configured algorithm determines the pass result. Pairs with null thresholds are labeled exempt with their note and are not claimed as universally validated. Exempt pairs are omitted from standard `components` front matter so Google validation does not mistake them for approved text combinations.
 
-**Metadata handling:** Placeholder names such as `Untitled` block export. Figlets does not assume that a code package name is the design-system name. The designer can supply the exact `design_system_name`, which repairs generated local config metadata after validation. Snapshot bootstrap selects a primary ramp from strong semantic `brand` or `primary` aliases before falling back to ramp order. This prevents an alphabetically first info ramp from becoming primary when semantic brand tokens point elsewhere.
+**Metadata handling:** Superseded on 2026-11-05 for export intake: missing or placeholder names request confirmation and continuation instead of returning an export failure. Figlets does not assume that a code package name is the design-system name. The designer can supply the exact `design_system_name`, which repairs generated local config metadata after validation. Snapshot bootstrap selects a primary ramp from strong semantic `brand` or `primary` aliases before falling back to ramp order. This prevents an alphabetically first info ramp from becoming primary when semantic brand tokens point elsewhere.
 
 **Touch targets:** Generated `touch/min` is 44px in every responsive mode. Generated `touch/comfortable` is 48px in every mode. Dense controls use the separate opt-in `touch/compact` token at 32px. The accessibility minimum is not weakened at desktop breakpoints.
 
@@ -2226,3 +2226,12 @@ Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats`
 **Archive freshness:** Verified DESIGN.md intake records a stable signature of its config, excluding source, generated primitives, and archive fields. Archived variable data can drive exports only while this signature matches. Config edits fall back to current config generation. The Markdown fingerprint still governs sidecar intake.
 
 **Component scope:** Document only observed bindings. Preserve native TIMING/EASING types and raw values, opacity units, and nested composed-color reference paths. Existing prototype reaction reporting remains unchanged. Motion timeline inspection and authoring remain deferred.
+
+
+## [2026-11-05] DESIGN.md identity belongs to config and missing identity is intake
+
+**Decision:** DS.project.name is authoritative. Export never silently replaces an established config name with the Figma file name or code package name. A missing/placeholder identity returns status needs_designer_input with one required naming question and an exact export continuation. The answer resumes validation and export through the existing design_system_name argument.
+
+**Imported systems:** Newly bootstrapped configs record figlets.projectNameSource as file-name-suggestion unless a name was explicitly supplied. This also covers configs created by sync before export. Export asks the designer to confirm that candidate or provide a different name. Confirmation saves designer-confirmed provenance, so later exports do not ask again. Existing authored configs retain their identity. Lower-level artifact validation still requires a meaningful name; intake resolves it before artifact creation.
+
+**Touch policy clarification:** The current hardcoded 44px Figlets minimum is unchanged. It is a product policy aligned with the enhanced WCAG target-size dimension, not the general WCAG 2.2 AA minimum. WCAG 2.2 criterion 2.5.8 AA uses 24 by 24 CSS pixels with exceptions; 2.5.5 AAA uses 44 by 44 with exceptions. A token alone does not establish runtime compliance. References: https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum and https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.

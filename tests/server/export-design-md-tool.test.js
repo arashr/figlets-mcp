@@ -188,7 +188,40 @@ module.exports = (async () => {
     }
   }
 
-  // --- Placeholder identity fails closed instead of guessing from the code project
+  // --- Config identity wins over file metadata and a fallback-name argument
+  {
+    const ws = makeWorkspace('config-identity');
+    try {
+      const snapshot = JSON.parse(fs.readFileSync(ws.snapshotPath, 'utf8'));
+      snapshot.fileName = 'Different Figma File';
+      fs.writeFileSync(ws.snapshotPath, JSON.stringify(snapshot));
+      const result = await withCwd(ws.tmp, () => handleExportDesignMd({ config_path: ws.configPath, figmaDataPath: ws.snapshotPath, design_system_name: 'Fallback Only' }));
+      assert.ok(!result.error && result.designMd.written);
+      const markdown = fs.readFileSync(result.designMd.path, 'utf8');
+      assert.ok(markdown.includes('Export MD Test'));
+      assert.ok(!markdown.includes('name: "Fallback Only"'));
+      assert.ok(!markdown.includes('name: "Different Figma File"'));
+    } finally { fs.rmSync(ws.tmp, { recursive: true, force: true }); }
+  }
+
+  // --- A config automatically created by sync still needs name confirmation
+  {
+    const ws = makeWorkspace('inferred-name');
+    try {
+      const original = fs.readFileSync(ws.configPath, 'utf8');
+      fs.writeFileSync(ws.configPath, original.replace("project: { name: 'Export MD Test' },", "project: { name: 'Imported file' }, figlets: { projectNameSource: 'file-name-suggestion' },"));
+      const pending = await withCwd(ws.tmp, () => handleExportDesignMd({ config_path: ws.configPath, figmaDataPath: ws.snapshotPath }));
+      assert.strictEqual(pending.status, 'needs_designer_input');
+      assert.strictEqual(pending.needsDesignerInput[0].suggestedValue, 'Imported file');
+      const resumed = await withCwd(ws.tmp, () => handleExportDesignMd({ ...pending.continuation.input, design_system_name: 'Real DS' }));
+      assert.ok(!resumed.error && resumed.designMd.written);
+      assert.ok(fs.readFileSync(ws.configPath, 'utf8').includes('designer-confirmed'));
+      const next = await withCwd(ws.tmp, () => handleExportDesignMd({ config_path: ws.configPath, figmaDataPath: ws.snapshotPath, dry_run: true }));
+      assert.notStrictEqual(next.status, 'needs_designer_input', 'confirmed names must not prompt again');
+    } finally { fs.rmSync(ws.tmp, { recursive: true, force: true }); }
+  }
+
+  // --- Placeholder identity requests input and continues without guessing
   {
     const ws = makeWorkspace('placeholder-name');
     try {
@@ -199,10 +232,15 @@ module.exports = (async () => {
         figmaDataPath: ws.snapshotPath,
         project_path: ws.tmp,
       }));
-      assert.ok(result.error, 'placeholder identity must block export');
-      assert.ok(result.lint.blockingFindings.some(finding => finding.rule === 'figlets-placeholder-project-name'));
-      assert.ok(/design_system_name/.test(result.hint));
-      assert.strictEqual(fs.readFileSync(ws.configPath, 'utf8'), before, 'blocked validation must not mutate config');
+      assert.ok(!result.error, 'missing identity is an intake step, not an export error');
+      assert.strictEqual(result.status, 'needs_designer_input');
+      assert.strictEqual(result.needsDesignerInput[0].field, 'project.name');
+      assert.strictEqual(result.continuation.answerField, 'design_system_name');
+      assert.strictEqual(fs.readFileSync(ws.configPath, 'utf8'), before, 'name intake must not mutate config');
+      assert.ok(!fs.existsSync(projectDesignMdPath(ws.tmp)));
+      const resumed = await withCwd(ws.tmp, () => handleExportDesignMd({ ...result.continuation.input, design_system_name: 'Confirmed System' }));
+      assert.ok(!resumed.error && resumed.designMd.written);
+      assert.ok(fs.readFileSync(ws.configPath, 'utf8').includes('Confirmed System'));
     } finally {
       fs.rmSync(ws.tmp, { recursive: true, force: true });
     }
@@ -361,10 +399,14 @@ module.exports = (async () => {
       const missingPath = path.join(tmp, 'design-system.config.js');
       const snapshotPath = path.join(tmp, 'figma-data.json');
       writeRichSnapshot(snapshotPath);
-      const result = await withCwd(tmp, () => handleExportDesignMd({
+      const pending = await withCwd(tmp, () => handleExportDesignMd({
         config_path: missingPath,
         figmaDataPath: snapshotPath,
       }));
+      assert.strictEqual(pending.status, 'needs_designer_input');
+      assert.strictEqual(pending.needsDesignerInput[0].suggestedValue, 'Imported Rich DS');
+      assert.ok(!fs.existsSync(missingPath), 'unconfirmed file identity must not create config');
+      const result = await withCwd(tmp, () => handleExportDesignMd({ ...pending.continuation.input, design_system_name: 'Confirmed External DS' }));
       assert.ok(!result.error, 'missing config with snapshot should bootstrap, got: ' + JSON.stringify(result));
       assert.ok(fs.existsSync(missingPath), 'snapshot-derived config should be written');
       assert.strictEqual(result.bootstrap.source, 'figma-snapshot-bootstrap');
@@ -376,7 +418,7 @@ module.exports = (async () => {
       assert.strictEqual(result.designMd.path, projectDesignMdPath(tmp));
       assert.ok(fs.existsSync(result.designMd.path), 'DESIGN.md should be written after bootstrap');
       const md = fs.readFileSync(result.designMd.path, 'utf8');
-      assert.ok(md.includes('Imported Rich DS'), 'DESIGN.md should use the Figma file name');
+      assert.ok(md.includes('Confirmed External DS'), 'DESIGN.md should use the confirmed identity');
       assert.ok(md.includes('primary-500'), 'DESIGN.md should include existing color ramp tokens');
       assert.ok(md.includes('| component/lg | 16 / 20 / 24 px |'), 'DESIGN.md should include responsive spacing tokens');
       assert.ok(md.includes('| body/md | 14 / 14 / 16 px | 400 | 0 |'), 'DESIGN.md should include typography resolved values');

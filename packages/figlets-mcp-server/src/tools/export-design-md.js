@@ -17,7 +17,7 @@ const {
 
 const exportDesignMdTool = {
   name: 'export_design_md',
-  description: 'Export a Google DESIGN.md 0.4.0 handoff plus an optional lossless figlets-design.json sidecar in the same folder. By default syncs the Figma file, refreshes design-system.config.js, validates the generated document, then writes specs/DESIGN.md under project_path. Export stops on Google errors or meaningful warnings while reporting tolerated orphaned-token warnings. Pass dry_run to preview without writing.',
+  description: 'Export a Google DESIGN.md 0.4.0 handoff plus an optional lossless figlets-design.json sidecar. Use the configured project.name. If it is missing or a placeholder, or no config exists, return a name confirmation question and continuation instead of an export error. Never silently use the Figma file name as the system identity. By default sync, refresh, validate, and write specs/DESIGN.md under project_path. Pass dry_run to preview without writing.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -80,8 +80,10 @@ function _repairPlaceholderProjectName(configPath, projectName, dryRun) {
   const core = _loadDsConfigCore();
   const ds = core.readDsConfig(configPath);
   const current = ds && ds.project && ds.project.name;
-  if (!core.designSystemPolicy.isPlaceholderProjectName(current)) return null;
+  const unconfirmed = ds && ds.figlets && ds.figlets.projectNameSource === 'file-name-suggestion';
+  if (!core.designSystemPolicy.isPlaceholderProjectName(current) && !unconfirmed) return null;
   ds.project = Object.assign({}, ds.project || {}, { name: projectName });
+  if (unconfirmed) ds.figlets.projectNameSource = 'designer-confirmed';
   if (!dryRun) _writeDsConfig(configPath, ds);
   return { kind: 'project-metadata', field: 'project.name', from: current || null, to: projectName };
 }
@@ -398,6 +400,33 @@ async function handleExportDesignMd(args) {
     }
     if (projectMetadataChange) {
       workingDs.project = Object.assign({}, workingDs.project || {}, { name: projectMetadataChange.to });
+      if (workingDs.figlets && workingDs.figlets.projectNameSource === 'file-name-suggestion') workingDs.figlets.projectNameSource = 'designer-confirmed';
+    }
+    const policy = _loadDsConfigCore().designSystemPolicy;
+    const configuredName = workingDs && workingDs.project && workingDs.project.name;
+    const unconfirmedName = workingDs.figlets && workingDs.figlets.projectNameSource === 'file-name-suggestion';
+    if (policy.isPlaceholderProjectName(configuredName)
+      || unconfirmedName || (bootstrap && policy.isPlaceholderProjectName(projectName))) {
+      const candidate = (bootstrap || unconfirmedName) && !policy.isPlaceholderProjectName(configuredName) ? configuredName : null;
+      return {
+        status: 'needs_designer_input',
+        message: 'Choose the design-system name to continue the DESIGN.md export.',
+        configPath,
+        dryRun,
+        bootstrap,
+        needsDesignerInput: [{
+          field: 'project.name',
+          inputField: 'design_system_name',
+          required: true,
+          suggestedValue: candidate,
+          question: candidate
+            ? 'Should this design system be called ' + JSON.stringify(candidate) + ', or would you like a different name?'
+            : 'What name should this design system use in its config and DESIGN.md?',
+          reason: 'The config owns the design-system identity. A Figma file name is only an unconfirmed suggestion.',
+        }],
+        continuation: { tool: 'export_design_md', input: Object.assign({}, args, { config_path: configPath }), answerField: 'design_system_name' },
+        agentInstruction: 'Ask the returned naming question, then retry continuation.input with the exact confirmed name in design_system_name. Do not report this as a failed export or use a file/package name without confirmation. No DESIGN.md or confirmed name has been written; sync may have prepared a snapshot-derived config.',
+      };
     }
     preparedArtifact = await prepareDesignMdArtifact({
       ds: workingDs,

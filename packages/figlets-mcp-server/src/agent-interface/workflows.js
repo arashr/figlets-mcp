@@ -859,7 +859,7 @@ const WORKFLOWS = [
       },
     ],
     next: ["component-docs", "health-check"],
-    errors: ["If export_design_md returns validation findings, explain that errors and meaningful warnings block the write while orphaned-token warnings are visible but allowed.", "If export_design_md returns needsDesignerInput, report the inferred export first, then ask only the returned gap questions if the designer wants to refine the local config/markdown."],
+    errors: ["If export_design_md returns status needs_designer_input, ask its required naming question and continue with the exact confirmed design_system_name. The configured project.name is authoritative; never silently substitute the Figma file name. This is intake, not an export failure.", "If export_design_md returns validation findings, explain that errors and meaningful warnings block the write while orphaned-token warnings are visible but allowed.", "Other optional needsDesignerInput gaps can be offered after the inferred export if the designer wants to refine the local config/markdown."],
   },
 ];
 

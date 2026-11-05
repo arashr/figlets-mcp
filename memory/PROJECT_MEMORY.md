@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-05] Config-owned DESIGN.md naming and visual confirmation
+
+**User confirmation:** The user accepted the generated documentation visually. On the clean selected Button 5:4212, Figlets generated Button · Spec on Page 1 / Documentation with five mode previews and no missing aliases. No source binding mutations were run for that clean Button. Earlier mixed-DS Card-C evidence is not a valid clean-component result; original Card-C restoration was not independently verified.
+
+**Naming change:** DS.project.name stays authoritative. Missing/placeholder names now return one required naming question plus export continuation instead of an export failure. New snapshot-bootstrap configs mark file names as unconfirmed suggestions, including configs created by sync. Exact design_system_name confirmation persists in config and prevents repeated prompts. Standard validation remains intact. Tests cover config priority, imported candidate confirmation, continuation save, and no repeated naming prompt.
+
+**44px explanation:** FIGLETS_TOUCH_MINIMUM_PX = 44 remains hardcoded in core design-system-policy.js; generated touch defaults also use 44. This is Figlets policy, not a universal WCAG AA minimum. WCAG 2.2 AA 2.5.8 uses 24 CSS px and AAA 2.5.5 uses 44, with exceptions. User asked where the value came from; the touch policy was not changed.
+
+---
+
 ### [2026-11-04] Live Phase 4 test found remote alias dependencies and a test setup mistake
 
 **Fixes:** Card-C uses variables from a different library design system. Figlets loaded directly bound remote variables but not their alias dependencies, leaving values unresolved and mode previews missing. Added recursive dependency fetching across all alias/channel modes before resolving collections, with cycle-safe traversal. Also moved component metadata out of an accidentally matched token stale-alias branch into component binding rows, and preserved variableBindings through the MCP response. Full suite passes 132/132. Specialized follow-up review passed.

@@ -47,6 +47,22 @@ const TOKEN_GAP_APPROVAL_CONTRACT = {
 };
 
 const DESIGNER_FLOW_HARD_RULES = {
+  presentation: {
+    layout: "Lead with the result or question. Use short headings for distinct sections, compact lists for findings, and tables only for comparisons. Omit empty sections, redundant success statements, routine technical details, and repeated safety explanations. Separate required findings from optional additions. Link artifacts once.",
+    questions: {
+      singleChoice: "Use a native single-choice control when available and suitable; otherwise show the same choices as a short numbered list.",
+      multipleChoice: "Use multiple selection only if supported by the host and the planner permits that subset. Otherwise use a numbered list and accept natural-language selections.",
+      customInput: "Use a short free-text question for names, hex colors, and custom values. Always allow custom answers; do not force an invented menu.",
+      approval: "Show the exact preview first, then ask for explicit approval or revisions. A preselected option is never approval. Preserve separate write boundaries.",
+      optional: "Include a skip choice when the workflow permits skipping. Do not bundle optional-context review with export approval.",
+      setup: "Ask one targeted intake question per turn. Keep supplied answers and ask only the next missing choice.",
+    },
+    connection: "Check the connection through the workflow before asking to reopen an already-running plugin. Ask for action only when the result requires it. Do not use CLI or raw Figma fallback in Designer Mode.",
+    findings: "Use short Needs attention, Optional, and Next sections only when relevant. A result below the selected contrast standard remains a failure even when close to the threshold. Raw primitives are valid inventory. Unchosen imported defaults are optional setup, not missing requirements.",
+    verification: "After an approved repair, sync and rerun the relevant checks automatically. Report fresh remaining findings only. A full health verdict requires the complete health-check sequence.",
+    export: "Report verified artifact links and relevant limitations. Keep internal config preparation, refresh counts, hashes, package versions, and routine validation details out of normal completion. Explain required identity intake before export and nonblocking AAA advice when present.",
+    recovery: "Do not ask designers to edit config files, delete Primitives, or rebuild as routine recovery. Reinspect and use exact structured repair paths. If a real design choice is missing, ask about that choice.",
+  },
   reviewMustUseFigletsWorkflow: true,
   bulkDesignSystemUpdatesAreInScope: true,
   appliesTo: [
@@ -99,7 +115,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "For health-check, if detect_design_system.emptyDesignSystem.isEmpty or inspect_ds_token_gaps.emptyDesignSystem.isEmpty is true, treat the file as empty from a design-system perspective before ordinary repair routing. Say plainly whether no foundation collections exist yet or foundation collections exist but there are no design-system variables or local styles, then ask whether the designer wants to set up or continue the design-system foundation. Do not present normal token-gap repair as the main story until the designer chooses a setup/foundation path.",
     "For health-check, do not call semantic colors clean unless inspect_ds_setup_gaps completed and the fresh result has no semantic setup gaps, contrast failures, icon contrast failures, broken aliases, apply-ready setup repairs, or unresolved naming findings. Do not call token gaps clean unless inspect_ds_token_gaps completed. Do not call visible/page layer bindings clean unless qa_binding_audit completed; otherwise say binding QA is a separate check.",
     "When health-check finds both semantic setup repairs and token-gap suggestions, the next-step prompt must offer both boundaries. Do not make semantic color repair or naming consolidation the only clean next step if inspect_ds_token_gaps found foundation modes, primitive gaps, or semantic token repairs.",
-    "End health-check repair summaries with a numbered repair choice menu: one numbered option per available repair category, then a numbered all option, then a numbered specific/other option where the designer can name exact fixes. Category choices must use designer goal language such as fix, review, plan, add, or create; do not use implementation terms like dry-run in the menu label. If a selected category needs a dry-run preview before writing, say the designer will review the proposed changes and be asked for confirmation before anything changes. Category choices must preserve separate write boundaries; all must state exactly which ready safe categories it includes and which optional, designer-decision, or separate-boundary items it excludes.",
+    "Prefer native question controls for repair choices when supported, with the same numbered text fallback. End health-check repair summaries with a numbered repair choice menu: one numbered option per available repair category, then a numbered all option, then a numbered specific/other option where the designer can name exact fixes. Category choices must use designer goal language such as fix, review, plan, add, or create; do not use implementation terms like dry-run in the menu label. If a selected category needs a dry-run preview before writing, say the designer will review the proposed changes and be asked for confirmation before anything changes. Category choices must preserve separate write boundaries; all must state exactly which ready safe categories it includes and which optional, designer-decision, or separate-boundary items it excludes.",
     "If a designer asks to review token repairs from health-check, use inspect_ds_token_gaps.repairPlan.reviewOptions as a submenu and run only the selected preview option. Do not run repairPlan.previewInput plus primitiveRepairPlan.previewInput as one combined token preview. Token review options must stay separated: foundation modes, primitive typography, exact semantic spacing aliases, radius/border tokens, typography variables/styles, and full semantic spacing token completion when present.",
     "For config-backed missing typography, spacing, radius, border-width, or elevation tokens, use inspect_ds_token_gaps and dry-run previews. Present foundation collection/mode creation, primitive updates, and semantic token updates as separate options with separate approvals. If foundationRepairPlan applies and is approved, call only apply_ds_foundation_repairs, then sync and reinspect, then stop before primitive or semantic token writes. Never ask for one approval that covers foundation repair and token apply.",
     "If the designer asks to make, create, update, rename, or delete exact variables, variable values, collections, collection modes, local text/effect styles, exact node bindings, variable metadata, collection metadata, or token lifecycle operations outside a narrower Figlets repair flow, call plan_ds_figma_operations. For exact variable creation, use create_variable operations with exact names, collections, types, and mode values/aliases. Show all proposedChanges and warnings, especially destructive delete/replace/move operations, and after approval pass repairPlan.applyInput unchanged to apply_ds_figma_operations. If exact names, values, collections, modes, aliases, style names/properties, node IDs, binding properties, or lifecycle targets are missing, ask for those details instead of claiming Figlets cannot do it.",
@@ -109,7 +125,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability. Present violations as a stable numbered list using issueNumber so the designer can reply with issue numbers. Before asking to apply fixableNow bindings, show every fixableNow item as raw value → exact target token/style, including color candidate facts such as rawFill, top candidates, roleCandidate, and textDescendants when present; never collapse color fixes into a count like 'safe bindings'. For needsDesignerDecision color and typography findings, do not merely repeat the first suggestion: interpret the layer name, textDescendants, rawFill, roleCandidate, top candidates, and raw typography, then show a visible recommended target. If that visible recommendation differs from the raw repairPlan suggestion, distinguish it clearly and treat shorthand approval like ok, good, good on suggestion, or approving the issue number as approval of the visible recommendation. call qa_binding_audit({ fix: true }) only after fixableNow approval. For needsDesignerDecision suggestions such as role-based text styles or closest spacing/radius/border tokens, ask approval and then pass exact entries from repairPlan.designerDecisionApplyInput.approved_suggestions to qa_binding_audit({ approved_suggestions }) only when the displayed target is unchanged. If the designer approves a visible alternate recommendation or gives an exact alternate token/style for one of those audited findings, do not refuse because it was not the first suggestion: keep issueNumber, nodeId, property, rawValue/expectedRawValue, fillIndex/strokeIndex from the audit entry and replace only suggestion with the approved displayed target token/style.",
     "Do not create tokens from qa_binding_audit findings unless a Figlets token-completion planner provides the payload.",
     "For TIMING or EASING creation, a missing target collection is a setup prerequisite, not a terminal error. Follow plan_ds_figma_operations phase create_missing_motion_collections: present and approve the exact collection/modes with pending variable values, apply only its foundation payload, sync, and replan continuation.input before previewing and approving the variable writes. If collection is omitted, the planner reuses Motion or follows the existing numbered collection pattern. Do not invent IDs or stop after creating an empty collection.",
-    "Only on an explicit timing, easing, transition-token, or motion-foundation request, offer prepare_ds_config with motion_profile: default as a read-only editable proposal. Show collection, Default/Reduced Motion modes, names, millisecond durations, exact curves, and accessibilityNote. Do not add motion to ordinary intake or report its absence as a defect. Ask approval for the exact saveInput before the local config write, then run its nextInput to reprepare. Use plan_ds_figma_operations with motion_config_path for the separately approved Figma stages; stop on unresolved collection/mode results rather than omitting Reduced Motion. Follow apply_ds_setup.nextStep when motionPending is true. Springs are optional and are never added to the default profile.",
+    "During new design-system setup, offer the motion-choice question once after base intake/preparation and before final build approval, unless motion is already configured or the choice is already known. review-motion or an explicit timing/easing/motion request permits a read-only prepare_ds_config motion proposal; skip-motion means no motion tool calls or default additions. Show collection, Default/Reduced Motion modes, names, millisecond durations, exact curves, and accessibilityNote. Review is not approval to save or build. Ask approval for exact saveInput before its local config write, then run nextInput to reprepare. Motion collection/mode creation and variable writes each require separate approval through plan_ds_figma_operations with motion_config_path. Stop on unresolved collection/mode results rather than omitting Reduced Motion. Follow apply_ds_setup.nextStep when motionPending is true. Do not report missing motion as a defect. Springs remain optional, never default.",
     "Variable create/update batches use atomic-variable-values: read batchStatus, counts, and per-operation results. Report created, updated, unchanged, blocked, failed, and rolledBack accurately. A blocked batch performed no writes; a rolled_back batch restored its attempted changes. For rollback_failed or unknown, stop and sync/inspect before retrying; never imply no changes remain. Keep motion/composed-value batches separate from structural/lifecycle/style/binding edits. best-effort-structural-operations is not an atomic rollback guarantee.",
     "If no specialized Figlets repair payload exists, first check whether the request is an exact designer-specified variable, collection, mode, style, binding, metadata, or lifecycle edit that plan_ds_figma_operations can represent. Do not convert product-specific health-check findings into invented generic operations. Only product-specific planning/decision gaps should be reported as Figlets product/tool gaps.",
   ],
@@ -151,6 +167,7 @@ const DESIGNER_FLOW_HARD_RULES = {
 };
 
 const NEW_DS_SETUP_INTAKE_CONTRACT = {
+  optionalMotionRule: "After base intake and preparation, ask the motion-choice question once before final build approval. Reuse an explicit or already configured choice. Motion is optional; skipping does not block setup or add defaults. Selecting review only permits a read-only proposal, not a save or Figma write.",
   treatPromptAs: "initial direction, not a complete design-system spec",
   requireQuestionsBefore: ["create_ds_config_from_intake", "prepare_ds_config", "apply_ds_setup"],
   configCreationTool: "create_ds_config_from_intake",
@@ -166,7 +183,7 @@ const NEW_DS_SETUP_INTAKE_CONTRACT = {
     colorScale:
       "Ask for concrete scale labels, not abstract size words. Examples: 100-900, 50-950, or 0-100. If the designer asks for a recommendation, suggest 100-900 for simple product systems or 50-950 when they want extra extremes.",
     fontFamilies:
-      "If the designer says any/default/reasonable monospace, treat that as approval to choose a concrete default: SF Mono for iOS/macOS, Roboto Mono for Android, JetBrains Mono otherwise.",
+      "Keep supplied primary/body, display, UI, and other family assignments distinct even when multiple faces are sans-serif. Store optional display in typography.families.display, named families in typography.families, and explicit role mappings in typography.roleFamilies. Do not introduce a display font or an extra required intake question by default. Ask one role question only if supplied family assignments are ambiguous. Show supplied roles and typefaces in the setup preview. If the designer says any/default/reasonable monospace, treat that as approval to choose a concrete default: SF Mono for iOS/macOS, Roboto Mono for Android, JetBrains Mono otherwise.",
   },
   intakeQuestionOrder: [
     "project name",
@@ -579,6 +596,49 @@ const WORKFLOWS = [
         designerMessage: "If the preview finds contrast failures with exact repair options, I'll show those options, ask approval, apply only the approved local config alias repair, then rerun prepare_ds_config before any Figma write.",
       },
       {
+        id: "motion-choice",
+        kind: "confirmation",
+        conditional: "After base preparation, when motion is not already configured and the designer has not already requested or skipped it in this setup.",
+        designerMessage: "Include motion foundations?",
+        selectionPrompt: {
+          type: "single-choice",
+          message: "Include motion foundations?\n\n1. Review a motion proposal\n2. Skip for now",
+          choices: [
+            { id: "review-motion", label: "Review a motion proposal" },
+            { id: "skip-motion", label: "Skip for now" },
+          ],
+        },
+        skipRule: "skip-motion continues base setup with no motion tool calls, no motion defaults, and no motion writes.",
+        repeatRule: "If motion is already configured or the choice is already supplied, reviewed, or skipped in this setup, reuse that state instead of asking again.",
+      },
+      {
+        id: "preview-motion",
+        kind: "read",
+        tool: "prepare_ds_config",
+        conditional: "Only after review-motion or an explicit motion request; never after skip-motion. Reuse an existing profile unless the designer requests changes.",
+        optionsForNewProfile: { motion_profile: "default" },
+        existingProfileRule: "Preview the designer's existing or edited profile. Never replace an existing profile with default solely because Review was selected.",
+        designerMessage: "I'll show an editable motion proposal with durations, easing curves, and reduced-motion values. Reviewing it does not save or build it.",
+      },
+      {
+        id: "save-motion",
+        kind: "write-local",
+        tool: "prepare_ds_config",
+        localConfigWrite: true,
+        requiresApproval: true,
+        conditional: "Only after approval of the exact motion proposal.",
+        inputSource: "preview-motion.saveInput",
+        designerMessage: "I'll save only the approved motion choices. Figma changes still require separate approval.",
+      },
+      {
+        id: "reprepare-after-motion",
+        kind: "read",
+        tool: "prepare_ds_config",
+        conditional: "Only after save-motion succeeds.",
+        inputSource: "save-motion.nextInput",
+        designerMessage: "I'll refresh the setup preview with your approved motion choices before asking to build.",
+      },
+      {
         id: "approve-build",
         kind: "confirmation",
         designerMessage: "After you review the detailed setupApprovalPreview, I'll ask whether the plan looks right and whether you're ready to build it in Figma.",
@@ -975,95 +1035,22 @@ function _semanticWorkflowOverride(text) {
 function _workflowStartResponse(workflow) {
   if (!workflow || workflow.id === "start") return null;
   if (workflow.id === "new-ds-setup") {
-    return [
-      "# Figlets",
-      "",
-      "I'll use the Figlets new design system setup workflow.",
-      "",
-      "Your prompt gives me direction, not a complete design-system spec yet.",
-      "",
-      "I'll ask one setup question at a time and record any extra answers you give along the way.",
-      "",
-      "First question: what should this design system be called?",
-      "",
-      "I won't draft a full palette, typography stack, grid defaults, or token names before you answer.",
-      "I may offer lightweight multiple-choice options, but not a proposal to approve. If you provide brand colors and a semantic naming grammar, I'll infer the generated background/foreground pairing intent unless you ask for custom pairings.",
-      "",
-      "After intake I'll save your choices, prepare the design system, show the collections, modes, sample token relationships, and assumptions, then ask before building in Figma.",
-    ].join("\n");
+    return "# Figlets\n\nI'll ask one setup question at a time and keep the choices you've already provided.";
   }
   if (workflow.id === "health-check") {
-    return [
-      "# Figlets",
-      "",
-      "I'll review your design system using the Figlets health check.",
-      "",
-      "I'll start read-only:",
-      "1. Sync the current Figma file",
-      "2. Detect design-system structure",
-      "3. Audit token health",
-      "4. Check semantic setup gaps, icon contrast, and missing roles",
-      "5. Check for missing tokens and collection modes",
-      "",
-      "I'll summarize semantic setup findings separately from token-gap suggestions. If a write is needed, I'll ask before changing Figma and keep foundation, primitive, and semantic-token approvals separate.",
-      "",
-      "Please make sure the Figlets Bridge plugin is open in Figma, then I'll begin.",
-    ].join("\n");
+    return "# Figlets\n\nI'll check your design system and summarize what needs attention.";
   }
+  const openings = {
+    "build-showcase": "I'll inspect this file's design system, then show the planned showcase sections before asking to create them in Figma.",
+    "component-docs": "I'll inspect the selected component, then preview its documentation before asking to create the spec sheet and Markdown handoff.",
+    "export-design-md": "I'll export your design system to DESIGN.md using the current Figma data.",
+    "export-make-guidelines": "I'll prepare a Make guidelines bundle and show its file plan. You can skip optional suggestions. I'll ask before exporting.",
+  };
+  if (openings[workflow.id]) return "# Figlets\n\n" + openings[workflow.id];
   if (workflow.id === "token-gap-completion") {
-    return [
-      "# Figlets",
-      "",
-      "I'll review and complete missing design-system tokens using Figlets.",
-      "",
-      "I'll start read-only:",
-      "1. Sync the current Figma file",
-      "2. Check for missing tokens",
-      "3. Dry-run semantic token updates",
-      "4. Dry-run primitive updates when needed",
-      "",
-      "I will not change Figma until you explicitly approve after the dry-run plan (for example: yes, proceed, or apply).",
-      "Phrases like 'complete missing tokens' route to this workflow; they are not approval to write.",
-      "",
-      "Please make sure the Figlets Bridge plugin is open in Figma, then I'll begin.",
-    ].join("\n");
+    return "# Figlets\n\nI'll review missing tokens and show repair choices.\n\nI will not change Figma until you explicitly approve the preview. Asking to complete tokens is not approval to write.";
   }
-  if (workflow.id === "export-make-guidelines") {
-    return [
-      "# Figlets",
-      "",
-      "I'll generate a Figma Make guidelines bundle from the design-system information Figlets already has.",
-      "",
-      "I'll start read-only:",
-      "1. Sync or load the current Figma snapshot",
-      "2. Translate confirmed variables, modes, styles, and components",
-      "3. Generate and lint the Figlets CSS and guideline structure",
-      "4. Show the exact files that would be created or refreshed",
-      "",
-      "I may offer optional suggestions for useful missing context, but you can skip them. I won't ask about packages or require you to fill every gap.",
-      "",
-      "I'll ask before saving optional guidance or exporting local files.",
-    ].join("\n");
-  }
-  const readSteps = (workflow.steps || []).filter(step => step.kind === "read" && step.tool);
-  const writeSteps = (workflow.steps || []).filter(step => step.kind === "write" || step.kind === "write-local");
-  const lines = [
-    "# Figlets",
-    "",
-    `I'll use the Figlets ${workflow.title.toLowerCase()} workflow.`,
-    "",
-  ];
-  if (readSteps.length) {
-    lines.push("I'll start read-only:");
-    readSteps.slice(0, 4).forEach((step, index) => {
-      lines.push(`${index + 1}. ${step.designerMessage || step.tool}`);
-    });
-    lines.push("");
-  }
-  lines.push(writeSteps.length
-    ? "If a write is needed, I'll ask before changing Figma."
-    : "I'll summarize the result in plain language.");
-  return lines.join("\n");
+  return "# Figlets\n\nI'll start read-only with the Figlets " + workflow.title.toLowerCase() + " workflow and summarize the findings.";
 }
 
 function _selectionPrompt(candidates, capabilityMenu) {

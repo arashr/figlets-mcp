@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="425" viewBox="0 0 1120 425">
+<rect x="1" y="1" width="1118" height="423" rx="12" fill="#f7f7f7" stroke="#d4d4d4"/>
+<g font-family="Arial, sans-serif" fill="#171717">
+<text x="18" y="32" font-size="16" font-weight="700">COLOR/SCRIM/BLACK</text>
+<text x="18.00" y="66" font-size="12" font-weight="700" fill="#444">4</text>
+<g transform="translate(18.00,78)"><rect width="172.33" height="75" rx="9" fill="#f4f4f4"/><rect width="172.33" height="75" rx="9" fill="#000000" fill-opacity="0.04"/><rect width="172.33" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="18.00" y="178" font-size="12" fill="#444">–</text>
+<text x="200.33" y="66" font-size="12" font-weight="700" fill="#444">8</text>
+<g transform="translate(200.33,78)"><rect width="172.33" height="75" rx="9" fill="#f4f4f4"/><rect width="172.33" height="75" rx="9" fill="#000000" fill-opacity="0.08"/><rect width="172.33" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="200.33" y="178" font-size="12" fill="#444">–</text>
+<text x="382.67" y="66" font-size="12" font-weight="700" fill="#444">12</text>
+<g transform="translate(382.67,78)"><rect width="172.33" height="75" rx="9" fill="#f4f4f4"/><rect width="172.33" height="75" rx="9" fill="#000000" fill-opacity="0.12"/><rect width="172.33" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="382.67" y="178" font-size="12" fill="#444">–</text>
+<text x="565.00" y="66" font-size="12" font-weight="700" fill="#444">20</text>
+<g transform="translate(565.00,78)"><rect width="172.33" height="75" rx="9" fill="#f4f4f4"/><rect width="172.33" height="75" rx="9" fill="#000000" fill-opacity="0.2"/><rect width="172.33" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="565.00" y="178" font-size="12" fill="#444">–</text>
+<text x="747.33" y="66" font-size="12" font-weight="700" fill="#444">40</text>
+<g transform="translate(747.33,78)"><rect width="172.33" height="75" rx="9" fill="#f4f4f4"/><rect width="172.33" height="75" rx="9" fill="#000000" fill-opacity="0.4"/><rect width="172.33" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="747.33" y="178" font-size="12" fill="#444">–</text>
+<text x="929.67" y="66" font-size="12" font-weight="700" fill="#444">60</text>
+<g transform="translate(929.67,78)"><rect width="172.33" height="75" rx="9" fill="#f4f4f4"/><rect width="172.33" height="75" rx="9" fill="#000000" fill-opacity="0.6"/><rect width="172.33" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="929.67" y="178" font-size="12" fill="#444">–</text>
+<text x="18" y="245" font-size="16" font-weight="700">COLOR/SCRIM/WHITE</text>
+<text x="18.00" y="279" font-size="12" font-weight="700" fill="#444">8</text>
+<g transform="translate(18.00,291)"><rect width="263.50" height="75" rx="9" fill="#161616"/><rect width="263.50" height="75" rx="9" fill="#ffffff" fill-opacity="0.08"/><rect width="263.50" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="18.00" y="391" font-size="12" fill="#444">–</text>
+<text x="291.50" y="279" font-size="12" font-weight="700" fill="#444">12</text>
+<g transform="translate(291.50,291)"><rect width="263.50" height="75" rx="9" fill="#161616"/><rect width="263.50" height="75" rx="9" fill="#ffffff" fill-opacity="0.12"/><rect width="263.50" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="291.50" y="391" font-size="12" fill="#444">–</text>
+<text x="565.00" y="279" font-size="12" font-weight="700" fill="#444">16</text>
+<g transform="translate(565.00,291)"><rect width="263.50" height="75" rx="9" fill="#161616"/><rect width="263.50" height="75" rx="9" fill="#ffffff" fill-opacity="0.16"/><rect width="263.50" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="565.00" y="391" font-size="12" fill="#444">–</text>
+<text x="838.50" y="279" font-size="12" font-weight="700" fill="#444">20</text>
+<g transform="translate(838.50,291)"><rect width="263.50" height="75" rx="9" fill="#161616"/><rect width="263.50" height="75" rx="9" fill="#ffffff" fill-opacity="0.2"/><rect width="263.50" height="75" rx="9" fill="none" stroke="#d1d1d1"/></g>
+<text x="838.50" y="391" font-size="12" fill="#444">–</text>
+<path d="M1 213H1119" stroke="#d4d4d4"/></g></svg>

@@ -1,4 +1,5 @@
 'use strict';
+const { typographyFamilies } = require('./typography-family');
 
 /**
  * generate-primitives-data.js
@@ -186,11 +187,8 @@ function generatePrimitivesData(ds, options = {}) {
   // ── Strings: font families ───────────────────────────────────────────────────
   const strings = [];
   const _ff = (DS.naming && DS.naming.fontFamily) ? DS.naming.fontFamily : 'font/{variant}';
-  strings.push({ name: _ff.replace('{variant}', 'sans'), value: (DS.typography && DS.typography.families && DS.typography.families.sans) ? DS.typography.families.sans : 'Inter' });
-  strings.push({ name: _ff.replace('{variant}', 'mono'), value: (DS.typography && DS.typography.families && DS.typography.families.mono) ? DS.typography.families.mono : 'JetBrains Mono' });
-  if (DS.typography && DS.typography.families && DS.typography.families.serif) {
-    strings.push({ name: _ff.replace('{variant}', 'serif'), value: DS.typography.families.serif });
-  }
+  const families = typographyFamilies(DS.typography);
+  for (const variant of Object.keys(families)) strings.push({ name: _ff.replace('{variant}', variant), value: families[variant] });
 
   return {
     collectionName: (DS.collections && DS.collections.primitives) ? DS.collections.primitives : '1. Primitives',

@@ -4,6 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { readDsConfig } = require('../../packages/figlets-core/src/ds-config');
 
 const originalLocalDir = process.env.FIGLETS_LOCAL_DIR;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'figlets-design-md-'));
@@ -131,12 +132,20 @@ const completeIntakeResult = handleCreateDsConfigFromIntake({
     families: {
       sans: 'Inter',
       mono: 'JetBrains Mono',
+      display: 'Space Grotesk',
+      editorial: 'DM Sans',
     },
+    roleFamilies: { headline: 'editorial' },
   },
 });
 
 assert.ok(!completeIntakeResult.error, 'complete intake should write config');
 assert.strictEqual(completeIntakeResult.configWritten, true);
+const multiFamilyIntake = readDsConfig(intakeConfigPath);
+assert.strictEqual(multiFamilyIntake.typography.families.display, 'Space Grotesk');
+assert.strictEqual(multiFamilyIntake.typography.families.sans, 'Inter');
+assert.strictEqual(multiFamilyIntake.typography.families.editorial, 'DM Sans');
+assert.strictEqual(multiFamilyIntake.typography.roleFamilies.headline, 'editorial');
 assert.ok(
   !completeIntakeResult.needsDesignerInput.some(item => /pairing intent|background\/foreground/i.test(item)),
   'complete generated intake should not ask a vague pairing-intent follow-up'
@@ -156,8 +165,9 @@ const vagueMonoResult = handleCreateDsConfigFromIntake({
   brand_colors: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }],
   typography: {
     scalePreset: 'standard',
+    body_family: 'Inter',
+    display_family: 'Space Grotesk',
     families: {
-      sans: 'Inter',
       mono: 'any reasonable monospace',
     },
   },
@@ -165,6 +175,9 @@ const vagueMonoResult = handleCreateDsConfigFromIntake({
 
 assert.ok(!vagueMonoResult.error, 'vague approved monospace choice should not block intake');
 assert.strictEqual(vagueMonoResult.preview.typography.families.mono, 'JetBrains Mono');
+assert.strictEqual(vagueMonoResult.preview.typography.families.sans, 'Inter');
+assert.strictEqual(vagueMonoResult.preview.typography.families.body, 'Inter');
+assert.strictEqual(vagueMonoResult.preview.typography.families.display, 'Space Grotesk', 'legacy body/display input fields must remain distinct');
 assert.ok(
   fs.readFileSync(intakeConfigPath, 'utf8').includes('"mono": "JetBrains Mono"'),
   'config should write a concrete monospace family, not vague prose'

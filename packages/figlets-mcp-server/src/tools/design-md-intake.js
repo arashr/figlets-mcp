@@ -190,7 +190,7 @@ function _brandColors(args, needsDesignerInput) {
 function _typography(args, needsDesignerInput) {
   const input = args.typography && typeof args.typography === 'object' ? args.typography : {};
   const families = input.families && typeof input.families === 'object' ? input.families : {};
-  const sans = families.sans || input.sans || input.display_family || input.body_family;
+  const sans = families.sans || input.sans || families.body || input.body_family;
   const mono = _normalizeMonoFamily(families.mono || input.mono || input.mono_family, args.platform);
   const scale = input.scale && typeof input.scale === 'object'
     ? input.scale
@@ -200,17 +200,22 @@ function _typography(args, needsDesignerInput) {
     ? 'custom'
     : dsConfig.normalizeTypographyPreset(rawPreset);
   const knownPreset = ['material3', 'fluid', 'compact', 'custom'].includes(scalePreset);
-  if (!sans) needsDesignerInput.push('typography sans/display family name');
-  if (!mono) needsDesignerInput.push('typography mono/body family name');
+  if (!sans) needsDesignerInput.push('typography primary/body family name');
+  if (!mono) needsDesignerInput.push('typography monospace family name');
   if (!scale && !rawPreset) needsDesignerInput.push('typography scale or preset');
   else if (!scale && scalePreset === 'custom') needsDesignerInput.push('explicit typography scale for custom preset');
   else if (!scale && !knownPreset) needsDesignerInput.push('supported typography preset (material3, fluid, compact, or custom scale)');
   const typography = {
     scalePreset,
     families: {
+      ...families,
       sans: sans || 'Inter',
       mono: mono || 'JetBrains Mono',
+      ...(input.display_family ? { display: input.display_family } : {}),
+      ...(input.body_family ? { body: input.body_family } : {}),
+      ...(input.ui_family ? { ui: input.ui_family } : {}),
     },
+    ...(input.roleFamilies ? { roleFamilies: { ...input.roleFamilies } } : {}),
   };
   if (scale) typography.scale = scale;
   return typography;

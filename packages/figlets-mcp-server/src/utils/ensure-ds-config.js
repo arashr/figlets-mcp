@@ -74,15 +74,27 @@ function ensureActiveDsConfig(input = {}) {
     createdAt: input.createdAt,
   });
   if (existingDs) {
+    const { mergeFoundationRequirements } = require('./foundation-requirements');
+    ds.figlets.foundationRequirements = mergeFoundationRequirements(existingDs.figlets && existingDs.figlets.foundationRequirements, ds.figlets.foundationRequirements);
+    if (existingDs.figlets && existingDs.figlets.foundationRequirementsApproved === true) ds.figlets.foundationRequirementsApproved = true;
     if (
       existingDs.project &&
       existingDs.project.name &&
       existingDs.project.name !== "Imported Figma design system"
     ) {
       ds.project = Object.assign({}, ds.project, existingDs.project);
+      // Confirmation belongs to the retained project name, not the new snapshot suggestion.
+      if (existingDs.figlets && existingDs.figlets.projectNameSource === "designer-confirmed") {
+        ds.figlets.projectNameSource = "designer-confirmed";
+      }
     }
     if (existingDs.grid) ds.grid = existingDs.grid;
-    if (existingDs.typography) ds.typography = existingDs.typography;
+    if (existingDs.typography) {
+      const inferredTypography = ds.typography || {};
+      ds.typography = Object.assign({}, inferredTypography, existingDs.typography);
+      if (inferredTypography.families || existingDs.typography.families) ds.typography.families = Object.assign({}, inferredTypography.families, existingDs.typography.families);
+      if (inferredTypography.scale || existingDs.typography.scale) ds.typography.scale = Object.assign({}, inferredTypography.scale, existingDs.typography.scale);
+    }
     if (existingDs.motion) {
       ds.motion = existingDs.motion;
       const { motionCollectionName } = require('../figlets-core.js').dsConfig;

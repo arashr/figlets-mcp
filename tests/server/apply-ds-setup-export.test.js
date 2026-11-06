@@ -83,6 +83,8 @@ module.exports = (async () => {
     const { handleApplyDsSetup, _checkGeneratedSetupPrimitiveCoverage } = require('../../packages/figlets-mcp-server/src/tools/apply-ds-setup.js');
     const core = require('../../packages/figlets-core/src/ds-config');
     const readyDs = core.readDsConfig(configPath);
+    readyDs.figlets = { source: 'figma-snapshot-bootstrap' };
+    core.writeDsConfig(configPath, readyDs);
     const missingBorderPrimitive = core.generatePrimitivesData(readyDs);
     missingBorderPrimitive.floats = missingBorderPrimitive.floats.filter(item => item.name !== 'border/width/default');
     assert.ok(
@@ -109,6 +111,7 @@ module.exports = (async () => {
     assert.strictEqual(result.designMdExport.lint.passed, true, 'apply_ds_setup should use the shared DESIGN.md validation gate');
     assert.ok(fs.existsSync(result.designMdExport.sidecarPath), 'apply_ds_setup should write the default lossless sidecar');
     assert.strictEqual(result.motionPending, undefined, 'ordinary setup must not add motion');
+    assert.strictEqual(core.readDsConfig(configPath).figlets.foundationRequirementsApproved, true, 'Successful approved setup establishes foundation requirements');
     const motionCore = require('../../packages/figlets-core/src/ds-config');
     readyDs.motion = motionCore.defaultMotionProfile();
     motionCore.writeDsConfig(configPath, readyDs);

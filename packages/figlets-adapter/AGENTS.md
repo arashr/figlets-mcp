@@ -79,6 +79,14 @@ For raw elevation effect-style bindings, preserve `repairPlan.previewInput.effec
 
 ---
 
+## Designer presentation
+
+Follow `hardRules.presentation` returned by the Figlets Agent Interface. Lead with the result or question. Use short headings and compact lists for distinct findings, optional additions, and next steps. Omit empty sections and redundant success statements. Link artifacts once. Keep internal config work and routine technical details out of normal responses.
+
+Use native single-choice controls when available and suitable; otherwise show the same choices as a short numbered list. Use multiple selection only when the host and planner support the subset. Allow custom answers. Use free text for names, hex colors, and custom values. Include a skip choice when optional context can be skipped. Show exact changes before explicit approval; a preselected choice is not approval. Preserve one setup question per turn.
+
+Check connection state before asking to reopen an already-running plugin. After approved repairs, sync and rerun relevant checks automatically. Report fresh findings only. A near-threshold contrast failure is still below the selected standard. Unchosen imported defaults are optional setup, not missing requirements.
+
 ## Workflows
 
 ### Detect design system
@@ -88,8 +96,8 @@ For raw elevation effect-style bindings, preserve `repairPlan.previewInput.effec
 4. Summarize: collection names, variable counts by type, text and effect style counts, inferred capabilities
 
 ### Inspect a component
-1. Ask the user to select the target node in Figma Desktop, then wait for confirmation
-2. Call `inspect_component`
+1. Call `inspect_component` on the current selection or known target
+2. Ask for selection only if inspection reports no usable target
 3. Summarize: name, type, layout mode, padding and spacing, variants, key children and their bindings
 
 ### Audit tokens
@@ -116,14 +124,17 @@ For raw elevation effect-style bindings, preserve `repairPlan.previewInput.effec
 7. Re-run `inspect_ds_token_gaps` to verify remaining gaps.
 
 ### Build token showcase
-1. Tell the designer: "I'll check what this file exposes, then build the showcase sections that apply. Please keep the Figlets Bridge plugin open in Figma."
+1. Inspect the connected file and show its planned showcase sections and destination. Ask explicit approval before creating the showcase. Ask for plugin action only if the connection result requires it.
 2. Call `sync_figma_data` if fresh data is needed (or skip if already synced)
-3. By default, call `build_ds_showcase` with no options. It renders what the design system exposes and keeps descriptions deterministic and cheap.
+3. After approval, by default call `build_ds_showcase` with no options. It renders what the design system exposes and keeps descriptions deterministic and cheap.
 4. If the user explicitly accepts numeric nearest/floor fallback for generated showcase chrome, call `build_ds_showcase` with `numericFallback`, for example `{ "radius": "nearest", "border": "floor", "maxDistance": 8 }`. Exact token matches still win; colors never use nearest fallback.
 5. Report which sections were built (Colors, Typography, Spacing, Elevation, Scrims)
 6. Tell the user to look at the "00 · Tokens" page in their Figma file
 
 ### Set up a new design system (bootstrap collections)
+
+Preserve supplied typeface roles, including multiple sans-serif families. Optional display belongs in `typography.families.display`; named families stay in `typography.families`, with explicit `typography.roleFamilies` mappings when supplied. Per-style `family` takes priority. Do not introduce a display default, apply it to unrelated headings, or add a mandatory display-font question. Ask one role-assignment question only when supplied choices are ambiguous. Show role/typeface assignments from the setup preview before approval.
+
 Treat evocative setup prompts (for example, "multiple vibrant background colors with matching foregrounds") as **direction**, not a complete design-system spec. Ask exactly one targeted intake question per assistant turn before creating config values or calling `prepare_ds_config`. If the designer answers multiple topics at once, record all answered topics and ask only the next single missing question. Do not ask a vague color-family/background-foreground pairing question by default after brand colors and semantic naming grammar are provided; infer reasonable generated pairings unless the designer asks for custom pairings. Semantic color naming questions must include examples instead of unexplained labels. Color scale questions must use concrete scale labels such as `100-900`, `50-950`, or `0-100`. If the designer says any/default/reasonable monospace, choose a concrete platform-appropriate family before config creation (`SF Mono` for iOS/macOS, `Roboto Mono` for Android, `JetBrains Mono` otherwise). Do not draft a full proposal, palette, typography stack, grid defaults, or token names before intake. You may offer lightweight multiple-choice options, and you may present tool-returned or designer-requested suggestions as editable proposals, but do not write suggested values until the designer approves one.
 
 1. Offer DESIGN.md first as an optional shortcut: "If you have a DESIGN.md file, just drop it in and I will ask the remaining questions. If you don't, no worries." Markdown-only DESIGN.md is valid partial intake. If provided, call `create_ds_config_from_design_md` (pass `linked_config_path` when DESIGN.md references JSON config), then only ask for topics listed in `needsDesignerInput`. Treat DESIGN.md as imported intake answers, not as the final source of truth.
@@ -138,9 +149,9 @@ Treat evocative setup prompts (for example, "multiple vibrant background colors 
    If `failCount > 0` and there are no exact repair options: do not ask for a prose-only direction like "preserve the background" or "make the text lighter" as though it can be applied. Rerun `prepare_ds_config` once on the current config because generated setup should self-correct. If the latest result still fails with no exact options, explain the exact blocker and ask only for an executable choice: a specific semantic alias, a brand hex change, or a color scale change.
 7. If `needsDesignerInput` contains `DS.typography.scale`: if the designer chose Material/standard, pass `material3` through `create_ds_config_from_intake`; if they chose `custom` or a non-standard scale, use `suggestions.typography` from `create_ds_config_from_intake` to offer editable type-scale templates before asking them to approve or adjust one.
 8. Ask: "Does this all look right? Ready to build in Figma?"
-9. Once confirmed and `readyToBuild === true`: ask the user to keep the Figlets Bridge plugin open. Treat "go for Figma" / "build it" as approval only in this state; if `readyToBuild` is false, do not call `apply_ds_setup` and do not start another abstract approval loop.
+9. Once confirmed and `readyToBuild === true`: use the current connection; ask for plugin action only if its result requires it. Treat "go for Figma" / "build it" as approval only in this state; if `readyToBuild` is false, do not call `apply_ds_setup` and do not start another abstract approval loop.
 10. Call `apply_ds_setup` with the config path
-11. Report: collections created, any skipped (already existed), config path, and `DESIGN.md` export path for reference
+11. Report created collections, relevant skipped items, and the verified DESIGN.md link. Keep internal config paths out of normal completion.
 
 Optional DESIGN.md follow-ups:
 - Suggest `npx @google/design.md lint DESIGN.md` only when the designer wants external spec validation or plans to share the file with coding agents.
@@ -152,7 +163,7 @@ Use this when only some primitive values changed — for example, the designer s
 When the designer flips `DS.color.contrastAlgorithm`, expect `failCount` to change — APCA and WCAG do not always agree on which pairs pass. Surface the difference plainly: "switching to APCA cleared 2 previously failing pairs" or "switching to WCAG flagged 3 pairs that passed APCA". The choice itself is not a code change in Figma; only the readiness verdict and the showcase render reflect it.
 
 1. Run `sync_figma_data`, then `refresh_ds_config_from_figma` to update existing config entries from current Figma values without creating new config tokens or mutating Figma.
-2. Ask the user to keep the Figlets Bridge plugin open in Figma Desktop.
+2. Ask for plugin action only if the connection result requires it.
 3. Run `inspect_ds_setup_gaps` to report additive repair candidates from current Figma state without mutating Figma or config.
 4. Ask which categories to update. Today: `color`, `spacing`, `color-semantics`, and `primitive-opacity` / `primitive-typography` / `primitive-shadow` when `inspect_ds_token_gaps.repairPlan.primitiveRepairPlan` applies. `primitive-opacity` requires the exact `opacity_repairs` entries from inspection. If unspecified, default to `color`, `spacing`, and `color-semantics`.
 5. For setup repair gaps, ask the designer which proposed repairs to apply, then call `apply_ds_setup_repairs` with only those approved repairs.
@@ -223,16 +234,16 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 | `qa_binding_audit` returns violations with no suggestion | The selected layer uses a value/role not covered by existing variables or typography styles | Tell the user the binding policy could not find a matching DS variable/style; the DS may need a new token or the layer role may need adjustment |
 | `qa_binding_audit` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `build_ds_showcase` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
-| `prepare_ds_config` returns error about missing ramps | Config missing `DS.color.brand` | "Add brand color(s) to the config (name + hex) and try again." |
+| `prepare_ds_config` returns error about missing ramps | Config missing `DS.color.brand` | Ask only for the missing design choice, such as "What is your primary brand color?" Figlets manages internal preparation. |
 | `prepare_ds_config` returns `failCount > 0` with repair options | Semantic pairs fail contrast | Show `semanticPairs.contrastRepairOptions`; after approval call `apply_ds_config_contrast_repairs`, then rerun `prepare_ds_config` |
 | `prepare_ds_config` returns `failCount > 0` with no repair options | Generated setup may need a fresh prepare, or the current config has no executable contrast repair | Rerun `prepare_ds_config` once; if still blocked, ask for a concrete alias, brand hex, or color scale change. Do not ask for prose-only repair approval. |
 | `apply_ds_setup` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
-| `update_ds_primitives` returns "Primitives collection ... not found" | The collection has not been built yet | Run `apply_ds_setup` first; in-place update only works on an existing Primitives collection |
-| `update_ds_primitives` returns variables in `unmatched` | The config defines tokens that don't exist in Figma yet | Either run a fresh `apply_ds_setup` (after deleting the old Primitives) or drop those new tokens from the config |
+| `update_ds_primitives` returns "Primitives collection ... not found" | The collection has not been built yet | Reinspect with `inspect_ds_token_gaps`; present any exact foundation repair as a separate approved step, then sync and reinspect before token work |
+| `update_ds_primitives` returns variables in `unmatched` | The config defines tokens that don't exist in Figma yet | Reinspect and preview the exact supported missing-token repair; ask approval before creation. Never delete Primitives as routine recovery |
 | `update_ds_primitives` says the connected plugin does not advertise the command | Local development build mismatch | For designers, say "The bridge is connected but this command is unavailable in the current plugin session." For developers, reload the local Figlets Bridge plugin so it loads the latest code. |
 | `update_ds_primitives` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 | `apply_ds_setup_repairs` rejects `aliases` or schema validation fails | The payload was hand-authored or corrupted instead of copied from `repairPlan.applyInput` | Stop, rerun `inspect_ds_setup_gaps`, then copy or filter the fresh structured `repairPlan.applyInput`. Do not retry with invented aliases, counts, summaries, booleans, or prose-derived values. |
-| `apply_ds_setup` collection skipped | Collection already exists | Report which were skipped; offer to delete and rebuild if user wants a clean slate |
+| `apply_ds_setup` collection skipped | Collection already exists | Report the skipped collections and reinspect for remaining gaps. Use structured repairs instead of routine deletion and rebuild |
 | `generate_component_doc` returns "Component not found on current page" | The component is on a different page or named differently | Ask the user to navigate to the page with the component, or confirm the exact component name |
 | `generate_component_doc` returns 503 | Bridge plugin not connected | "Open the figlets bridge plugin in Figma Desktop and try again." |
 
@@ -257,6 +268,6 @@ The Figma spec sheet is for **humans**; the markdown handover is for **agents**.
 
 ### Optional motion foundations
 
-Only after an explicit motion, transition-token, timing, or easing request, call `prepare_ds_config` with `motion_profile: "default"` (or an edited profile) for a read-only proposal. Show the exact collection, named Default/Reduced Motion maps, token names, durations in milliseconds, curves, and accessibility note. Do not add a motion question to ordinary intake or treat missing motion as a health defect. Springs are optional, not default.
+During new setup, offer the motion-choice question once after base preparation and before final build approval: Review a motion proposal, or Skip for now. Use native single-choice controls when supported, with matching numbered choices otherwise. Reuse an existing motion profile or an already supplied choice instead of asking again. Choosing Skip continues base setup without motion tool calls or defaults. Choosing Review or receiving an explicit motion, transition-token, timing, or easing request permits calling `prepare_ds_config` with the exact existing/edited profile, or `motion_profile: "default"` only for a new profile, for a read-only proposal. Never replace an existing profile with defaults just because Review was selected. Show the exact collection, named Default/Reduced Motion maps, token names, durations in milliseconds, curves, and accessibility note. Review is not approval to save or build. Motion remains optional, and its absence is not a health defect. Springs are optional, not default.
 
 Get approval before passing the exact `saveInput` back to `prepare_ds_config`. This writes only local config. Run the returned `nextInput` to reprepare, then call `plan_ds_figma_operations` with `motion_config_path`. Collection/mode creation and atomic variable values have separate previews and approvals. Sync and follow the continuation after successful foundation apply. If any mode is unresolved, stop and report it; never drop Reduced Motion or claim an empty collection completes the request. When broad setup returns `motionPending`, follow its `nextStep` before reporting setup complete.

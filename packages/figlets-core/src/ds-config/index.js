@@ -133,6 +133,7 @@ function runDsPipeline(configPath) {
 }
 
 module.exports = {
+  ...require('./typography-family'),
   ...motionProfile,
   computeDsConfig,
   getTouchSemanticDefaults,

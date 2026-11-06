@@ -30,7 +30,9 @@ function assertRoutePayload(route) {
   assert.strictEqual(route.workflow.id, "health-check");
   assert.strictEqual(route.hardRules.reviewMustUseFigletsWorkflow, true);
   assert.ok(route.message.includes("Figlets workflow"), "route message must steer agents to Figlets workflows");
-  assert.ok(route.designerResponse.includes("health check"), "route designerResponse should name the health-check workflow");
+  assert.ok(route.designerResponse.includes("check your design system"), "route response should describe the designer's goal");
+  assert.ok(route.designerResponse.split(/\s+/).length < 40, "route opening should remain concise");
+  assert.ok(route.hardRules.presentation.questions.singleChoice.includes("native"), "host smoke must retain presentation guidance");
 }
 
 function assertWorkflowGuidePayload(guide) {

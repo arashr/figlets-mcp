@@ -55,7 +55,7 @@ function makeVariable(id, name, collectionId, type) {
   };
 }
 
-async function buildSetupSnapshot(ds) {
+async function buildSetupSnapshot(ds, unavailable = {}) {
   const code = fs.readFileSync(path.join(__dirname, "../../packages/figma-bridge-plugin/code.js"), "utf8");
   const collections = [];
   const variables = [];
@@ -102,10 +102,13 @@ async function buildSetupSnapshot(ds) {
       textStyles.push(style);
       return style;
     },
-    async loadFontAsync() {},
+    async loadFontAsync(font) {
+      if (font.family === unavailable.family || font.style === unavailable.style) throw new Error('Font unavailable');
+    },
   };
 
   const functions = [
+    ["typographyFamilies", false], ["resolveTypographyFamily", false], ["typographyFontStyles", false], ["_preflightTypographyFonts", true],
     ["_scopeForVariableName", false],
     ["_sameVariableScopes", false],
     ["_setVariableScopes", false],
@@ -123,11 +126,12 @@ async function buildSetupSnapshot(ds) {
   const context = { figma, module: { exports: {} }, Set };
   vm.createContext(context);
   vm.runInContext(source, context, { filename: "generated-setup-qa-parity.vm.js" });
-  await context.module.exports._applyDsSetup({ DS: ds, primitivesData: generatePrimitivesData(ds) });
+  const firstResult = await context.module.exports._applyDsSetup({ DS: ds, primitivesData: generatePrimitivesData(ds) });
+  if (firstResult.error) return { ...firstResult, variables, collections, textStyles };
   const firstIds = variables.map(variable => variable.id);
   await context.module.exports._applyDsSetup({ DS: ds, primitivesData: generatePrimitivesData(ds) });
   assert.deepStrictEqual(variables.map(variable => variable.id), firstIds, "repeated setup should preserve every generated variable ID");
-  return { variables, collections };
+  return { variables, collections, textStyles };
 }
 
 module.exports = (async () => {
@@ -182,6 +186,23 @@ module.exports = (async () => {
   assert.strictEqual(mutedPair.min, null, "generated muted pair should preserve its WCAG contrast exemption");
 
   const snapshot = await buildSetupSnapshot(ds);
+  const multi = JSON.parse(JSON.stringify(ds));
+  multi.typography.families.display = 'Space Grotesk';
+  multi.typography.scale['body/md'].family = 'Inter';
+  const multiSnapshot = await buildSetupSnapshot(multi);
+  assert.ok(!multiSnapshot.error, multiSnapshot.error);
+  const multiVariables = new Map(multiSnapshot.variables.map(item => [item.name, item]));
+  const displayFamily = multiVariables.get('type/display/lg/family');
+  assert.strictEqual(Object.values(displayFamily.valuesByMode)[0].id, multiVariables.get('font/display').id);
+  assert.strictEqual(multiSnapshot.textStyles.find(item => item.name === 'type/display/lg').fontName.family, 'Space Grotesk');
+  assert.strictEqual(multiSnapshot.textStyles.find(item => item.name === 'type/body/md').fontName.family, 'Inter');
+  const missingFont = await buildSetupSnapshot(multi, { family: 'Space Grotesk' });
+  assert.ok(missingFont.error);
+  assert.strictEqual(missingFont.collections.length, 0, 'Font availability must be checked before any setup write');
+  assert.strictEqual(missingFont.textStyles.length, 0);
+  const missingWeight = await buildSetupSnapshot(multi, { style: 'Medium' });
+  assert.ok(missingWeight.error, 'Missing weight must not fall back to Regular');
+  assert.strictEqual(missingWeight.variables.length, 0);
   const primitiveCollection = snapshot.collections.find(collection => collection.name === "1. Primitives");
   const primitiveModeId = primitiveCollection.modes[0].modeId;
   const primitiveByName = new Map(snapshot.variables

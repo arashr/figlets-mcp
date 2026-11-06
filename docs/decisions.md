@@ -2255,3 +2255,57 @@ Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats`
 **Independent foundation checks:** Shared generatePrimitivesData accepts optional includeColors/includeSpacing exclusions for non-color planning. Typography/shadow inspection no longer fails because unrelated color ramps or computed primitive spacing are absent. Default full setup still validates those required prerequisites. Workflow responses describe design-system choices and token checks without internal file terminology. Genuine missing design choices remain setup-intake questions.
 
 **Verification:** Regression coverage includes seven opacity primitives, custom primitive names/collections, repeated literals, preservation of semantic defects, missing internal config creation, repeated inspection without config rewrites, snapshot preservation, and independent typography/shadow checks. Current-file handlers report seven opacity inventory entries, zero opacity defects, and zero unavailable primitive-source notes. No Figma writes were performed for this fix.
+
+## [2026-11-06] Imported foundation defaults require a requirement boundary
+
+**Approval:** User approved the logic proposal, response preview, and regression scope, with the redundant success sentence removed. A color-only imported system should not receive invented typography/shadow primitive defects from Figlets defaults.
+
+**Decision:** Snapshot bootstrap records observed primitive typography/shadow requirements and known literal values internally. Refresh retains deleted requirements, updates observed values, and preserves approved setup provenance. Authored configuration and successful designer-approved setup continue to establish full generated foundation requirements. Legacy imported configurations without provenance do not silently promote defaults into requirements.
+
+**Architecture:** Extend existing inspect_ds_token_gaps and update_ds_primitives surfaces with shared internal helpers. Existing bridge category handlers consume scoped imported entries; no public tool or parallel mutation surface is added. Preserve known imported values, including nonstandard literals. Differing modes or unresolved aliases require exact source information before primitive apply readiness. Missing reference targets are snapshot findings, not proof of deletion or permission to invent replacements.
+
+**Verification:** Sparse-import regression fails with 44 invented missing variables before the fix. Final suite 134/134 test files passes. Coverage includes missing requirements, repeat inspection and refresh, approved setup, legacy imports, unresolved references, exact bridge entry selection, preserved custom values, and blocked unknown-value batches. No live Figma writes, bridge reload, or MCP restart was performed. Live workflow verification remains separate.
+
+## [2026-11-06] Shared presentation guidance keeps designer responses readable
+
+**Approval:** User approved the prompt previews and the additional visual hierarchy and question-control proposal before implementation.
+
+**Decision:** Keep the existing six-workflow menu and approval boundaries. Centralize presentation guidance in hardRules.presentation, available from entry, routing, and workflow tools. Use concise openings, short relevant sections, compact findings, separate optional work, and verified artifact links. Prefer suitable native controls with equivalent numbered fallbacks; preserve custom answers, one-question setup intake, and explicit approval. Host preselection is never consent. Custom widgets and host integrations are deferred.
+
+**Alignment:** Paste-ready prompts and adapter instructions follow this contract. Connection checks precede plugin-action requests, required naming intake precedes export, internal config work stays hidden, contrast failures are not dismissed near a threshold, and approved repairs receive automatic relevant verification. Exact repair payload and separate-write rules are retained. No token math, repair algorithms, or artifact formats change in this slice.
+
+**Verification:** Full suite 135/135 test files passes, including structured routing and workflow coverage, concise openings, native/fallback choice consistency, and existing approval/payload regressions. Model adherence and actual native control rendering still require live workflow verification. No Figma writes or reloads were performed.
+
+## [2026-11-06] Component QA excludes authoring containers and inactive Auto gaps
+
+**Approval:** User approved excluding component-set container properties, then separately approved skipping fixed-gap checks when Auto spacing is selected after providing a screenshot of Notification toggle.
+
+**Decision:** COMPONENT_SET is traversed for its variants without auditing the container's own properties. For auto-layout nodes with primaryAxisAlignItems SPACE_BETWEEN, retained itemSpacing is inactive and does not produce a binding finding. Other properties, variant contents, and nested fixed gaps remain in scope. The same fresh findings drive automatic fixes and approved-decision validation, so excluded containers and inactive gaps cannot be changed through stale approvals.
+
+**Verification:** Runtime regression failed before each fix and passed afterward. Coverage includes selection/page scope, horizontal/vertical Auto spacing, consecutive numbering, retained padding checks, nested fixed gaps, switching back to fixed spacing, and stale approvals. Full suite 136/136 passes; whitespace check passes. Prior read-only live audit verified container exclusion. Auto-gap live verification awaits plugin reload. Local bridge marker: 1.3.0+dev.20261106.3. No component bindings were changed.
+
+## [2026-11-06] Optional typeface roles remain distinct from font classification
+
+**Approval and research:** User approved the behavior, response preview, and regression plan in docs/reviews/display-font-support-proposal.md. Material Web distinguishes brand/plain typefaces, USWDS separates type and role tokens, and Carbon allows expressive/productive typography. These patterns inform Figlets behavior rather than imposing a new naming standard on imported systems.
+
+**Decision:** Keep named family literals in typography.families. Optional display/body/UI families and explicit roleFamilies mappings are supported without new defaults or mandatory questions. Resolve explicit per-style family first, then exact/group role assignment, then optional matching role family, then the existing primary family. Supplying display does not assign it to headlines, titles, or labels. Preserve observed semantic family values and named family strings on imports and generated refresh. Existing custom token naming patterns remain in use.
+
+**Architecture:** Extend existing intake, setup, primitive update, semantic typography, preview, import/export, and QA paths. Use canonical pure family helpers in core and a verbatim ES5-compatible embedded copy in the Figma bridge, enforced by tests. No public tool or parallel repair surface is added. Check supplied families and requested weights before dependent writes. Report exact failures rather than silently substituting another face or Regular weight. Existing structural/best-effort write guarantees are not expanded into atomicity claims.
+
+**Output and verification:** Multi-family setup previews expose role/typeface assignments; DESIGN.md adds a typeface column only when multiple families are used. Single-family primitive and Make inventories and the existing documentation table stay unchanged. Full suite 138/138 test files passes, covering intake, core/bridge parity, aliases and text styles, unavailable fonts/weights, QA, imports/refresh, Markdown round trips, CSS/Make, and default preservation. Bridge build is 1.3.0+dev.20261106.4. No live Figma typography mutations or runtime reloads were performed; live verification remains separate.
+
+## [2026-11-06] Scrims reuse existing swatches with contrasting backing
+
+**Approval:** User rejected a different layout and approved only three adjustments to the existing swatches: scrims last, no second contrast half, and one contrasting neutral layer beneath the actual scrim.
+
+**Decision:** Reuse the existing ramp-row, text, spacing, and swatch sizing. Exclude scrims from ordinary color ramps, including composed and explicitly named opaque scrims. Render grouped opacity steps in the existing final Scrims section using that same swatch design. Bind a light neutral beneath black scrims and a dark neutral beneath white scrims, choosing existing contrasting neutral variables. The overlay binds the original scrim variable without an additional opacity multiplier. Ordinary primitive swatches retain both contrast halves. Missing scrim/neutral data yields a warning instead of invented values.
+
+**Architecture and verification:** Extend the existing showcase renderer and reuse the existing composed-variable resolver; no public tool or parallel showcase flow. Full showcase regeneration already rebuilds generated sections, so tests require one final scrim section, not stable generated section IDs. Full suite 139/139 passes. Runtime rendering checks cover classification, opacity ordering, bindings, composites, missing data, ordinary-swatch preservation, and refresh ordering. Updated legacy checks that required the now-replaced scrim table while retaining elevation table checks. Bridge build: 1.3.0+dev.20261106.5. No live Figma regeneration or variable changes; visual verification remains pending.
+
+## [2026-11-06] Optional motion is discoverable during setup
+
+**Approval:** User approved the preview question, Include motion foundations?, with Review a motion proposal and Skip for now. Supersedes the previous rule requiring an unsolicited explicit motion request before offering the feature.
+
+**Decision:** Offer once after base preparation and before final build approval. Reuse existing motion and choices already supplied in the current setup. Motion is optional and outside required intake topics. Skip causes no motion tool calls, defaults, or writes. Review or an explicit request permits only a read-only profile proposal. Preserve an existing/edited profile instead of replacing it with default. Save only after exact-profile approval, reprepare using the returned continuation, and retain separate Figma collection/mode and variable approval boundaries. Missing motion remains valid; springs are not added by default.
+
+**Architecture and verification:** Extend existing workflow confirmation and guide steps, using prepare_ds_config and the existing motion planner/apply path. No new public tool, bridge command, or automatic mutation is introduced. Adapters and packaged designer skills share the discovery rule. The new regression fails on the previous guide and passes with the choice, ordering, skip/review, profile-preservation, and save approval contracts. Full suite 140/140 test files passes. No Figma writes or runtime reloads; live host/model behavior remains pending. Bridge build unchanged at 1.3.0+dev.20261106.5.

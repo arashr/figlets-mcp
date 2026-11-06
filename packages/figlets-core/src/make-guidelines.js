@@ -248,6 +248,9 @@ function snapshotFromDsConfig(inputDs) {
     responsiveModes
   );
   for (const [role, definition] of Object.entries(typography.scale || {})) {
+    if (definition.family || typography.roleFamilies || typography.families && (typography.families.display || typography.families.body || typography.families.ui)) {
+      addVariable(typographyCollection, `${typePrefix}/${role}/family`, "STRING", responsiveValues(dsCore.resolveTypographyFamily(typography, role, definition).family));
+    }
     addVariable(typographyCollection, `${typePrefix}/${role}/size`, "FLOAT", responsiveValues(definition.sizes || []));
     addVariable(typographyCollection, `${typePrefix}/${role}/line-height`, "FLOAT", responsiveValues(definition.lineHeights || []));
     addVariable(typographyCollection, `${typePrefix}/${role}/weight`, "FLOAT", responsiveValues(definition.weight || 400));

@@ -184,10 +184,9 @@ try {
     assert.strictEqual(route.hardRules.reviewMustUseFigletsWorkflow, true);
     assert.strictEqual(route.selectionPrompt, null);
     assert.ok(route.designerResponse.startsWith("# Figlets"));
-    assert.ok(route.designerResponse.includes("I'll review your design system using the Figlets health check."));
-    assert.ok(route.designerResponse.includes("1. Sync the current Figma file"));
-    assert.ok(route.designerResponse.includes("5. Check for missing tokens and collection modes"));
-    assert.ok(route.designerResponse.includes("semantic setup findings separately from token-gap suggestions"));
+    assert.ok(route.designerResponse.includes("I'll check your design system"));
+    assert.ok(route.designerResponse.split(/\s+/).length < 40, "health opening should be concise");
+    assert.ok(route.hardRules.presentation.verification.includes("complete health-check sequence"));
     assert.ok(!route.designerResponse.includes("| What you can ask for |"));
   }
 
@@ -342,9 +341,8 @@ try {
     assert.ok(route.message.includes("do not draft a full proposal"));
     assert.ok(route.message.includes("create_ds_config_from_intake"));
     assert.ok(route.designerResponse.includes("one setup question at a time"));
-    assert.ok(route.designerResponse.includes("won't draft"));
-    assert.ok(route.designerResponse.includes("not a proposal to approve"));
-    assert.ok(route.designerResponse.includes("save your choices"));
+    assert.ok(route.designerResponse.includes("keep the choices"));
+    assert.ok(route.intakeContract.proposalRule.includes("Do not draft a full proposal before intake"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
   }
 

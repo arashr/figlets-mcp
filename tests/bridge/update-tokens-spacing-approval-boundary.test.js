@@ -80,6 +80,7 @@ module.exports = (async () => {
   };
 
   const functionNames = [
+    "typographyFamilies", "resolveTypographyFamily", "typographyFontStyles",
     "_scopeForVariableName",
     "_sameVariableScopes",
     "_setVariableScopes",
@@ -95,7 +96,7 @@ module.exports = (async () => {
     "_tokenUpdateEntriesFromSpacingRepairs",
     "_tokenValueEq",
   ];
-  const source = functionNames.map(name => extractFunction(code, name)).join("\n")
+  const source = extractFunction(code, "_preflightTypographyFonts", true) + "\n" + functionNames.map(name => extractFunction(code, name)).join("\n")
     + "\n" + extractFunction(code, "_updateDsTokens", true)
     + "\nmodule.exports = { _updateDsTokens };";
 

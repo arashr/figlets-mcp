@@ -612,6 +612,7 @@ function _handleApplyDsTokens(args, configPath, ds) {
         message: result.message || "Token update complete.",
         configPath,
         error: result.error,
+        fontLoadFailures: result.fontLoadFailures || [],
         missingCapabilityNotes: missingCapabilityNotes.concat(result.missingCapabilityNotes || []),
         applySupported: true,
       };

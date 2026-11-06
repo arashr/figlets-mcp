@@ -533,11 +533,9 @@ try {
     assert.ok(route.message.includes("do not draft a full proposal"));
     assert.ok(route.message.includes("create_ds_config_from_intake"));
     assert.ok(route.designerResponse.includes("one setup question at a time"));
-    assert.ok(route.designerResponse.includes("won't draft"));
-    assert.ok(route.designerResponse.includes("show the collections, modes"));
+    assert.ok(route.designerResponse.split(/\s+/).length < 50, "setup opening should ask without a policy wall");
+    assert.ok(route.hardRules.presentation.questions.setup.includes("next missing choice"));
     assert.ok(!route.designerResponse.includes("config"));
-    assert.ok(route.designerResponse.includes("save your choices"));
-    assert.ok(route.designerResponse.includes("sample token relationships"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
 
     const guide = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });

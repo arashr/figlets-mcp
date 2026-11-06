@@ -4,6 +4,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { ensureActiveDsConfig } = require('../../packages/figlets-mcp-server/src/utils/ensure-ds-config.js');
+const { readDsConfig, writeDsConfig } = require('../../packages/figlets-mcp-server/src/figlets-core.js').dsConfig;
 
 const {
   exportDesignMdTool,
@@ -211,15 +213,30 @@ module.exports = (async () => {
     const ws = makeWorkspace('inferred-name');
     try {
       const original = fs.readFileSync(ws.configPath, 'utf8');
-      fs.writeFileSync(ws.configPath, original.replace("project: { name: 'Export MD Test' },", "project: { name: 'Imported file' }, figlets: { projectNameSource: 'file-name-suggestion' },"));
+      fs.writeFileSync(ws.configPath, original.replace("project: { name: 'Export MD Test' },", "project: { name: 'Imported file' }, figlets: { source: 'figma-snapshot-bootstrap', projectNameSource: 'file-name-suggestion' },"));
+      const snapshot = JSON.parse(fs.readFileSync(ws.snapshotPath, 'utf8'));
+      snapshot.fileName = 'Different file name';
+      const refresh = () => ensureActiveDsConfig({ configPath: ws.configPath, refreshGenerated: true, dataSource: { figmaData: snapshot } });
+      assert.strictEqual(refresh().refreshed, true);
       const pending = await withCwd(ws.tmp, () => handleExportDesignMd({ config_path: ws.configPath, figmaDataPath: ws.snapshotPath }));
       assert.strictEqual(pending.status, 'needs_designer_input');
       assert.strictEqual(pending.needsDesignerInput[0].suggestedValue, 'Imported file');
       const resumed = await withCwd(ws.tmp, () => handleExportDesignMd({ ...pending.continuation.input, design_system_name: 'Real DS' }));
       assert.ok(!resumed.error && resumed.designMd.written);
       assert.ok(fs.readFileSync(ws.configPath, 'utf8').includes('designer-confirmed'));
+      assert.strictEqual(refresh().refreshed, true);
+      assert.strictEqual(readDsConfig(ws.configPath).project.name, 'Real DS');
+      assert.strictEqual(readDsConfig(ws.configPath).figlets.projectNameSource, 'designer-confirmed', 'refresh must preserve name confirmation');
       const next = await withCwd(ws.tmp, () => handleExportDesignMd({ config_path: ws.configPath, figmaDataPath: ws.snapshotPath, dry_run: true }));
       assert.notStrictEqual(next.status, 'needs_designer_input', 'confirmed names must not prompt again');
+      assert.ok(!next.error, JSON.stringify(next));
+      const renamed = readDsConfig(ws.configPath);
+      renamed.project.name = 'Renamed System';
+      writeDsConfig(ws.configPath, renamed);
+      refresh();
+      const renamedExport = await withCwd(ws.tmp, () => handleExportDesignMd({ config_path: ws.configPath, figmaDataPath: ws.snapshotPath }));
+      assert.ok(!renamedExport.error && renamedExport.designMd.written, JSON.stringify(renamedExport));
+      assert.ok(fs.readFileSync(renamedExport.designMd.path, 'utf8').includes('Renamed System'), 'intentional names must survive refresh into the artifact');
     } finally { fs.rmSync(ws.tmp, { recursive: true, force: true }); }
   }
 

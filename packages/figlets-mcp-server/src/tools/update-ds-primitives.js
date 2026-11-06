@@ -109,14 +109,26 @@ function handleUpdateDsPrimitives(args) {
   const needsPrimitiveShadow = requestedCategories.includes('primitive-shadow');
   const needsPrimitiveOpacity = requestedCategories.includes('primitive-opacity');
   const needsPrimitiveGenerator = needsPrimitiveTypography || needsPrimitiveShadow;
+  if (needsPrimitiveGenerator && ds.figlets && ds.figlets.source === 'figma-snapshot-bootstrap'
+    && ds.figlets.foundationRequirementsApproved !== true) {
+    const entries = {};
+    for (const category of requestedCategories.filter(category => ['primitive-typography', 'primitive-shadow'].includes(category))) {
+      const required = ds.figlets.foundationRequirements && ds.figlets.foundationRequirements[category] || [];
+      if (required.some(item => !Object.prototype.hasOwnProperty.call(item, 'value'))) {
+        return Promise.resolve({ error: 'These imported foundations need exact mode values or alias choices before a repair can be previewed. No default values will be substituted.' });
+      }
+      entries[category] = required.map(item => ({ name: item.name, type: item.expectedType, value: item.value }));
+    }
+    ds.figlets.foundationPrimitiveEntries = entries;
+  }
 
   if (needsColor && (!ds.color || !ds.color.ramps || !ds.color.ramps.length)) {
     return Promise.resolve({ error: 'Config is missing DS.color.ramps. Run prepare_ds_config first.' });
   }
-  if ((needsSpacing || needsPrimitiveGenerator) && !ds.primitives) {
+  if ((needsSpacing || needsPrimitiveGenerator && !(ds.figlets && ds.figlets.foundationPrimitiveEntries)) && !ds.primitives) {
     return Promise.resolve({ error: 'Config is missing DS.primitives. Run prepare_ds_config first.' });
   }
-  if (needsPrimitiveTypography && (!ds.typography || !ds.typography.scale)) {
+  if (needsPrimitiveTypography && !(ds.figlets && ds.figlets.foundationPrimitiveEntries) && (!ds.typography || !ds.typography.scale)) {
     return Promise.resolve({ error: 'Config is missing DS.typography.scale. Run prepare_ds_config first.' });
   }
   if (needsPrimitiveOpacity && (!opacityRepairs || !opacityRepairs.length)) {

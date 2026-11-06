@@ -1,0 +1,35 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { handleFigletsWorkflowGuide } = require('../../packages/figlets-mcp-server/src/tools/agent-interface');
+const result = handleFigletsWorkflowGuide({ workflow_id: 'new-ds-setup' });
+const guide = result.workflow;
+const steps = guide.steps;
+const choice = steps.find(step => step.id === 'motion-choice');
+assert.ok(choice, 'ordinary setup must surface the optional motion choice');
+assert.strictEqual(choice.kind, 'confirmation');
+assert.deepStrictEqual(choice.selectionPrompt.choices.map(item => item.id), ['review-motion', 'skip-motion']);
+for (const item of choice.selectionPrompt.choices) assert.ok(choice.selectionPrompt.message.includes(item.label), 'native and text choices must agree');
+const index = id => steps.findIndex(step => step.id === id);
+assert.ok(index('prepare') < index('motion-choice'));
+assert.ok(index('motion-choice') < index('approve-build'));
+assert.ok(!guide.intakeContract.requiredTopics.some(topic => /motion/i.test(topic)), 'motion must remain outside required foundation choices');
+const preview = steps.find(step => step.id === 'preview-motion');
+assert.strictEqual(preview.tool, 'prepare_ds_config');
+assert.strictEqual(preview.kind, 'read');
+assert.ok(preview.conditional.includes('review-motion'));
+assert.strictEqual(preview.optionsForNewProfile.motion_profile, 'default');
+assert.ok(preview.existingProfileRule.includes('Never replace'));
+const save = steps.find(step => step.id === 'save-motion');
+assert.strictEqual(save.requiresApproval, true);
+assert.strictEqual(save.localConfigWrite, true);
+assert.strictEqual(save.inputSource, 'preview-motion.saveInput');
+assert.ok(choice.skipRule.includes('no motion tool calls'));
+assert.ok(choice.repeatRule.includes('already'));
+assert.ok(result.hardRules.bulkRepairRouting.some(rule => rule.includes('skip-motion') && rule.includes('separate approval')));
+for (const file of ['packages/figlets-adapter/AGENTS.md', 'packages/figlets-adapter/CLAUDE.md', 'plugins/codex/figlets/skills/figlets-designer/SKILL.md', 'plugins/claude-code/figlets/skills/figlets-designer/SKILL.md']) {
+  const text = fs.readFileSync(path.resolve(__dirname, '../..', file), 'utf8');
+  assert.ok(text.includes('Review a motion proposal') && text.includes('Skip for now'), 'all host instructions must expose the same choice');
+  assert.ok(!text.includes('Do not add a motion question to ordinary intake') && !text.includes('Do not add motion to ordinary intake'), 'remove the superseded discovery prohibition');
+}

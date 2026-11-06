@@ -153,12 +153,14 @@ module.exports = (async () => {
       return style;
     },
     async loadFontAsync(font) {
+      if (font.family === "Space Grotesk" && font.style === "Regular") return;
       if (font.family === "Inter" && (font.style === "Regular" || font.style === "Medium")) return;
       throw new Error(`Font unavailable: ${font.family} ${font.style}`);
     },
   };
 
   const functionNames = [
+    "typographyFamilies", "resolveTypographyFamily", "typographyFontStyles",
     "_scopeForVariableName",
     "_sameVariableScopes",
     "_setVariableScopes",
@@ -173,7 +175,7 @@ module.exports = (async () => {
     "_tokenUpdateEntriesForCategory",
     "_tokenValueEq",
   ];
-  const source = functionNames.map(name => extractFunction(code, name)).join("\n")
+  const source = extractFunction(code, "_preflightTypographyFonts", true) + "\n" + functionNames.map(name => extractFunction(code, name)).join("\n")
     + "\n" + extractFunction(code, "_updateDsTokens", true)
     + "\nmodule.exports = { _updateDsTokens };";
 
@@ -376,4 +378,28 @@ module.exports = (async () => {
     "exact effect-style apply must not touch unapproved elevation styles"
   );
   assert.notStrictEqual(elevationTwoStyle.effects[0].radius, 888, "the approved raw style should be rebuilt");
+
+  variables.push(makeVariable('display-font', 'font/display', 'primitives', 'STRING', { value: 'Space Grotesk' }));
+  DS.typography.families = { sans: 'Inter', display: 'Space Grotesk' };
+  DS.typography.scale['display/lg'] = { sizes: [48, 48, 48], lineHeights: [56, 56, 56], weight: 400, tracking: 0 };
+  const multiPreview = await context.module.exports._updateDsTokens({ DS, categories: ['typography'], createMissing: true, dryRun: true });
+  assert.ok(!multiPreview.error, multiPreview.error);
+  assert.ok(!variables.some(item => item.name === 'type/display/lg/family'), 'preview must not create family variables');
+  const multiApply = await context.module.exports._updateDsTokens({ DS, categories: ['typography'], createMissing: true, dryRun: false });
+  assert.ok(!multiApply.error, multiApply.error);
+  const displayFamilyVariable = variables.find(item => item.name === 'type/display/lg/family');
+  assert.ok(Object.values(displayFamilyVariable.valuesByMode).every(value => value.id === 'display-font'));
+  assert.strictEqual(textStyles.find(item => item.name === 'type/display/lg').fontName.family, 'Space Grotesk');
+  assert.strictEqual(textStyles.find(item => item.name === 'type/body/md').fontName.family, 'Inter');
+  const beforeMissingFont = JSON.stringify({ variables, textStyles });
+  DS.typography.families.display = 'Missing Font';
+  const missingFont = await context.module.exports._updateDsTokens({ DS, categories: ['typography'], createMissing: true, dryRun: false });
+  assert.ok(missingFont.error);
+  assert.strictEqual(missingFont.fontLoadFailures[0].family, 'Missing Font');
+  assert.strictEqual(JSON.stringify({ variables, textStyles }), beforeMissingFont, 'font failure must precede dependent updates');
+  DS.typography.families.display = 'Space Grotesk';
+  DS.typography.scale['display/lg'].weight = 700;
+  const missingWeight = await context.module.exports._updateDsTokens({ DS, categories: ['typography'], createMissing: true, dryRun: false });
+  assert.ok(missingWeight.error);
+  assert.strictEqual(JSON.stringify({ variables, textStyles }), beforeMissingFont, 'missing display weight must not fall back to Regular');
 })();

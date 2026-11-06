@@ -25,6 +25,10 @@ try {
   assert.ok(!result.error, JSON.stringify(result));
   assert.strictEqual(result.config.created, true);
   assert.strictEqual(result.config.path, configPath, 'Explicit snapshots own their sibling internal model, not another active file');
+  assert.strictEqual(result.summary.missingVariableCount, 0, 'Unchosen imported defaults are not missing requirements');
+  assert.strictEqual(result.tokenGaps.length, 0);
+  assert.strictEqual(result.repairPlan.primitiveRepairPlan, null);
+  assert.strictEqual(result.message, 'This file currently contains color tokens. Typography and shadow foundations have not been defined.');
   assert.ok(fs.existsSync(configPath));
   assert.strictEqual(fs.readFileSync(snapshotPath, 'utf8'), before, 'Preparing internal data must not mutate the Figma snapshot');
   const configBefore = fs.readFileSync(configPath, 'utf8');

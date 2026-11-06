@@ -11,6 +11,7 @@ const { getTouchSemanticDefaults } = require("../figlets-core.js").dsConfig;
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/paths.js");
 const { ensureActiveDsConfig } = require('../utils/ensure-ds-config.js');
+const { requiredFoundationEntries, brokenFoundationReferences } = require('../utils/foundation-requirements.js');
 const {
   SEMANTIC_ALIAS_REPAIR_MODEL,
   buildPrimitiveSpacingLookup,
@@ -902,7 +903,8 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
 
   const tokenGaps = [];
   const existingUpdates = [];
-  const missingCapabilityNotes = [];
+  const brokenReferences = brokenFoundationReferences(ds, figmaData, categories);
+  const missingCapabilityNotes = brokenReferences.slice();
   const foundationRepairs = [];
   const foundationRepairKeys = new Set();
   const supportedCategoriesWithGaps = new Set();
@@ -933,6 +935,17 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     }
 
     supportedCategories.push(category);
+    const expected = requiredFoundationEntries(ds, figmaData, category,
+      _expectedForCategory(category === "spacing-semantics" ? planningDs : ds, category));
+    if (!expected.length && ["primitive-typography", "primitive-shadow"].includes(category)
+      && ds.figlets && ds.figlets.source === "figma-snapshot-bootstrap") continue;
+    if (["primitive-typography", "primitive-shadow"].includes(category) && ds.figlets
+      && ds.figlets.source === "figma-snapshot-bootstrap" && ds.figlets.foundationRequirementsApproved !== true
+      && expected.some(item => !Object.prototype.hasOwnProperty.call(item, "value"))) {
+      foundationBlockedApplyCategories.add(category);
+      missingCapabilityNotes.push({ kind: "unresolved-foundation-values", category, productGap: false, repairReady: false,
+        reason: "Exact mode values or alias choices are needed before these imported foundations can be repaired. Do not substitute Figlets defaults." });
+    }
     const requiredCollection = _requiredCollectionForCategory(ds, category);
     if (collectionNames && requiredCollection && !collectionNames.has(requiredCollection)) {
       const foundationRepair = _foundationRepairForCategory(ds, category, requiredCollection);
@@ -990,7 +1003,6 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
         }
       }
     }
-    const expected = _expectedForCategory(category === "spacing-semantics" ? planningDs : ds, category);
     for (const item of expected) {
       if (item.kind === "unavailable-source") {
         missingCapabilityNotes.push({
@@ -1257,6 +1269,7 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     touchPolicyReview,
   });
   const summary = {
+    brokenReferenceCount: brokenReferences.length,
     emptyDesignSystem: emptyDesignSystem.isEmpty,
     designSystemArtifactCount: emptyDesignSystem.counts.designSystemArtifacts,
     missingVariableCount: missingVariables.length,
@@ -1278,13 +1291,18 @@ function inspectDsTokenGapsFromConfigAndFigmaData(ds, figmaData, options = {}) {
     + summary.typeMismatchCount + summary.staleVariableCount + summary.configDriftCount
     + summary.opacityMigrationCount + summary.touchPolicyDriftCount;
   return {
-    message: _composeMessage(summary),
+    message: !gapTotal && !brokenReferences.length && ds.figlets && ds.figlets.source === "figma-snapshot-bootstrap"
+      && categories.every(category => ["primitive-typography", "primitive-shadow"].includes(category))
+      && (figmaData.variables || []).length > 0 && figmaData.variables.every(variable => variable.resolvedType === "COLOR")
+      ? "This file currently contains color tokens. Typography and shadow foundations have not been defined."
+      : _composeMessage(summary),
     semanticAliasRepairModel: spacingAliasPlan.model || SEMANTIC_ALIAS_REPAIR_MODEL,
     spacingSemanticSource: spacingAliasPlan.spacingSemanticSource || spacingEffective.spacingSemanticMeta.source,
     approvalBoundary: gapTotal ? TOKEN_GAP_APPROVAL_BOUNDARY : null,
     summary,
     repairPlan,
     topFindings: {
+      brokenReferences,
       missingVariables: missingVariables.slice(0, 10),
       missingStyles: missingStyles.slice(0, 10),
       staleStyles: staleStyles.slice(0, 10),
@@ -1344,6 +1362,7 @@ function _buildRepairPlan(context) {
   }));
   const primitiveApplyCategories = categories
     .filter(category => PRIMITIVE_APPLY_CATEGORIES.has(category))
+    .filter(category => !foundationBlocked.has(category))
     .filter(category =>
       (context.missingVariables || []).some(gap => gap.category === category)
       || (context.typeMismatches || []).some(gap => gap.category === category)
@@ -2214,7 +2233,7 @@ const TOKEN_GAP_APPROVAL_BOUNDARY = {
 function _composeMessage(summary) {
   const total = summary.missingVariableCount + summary.missingStyleCount + summary.typeMismatchCount
     + (summary.staleVariableCount || 0) + (summary.staleStyleCount || 0) + (summary.configDriftCount || 0)
-    + (summary.opacityMigrationCount || 0) + (summary.touchPolicyDriftCount || 0);
+    + (summary.opacityMigrationCount || 0) + (summary.touchPolicyDriftCount || 0) + (summary.brokenReferenceCount || 0);
   if (summary.emptyDesignSystem) {
     const setupMessage = "This file has no design-system variables or local styles yet. Ask whether the designer wants to set up or continue the design-system foundation before presenting ordinary token-gap repair choices.";
     if (!total && !summary.unsupportedCategoryCount && !summary.responsiveSpacingAdvisoryCount && !summary.blockedOpacityMigrationCount) {
@@ -2229,6 +2248,7 @@ function _composeMessage(summary) {
     return "No config-backed token gaps found in the inspected categories.";
   }
   const parts = [];
+  if (summary.brokenReferenceCount) parts.push(`${summary.brokenReferenceCount} unresolved variable reference${summary.brokenReferenceCount === 1 ? "" : "s"}`);
   if (summary.missingVariableCount) parts.push(`${summary.missingVariableCount} missing variable${summary.missingVariableCount === 1 ? "" : "s"}`);
   if (summary.missingStyleCount) parts.push(`${summary.missingStyleCount} missing style${summary.missingStyleCount === 1 ? "" : "s"}`);
   if (summary.staleStyleCount) parts.push(`${summary.staleStyleCount} effect style${summary.staleStyleCount === 1 ? "" : "s"} with raw shadow properties`);

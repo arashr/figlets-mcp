@@ -309,6 +309,12 @@ function inferTypographyFromSnapshot(figmaData) {
 
   for (const variable of variables) {
     if (!variable || typeof variable.name !== "string") continue;
+    const familyMatch = variable.name.match(/^type\/(.+)\/family$/i);
+    if (familyMatch && variable.resolvedType === "STRING") {
+      const familyValue = _firstStringValue(variable, varsById, collections);
+      if (familyValue) groupFor(familyMatch[1]).family = familyValue;
+      continue;
+    }
     let match = variable.name.match(/^type\/(.+?)\/(.+?)\/(size|line-height|weight|tracking|letter-spacing)$/i);
     if (match && variable.resolvedType === "FLOAT") {
       const role = match[1] + "/" + match[2];
@@ -347,7 +353,7 @@ function inferTypographyFromSnapshot(figmaData) {
     }
     if (style.fontName && style.fontName.family) {
       familyCounts[style.fontName.family] = (familyCounts[style.fontName.family] || 0) + 1;
-      group.family = style.fontName.family;
+      if (!group.family) group.family = style.fontName.family;
     }
   }
 
@@ -369,6 +375,7 @@ function inferTypographyFromSnapshot(figmaData) {
     for (const family of Object.keys(familyCounts)) {
       if (!bestFamily || familyCounts[family] > familyCounts[bestFamily]) bestFamily = family;
     }
+    if (scale['body/md'] && scale['body/md'].family) bestFamily = scale['body/md'].family;
     if (bestFamily) families.sans = bestFamily;
   }
 
@@ -631,7 +638,7 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
       unpaired: templateSemantics.unpaired || [],
     }
     : inferredSemantics;
-  return {
+  const ds = {
     project: {
       name: opts.projectName || (figmaData && figmaData.fileName) || "Imported Figma design system",
     },
@@ -656,6 +663,8 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
       note: "Generated from synced Figma variables because no file-scoped design-system.config.js existed.",
     },
   };
+  ds.figlets.foundationRequirements = require('./foundation-requirements').observedFoundationRequirements(ds, figmaData);
+  return ds;
 }
 
 module.exports = {

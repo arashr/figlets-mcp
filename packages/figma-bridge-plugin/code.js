@@ -1,6 +1,8 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
 var _bridgeBuild = '1.3.0';
+// Local build metadata. Remove this suffix when preparing the next release.
+_bridgeBuild += '+dev.20261106.5';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -2367,6 +2369,15 @@ async function _runQaBindingAudit(opts) {
       return;
     }
 
+    // Component sets organize variants in Figma; only their contents are product UI.
+    if (node.type === 'COMPONENT_SET') {
+      for (let childIndex = 0; node.children && childIndex < node.children.length; childIndex++) {
+        if (truncated) break;
+        _auditNode(node.children[childIndex]);
+      }
+      return;
+    }
+
     auditedNodeCount++;
 
     if (node.fills && Array.isArray(node.fills)) {
@@ -2414,6 +2425,8 @@ async function _runQaBindingAudit(opts) {
 
     if (node.layoutMode && node.layoutMode !== 'NONE') {
       ['paddingTop','paddingBottom','paddingLeft','paddingRight','itemSpacing','counterAxisSpacing'].forEach(function (prop) {
+        // Auto gap distributes free space; the retained itemSpacing value is inactive.
+        if (prop === 'itemSpacing' && node.primaryAxisAlignItems === 'SPACE_BETWEEN') return;
         if (typeof node[prop] === 'number' && node[prop] !== 0 && !(node.boundVariables && node.boundVariables[prop])) {
           _pushViolation(node, prop, node[prop] + 'px', 'spacing', {
             suggestion: _nearestFloatSuggestion(node[prop], 'spacing', 'spacing')
@@ -3818,9 +3831,44 @@ async function _buildShowcase(opts) {
     });
   }
 
-  function _buildPrimitiveContrastSwatch(swatchRGB, stepLabel, hexLabel, swatchVar) {
-    var top = _pickNeutralTextForSwatch(swatchRGB);
-    var bottom = _pickNeutralBackgroundForSwatchText(swatchRGB);
+  function _resolveShowcaseScrim(variable) {
+    if (!variable) return null;
+    const variables = {};
+    const collections = {};
+    for (const item of _dsStruct_allVars) variables[item.id] = item;
+    for (const item of _dsStruct_allColls) collections[item.id] = item;
+    const resolved = _docResolveVariableValue(variable.id, '', variables, collections);
+    const color = resolved && resolved.val;
+    if (!color || ![color.r, color.g, color.b].every(function (value) { return typeof value === 'number' && isFinite(value); })) return null;
+    const alpha = color.a === undefined ? 1 : color.a;
+    if (typeof alpha !== 'number' || !isFinite(alpha) || alpha < 0 || alpha > 1) return null;
+    return { r: color.r, g: color.g, b: color.b, a: alpha };
+  }
+
+  function _isShowcaseScrim(variable) {
+    if (!variable || variable.resolvedType !== 'COLOR') return false;
+    if (/(?:^|\/)(scrim|overlay)(?:\/|$)/i.test(variable.name || '')) return true;
+    const resolved = _resolveShowcaseScrim(variable);
+    return !!resolved && resolved.a < 0.95;
+  }
+
+  function _pickScrimBackground(swatchRGB) {
+    const needsLight = _lum(swatchRGB) < 0.5;
+    var best = null;
+    for (const candidate of _scored) {
+      if (!/(?:^|\/)(neutral|neutral-variant|gray|grey)(?:\/|$)/i.test(candidate.name)) continue;
+      const color = _resolveShowcaseScrim(candidate.v);
+      if (!color || color.a < 1) continue;
+      const luminance = _lum(color);
+      if (needsLight ? luminance <= 0.5 : luminance >= 0.5) continue;
+      if (!best || (needsLight ? luminance > best.luminance : luminance < best.luminance)) best = { rgb: color, variable: candidate.v, luminance: luminance };
+    }
+    return best;
+  }
+
+  function _buildPrimitiveContrastSwatch(swatchRGB, stepLabel, hexLabel, swatchVar, scrimBackground) {
+    var top = scrimBackground ? null : _pickNeutralTextForSwatch(swatchRGB);
+    var bottom = scrimBackground ? null : _pickNeutralBackgroundForSwatchText(swatchRGB);
 
     const swatch = _f('Primitive Contrast Swatch 1.0.0', 'VERTICAL');
     swatch.itemSpacing = 8;
@@ -3844,27 +3892,50 @@ async function _buildShowcase(opts) {
     container.strokeWeight = 0.5;
     container.strokeAlign = 'INSIDE';
 
-    const topHalf = _f('Neutral on swatch', 'HORIZONTAL');
-    topHalf.primaryAxisAlignItems = 'CENTER';
-    topHalf.counterAxisAlignItems = 'CENTER';
-    topHalf.resize(56, 32);
-    topHalf.fills = [_paint(swatchRGB, swatchVar)];
-    const topText = _tDS(_contrastLabel(top.lc, top.ratio, 75, 4.5), 9, top.fg, true, top.varRef);
-    topHalf.appendChild(topText);
-    container.appendChild(topHalf);
-    topHalf.layoutSizingHorizontal = 'FILL';
-    topHalf.layoutSizingVertical = 'FIXED';
+    if (scrimBackground) {
+      container.layoutMode = 'NONE';
+      container.fills = [];
+      const background = figma.createFrame();
+      background.name = 'Neutral background';
+      background.layoutMode = 'NONE';
+      background.resize(56, 64);
+      background.fills = [_paint({ r: scrimBackground.rgb.r, g: scrimBackground.rgb.g, b: scrimBackground.rgb.b }, scrimBackground.variable)];
+      container.appendChild(background);
+      background.x = 0; background.y = 0;
+      background.constraints = { horizontal: 'STRETCH', vertical: 'STRETCH' };
+      const overlay = figma.createFrame();
+      overlay.name = 'Scrim overlay';
+      overlay.layoutMode = 'NONE';
+      overlay.resize(56, 64);
+      // Binding the COLOR variable supplies its alpha; do not multiply paint opacity again.
+      overlay.fills = [_paint(swatchRGB, swatchVar)];
+      container.appendChild(overlay);
+      overlay.x = 0; overlay.y = 0;
+      overlay.constraints = { horizontal: 'STRETCH', vertical: 'STRETCH' };
+    } else {
+      const topHalf = _f('Neutral on swatch', 'HORIZONTAL');
+      topHalf.primaryAxisAlignItems = 'CENTER';
+      topHalf.counterAxisAlignItems = 'CENTER';
+      topHalf.resize(56, 32);
+      topHalf.fills = [_paint(swatchRGB, swatchVar)];
+      const topText = _tDS(_contrastLabel(top.lc, top.ratio, 75, 4.5), 9, top.fg, true, top.varRef);
+      topHalf.appendChild(topText);
+      container.appendChild(topHalf);
+      topHalf.layoutSizingHorizontal = 'FILL';
+      topHalf.layoutSizingVertical = 'FIXED';
 
-    const bottomHalf = _f('Swatch on neutral', 'HORIZONTAL');
-    bottomHalf.primaryAxisAlignItems = 'CENTER';
-    bottomHalf.counterAxisAlignItems = 'CENTER';
-    bottomHalf.resize(56, 32);
-    bottomHalf.fills = [_paint(bottom.bg, bottom.varRef)];
-    const bottomText = _tDS(_contrastLabel(bottom.lc, bottom.ratio, 75, 4.5), 9, swatchRGB, true, swatchVar);
-    bottomHalf.appendChild(bottomText);
-    container.appendChild(bottomHalf);
-    bottomHalf.layoutSizingHorizontal = 'FILL';
-    bottomHalf.layoutSizingVertical = 'FIXED';
+      const bottomHalf = _f('Swatch on neutral', 'HORIZONTAL');
+      bottomHalf.primaryAxisAlignItems = 'CENTER';
+      bottomHalf.counterAxisAlignItems = 'CENTER';
+      bottomHalf.resize(56, 32);
+      bottomHalf.fills = [_paint(bottom.bg, bottom.varRef)];
+      const bottomText = _tDS(_contrastLabel(bottom.lc, bottom.ratio, 75, 4.5), 9, swatchRGB, true, swatchVar);
+      bottomHalf.appendChild(bottomText);
+      container.appendChild(bottomHalf);
+      bottomHalf.layoutSizingHorizontal = 'FILL';
+      bottomHalf.layoutSizingVertical = 'FIXED';
+
+    }
 
     swatch.appendChild(container);
     container.layoutSizingHorizontal = 'FILL';
@@ -3879,7 +3950,7 @@ async function _buildShowcase(opts) {
     return swatch;
   }
 
-  function _buildPrimSwatchRow(rampName, vars) {
+  function _buildPrimSwatchRow(rampName, vars, scrims) {
     const row = _f('Table / Row / Primary Color Swatches 1.0.0', 'VERTICAL');
     row.paddingLeft = 16; row.paddingRight  = 16;
     row.paddingTop  = 16; row.paddingBottom = 16;
@@ -3896,7 +3967,12 @@ async function _buildShowcase(opts) {
 
     for (const v of vars) {
       const stepName = v.name.split('/').pop();
-      const rawVal   = resolveVarValue(v);
+      const rawVal   = scrims ? _resolveShowcaseScrim(v) : resolveVarValue(v);
+      const backing = scrims && rawVal ? _pickScrimBackground(rawVal) : null;
+      if (scrims && (!rawVal || !backing)) {
+        _warnShowcaseBinding('Cannot demonstrate ' + v.name + ': ' + (!rawVal ? 'scrim value is unresolved.' : 'a contrasting neutral variable is unavailable.'));
+        continue;
+      }
       const swatchRGB = rawVal && 'r' in rawVal
         ? { r: rawVal.r, g: rawVal.g, b: rawVal.b }
         : { r: 0.8, g: 0.8, b: 0.8 };
@@ -3904,7 +3980,8 @@ async function _buildShowcase(opts) {
         swatchRGB,
         stepName,
         rawVal && 'r' in rawVal ? _hex(rawVal) : '—',
-        v
+        v,
+        backing
       );
       strip.appendChild(swatch);
       swatch.layoutSizingHorizontal = 'FILL';
@@ -3913,6 +3990,7 @@ async function _buildShowcase(opts) {
       _setMinWidth(swatch, 56);
     }
 
+    if (scrims && !strip.children.length) return null;
     row.appendChild(strip);
     strip.layoutSizingHorizontal = 'FILL';
     return row;
@@ -4709,7 +4787,7 @@ async function _buildShowcase(opts) {
 
       for (const coll of _primColls) {
         const _colorVars = coll.vars.filter(v => {
-          if (v.resolvedType !== 'COLOR') return false;
+          if (v.resolvedType !== 'COLOR' || _isShowcaseScrim(v)) return false;
           const raw = resolveVarValue(v);
           if (raw && raw.a !== undefined && raw.a < 0.95) return false;
           return true;
@@ -4738,7 +4816,7 @@ async function _buildShowcase(opts) {
     if (_semanticColls.length) {
       const _semVarRGB = new Map();
       for (const coll of _semanticColls) {
-        for (const v of coll.vars.filter(v => v.resolvedType === 'COLOR')) {
+        for (const v of coll.vars.filter(v => v.resolvedType === 'COLOR' && !_isShowcaseScrim(v))) {
           const raw = resolveVarValue(v);
           if (raw && 'r' in raw) _semVarRGB.set(v.name, { r: raw.r, g: raw.g, b: raw.b });
         }
@@ -5078,7 +5156,7 @@ async function _buildShowcase(opts) {
           const _extraBgGroups = {};
           const _extraBgOrder = [];
           for (const coll of _semanticColls) {
-            for (const v of coll.vars.filter(v => v.resolvedType === 'COLOR')) {
+            for (const v of coll.vars.filter(v => v.resolvedType === 'COLOR' && !_isShowcaseScrim(v))) {
               if (_seenConfigBgRefs[v.name]) continue;
               if (/(?:^|\/)on[-_]/i.test(v.name)) continue;
               if (!/(?:^|\/)(?:surface|bg|background|base|page|fill)(?:\/|$)/i.test(v.name)) continue;
@@ -5170,7 +5248,7 @@ async function _buildShowcase(opts) {
       const _bottomGroups = [];
 
       for (const [groupKey, groupVars] of _allSemGroupEntries) {
-        const nonOnVars = _sortSemanticVars(groupVars.filter(v => !v.name.split('/').some(seg => /^on[-_]/i.test(seg))));
+        const nonOnVars = _sortSemanticVars(groupVars.filter(v => !_isShowcaseScrim(v) && !v.name.split('/').some(seg => /^on[-_]/i.test(seg))));
         const bgPairedRows = [], bgUnpairedRows = [], fgRows = [];
 
         for (const v of nonOnVars) {
@@ -5622,125 +5700,30 @@ async function _buildShowcase(opts) {
 
   // ── Scrims section ───────────────────────────────────────────────────────────
 
-  const _scrimVars = Object.values(varByName)
-    .filter(v => {
-      if (v.resolvedType !== 'COLOR') return false;
-      const c = resolveVarValue(v);
-      if (!c || !('r' in c)) return false;
-      return (c.a !== undefined ? c.a : 1) < 0.95;
-    })
-    .sort((a, b) => {
-      const aA = (() => { const c = resolveVarValue(a); return c ? (c.a != null ? c.a : 1) : 1; })();
-      const bA = (() => { const c = resolveVarValue(b); return c ? (c.a != null ? c.a : 1) : 1; })();
-      return Math.abs(aA - bA) > 0.01 ? aA - bA : a.name.localeCompare(b.name);
-    });
-
+  const _scrimVars = Object.values(varByName).filter(_isShowcaseScrim);
   const _prevScrims = _page.children.find(n =>
     (n.type === 'FRAME' || n.type === 'SECTION') && n.name === 'Token Showcase — Scrims'
   );
-  const _myScrimsX = _prevScrims ? _prevScrims.x : _sectionX;
-
   if (_scrimVars.length) {
     if (_prevScrims) _prevScrims.remove();
     const _scrimFrame = _makeShowcaseFrame('Scrims');
     _addToFrame(_buildSectionHeader('Overlays & Scrims', 'Scrim and overlay opacity tokens.'), _scrimFrame);
-
     const _scrimTable = _buildTable('Overlays & Scrims', _SCRIM_TABLE_DESC);
-    const _scrimHeading = _buildTableHeading([
-      { text: 'Roles',   flex: true },
-      { text: 'Preview', flex: true },
-      { text: 'Opacity', width: 96, center: true },
-    ], 16);
-    _scrimTable.appendChild(_scrimHeading);
-    _scrimHeading.layoutSizingHorizontal = 'FILL';
-    _addTableDivider(_scrimTable);
-
-    const _scrimGroups = {};
-    for (const v of _scrimVars) {
-      const parts = v.name.split('/');
-      const key   = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
-      if (!_scrimGroups[key]) _scrimGroups[key] = [];
-      _scrimGroups[key].push(v);
+    const _scrimGroups = groupByPath(_scrimVars);
+    for (const groupPath of Object.keys(_scrimGroups).sort()) {
+      const groupVars = _scrimGroups[groupPath].slice().sort(function (a, b) {
+        const av = _resolveShowcaseScrim(a), bv = _resolveShowcaseScrim(b);
+        return av && bv && av.a !== bv.a ? av.a - bv.a : a.name.localeCompare(b.name);
+      });
+      const row = _buildPrimSwatchRow(groupPath, groupVars, true);
+      if (!row) continue;
+      _scrimTable.appendChild(row);
+      row.layoutSizingHorizontal = 'FILL';
+      _addTableDivider(_scrimTable);
     }
-
-    for (const [groupPath, groupVars] of Object.entries(_scrimGroups)) {
-      if (Object.keys(_scrimGroups).length > 1 && groupPath) {
-        const groupHeader = _buildGroupHeader(groupPath.split('/').pop() || groupPath);
-        _scrimTable.appendChild(groupHeader);
-        groupHeader.layoutSizingHorizontal = 'FILL';
-        _addTableDivider(_scrimTable);
-      }
-
-      for (const scrimVar of groupVars) {
-        const scrimResolved = resolveVarValue(scrimVar);
-        const scrimRGB   = scrimResolved && 'r' in scrimResolved
-          ? { r: scrimResolved.r, g: scrimResolved.g, b: scrimResolved.b }
-          : { r: 0, g: 0, b: 0 };
-        const scrimAlpha = scrimResolved && scrimResolved.a !== undefined ? scrimResolved.a : 0.5;
-        const desc       = (scrimVar.description && scrimVar.description.trim()) ? scrimVar.description.trim() : null;
-
-        const row = _tableRow(scrimVar.name);
-        row.fills    = [_paint(_RC.surfaceDefault, _V.surfaceDefault)];
-        row.paddingLeft = 16; row.paddingRight  = 16;
-        row.paddingTop  = 16; row.paddingBottom = 16;
-        row.itemSpacing = 16;
-
-        const tokenCell = _f('TokenCell', 'VERTICAL');
-        tokenCell.itemSpacing = 8;
-        tokenCell.counterAxisAlignItems = 'MIN';
-        tokenCell.primaryAxisAlignItems = 'CENTER';
-        const _scrimTag = _buildTag(scrimVar.name.split('/').pop());
-        tokenCell.appendChild(_scrimTag);
-        _scrimTag.layoutSizingHorizontal = 'HUG';
-        const scrimDescText = _tokenDesc(scrimVar.name);
-        const _scrimDesc = _tDS(scrimDescText || desc || 'Scrim token for layered overlays and dimmed backgrounds.', 12, _subColor, false, _V.textSub);
-        _scrimDesc.name = 'DS Description';
-        tokenCell.appendChild(_scrimDesc);
-        _scrimDesc.layoutSizingHorizontal = 'FILL';
-        row.appendChild(tokenCell);
-        tokenCell.layoutSizingHorizontal = 'FILL';
-        tokenCell.layoutSizingVertical   = 'FILL';
-
-        const demo = figma.createFrame();
-        demo.resize(56, 40);
-        demo.layoutMode = 'NONE';
-        demo.cornerRadius = 4;
-        demo.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];
-        demo.strokeWeight = 0.5;
-        demo.strokeAlign = 'INSIDE';
-        demo.fills = [
-          _paint(_bgColor, _V.bg),
-          figma.variables.setBoundVariableForPaint(
-            { type: 'SOLID', color: scrimRGB, opacity: scrimAlpha },
-            'color',
-            scrimVar
-          ),
-        ];
-        const demoCell = _f('Visual', 'HORIZONTAL');
-        demoCell.paddingTop = 8; demoCell.paddingBottom = 8;
-        demoCell.paddingLeft = 12; demoCell.paddingRight = 12;
-        demoCell.primaryAxisAlignItems = 'CENTER';
-        demoCell.counterAxisAlignItems = 'CENTER';
-        demoCell.appendChild(demo);
-        demo.layoutSizingHorizontal = 'FILL';
-        demo.layoutSizingVertical = 'FIXED';
-        row.appendChild(demoCell);
-        demoCell.layoutSizingHorizontal = 'FILL';
-        demoCell.layoutSizingVertical   = 'FILL';
-
-        const opacityCell = _metaCell(`${Math.round(scrimAlpha * 100)}%`);
-        row.appendChild(opacityCell);
-        opacityCell.layoutSizingHorizontal = 'FIXED';
-        opacityCell.resize(96, 1);
-        opacityCell.layoutSizingVertical   = 'FILL';
-
-        _addRow(row, _scrimTable);
-        _addTableDivider(_scrimTable);
-      }
-    }
-
     _appendFill(_scrimTable, _scrimFrame);
-    _placeShowcaseSection('Scrims', _scrimFrame, _myScrimsX);
+    // Always place after all other generated sections, including on regeneration.
+    _placeShowcaseSection('Scrims', _scrimFrame, null);
   }
 
   // ── Finale ───────────────────────────────────────────────────────────────────
@@ -5940,6 +5923,79 @@ function _ensureCollectionModes(collection, modeNames) {
 // Input: { DS, primitivesData } from apply_ds_setup. Primitive decisions are
 // prepared upstream; the bridge only executes the payload.
 
+// Keep these pure functions compatible with the Figma sandbox. The bridge embeds
+// this block verbatim; regression tests enforce parity between both runtimes.
+function typographyFamilies(typography) {
+  typography = typography || {};
+  var supplied = typography.families || {};
+  var families = { sans: supplied.sans || supplied.body || 'Inter', mono: supplied.mono || 'JetBrains Mono' };
+  Object.keys(supplied).forEach(function (key) {
+    if (typeof supplied[key] === 'string' && supplied[key].trim()) families[key] = supplied[key].trim();
+  });
+  var assignments = typography.roleFamilies || {};
+  var scale = typography.scale || {};
+  function retain(selector, key) {
+    if (typeof selector !== 'string' || !selector.trim() || families[selector]) return;
+    var literal = selector.trim();
+    if (!Object.keys(families).some(function (name) { return families[name] === literal; })) families[key] = literal;
+  }
+  Object.keys(assignments).forEach(function (role) { retain(assignments[role], 'role/' + role); });
+  Object.keys(scale).forEach(function (role) { retain(scale[role].family, 'role/' + role); });
+  return families;
+}
+
+function resolveTypographyFamily(typography, role, entry) {
+  typography = typography || {};
+  entry = entry || (typography.scale || {})[role] || {};
+  var families = typographyFamilies(typography);
+  var group = String(role || '').split('/')[0];
+  var assignments = typography.roleFamilies || {};
+  var selector = entry.family || assignments[role] || assignments[group];
+  if (!selector && group === 'display' && families.display) selector = 'display';
+  if (!selector && group === 'body' && families.body) selector = 'body';
+  if (!selector && (group === 'ui' || group === 'label') && families.ui) selector = 'ui';
+  selector = selector || 'sans';
+  var family = families[selector] || selector;
+  var variant = families[selector] ? selector : Object.keys(families).filter(function (key) { return families[key] === family; })[0];
+  return { family: family, variant: variant || null };
+}
+
+function typographyFontStyles(weight) {
+  var styles = {
+    100: ['Thin'], 200: ['Extra Light', 'ExtraLight', 'Ultra Light'], 300: ['Light'],
+    400: ['Regular', 'Normal', 'Book'], 500: ['Medium'],
+    600: ['Semi Bold', 'Semibold', 'SemiBold', 'Demi Bold'], 700: ['Bold'],
+    800: ['Extra Bold', 'ExtraBold', 'Ultra Bold'], 900: ['Black', 'Heavy']
+  };
+  return styles[weight] || [];
+}
+
+
+async function _preflightTypographyFonts(DS) {
+  var typography = DS.typography || {};
+  var scale = typography.scale || {};
+  var fonts = {};
+  var failures = [];
+  var roles = Object.keys(scale);
+  for (var i = 0; i < roles.length; i++) {
+    var role = roles[i];
+    var family = resolveTypographyFamily(typography, role, scale[role]).family;
+    var weight = scale[role].weight || 400;
+    var candidates = typographyFontStyles(weight);
+    var loaded = null;
+    for (var j = 0; j < candidates.length; j++) {
+      try {
+        await figma.loadFontAsync({ family: family, style: candidates[j] });
+        loaded = { family: family, style: candidates[j] };
+        break;
+      } catch (_) {}
+    }
+    if (loaded) fonts[role] = loaded;
+    else failures.push({ role: role, family: family, weight: weight, attemptedStyles: candidates });
+  }
+  return { fonts: fonts, failures: failures };
+}
+
 async function _applyDsSetup(setupPayload) {
   if (!setupPayload) throw new Error('No DS setup payload received.');
   var DS = setupPayload.DS || null;
@@ -5948,6 +6004,9 @@ async function _applyDsSetup(setupPayload) {
   if (!preparedPrimitives) {
     throw new Error('Prepared primitive inventory missing. Run apply_ds_setup through the Figlets MCP server so the Bridge only executes the core setup plan.');
   }
+
+  var fontPreflight = await _preflightTypographyFonts(DS);
+  if (fontPreflight.failures.length) return { error: 'Required typography fonts or weights are unavailable.', fontLoadFailures: fontPreflight.failures };
 
   var built = [];
   var skipped = [];
@@ -6075,18 +6134,6 @@ async function _applyDsSetup(setupPayload) {
     return _ensureCollectionModes(collection, modeNames).map;
   }
 
-  async function _loadFontForTextStyle(family, style) {
-    try {
-      await figma.loadFontAsync({ family: family, style: style });
-      return { family: family, style: style };
-    } catch (_) {}
-    try {
-      await figma.loadFontAsync({ family: family, style: 'Regular' });
-      return { family: family, style: 'Regular' };
-    } catch (_) {}
-    return null;
-  }
-
   function _typeStyleName(pattern, role) {
     pattern = pattern || 'type/{role}/{size}';
     var parts = String(role).split('/');
@@ -6105,9 +6152,6 @@ async function _applyDsSetup(setupPayload) {
     if (!roles.length) return { created: 0, updated: 0 };
 
     var textStylePattern = (DS.naming && DS.naming.textStyle) ? DS.naming.textStyle : 'type/{role}/{size}';
-    var families = (DS.typography && DS.typography.families) ? DS.typography.families : {};
-    var family = families.sans || 'Inter';
-    var weightStyleMap = { 400: 'Regular', 500: 'Medium', 600: 'Semi Bold', 700: 'Bold' };
     var modeIndex = modes && modes.length ? modes.length - 1 : 0;
 
     var styleList = await figma.getLocalTextStylesAsync();
@@ -6142,8 +6186,7 @@ async function _applyDsSetup(setupPayload) {
       var lineHeight = lineHeights[modeIndex] != null ? lineHeights[modeIndex] : lineHeights[lineHeights.length - 1];
       var weight = roleDef.weight || 400;
       var tracking = roleDef.tracking != null ? roleDef.tracking : 0;
-      var fontStyle = weightStyleMap[weight] || 'Regular';
-      var loadedFont = await _loadFontForTextStyle(family, fontStyle);
+      var loadedFont = fontPreflight.fonts[role];
 
       if (loadedFont) {
         try { textStyle.fontName = loadedFont; } catch (_) {}
@@ -6568,8 +6611,9 @@ async function _applyDsSetup(setupPayload) {
         }
       }
 
-      // family variable (alias to font/sans)
-      var famAlias3 = typoAlias(_fontFamilyPatternSetup.replace('{variant}', 'sans'));
+      // Resolve the family's role without collapsing display into the primary face.
+      var familySelection = resolveTypographyFamily(DS.typography, role, roleDef);
+      var famAlias3 = typoAlias(_fontFamilyPatternSetup.replace('{variant}', familySelection.variant));
       if (famAlias3 && !_typoMergeMap[tokenBase + '/family']) {
         var famVar3 = await createSetupVariable(tokenBase + '/family', typoColl, 'STRING');
         _setVariableScopesForName(famVar3, tokenBase + '/family', 'STRING');
@@ -6911,9 +6955,15 @@ var UPDATE_PRIMITIVE_SPECS = {
     return entries;
   },
   'primitive-typography': function (DS) {
+    if (DS.figlets && DS.figlets.source === 'figma-snapshot-bootstrap' && DS.figlets.foundationRequirementsApproved !== true) {
+      return _importedFoundationEntries(DS, 'primitive-typography');
+    }
     return _primitiveTypographyEntries(DS);
   },
   'primitive-shadow': function (DS) {
+    if (DS.figlets && DS.figlets.source === 'figma-snapshot-bootstrap' && DS.figlets.foundationRequirementsApproved !== true) {
+      return _importedFoundationEntries(DS, 'primitive-shadow');
+    }
     return _primitiveShadowEntries(DS);
   },
   'primitive-opacity': function () {
@@ -6923,6 +6973,12 @@ var UPDATE_PRIMITIVE_SPECS = {
     return null;
   },
 };
+
+function _importedFoundationEntries(DS, category) {
+  var entries = DS.figlets.foundationPrimitiveEntries;
+  if (!entries || !Array.isArray(entries[category])) throw new Error('Imported foundation requirements must be prepared before update.');
+  return entries[category];
+}
 
 function _primitiveShadowEntries(DS) {
   var entries = [];
@@ -7032,13 +7088,10 @@ function _primitiveTypographyEntries(DS) {
   for (si = 0; si < tracking.length; si++) {
     entries.push({ name: tracking[si].name, type: 'FLOAT', value: tracking[si].value });
   }
-  var sans = (DS.typography.families && DS.typography.families.sans) ? DS.typography.families.sans : 'Inter';
-  var mono = (DS.typography.families && DS.typography.families.mono) ? DS.typography.families.mono : 'JetBrains Mono';
-  entries.push({ name: ff.replace('{variant}', 'sans'), type: 'STRING', value: sans });
-  entries.push({ name: ff.replace('{variant}', 'mono'), type: 'STRING', value: mono });
-  if (DS.typography.families && DS.typography.families.serif) {
-    entries.push({ name: ff.replace('{variant}', 'serif'), type: 'STRING', value: DS.typography.families.serif });
-  }
+  var families = typographyFamilies(DS.typography);
+  Object.keys(families).forEach(function (variant) {
+    entries.push({ name: ff.replace('{variant}', variant), type: 'STRING', value: families[variant] });
+  });
   return entries;
 }
 
@@ -7867,7 +7920,7 @@ function _tokenUpdateEntriesForCategory(DS, category) {
         name: tokenBase + '/family',
         type: 'STRING',
         value: null,
-        aliasName: familyPattern.replace('{variant}', 'sans'),
+        aliasName: familyPattern.replace('{variant}', resolveTypographyFamily(DS.typography, role, roleDef).variant),
         requiresAlias: true,
       });
     }
@@ -8116,6 +8169,11 @@ async function _updateDsTokens(payload) {
   }
   var applyOrder = { 'radius': 1, 'border-width': 2, 'spacing-semantics': 3, 'typography-variables': 4, 'typography-styles': 5, 'elevation-variables': 6, 'elevation-styles': 7 };
   categories.sort(function(a, b) { return (applyOrder[a] || 99) - (applyOrder[b] || 99); });
+
+  if (categories.indexOf('typography-styles') >= 0) {
+    var typographyPreflight = await _preflightTypographyFonts(DS);
+    if (typographyPreflight.failures.length) return { error: 'Required typography fonts or weights are unavailable.', fontLoadFailures: typographyPreflight.failures, dryRun: dryRun, categories: categories, report: {} };
+  }
 
   var allColls = await figma.variables.getLocalVariableCollectionsAsync();
   var allVars = await figma.variables.getLocalVariablesAsync();
@@ -8530,18 +8588,8 @@ async function _updateDsTokens(payload) {
         return value;
       }
 
-      function _fontStyleCandidates(weight) {
-        var map = {
-          400: ['Regular'],
-          500: ['Medium', 'Regular'],
-          600: ['Semi Bold', 'Semibold', 'SemiBold', 'Medium', 'Regular'],
-          700: ['Bold', 'Semi Bold', 'Semibold', 'SemiBold', 'Regular'],
-        };
-        return map[weight] || ['Regular'];
-      }
-
       async function _loadFontForTypographyStyle(family, weight) {
-        var candidates = _fontStyleCandidates(weight);
+        var candidates = typographyFontStyles(weight);
         for (var csi = 0; csi < candidates.length; csi++) {
           var font = { family: family, style: candidates[csi] };
           try {
@@ -8585,6 +8633,7 @@ async function _updateDsTokens(payload) {
       for (var tri = 0; tri < typoRoles.length; tri++) {
         var role = typoRoles[tri];
         var roleDef = scale[role] || {};
+        var fallbackFamily = resolveTypographyFamily(DS.typography, role, roleDef).family;
         var styleName = _textStyleNameForUpdate(role);
         var tokenBase = typePrefix + '/' + role;
         var styleItem = _textStyleItem(styleName);
@@ -8628,6 +8677,12 @@ async function _updateDsTokens(payload) {
         if (typeof resolvedFamily !== 'string' || !resolvedFamily) {
           catReport.bindingWarnings.push({ kind: 'missingFontFamilyVariable', styleName: styleName, name: familyVarName, fallbackFamily: fallbackFamily });
           resolvedFamily = fallbackFamily;
+        }
+
+        if (resolvedFamily !== fallbackFamily) {
+          catReport.bindingWarnings.push({ kind: 'fontFamilyMismatch', styleName: styleName, expectedFamily: fallbackFamily, actualFamily: resolvedFamily });
+          catReport.unmatched.push(styleItem);
+          continue;
         }
 
         var weightValue = _resolveVariableLiteral(allVariablesByName[weightVarName], 0);

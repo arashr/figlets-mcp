@@ -121,6 +121,7 @@ module.exports = (async () => {
   };
 
   const functions = [
+    ["typographyFamilies", false], ["resolveTypographyFamily", false], ["typographyFontStyles", false], ["_preflightTypographyFonts", true],
     ["_scopeForVariableName", false],
     ["_sameVariableScopes", false],
     ["_setVariableScopes", false],

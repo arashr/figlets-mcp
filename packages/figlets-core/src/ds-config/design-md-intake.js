@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { resolveTypographyFamily } = require('./typography-family');
 const { wcagContrastRatio, apcaLc } = require('./semantic-contrast.js');
 const { variableSnapshot, configSignature, archivedSnapshot } = require('../variable-values.js');
 
@@ -429,13 +430,17 @@ function _makeTypographyScale(typography) {
       tracking: tracking
     };
     const family = value.fontFamily || value.family;
-    if (family) familyCounts[family] = (familyCounts[family] || 0) + 1;
+    if (family) {
+      scale[role].family = family;
+      familyCounts[family] = (familyCounts[family] || 0) + 1;
+    }
   }
 
   let sans = null;
   for (const family of Object.keys(familyCounts)) {
     if (!sans || familyCounts[family] > familyCounts[sans]) sans = family;
   }
+  if (scale['body/md'] && scale['body/md'].family) sans = scale['body/md'].family;
 
   return { scale, sans };
 }
@@ -838,8 +843,6 @@ function _buildColorsMap(DS) {
 function _buildTypographyMap(DS) {
   const typography = {};
   if (!DS.typography || !DS.typography.scale) return typography;
-  const families = DS.typography.families || {};
-  const defaultFamily = families.sans || 'Inter';
   for (const role of Object.keys(DS.typography.scale)) {
     const entry = DS.typography.scale[role] || {};
     const sizes = entry.sizes || [];
@@ -848,7 +851,7 @@ function _buildTypographyMap(DS) {
     for (let index = 0; index < sizeTokens.length; index++) {
       const token = sizeTokens[index];
       typography[token.name] = {
-        fontFamily: entry.family || defaultFamily,
+        fontFamily: resolveTypographyFamily(DS.typography, role, entry).family,
         fontSize: _formatDimension(token.value),
         fontWeight: Number(entry.weight || 400),
         lineHeight: _formatDimension(lineHeights[index] != null ? lineHeights[index] : lineHeights[lineHeights.length - 1] || 24),
@@ -1073,8 +1076,8 @@ function _bodyTypography(DS) {
   const families = (DS.typography && DS.typography.families) || {};
   const scale = DS.typography && DS.typography.scale ? DS.typography.scale : null;
   const usedFamilies = new Set();
-  for (const entry of Object.values(scale || {})) {
-    usedFamilies.add(entry && entry.family || families.sans || 'Inter');
+  for (const [role, entry] of Object.entries(scale || {})) {
+    usedFamilies.add(resolveTypographyFamily(DS.typography, role, entry).family);
   }
   if (families.sans && usedFamilies.has(families.sans)) lines.push('Primary typeface: **' + families.sans + '**.');
   if (families.mono && usedFamilies.has(families.mono)) lines.push('Monospace typeface: **' + families.mono + '**.');
@@ -1084,14 +1087,15 @@ function _bodyTypography(DS) {
     const rows = Object.keys(scale);
     if (rows.length) {
       const modes = _responsiveModes(DS, Math.max(...rows.map(role => (scale[role].sizes || []).length), 1));
+      const showFamilies = usedFamilies.size > 1;
       lines.push('');
-      lines.push('| Role | Sizes (' + modes.join(' / ') + ') | Weight | Tracking |');
-      lines.push('|---|---|---|---|');
+      lines.push('| Role | ' + (showFamilies ? 'Typeface | ' : '') + 'Sizes (' + modes.join(' / ') + ') | Weight | Tracking |');
+      lines.push(showFamilies ? '|---|---|---|---|---|' : '|---|---|---|---|');
       for (const role of rows) {
         const entry = scale[role] || {};
         const sizes = entry.sizes || [];
         const sizeCell = (sizes.length ? sizes : ['?']).join(' / ') + ' px';
-        lines.push('| ' + role + ' | ' + sizeCell + ' | ' + (entry.weight || 400) + ' | ' + (_formatNumber(Number(entry.tracking || 0)) || '0') + ' |');
+        lines.push('| ' + role + ' | ' + (showFamilies ? resolveTypographyFamily(DS.typography, role, entry).family + ' | ' : '') + sizeCell + ' | ' + (entry.weight || 400) + ' | ' + (_formatNumber(Number(entry.tracking || 0)) || '0') + ' |');
       }
     }
   }

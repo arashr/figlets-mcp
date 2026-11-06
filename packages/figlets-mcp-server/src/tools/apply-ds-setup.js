@@ -156,9 +156,11 @@ function _checkGeneratedSetupPrimitiveCoverage(ds, primitivesData) {
     if (!inventory.names.has(trackingName)) errors.push(`missing primitive ${trackingName} for typography ${role} tracking ${tracking}`);
   }
 
-  const fontName = fontPattern.replace('{variant}', 'sans');
-  if (Object.keys(scale).length && !inventory.names.has(fontName)) {
-    errors.push(`missing primitive ${fontName} for typography family aliases`);
+  const { resolveTypographyFamily } = require('../figlets-core.js').dsConfig;
+  for (const role of Object.keys(scale)) {
+    const selected = resolveTypographyFamily(ds.typography, role, scale[role]);
+    const fontName = fontPattern.replace('{variant}', selected.variant);
+    if (!inventory.names.has(fontName)) errors.push(`missing primitive ${fontName} for typography family aliases (${role})`);
   }
 
   function hasPrimitiveValue(value, predicate) {
@@ -301,7 +303,11 @@ async function handleApplyDsSetup({ config_path }) {
   if (response.statusCode === 200) {
     const parsed = response.data || {};
     const result = parsed.result || {};
-    if (result.error) return { error: result.error, collections: result.collections || [], motionPending: Boolean(motion) };
+    if (result.error) return { error: result.error, fontLoadFailures: result.fontLoadFailures || [], collections: result.collections || [], motionPending: Boolean(motion) };
+    if (ds.figlets && ds.figlets.source === 'figma-snapshot-bootstrap') {
+      ds.figlets.foundationRequirementsApproved = true;
+      core.writeDsConfig(resolvedPath, ds);
+    }
     const written = writePreparedDesignMdArtifact(preparedArtifact, { includeSidecar: true });
     return {
       collections: result.collections || [],

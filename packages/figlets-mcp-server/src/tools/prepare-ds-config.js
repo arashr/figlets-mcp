@@ -14,6 +14,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { resolveTypographyFamily } = require('../figlets-core.js').dsConfig;
 const { getConfigPathGuardError } = require('../utils/paths.js');
 const { prepareAndWriteDesignMdArtifact } = require('../utils/design-md-artifact.js');
 
@@ -256,6 +257,7 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
         },
         preset: ds && ds.typography && ds.typography.scalePreset || 'material3',
         families: ds && ds.typography && ds.typography.families || {},
+        familyAssignments: typographyRoles.map(role => ({ role, family: resolveTypographyFamily(ds.typography, role, typographyScale[role]).family })),
         sampleStyles: textStyleExamples,
       },
       {

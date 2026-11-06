@@ -439,12 +439,12 @@ assert.ok(
 );
 
 assert.ok(
-  code.includes("function _buildPrimitiveContrastSwatch(swatchRGB, stepLabel, hexLabel, swatchVar)") &&
+  code.includes("function _buildPrimitiveContrastSwatch(swatchRGB, stepLabel, hexLabel, swatchVar, scrimBackground)") &&
     code.includes("const topText = _tDS(_contrastLabel(top.lc, top.ratio, 75, 4.5), 9, top.fg, true, top.varRef);") &&
     code.includes("const bottomText = _tDS(_contrastLabel(bottom.lc, bottom.ratio, 75, 4.5), 9, swatchRGB, true, swatchVar);") &&
     code.includes("swatch.layoutGrow = 1;") &&
     code.includes("_setMinWidth(swatch, 56);"),
-  "Showcase primitive swatches must bind split contrast labels to variables and flex within the row"
+  "Ordinary primitive swatches retain bound split contrast labels and row sizing, with optional scrim backing"
 );
 
 assert.ok(
@@ -517,13 +517,8 @@ assert.ok(
     code.includes("row.itemSpacing = 16;") &&
     !code.includes("tokenCell.paddingLeft = 12; tokenCell.paddingRight  = 12;") &&
     code.includes("previewCell.layoutSizingHorizontal = 'FILL';") &&
-    code.includes("const _scrimHeading = _buildTableHeading([") &&
-    code.includes("{ text: 'Roles',   flex: true }") &&
-    code.includes("{ text: 'Preview', flex: true }") &&
-    code.includes("demoCell.layoutSizingHorizontal = 'FILL';") &&
-    code.includes("demo.strokes = [_paint(_RC.outlineSubtle, _V.outlineSubtle)];") &&
-    code.includes("demo.layoutSizingHorizontal = 'FILL';"),
-  "Elevation and scrim headers must match semantic table header treatment"
+    code.includes("const row = _buildPrimSwatchRow(groupPath, groupVars, true);"),
+  "Elevation retains semantic table treatment; scrims reuse the approved primitive swatch rows"
 );
 
 assert.ok(

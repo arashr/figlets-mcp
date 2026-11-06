@@ -85,7 +85,8 @@ const figmaData = {
 module.exports = (() => {
   assert.strictEqual(inspectDsTokenGapsTool.name, "inspect_ds_token_gaps");
   assert.strictEqual(applyDsConfigResponsiveSpacingRepairsTool.name, "apply_ds_config_responsive_spacing_repairs");
-  assert.ok(inspectDsTokenGapsTool.description.includes("Read-only planner"));
+  assert.ok(inspectDsTokenGapsTool.description.includes("without changing Figma"));
+  assert.ok(inspectDsTokenGapsTool.description.includes("Automatically prepares"));
   assert.ok(inspectDsTokenGapsTool.inputSchema.properties.categories, "schema should accept categories");
   assert.ok(inspectDsTokenGapsTool.inputSchema.properties.include_existing_updates, "schema should accept include_existing_updates");
 

@@ -63,19 +63,21 @@ function handleAuditTokens(args = {}) {
     ? dsContext.context.indexes
     : null;
 
+  const ds = loadDsForAudit(configPath);
   const result = auditTokens({
     variables: rawData.variables || [],
     collections: rawData.collections || [],
     effectStyles: rawData.effectStyles || [],
-    contextIndexes
+    contextIndexes,
+    primitiveCollectionNames: ds && ds.collections && ds.collections.primitives ? [ds.collections.primitives] : [],
   });
 
-  const ds = loadDsForAudit(configPath);
   const enriched = enrichAuditTokensWithSpacingAliasRepairs(result, {
     ds,
     figmaData: rawData,
     configPath,
   });
+  enriched.agentInstruction = 'Raw primitive values are valid foundation inventory, including opacity tokens. Do not describe rawPrimitives, rawPrimitiveCount, or informationalDuplicates as errors, unresolved review items, or repairs. Report actionable semantic findings separately. Internal config preparation belongs to Figlets; do not ask the designer to create or edit config files.';
 
   return {
     content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }]

@@ -6,15 +6,16 @@
  * Pure function — no file I/O.
  *
  * @param {object} ds - DS config (must have DS.color.ramps, DS.primitives.spacing, DS.typography.scale)
+ * @param {object} options - Set includeColors/includeSpacing false for independent non-color foundation planning.
  * @returns {{ collectionName, colors, floats, strings, scrims, summary }}
  */
-function generatePrimitivesData(ds) {
+function generatePrimitivesData(ds, options = {}) {
   const DS = ds;
 
-  if (!DS.color || !DS.color.ramps || !DS.color.ramps.length) {
+  if (options.includeColors !== false && (!DS.color || !DS.color.ramps || !DS.color.ramps.length)) {
     throw new Error('DS.color.ramps missing. Run generateColorRamps first.');
   }
-  if (!DS.primitives || !DS.primitives.spacing) {
+  if (options.includeSpacing !== false && (!DS.primitives || !DS.primitives.spacing)) {
     throw new Error('DS.primitives.spacing missing. Run computeDsConfig first.');
   }
 
@@ -24,7 +25,8 @@ function generatePrimitivesData(ds) {
 
   // ── Color ramps → hex ────────────────────────────────────────────────────────
   const colors = [];
-  for (const ramp of DS.color.ramps) {
+  const ramps = options.includeColors === false ? [] : DS.color.ramps;
+  for (const ramp of ramps) {
     for (const [step, r, g, b] of ramp.steps) {
       colors.push({ name: `${ramp.folder}/${step}`, hex: toHex({ r, g, b }) });
     }
@@ -34,7 +36,7 @@ function generatePrimitivesData(ds) {
     const target = channel === 'white' ? 1 : 0;
     const preferred = [];
     const other = [];
-    for (const ramp of DS.color.ramps) {
+    for (const ramp of ramps) {
       const bucket = ramp.folder === 'color/neutral' ? preferred : other;
       const steps = Array.isArray(ramp.steps) ? ramp.steps : [];
       const endpoints = steps.length > 1 ? [steps[0], steps[steps.length - 1]] : steps;
@@ -61,7 +63,7 @@ function generatePrimitivesData(ds) {
     ['white', 16],
     ['white', 20],
   ];
-  const scrims = scrimSpecs.map(([channel, percentage]) => {
+  const scrims = options.includeColors === false ? [] : scrimSpecs.map(([channel, percentage]) => {
     const raw = channel === 'white' ? { r: 1, g: 1, b: 1 } : { r: 0, g: 0, b: 0 };
     const endpoint = channel === 'white' ? whiteEndpoint : blackEndpoint;
     return {
@@ -165,7 +167,7 @@ function generatePrimitivesData(ds) {
   for (const t of TYPE_LINE_HEIGHTS) floats.push(t);
   for (const t of TYPE_TRACKING)     floats.push(t);
 
-  for (const [step, value] of DS.primitives.spacing) {
+  for (const [step, value] of (options.includeSpacing === false ? [] : DS.primitives.spacing)) {
     floats.push({ name: `space/${sanitize(step)}`, value });
   }
 

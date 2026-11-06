@@ -2244,3 +2244,14 @@ Structural roles (`onSurface`, `surfaceDefault`, etc.) do not use `requiredCats`
 **Generation and existing files:** Historical presets before 8861162 explicitly generated touch/min as 44/44/32 and comfortable as 48/48/40. Current shared defaults generate 44/44/44 and 48/48/48. Snapshot import can retain existing values. Documentation must report configured values and must not assert every system uses a 44px minimum or infer runtime nonconformance from a token alone. No Figma variables are changed by this validation update.
 
 **Verification:** Full suite 132/132 passes, including an export at 44/44/32 that writes successfully, retains the configured values, and reports a nonblocking AAA advisory. Missing touch/min also produces a nonblocking AAA advisory. Existing default-generation tests continue to pass.
+
+
+## [2026-11-06] Primitive literals are inventory and internal config preparation belongs to Figlets
+
+**Decision:** Raw values in recognized or configured primitive collections, including opacity/*, are valid foundation inventory. Do not report their lack of aliases as a defect, partially unaliased semantic repair, or unresolved review item. Repeated primitive literals are informational. Semantic tokens outside that foundation boundary retain alias checks.
+
+**Internal preparation:** Extend the existing inspect_ds_token_gaps surface and reuse ensureActiveDsConfig to create a missing file-scoped reference model from its synced snapshot. Do not ask designers to create, repair, locate, or edit config files. Existing configs are preserved. An explicit snapshot defaults to its sibling config to avoid writing into a different active file's model. No new public tool, repair path, or bridge mutation branch is added; Figma mutations retain separate approval.
+
+**Independent foundation checks:** Shared generatePrimitivesData accepts optional includeColors/includeSpacing exclusions for non-color planning. Typography/shadow inspection no longer fails because unrelated color ramps or computed primitive spacing are absent. Default full setup still validates those required prerequisites. Workflow responses describe design-system choices and token checks without internal file terminology. Genuine missing design choices remain setup-intake questions.
+
+**Verification:** Regression coverage includes seven opacity primitives, custom primitive names/collections, repeated literals, preservation of semantic defects, missing internal config creation, repeated inspection without config rewrites, snapshot preservation, and independent typography/shadow checks. Current-file handlers report seven opacity inventory entries, zero opacity defects, and zero unavailable primitive-source notes. No Figma writes were performed for this fix.

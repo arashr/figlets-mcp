@@ -10,6 +10,7 @@ const {
 const { getTouchSemanticDefaults } = require("../figlets-core.js").dsConfig;
 const { loadActiveFigmaDataSource, loadFigmaDataSource } = require("../bridges/figma-data-source.js");
 const { getActiveFileConfigPath, getConfigPathGuardError } = require("../utils/paths.js");
+const { ensureActiveDsConfig } = require('../utils/ensure-ds-config.js');
 const {
   SEMANTIC_ALIAS_REPAIR_MODEL,
   buildPrimitiveSpacingLookup,
@@ -22,7 +23,7 @@ const { planPrimitiveOpacityRepairs } = require("./primitive-opacity-repair.js")
 const inspectDsTokenGapsTool = {
   name: "inspect_ds_token_gaps",
   description:
-    "Read-only planner for config-backed token gaps in the active Figma snapshot. Compares design-system.config.js to existing variables/styles, reports missing opacity, typography, spacing, radius, border-width, shadow, and elevation items, and emits exact update_ds_primitives or update_ds_tokens dry-run/apply input plus apply_ds_foundation_repairs input when required collections are absent. Never mutates Figma, config, or bridge state.",
+    "Inspects token gaps without changing Figma. Automatically prepares missing file-scoped internal config from the synced file; designers do not manage config files. Reports missing opacity, typography, spacing, radius, border-width, shadow, and elevation items with structured repair previews. Figma changes require separate approval.",
   inputSchema: {
     type: "object",
     properties: {
@@ -179,14 +180,14 @@ function _writeDsConfig(configPath, ds) {
   return writeDsConfig(configPath, ds);
 }
 
-function _generatePrimitivesData(ds) {
+function _generatePrimitivesData(ds, options) {
   let generatePrimitivesData;
   try {
     ({ generatePrimitivesData } = require("../figlets-core.js").dsConfig);
   } catch (err) {
     ({ generatePrimitivesData } = require("../figlets-core.js").dsConfig);
   }
-  return generatePrimitivesData(ds);
+  return generatePrimitivesData(ds, options);
 }
 
 function _activeConfigPath() {
@@ -751,7 +752,7 @@ function _expectedPrimitiveTokens(ds, category) {
 
   if (category === "primitive-typography" || category === "primitive-shadow") {
     try {
-      const primitives = _generatePrimitivesData(ds);
+      const primitives = _generatePrimitivesData(ds, { includeColors: false, includeSpacing: false });
       const typePrefix = _typePrefix(ds);
       for (const item of primitives.floats || []) {
         if (category === "primitive-typography" && !String(item.name).startsWith(typePrefix + "/")) continue;
@@ -2262,8 +2263,12 @@ function handleInspectDsTokenGaps(input = {}) {
     };
   }
 
-  const configPath = input.config_path ? path.resolve(input.config_path) : _activeConfigPath();
-  const configStatus = {
+  const configPath = input.config_path
+    ? path.resolve(input.config_path)
+    : input.figmaDataPath
+      ? path.join(path.dirname(path.resolve(input.figmaDataPath)), 'design-system.config.js')
+      : _activeConfigPath();
+  let configStatus = {
     configPath,
     configExists: Boolean(configPath && fs.existsSync(configPath)),
     created: false,
@@ -2278,11 +2283,11 @@ function handleInspectDsTokenGaps(input = {}) {
   const guardError = getConfigPathGuardError(configPath);
   if (guardError) return guardError;
   if (!fs.existsSync(configPath)) {
-    return {
-      error: "No design-system.config.js found for token-gap inspection.",
-      hint: "Run sync_figma_data first so Figlets can create or locate the active file-scoped config.",
-      configPath,
-    };
+    try {
+      configStatus = ensureActiveDsConfig({ configPath, dataSource, reason: 'token-gap-inspection' });
+    } catch (err) {
+      return { error: 'Figlets could not prepare the design-system review.', diagnostic: err.message, designerMessage: 'Figlets could not prepare this file for review. Please retry the connection.', configPath };
+    }
   }
 
   let ds;

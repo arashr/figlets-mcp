@@ -186,7 +186,7 @@ try {
     assert.ok(route.designerResponse.startsWith("# Figlets"));
     assert.ok(route.designerResponse.includes("I'll review your design system using the Figlets health check."));
     assert.ok(route.designerResponse.includes("1. Sync the current Figma file"));
-    assert.ok(route.designerResponse.includes("5. Inspect config-backed token-gap suggestions"));
+    assert.ok(route.designerResponse.includes("5. Check for missing tokens and collection modes"));
     assert.ok(route.designerResponse.includes("semantic setup findings separately from token-gap suggestions"));
     assert.ok(!route.designerResponse.includes("| What you can ask for |"));
   }
@@ -344,7 +344,7 @@ try {
     assert.ok(route.designerResponse.includes("one setup question at a time"));
     assert.ok(route.designerResponse.includes("won't draft"));
     assert.ok(route.designerResponse.includes("not a proposal to approve"));
-    assert.ok(route.designerResponse.includes("file-scoped local config"));
+    assert.ok(route.designerResponse.includes("save your choices"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
   }
 
@@ -527,8 +527,8 @@ try {
     assert.ok(guide.steps.some(step => step.id === "semantic-setup-qa" && step.kind === "read"));
     assert.ok(guide.steps.some(step => step.id === "detect" && step.designerMessage.includes("looks empty as a design system")));
     assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.kind === "read" && step.tool === "inspect_ds_token_gaps"));
-    assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("missing foundation collections or modes")));
-    assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("empty-state setup choice")));
+    assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("missing foundation collections, modes, and tokens")));
+    assert.ok(guide.steps.some(step => step.id === "token-gap-suggestions" && step.designerMessage.includes("ask whether you want to set them up")));
     assert.ok(guide.steps.some(step => step.id === "binding-audit-handoff" && step.kind === "read" && step.tool === "qa_binding_audit" && step.optional === true));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.kind === "confirmation" && step.designerMessage.includes("semantic setup repairs separate from token-gap")));
     assert.ok(guide.steps.some(step => step.id === "approve-repairs" && step.designerMessage.includes("summarized by category")));

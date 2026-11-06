@@ -85,6 +85,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "qa_binding_audit repairPlan.designerDecisionApplyInput.approved_suggestions → qa_binding_audit({ approved_suggestions }) for designer-approved role-based style or closest-token binding decisions; present QA findings as a stable numbered list using issueNumber, copy exact entries unchanged only when the designer accepts the displayed target unchanged, or preserve the audited issueNumber/node/property/raw identity and replace only suggestion when the displayed recommendation or designer-named target differs from the raw repairPlan suggestion",
   ],
   bulkRepairRouting: [
+    "Primitive values, including raw opacity values, are valid foundations. Do not turn rawPrimitives or informationalDuplicates into errors or pending review tasks. Figlets manages its config internally: use sync and automatic internal preparation, never ask designers to create/edit config files or report missing config source as a design defect. If actual design choices cannot be inferred, use setup intake and ask about the design choice in plain language.",
     "Inspect first. If inspect_ds_setup_gaps.repairPlan.applyInput is non-empty, ask approval and pass that exact object to repairPlan.tool / apply_ds_setup_repairs without inventing payloads.",
     "Never replace setup repair aliases with counts, summaries, booleans, or prose-derived values. aliases must remain the per-mode object from repairPlan.applyInput.",
     "If only a subset of setup repairs is approved, filter entries from repairPlan.applyInput while preserving each approved entry's aliases object unchanged.",
@@ -296,7 +297,7 @@ const WORKFLOWS = [
         id: "token-gap-suggestions",
         kind: "read",
         tool: "inspect_ds_token_gaps",
-        designerMessage: "I'll also inspect config-backed token gaps, including missing foundation collections or modes, and summarize them by category without changing Figma. If the file is empty as a design-system file, I'll lead with that empty-state setup choice instead of treating it as an ordinary token-gap repair menu.",
+        designerMessage: "I'll also check for missing foundation collections, modes, and tokens without changing Figma. Figlets prepares its internal reference data automatically. If the file has no design-system foundations, I'll ask whether you want to set them up.",
       },
       {
         id: "binding-audit-handoff",
@@ -559,7 +560,7 @@ const WORKFLOWS = [
         tool: "create_ds_config_from_intake",
         localConfigWrite: true,
         requiresIntake: true,
-        designerMessage: "I'll turn the approved intake answers into the file-scoped design-system.config.js. This writes only local Figlets config, never Figma; if exact hex colors or font families are missing, I'll ask for those instead of inventing them.",
+        designerMessage: "I'll save your design-system choices for Figlets to use. Nothing changes in Figma yet. If brand colors or font families are missing, I'll ask for those choices.",
       },
       {
         id: "prepare",
@@ -988,7 +989,7 @@ function _workflowStartResponse(workflow) {
       "I won't draft a full palette, typography stack, grid defaults, or token names before you answer.",
       "I may offer lightweight multiple-choice options, but not a proposal to approve. If you provide brand colors and a semantic naming grammar, I'll infer the generated background/foreground pairing intent unless you ask for custom pairings.",
       "",
-      "After intake I'll create the file-scoped local config, run prepare_ds_config, show the detailed setupApprovalPreview with concrete collections, modes, sample aliases, and assumptions, and only then ask before building in Figma.",
+      "After intake I'll save your choices, prepare the design system, show the collections, modes, sample token relationships, and assumptions, then ask before building in Figma.",
     ].join("\n");
   }
   if (workflow.id === "health-check") {
@@ -1002,7 +1003,7 @@ function _workflowStartResponse(workflow) {
       "2. Detect design-system structure",
       "3. Audit token health",
       "4. Check semantic setup gaps, icon contrast, and missing roles",
-      "5. Inspect config-backed token-gap suggestions, including missing collection modes",
+      "5. Check for missing tokens and collection modes",
       "",
       "I'll summarize semantic setup findings separately from token-gap suggestions. If a write is needed, I'll ask before changing Figma and keep foundation, primitive, and semantic-token approvals separate.",
       "",
@@ -1013,11 +1014,11 @@ function _workflowStartResponse(workflow) {
     return [
       "# Figlets",
       "",
-      "I'll complete missing config-backed tokens using the Figlets token-gap workflow.",
+      "I'll review and complete missing design-system tokens using Figlets.",
       "",
       "I'll start read-only:",
       "1. Sync the current Figma file",
-      "2. Inspect config-backed token gaps",
+      "2. Check for missing tokens",
       "3. Dry-run semantic token updates",
       "4. Dry-run primitive updates when needed",
       "",

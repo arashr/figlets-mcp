@@ -5,7 +5,7 @@ const ALIAS = (id) => ({ type: "VARIABLE_ALIAS", id });
 
 const mockData = {
   collections: [
-    { id: "col:1", name: "Primitives", variableIds: ["var:1", "var:2", "var:3"] },
+    { id: "col:1", name: "Semantic colors", variableIds: ["var:1", "var:2", "var:3"] },
     { id: "col:2", name: "Semantics", variableIds: ["var:4", "var:5", "var:6"] }
   ],
   variables: [
@@ -248,4 +248,16 @@ const mockData = {
   const result = auditTokens(allAliased);
   assert.strictEqual(result.summary.unaliasedCount, 0, "All aliased — no unaliased issues");
   assert.strictEqual(result.summary.duplicateValueGroups, 0, "No raw values to duplicate");
+}
+
+{
+  const primitiveValues = [4, 8, 12, 16, 20, 40, 60].map((value, index) => ({ id: 'opacity-' + index, name: 'opacity/' + value, resolvedType: 'FLOAT', valuesByMode: { d: value } }));
+  primitiveValues.push({ id: 'custom', name: 'custom/base', resolvedType: 'FLOAT', valuesByMode: { d: 4 } });
+  const result = auditTokens({ variables: primitiveValues, collections: [{ id: 'p', name: '1. Primitives', variableIds: primitiveValues.map(v => v.id) }] });
+  assert.strictEqual(result.summary.unaliasedCount, 0);
+  assert.strictEqual(result.rawPrimitives.length, 8);
+  assert.strictEqual(result.summary.duplicateValueGroups, 0);
+  assert.ok(result.informationalDuplicates.length);
+  const custom = auditTokens({ variables: primitiveValues, collections: [{ id: 'p', name: 'Base values', variableIds: primitiveValues.map(v => v.id) }], primitiveCollectionNames: ['Base values'] });
+  assert.strictEqual(custom.unaliased.length, 0);
 }

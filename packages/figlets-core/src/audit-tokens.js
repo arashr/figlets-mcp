@@ -66,6 +66,7 @@ function isSpacingSemanticTokenName(name) {
 
 function isPrimitiveLikeName(name) {
   const value = String(name || "");
+  if (/^opacity\//.test(value)) return true;
   if (/^color\/[^/]+\/\d+$/.test(value)) return true;
   if (/^color\/scrim\//.test(value)) return true;
   if (isPrimitiveSpacingStepToken(value)) return true;
@@ -256,7 +257,12 @@ function auditTokens(input = {}) {
   const unaliased = [];
   const partiallyUnaliased = [];
   const rawPrimitives = [];
+  const primitiveNames = new Set(input.primitiveCollectionNames || []);
+  const primitiveCollections = collections.filter(c => primitiveNames.has(c.name) || /^(?:\d+\s*[.·-]\s*)?primitives?$/i.test(String(c.name || '').trim()));
+  const primitiveCollectionIds = new Set(primitiveCollections.map(c => c.id));
+  const primitiveIds = new Set(primitiveCollections.flatMap(c => c.variableIds || []).concat(variables.filter(v => primitiveCollectionIds.has(v.variableCollectionId)).map(v => v.id)));
   const duplicateValueMap = {}; // "type::serializedValue" → [variableNames]
+  const nonPrimitiveDuplicateKeys = new Set();
   const collectionConventions = {}; // collectionId → { convention → count }
 
   for (const variable of variables) {
@@ -277,10 +283,11 @@ function auditTokens(input = {}) {
         rawValues[modeId] = val;
       }
       const row = { id, name, type: resolvedType, values: rawValues };
-      if (isPrimitiveLikeName(name)) rawPrimitives.push(row);
+      if (primitiveIds.has(id) || isPrimitiveLikeName(name)) rawPrimitives.push(row);
       else unaliased.push(row);
     } else if (
       resolvedType === "FLOAT"
+      && !primitiveIds.has(id)
       && isSpacingSemanticTokenName(name)
       && hasAnyAlias
       && !allRaw
@@ -306,6 +313,7 @@ function auditTokens(input = {}) {
       const key = `${resolvedType}::${JSON.stringify(modeValues[0])}`;
       if (!duplicateValueMap[key]) duplicateValueMap[key] = [];
       duplicateValueMap[key].push(name);
+      if (!primitiveIds.has(id) && !isPrimitiveLikeName(name)) nonPrimitiveDuplicateKeys.add(key);
     }
 
     // --- Naming convention check ---
@@ -329,9 +337,10 @@ function auditTokens(input = {}) {
     .filter(([, names]) => names.length > 1)
     .map(([key, names]) => {
       const [type, serializedValue] = key.split("::");
-      const severity = duplicateSeverity(names);
+      const primitiveGroup = !nonPrimitiveDuplicateKeys.has(key);
+      const severity = primitiveGroup ? "info" : duplicateSeverity(names);
       const reason = severity === "info"
-        ? "Same literal value appears across different token domains; usually informational."
+        ? (primitiveGroup ? "Primitive values may repeat; this is foundation inventory, not an aliasing defect." : "Same literal value appears across different token domains; usually informational.")
         : severity === "review"
         ? "Same literal value appears within one token domain; review if these are intended aliases or distinct decisions."
         : "Same literal value appears in the same token group; likely a real duplicate token.";

@@ -4,6 +4,16 @@ Active context for the project so future sessions can recover quickly without re
 
 ---
 
+### [2026-11-06] Primitive audit and internal preparation fixed
+
+**User contract:** Primitives are allowed to hold raw values. Config is Figlets implementation data, not designer work. Missing config must enter automatic preparation or ask about genuine design choices, never surface a config-file task.
+
+**Fixes:** Added opacity primitive recognition and collection-aware primitive classification, including configured custom collection names. Primitive literals and repeated values are inventory, not alias defects. Token-gap inspection reuses ensureActiveDsConfig when the internal model is absent and preserves existing configs. Explicit snapshots use sibling configs to avoid cross-file writes. Non-color primitive planning uses shared generation with unrelated color/spacing prerequisites excluded, while full setup retains its validations. Designer workflow text hides internal config terminology.
+
+**Evidence:** Current-source handlers on the active file report seven opacity inventory entries, zero opacity defects, zero unavailable primitive-source notes. New regression file tests automatic preparation and repeat-run preservation. No Figma mutations. Existing running MCP processes need reconnection to load source changes; bridge plugin reload is not required.
+
+---
+
 ### [2026-11-05] AAA target-size advice no longer blocks DESIGN.md
 
 **Origin:** Older compute-ds-config presets before 8861162 generated touch/min 44/44/32 and comfortable 48/48/40. Current defaults are 44/44/44 and 48/48/48. Existing snapshot/config values can outlive that default change.

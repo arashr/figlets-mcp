@@ -1,0 +1,35 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { handleInspectDsTokenGaps, inspectDsTokenGapsFromConfigAndFigmaData } = require('../../packages/figlets-mcp-server/src/tools/inspect-ds-token-gaps');
+const { generatePrimitivesData } = require('../../packages/figlets-core/src/ds-config');
+const categories = ['primitive-typography', 'primitive-shadow'];
+const sparse = { project: { name: 'Existing foundations' }, collections: { primitives: '1. Primitives' }, typography: { families: { sans: 'Inter' }, scale: {} } };
+const foundations = generatePrimitivesData(sparse, { includeColors: false, includeSpacing: false });
+assert.ok(foundations.floats.some(v => v.name === 'shadow/1/radius'));
+assert.ok(foundations.floats.some(v => v.name === 'type/weight/regular'));
+assert.deepStrictEqual(foundations.colors, []);
+assert.deepStrictEqual(foundations.scrims, []);
+assert.throws(() => generatePrimitivesData(sparse), /ramps missing/, 'Full setup still requires its color source');
+const inspection = inspectDsTokenGapsFromConfigAndFigmaData(sparse, { collections: [], variables: [] }, { categories });
+assert.ok(!inspection.repairPlan.missingCapabilityNotes.some(note => note.kind === 'unavailable-config-source'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'figlets-internal-foundations-'));
+try {
+  const snapshotPath = path.join(dir, 'figma-data.json');
+  const configPath = path.join(dir, 'design-system.config.js');
+  fs.writeFileSync(snapshotPath, JSON.stringify({ fileKey: 'internal-test', fileName: 'Existing DS', collections: [{ id: 'p', name: '1. Primitives', variableIds: ['c'], modes: [{ modeId: 'd', name: 'Default' }] }], variables: [{ id: 'c', name: 'color/brand/500', variableCollectionId: 'p', resolvedType: 'COLOR', valuesByMode: { d: { r: 0, g: 0, b: 0 } } }] }));
+  const before = fs.readFileSync(snapshotPath, 'utf8');
+  const result = handleInspectDsTokenGaps({ figmaDataPath: snapshotPath, categories });
+  assert.ok(!result.error, JSON.stringify(result));
+  assert.strictEqual(result.config.created, true);
+  assert.strictEqual(result.config.path, configPath, 'Explicit snapshots own their sibling internal model, not another active file');
+  assert.ok(fs.existsSync(configPath));
+  assert.strictEqual(fs.readFileSync(snapshotPath, 'utf8'), before, 'Preparing internal data must not mutate the Figma snapshot');
+  const configBefore = fs.readFileSync(configPath, 'utf8');
+  const repeat = handleInspectDsTokenGaps({ config_path: configPath, figmaDataPath: snapshotPath, categories });
+  assert.strictEqual(repeat.config.created, false);
+  assert.strictEqual(fs.readFileSync(configPath, 'utf8'), configBefore, 'Existing config must be preserved');
+  assert.ok(!result.repairPlan.missingCapabilityNotes.some(note => note.kind === 'unavailable-config-source'));
+} finally { fs.rmSync(dir, { recursive: true, force: true }); }

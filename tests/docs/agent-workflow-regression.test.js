@@ -534,9 +534,10 @@ try {
     assert.ok(route.message.includes("create_ds_config_from_intake"));
     assert.ok(route.designerResponse.includes("one setup question at a time"));
     assert.ok(route.designerResponse.includes("won't draft"));
-    assert.ok(route.designerResponse.includes("setupApprovalPreview"));
-    assert.ok(route.designerResponse.includes("file-scoped local config"));
-    assert.ok(route.designerResponse.includes("sample aliases"));
+    assert.ok(route.designerResponse.includes("show the collections, modes"));
+    assert.ok(!route.designerResponse.includes("config"));
+    assert.ok(route.designerResponse.includes("save your choices"));
+    assert.ok(route.designerResponse.includes("sample token relationships"));
     assert.ok(!route.designerResponse.includes("1. I'll compute and preview"));
 
     const guide = handleFigletsWorkflowGuide({ workflow_id: "new-ds-setup" });

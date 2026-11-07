@@ -990,6 +990,45 @@ function planDsFigmaOperationsFromFigmaData(figmaData = {}, input = {}) {
   };
 }
 
+function planMotionProfileOperationsFromFigmaData(figmaData, motion) {
+  let result;
+  const ctx = _context(figmaData);
+  for (const token of motion.tokens) {
+    const error = _capabilityError(token.type, token.values, ctx);
+    if (error) return { error };
+  }
+  if (!ctx.capabilities.atomicVariableValueBatches) return { error: "Reload the current bridge and sync before planning config-backed motion setup; atomic variable batches are required." };
+  const namedCollections = (figmaData.collections || []).filter(item => item && item.name === motion.collection);
+  if (namedCollections.length > 1) return { error: `Motion collection ${motion.collection} is ambiguous: multiple collection IDs use that name. Resolve the duplicate names before setup.` };
+  const collection = ctx.collectionsByName.get(motion.collection);
+  const tokenMatches = new Map();
+  for (const token of motion.tokens) {
+    const matches = Array.from(ctx.varsById.values()).filter(variable => variable.name === token.name);
+    if (matches.length > 1 || (matches.length && (!collection || _collectionForVariable(matches[0], ctx)?.id !== collection.id))) return { error: `Motion token ${token.name} has an ambiguous name or exists outside ${motion.collection}. Resolve the exact target before setup.` };
+    if (matches.length && matches[0].resolvedType !== token.type) return { error: `Motion token ${token.name} is ${matches[0].resolvedType}, not ${token.type}. Existing IDs will not be replaced.` };
+    tokenMatches.set(token.name, matches);
+  }
+  const missingModes = collection ? motion.modes.filter(mode => !_modeForName(collection, mode)) : [];
+  if (!collection || missingModes.length) {
+    const operations = collection ? missingModes.map(mode => ({ kind: "create_mode", collection: motion.collection, mode })) : [{ kind: "create_collection", name: motion.collection, modes: motion.modes }];
+    result = planDsFigmaOperationsFromFigmaData(figmaData, { operations });
+    result.phase = "motion_foundation_setup";
+    result.continuation = { after: "successful_apply_then_sync_figma_data", tool: "plan_ds_figma_operations", input: {} };
+    result.repairPlan.agentInstruction = "Present and approve the exact motion collection/modes separately from variables. Apply only repairPlan.applyInput. If any mode creation fails or remains unresolved, stop and report the exact blocker. Never drop Reduced Motion or continue to values. After successful apply, sync, then replan continuation.input and obtain separate approval for the variable stage.";
+  } else {
+    const operations = [];
+    for (const token of motion.tokens) {
+      const matches = tokenMatches.get(token.name);
+      const values = Object.fromEntries(Object.entries(token.values).map(([mode, value]) => [mode, token.type === 'TIMING' ? { milliseconds: value } : value]));
+      operations.push(matches.length ? { kind: 'update_variable', name: token.name, values } : { kind: 'create_variable', name: token.name, collection: motion.collection, type: token.type, values });
+    }
+    result = planDsFigmaOperationsFromFigmaData(figmaData, { operations });
+    result.phase = 'motion_variables';
+  }
+  result.motion = motion;
+  return result;
+}
+
 function handlePlanDsFigmaOperations(input = {}) {
   if (!input.motion_config_path && !Array.isArray(input.operations)) return { error: "Provide explicit operations or motion_config_path." };
   const dataSource = _loadDataSource(input);
@@ -1005,40 +1044,9 @@ function handlePlanDsFigmaOperations(input = {}) {
     let motion;
     try { motion = motionProfilePreview(readDsConfig(path)); } catch (error) { return { error: error.message }; }
     if (!motion) return { error: "No motion profile is enabled in this config. Preview and save an explicit motion profile with prepare_ds_config first." };
-    const ctx = _context(dataSource.figmaData);
-    for (const token of motion.tokens) {
-      const error = _capabilityError(token.type, token.values, ctx);
-      if (error) return { error };
-    }
-    if (!ctx.capabilities.atomicVariableValueBatches) return { error: "Reload the current bridge and sync before planning config-backed motion setup; atomic variable batches are required." };
-    const namedCollections = (dataSource.figmaData.collections || []).filter(item => item && item.name === motion.collection);
-    if (namedCollections.length > 1) return { error: `Motion collection ${motion.collection} is ambiguous: multiple collection IDs use that name. Resolve the duplicate names before setup.` };
-    const collection = ctx.collectionsByName.get(motion.collection);
-    const tokenMatches = new Map();
-    for (const token of motion.tokens) {
-      const matches = Array.from(ctx.varsById.values()).filter(variable => variable.name === token.name);
-      if (matches.length > 1 || (matches.length && (!collection || _collectionForVariable(matches[0], ctx)?.id !== collection.id))) return { error: `Motion token ${token.name} has an ambiguous name or exists outside ${motion.collection}. Resolve the exact target before setup.` };
-      if (matches.length && matches[0].resolvedType !== token.type) return { error: `Motion token ${token.name} is ${matches[0].resolvedType}, not ${token.type}. Existing IDs will not be replaced.` };
-      tokenMatches.set(token.name, matches);
-    }
-    const missingModes = collection ? motion.modes.filter(mode => !_modeForName(collection, mode)) : [];
-    if (!collection || missingModes.length) {
-      const operations = collection ? missingModes.map(mode => ({ kind: "create_mode", collection: motion.collection, mode })) : [{ kind: "create_collection", name: motion.collection, modes: motion.modes }];
-      result = planDsFigmaOperationsFromFigmaData(dataSource.figmaData, { operations });
-      result.phase = "motion_foundation_setup";
-      result.continuation = { after: "successful_apply_then_sync_figma_data", tool: "plan_ds_figma_operations", input: { motion_config_path: path } };
-      result.repairPlan.agentInstruction = "Present and approve the exact motion collection/modes separately from variables. Apply only repairPlan.applyInput. If any mode creation fails or remains unresolved, stop and report the exact blocker. Never drop Reduced Motion or continue to values. After successful apply, sync, then replan continuation.input and obtain separate approval for the variable stage.";
-    } else {
-      const operations = [];
-      for (const token of motion.tokens) {
-        const matches = tokenMatches.get(token.name);
-        const values = Object.fromEntries(Object.entries(token.values).map(([mode, value]) => [mode, token.type === 'TIMING' ? { milliseconds: value } : value]));
-        operations.push(matches.length ? { kind: 'update_variable', name: token.name, values } : { kind: 'create_variable', name: token.name, collection: motion.collection, type: token.type, values });
-      }
-      result = planDsFigmaOperationsFromFigmaData(dataSource.figmaData, { operations });
-      result.phase = 'motion_variables';
-    }
-    result.motion = motion;
+    result = planMotionProfileOperationsFromFigmaData(dataSource.figmaData, motion);
+    if (result.error) return result;
+    if (result.continuation) result.continuation.input = { motion_config_path: path };
   } else result = planDsFigmaOperationsFromFigmaData(dataSource.figmaData, input);
   result.source = {
     kind: dataSource.kind,
@@ -1382,6 +1390,7 @@ module.exports = {
   planDsFigmaOperationsTool,
   applyDsFigmaOperationsTool,
   planDsFigmaOperationsFromFigmaData,
+  planMotionProfileOperationsFromFigmaData,
   handlePlanDsFigmaOperations,
   handleApplyDsFigmaOperations,
   _validateApprovedOperations,

@@ -116,12 +116,9 @@ module.exports = (async () => {
     readyDs.motion = motionCore.defaultMotionProfile();
     motionCore.writeDsConfig(configPath, readyDs);
     const withMotion = await handleApplyDsSetup({ config_path: configPath });
-    assert.ok(!withMotion.error, withMotion.error);
+    assert.ok(withMotion.error, 'motion setup must not claim success without a synced snapshot and readback');
     assert.strictEqual(withMotion.motionPending, true);
-    assert.strictEqual(withMotion.motion.collection, '6. Motion');
-    assert.strictEqual(withMotion.nextStep.tool, 'plan_ds_figma_operations');
-    assert.strictEqual(withMotion.nextStep.input.motion_config_path, configPath);
-    assert.ok(withMotion.message.includes('before reporting the full setup complete'));
+    assert.strictEqual(withMotion.nextStep, undefined, 'a real setup failure must not become a separate approval workflow');
     assert.ok(fs.readFileSync(result.designMdExport.path, 'utf8').includes('Apply Export'), 'export should use DS project name');
   } finally {
     await new Promise(resolve => server.close(resolve));

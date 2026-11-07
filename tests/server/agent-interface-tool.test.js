@@ -108,8 +108,8 @@ try {
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("contrastRepairOptions")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("suggestedBackground") && item.includes("suggestedText")));
-    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("prose-only repair direction")));
-    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("go for Figma")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("continue_with_contrast_warnings")));
+    assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Never change source hex values")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("empty from a design-system perspective")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("spacing_semantic_repairs")));
     assert.ok(start.hardRules.bulkRepairRouting.some(item => item.includes("Do not replace the exact entries with token names")));

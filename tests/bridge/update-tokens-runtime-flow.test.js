@@ -153,6 +153,8 @@ module.exports = (async () => {
       return style;
     },
     async loadFontAsync(font) {
+      if (font.family === "BBH Bogle" && font.style === "Regular") return;
+      if (font.family === "Inconsolata" && (font.style === "Regular" || font.style === "Medium")) return;
       if (font.family === "Space Grotesk" && font.style === "Regular") return;
       if (font.family === "Inter" && (font.style === "Regular" || font.style === "Medium")) return;
       throw new Error(`Font unavailable: ${font.family} ${font.style}`);
@@ -402,4 +404,21 @@ module.exports = (async () => {
   const missingWeight = await context.module.exports._updateDsTokens({ DS, categories: ['typography'], createMissing: true, dryRun: false });
   assert.ok(missingWeight.error);
   assert.strictEqual(JSON.stringify({ variables, textStyles }), beforeMissingFont, 'missing display weight must not fall back to Regular');
+
+  // Repair an existing display role that was incorrectly bound to sans.
+  // Preserve token/style identities while restoring the approved family roles.
+  const styleId = textStyles.find(item => item.name === 'type/display/lg').id;
+  const familyId = displayFamilyVariable.id;
+  DS.typography.families = { sans: 'Inconsolata', mono: 'SF Mono', display: 'BBH Bogle' };
+  DS.typography.scale['display/lg'].weight = 400;
+  variables.find(item => item.id === 'font-sans').valuesByMode.value = 'Inconsolata';
+  variables.find(item => item.id === 'display-font').valuesByMode.value = 'BBH Bogle';
+  for (const mode of ['mobile', 'tablet', 'desktop']) displayFamilyVariable.valuesByMode[mode] = { type: 'VARIABLE_ALIAS', id: 'font-sans' };
+  const repairedFonts = await context.module.exports._updateDsTokens({ DS, categories: ['typography'], createMissing: true, dryRun: false });
+  assert.ok(!repairedFonts.error, repairedFonts.error);
+  assert.strictEqual(displayFamilyVariable.id, familyId);
+  assert.ok(Object.values(displayFamilyVariable.valuesByMode).every(value => value.id === 'display-font'));
+  assert.strictEqual(textStyles.find(item => item.name === 'type/display/lg').id, styleId);
+  assert.strictEqual(textStyles.find(item => item.name === 'type/display/lg').fontName.family, 'BBH Bogle');
+  assert.strictEqual(textStyles.find(item => item.name === 'type/body/md').fontName.family, 'Inconsolata');
 })();

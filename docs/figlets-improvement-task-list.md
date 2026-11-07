@@ -17,6 +17,72 @@ The user must explicitly approve each proposed change before implementation. App
 
 ## Ordered tasks
 
+### Priority investigation: requested scale and brand anchor ignored
+
+**Status: user-approved fix implemented November 7. Automated verification complete. Existing Figma file unchanged.**
+
+Saved dummy_ds_4 intake correctly records 0-100, #FFC850, and #B52840. The generator lacks a 0-100 scale and silently falls back to 50-950 while retaining the requested label. Read-only reproduction yields the agent's contradictory anchors at 200 and 600. Separately, the main brand semantic template starts at primary/500 rather than the supplied anchor; initial contrast adjustment can move it. The active saved snapshot shows the reported primary/400 binding. The exact historical selection of 400 is not attributed without an operation log.
+
+Implemented repair: shared scale-aware generation/reference resolution, anchor-based default main brand semantics, unchanged exact primitive colors, and truthful output/readback. Tests must cover all supported ranges, valid anchor steps, foreground/icon adaptation without moving the brand anchor, preserved explicit mappings, and rejection of unsupported silent fallback. See [evidence and proposed test scope](reviews/brand-anchor-scale-investigation.md).
+
+### Motion intake correction
+
+**Status: corrected November 7. 144/144 tests pass. Running connection refresh and live designer verification remain.**
+
+The prior integration finished the build path but left the optional question after preparation. User correctly identified that as incomplete. The include/skip choice now belongs to main intake, before declaring completion, creating config, or preparing the token plan. The normal intake tool will not save a completed config without a motion decision or an existing approved profile. It stores selected motion in the same write as all other answers; known answers are reused. Removed separate preview-motion/save-motion/reprepare workflow steps. A partial Markdown import also reports missing motion intake.
+
+Tests cover ordering, no config write before the question, skip with no motion defaults, selected/custom profiles, retained choices, invalid profile rejection, and the actual registered intake-to-build sequence with one setup call. Full suite 144/144, build, lint, package smoke, and whitespace pass. No Figma writes or new Bridge change. The running connection is confirmed stale for this ordering and must refresh before retesting. See [current flow and evidence](reviews/unified-optional-motion-setup.md).
+
+### Optional motion integrated into normal setup
+
+**Status: implemented and tested November 7. 143/143 tests pass. Running host refresh and live designer verification remain.**
+
+User approved one setup flow and one Figma build approval covering every selected foundation, including optional motion. The full preview includes its collection, modes, exact durations, and easing values. apply_ds_setup internally reuses the existing shared motion planner, generic structural executor, atomic value writer, and sync transport. No public tool or Bridge mutation branch was added. Skipping motion retains the ordinary five-foundation path. Successful completion requires readback in both configured modes; partial failures do not become separate approval tasks or claim full completion.
+
+Fresh stdio MCP integration proves one setup call completes the selected six-foundation plan using the actual Bridge operation handler in a simulated file. Tests cover retries, preserved IDs/unrelated tokens, capabilities, mode failure, rollback, readback, and config/file changes. Build, lint, packaging smoke, and whitespace checks pass. No live Figma writes, commit, release, or Bridge update for this slice. The current running guide is older and needs host-server refresh. See [implementation and verification](reviews/unified-optional-motion-setup.md).
+
+### Contrast continuation and semantic-only repairs
+
+**Status: completed November 7. 142/142 tests pass; actual running Figlets connection verified. Full manual designer conversation remains.**
+
+Semantic repair options now include exact evaluated icon steps and their background evidence. Repairs preserve primitive ramps, source hex, and scale. Saved semantic aliases stay unchanged until a repair is approved. Shared readiness makes icon findings advisory and honors explicit continuation for current text contrast findings, retaining that decision across prepare/apply and rechecks. Accepted findings remain unresolved warnings, not passing contrast. No unchanged repair loop or palette-change recommendation remains in current workflow guidance.
+
+Tests include actual registered MCP calls in a fresh stdio process, a simulated Bridge build, stale/conflicting repair rejection, incompatible shared backgrounds, persistence, unchanged primitives, and truthful exports. Build, lint, package smoke, and whitespace checks pass. No live Figma writes or new bridge changes were needed for this slice. The running Codex connection accepts explicit continuation and preserves it on recheck of an isolated failing config; the failure remains visible. Its workflow guide also contains the new policy. No restart is needed for this verified connection. A separate Cursor connection and full manual new-setup conversation are not verified. See [implementation and regression evidence](reviews/icon-contrast-build-policy-proposal.md).
+
+### Scrim inset requested from visual reference
+
+**Status: implemented and regenerated through bridge .8; 141/141 tests pass.**
+
+Added 8px padding to the scrim swatch container so the contrasting neutral backplate remains visible on all sides. Backplate remains a full-size bound absolute layer; the rounded overlay fills the padded area. Preserve outer swatch size, labels, the single-row design, and placement at the end of Primitive Colors. This changes showcase geometry only. Targeted helper/full-render tests and syntax/whitespace checks pass. Live .8 regeneration completed with six sections, no separate Scrims section, and no scrim-related warnings. Output remains in Figma for visual review.
+
+### Placement correction: scrims belong inside Primitive Colors
+
+**Status: implemented and regenerated in the disposable file; 141/141 tests pass.**
+
+The user clarified that scrims belong at the end of the Primitive Colors section, not in a separate showcase section. Reuse the existing primitive table and swatch helpers. Append only primitive scrim groups after all ordinary ramps; retain the contrasting neutral backplate, bound overlay, opacity order, and single-row design. Semantic scrim aliases must not become primitive swatches. Existing full showcase refresh removes the legacy standalone generated Scrims section. No token values or fonts change.
+
+Bridge build: 1.3.0+dev.20261106.7. User reloaded it; fresh active snapshot verifies that build and all three approved font primitives. Full-render regression fails against the previous separate-section layout and passes with the correction. Helper opacity-order tests also pass. Syntax and whitespace checks pass. Live .7 regeneration returned six sections, with Primitive Colors and no separate Scrims section, and no scrim-resolution warnings. The full-render test also verifies semantic overlay aliases are excluded from primitive swatches.
+
+### Priority: missing scrim showcase and display font
+
+**Status: approved repair implemented; disposable-file output restored through Figlets Bridge. Host intake refresh and visual sign-off remain.**
+
+Confirmed fonts: Display BBH Bogle, Sans Inconsolata, Mono SF Mono. Added explicit font-role fields to the intake schema and fixed the flat `typography.display` field being dropped while flat sans/mono fields were accepted. The exact original tool payload is unavailable, so this reproducible gap is not claimed as the sole historical cause. The running MCP guide is also older than source.
+
+Tests cover the exact three-family answer through persisted config and primitive generation, repair of existing display aliases/styles without replacing their IDs, and the complete showcase renderer on first generation and refresh. Full suite: 141/141. Build, lint, and whitespace checks pass. The new intake regression fails with the display fix removed.
+
+Live Bridge verification on dummy_ds_2026.11.06: created only font/display; retained font/sans Inconsolata and font/mono SF Mono; all three display roles alias font/display in Mobile, Tablet, and Desktop; all three display styles use BBH Bogle with their IDs preserved. Other styles use Inconsolata. Regenerated seven showcase sections, ending with Scrims, without scrim-resolution warnings. Existing bridge 1.3.0+dev.20261106.6 rendered this successfully; no new scrim layout or bridge change was needed.
+
+During broad typography verification, numeric aliases were replaced by equivalent literals. Restored the aliases using the existing typography variable path. An isolated style-only refresh changed zero variables; a final native dry-run reports zero variable creations/updates, font failures, or binding warnings. The precise cause of the intermediate alias churn is not established and must not be attributed to style setters without evidence. Record it as a follow-up before broader typography update work.
+
+Remaining limits: native build results confirm section generation, not visual sign-off. The original missing-scrim execution was not captured. Restart the affected agent host to load current intake code, then replay a new setup conversation. Do not claim this already ran in Cursor. See [repair verification](reviews/font-scrim-repair-verification.md).
+
+### Investigation: native Figma Specs
+
+**Status: parked by the user. Future implementation must use Figlets Bridge only.**
+
+See [native Specs investigation](reviews/native-figma-specs-investigation.md). Specs use Markdown and support visuals. User-confirmed scope: native Specs replace only the custom in-Figma documentation sheet. Local component-specs Markdown and the component description/SPEC block retain their existing behavior. Existing demos stay; separate them only where needed. No permanent alternative-output menu or redesign of other documentation. A fresh sync after user reload of bridge 1.3.0+dev.20261106.6 confirms native Specs methods are unavailable to this plugin. The read-only capability check is implemented and tested, with full suite 140/140 passing. The user rejected mixing official Figma MCP into Figlets. Resume bridge-only investigation only after the current regressions are resolved and the user resumes this task. A concrete preview and implementation approval remain required. No native Spec or demo writes were performed. Approved work preceding this investigation is committed as ac9aa54.
+
 ### Additional request: discoverable optional motion setup
 
 **Status: approved, implemented, and verified by automated tests. Live conversation verification pending.**
@@ -123,7 +189,7 @@ For each flow, record the input, visible response, approval point, resulting art
 
 - [ ] Present the final short changelog and remaining limitations.
 - [ ] Obtain approval for version and distribution changes.
-- [ ] Remove the local bridge build suffix `+dev.20261106.5` when preparing the approved release version.
+- [ ] Remove the local bridge build suffix `+dev.20261106.6` when preparing the approved release version.
 - [ ] Run required package, test, and plugin checks on the approved release candidate.
 - [ ] Obtain explicit publishing approval before release.
 

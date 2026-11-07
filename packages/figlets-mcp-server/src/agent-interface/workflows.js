@@ -8,6 +8,8 @@ const {
 const { ensureActiveDsConfig } = require("../utils/ensure-ds-config.js");
 const { checkForUpdate, getRuntimeVersionInfo } = require("../utils/version-check.js");
 
+const { MOTION_INTAKE_SELECTION } = require("./setup-intake.js");
+
 const MUTATING_TOOLS = new Set([
   "apply_ds_setup",
   "apply_ds_config_contrast_repairs",
@@ -108,9 +110,7 @@ const DESIGNER_FLOW_HARD_RULES = {
     "If schema validation rejects a setup repair payload, stop, rerun inspect_ds_setup_gaps, and copy or filter the fresh structured repairPlan.applyInput instead of retrying invented arguments.",
     "If repairPlan.optionalApplyInput is non-empty, present it as optional bulk creation that needs separate approval.",
     "If inspect_ds_setup_gaps reports semanticNamingConflicts or semanticNamingAdvisories, report the inferred semanticColorGrammar first. Do not ask for a binary surface-based/role-based choice by default. Ask for a grammar/context decision only when the designer wants naming cleanup, then call plan_ds_semantic_naming_consolidation; show every proposed rename line and every advisory; only after approval pass repairPlan.applyInput unchanged to apply_ds_semantic_naming_consolidation.",
-    "For new design-system setup, if prepare_ds_config reports semantic color contrast failures with contrastRepairOptions, show the exact evaluated options, including any paired suggestedBackground + suggestedText changes; do not invent untested examples. Ask approval, call apply_ds_config_contrast_repairs with the approved option objects, then rerun prepare_ds_config. Do not stop at 'the setup surface cannot apply this' and do not run apply_ds_setup until readyToBuild is true.",
-    "For new design-system setup, if prepare_ds_config reports semantic color contrast failures with zero contrastRepairOptions, rerun prepare_ds_config once because generated setup should self-correct. If the latest result still fails with no exact options, do not ask for or approve a prose-only repair direction; ask only for an executable choice such as an exact alias, brand hex, or color scale change.",
-    "When the designer says go for Figma or build it during setup, treat it as build approval only if the latest prepare_ds_config result has readyToBuild === true. If readyToBuild is false, do not call apply_ds_setup; run the available repair path or give one concise blocker instead of starting another approval loop.",
+    "Semantic contrast repairs adapt aliases to existing primitive ramp steps. Never change source hex values, color scale, or primitive ramp values to resolve a semantic finding. Offer exact evaluated text/icon contrastRepairOptions, including paired suggestedBackground + suggestedText when present, only when the designer wants repairs; apply only approved options through apply_ds_config_contrast_repairs. Icon-only findings are advisory. If no existing alias satisfies all evaluated backgrounds, explain that once and offer continuation, not another unchanged repair or palette change. If the designer says continue anyway, ignore this, fuck it continue, or chooses Build with current colors, honor that instruction for the current contrast findings without another confirmation: call prepare_ds_config with continue_with_contrast_warnings: true, then perform the requested build when readyToBuild is true. The same decision persists across prepare/apply and rechecks. Report unresolved warnings truthfully, never as passing. Missing data and execution errors are separate from contrast warnings.",
     "For health-check, run inspect_ds_token_gaps as a read-only suggestion step before summarizing the design-system audit. Surface token-gap findings by category, including missing foundation collection/mode suggestions, without forcing the designer into a separate token-gap workflow.",
     "For health-check, if detect_design_system.emptyDesignSystem.isEmpty or inspect_ds_token_gaps.emptyDesignSystem.isEmpty is true, treat the file as empty from a design-system perspective before ordinary repair routing. Say plainly whether no foundation collections exist yet or foundation collections exist but there are no design-system variables or local styles, then ask whether the designer wants to set up or continue the design-system foundation. Do not present normal token-gap repair as the main story until the designer chooses a setup/foundation path.",
     "For health-check, do not call semantic colors clean unless inspect_ds_setup_gaps completed and the fresh result has no semantic setup gaps, contrast failures, icon contrast failures, broken aliases, apply-ready setup repairs, or unresolved naming findings. Do not call token gaps clean unless inspect_ds_token_gaps completed. Do not call visible/page layer bindings clean unless qa_binding_audit completed; otherwise say binding QA is a separate check.",
@@ -124,8 +124,8 @@ const DESIGNER_FLOW_HARD_RULES = {
     "After any write inside health-check, rerun the full read-only health-check verification sequence before reporting clean or remaining findings: sync_figma_data, detect_design_system, audit_tokens, inspect_ds_setup_gaps, and inspect_ds_token_gaps. Do not summarize remaining setup, contrast, naming, or token-gap findings from the apply result or from a narrow token-only reinspection. Reconcile remaining items against the fresh results: if detect_design_system or inspect_ds_token_gaps no longer reports missing foundation modes, do not repeat a stale missing Tablet/Desktop modes item; if audit_tokens and inspect_ds_token_gaps report spacing aliases clear, say that boundary is cleared. Refer to the applied repair by its named boundary or token list, not by a drifting menu number such as 'option 5'.",
     "For raw unbound values on designed layers, use qa_binding_audit read-only first; use repairPlan.counts.fixableNow and byFixability. Present violations as a stable numbered list using issueNumber so the designer can reply with issue numbers. Before asking to apply fixableNow bindings, show every fixableNow item as raw value → exact target token/style, including color candidate facts such as rawFill, top candidates, roleCandidate, and textDescendants when present; never collapse color fixes into a count like 'safe bindings'. For needsDesignerDecision color and typography findings, do not merely repeat the first suggestion: interpret the layer name, textDescendants, rawFill, roleCandidate, top candidates, and raw typography, then show a visible recommended target. If that visible recommendation differs from the raw repairPlan suggestion, distinguish it clearly and treat shorthand approval like ok, good, good on suggestion, or approving the issue number as approval of the visible recommendation. call qa_binding_audit({ fix: true }) only after fixableNow approval. For needsDesignerDecision suggestions such as role-based text styles or closest spacing/radius/border tokens, ask approval and then pass exact entries from repairPlan.designerDecisionApplyInput.approved_suggestions to qa_binding_audit({ approved_suggestions }) only when the displayed target is unchanged. If the designer approves a visible alternate recommendation or gives an exact alternate token/style for one of those audited findings, do not refuse because it was not the first suggestion: keep issueNumber, nodeId, property, rawValue/expectedRawValue, fillIndex/strokeIndex from the audit entry and replace only suggestion with the approved displayed target token/style.",
     "Do not create tokens from qa_binding_audit findings unless a Figlets token-completion planner provides the payload.",
-    "For TIMING or EASING creation, a missing target collection is a setup prerequisite, not a terminal error. Follow plan_ds_figma_operations phase create_missing_motion_collections: present and approve the exact collection/modes with pending variable values, apply only its foundation payload, sync, and replan continuation.input before previewing and approving the variable writes. If collection is omitted, the planner reuses Motion or follows the existing numbered collection pattern. Do not invent IDs or stop after creating an empty collection.",
-    "During new design-system setup, offer the motion-choice question once after base intake/preparation and before final build approval, unless motion is already configured or the choice is already known. review-motion or an explicit timing/easing/motion request permits a read-only prepare_ds_config motion proposal; skip-motion means no motion tool calls or default additions. Show collection, Default/Reduced Motion modes, names, millisecond durations, exact curves, and accessibilityNote. Review is not approval to save or build. Ask approval for exact saveInput before its local config write, then run nextInput to reprepare. Motion collection/mode creation and variable writes each require separate approval through plan_ds_figma_operations with motion_config_path. Stop on unresolved collection/mode results rather than omitting Reduced Motion. Follow apply_ds_setup.nextStep when motionPending is true. Do not report missing motion as a defect. Springs remain optional, never default.",
+    "For standalone TIMING or EASING edits outside an approved full setup, a missing target collection is a setup prerequisite, not a terminal error. Follow plan_ds_figma_operations phase create_missing_motion_collections: present and approve the exact collection/modes with pending variable values, apply only its foundation payload, sync, and replan continuation.input before previewing and approving the variable writes. If collection is omitted, the planner reuses Motion or follows the existing numbered collection pattern. Do not invent IDs or stop after creating an empty collection.",
+    "Motion is an optional foundation with an include/skip decision in the main intake. Ask Include motion or Skip for now before create_ds_config_from_intake and before declaring intake complete. Use the tool-provided shared preset or approved custom profile; pass motion_choice and motion_profile in the same intake call as the other choices. Reuse an already supplied choice or approved profile without asking again. skip-motion adds no motion defaults or separate motion tools. Do not route new setup through separate preview-motion/save-motion/reprepare steps. The complete setupApprovalPreview includes selected motion under the same Figma build approval, and apply_ds_setup builds all selected foundations using shared planners and execution. Report partial errors truthfully. Standalone motion edits can still use their scoped profile/planner tools.",
     "Variable create/update batches use atomic-variable-values: read batchStatus, counts, and per-operation results. Report created, updated, unchanged, blocked, failed, and rolledBack accurately. A blocked batch performed no writes; a rolled_back batch restored its attempted changes. For rollback_failed or unknown, stop and sync/inspect before retrying; never imply no changes remain. Keep motion/composed-value batches separate from structural/lifecycle/style/binding edits. best-effort-structural-operations is not an atomic rollback guarantee.",
     "If no specialized Figlets repair payload exists, first check whether the request is an exact designer-specified variable, collection, mode, style, binding, metadata, or lifecycle edit that plan_ds_figma_operations can represent. Do not convert product-specific health-check findings into invented generic operations. Only product-specific planning/decision gaps should be reported as Figlets product/tool gaps.",
   ],
@@ -167,7 +167,7 @@ const DESIGNER_FLOW_HARD_RULES = {
 };
 
 const NEW_DS_SETUP_INTAKE_CONTRACT = {
-  optionalMotionRule: "After base intake and preparation, ask the motion-choice question once before final build approval. Reuse an explicit or already configured choice. Motion is optional; skipping does not block setup or add defaults. Selecting review only permits a read-only proposal, not a save or Figma write.",
+  optionalMotionRule: "Ask the motion include/skip decision during intake, before config creation or preparation. Motion is optional; the intake decision is required unless already supplied or an approved profile is present. Do not declare all intake answers complete before recording it. Pass the answer in create_ds_config_from_intake with the other foundation choices.",
   treatPromptAs: "initial direction, not a complete design-system spec",
   requireQuestionsBefore: ["create_ds_config_from_intake", "prepare_ds_config", "apply_ds_setup"],
   configCreationTool: "create_ds_config_from_intake",
@@ -178,6 +178,7 @@ const NEW_DS_SETUP_INTAKE_CONTRACT = {
   questionBatchingRule:
     "Ask one setup intake question per assistant turn. If the designer answers several topics at once, record all answered topics, then ask the next single missing question only.",
   questionHelp: {
+    motion: { selectionPrompt: MOTION_INTAKE_SELECTION, instruction: "Ask the optional motion include/skip decision during intake, before create_ds_config_from_intake. An approved profile or known skip answers this topic. Do not declare intake complete first." },
     semanticColorNamingGrammar:
       "When asking semantic color naming grammar, include one-line examples: paired context uses bg/surface + text/on-surface, element-first uses text/danger + bg/danger-subtle, intent/emphasis uses brand/strong/subtle states, component-scoped uses button/bg/default. Recommend intent/emphasis for broad product systems unless the designer has a stronger convention.",
     colorScale:
@@ -197,6 +198,7 @@ const NEW_DS_SETUP_INTAKE_CONTRACT = {
     "typography preset",
     "font families",
     "light/dark behavior",
+    "motion choice (include motion or skip for now)",
   ],
   inferPairingIntentRule:
     "If the designer supplies brand colors and a semantic naming grammar, infer reasonable generated background/foreground pairing intent from those answers unless they explicitly ask for custom pairings. Do not ask a vague color-family pairing question by default.",
@@ -228,6 +230,7 @@ const NEW_DS_SETUP_INTAKE_CONTRACT = {
     "brand colors (name + hex)",
     "typeface and typography preset (material3/material/standard, fluid, compact, or custom with explicit scale)",
     "light/dark behavior",
+    "motion choice (include motion or skip for now)",
   ],
   suggestionRule:
     "You may ask multiple-choice questions or offer lightweight answer options, but label them as choices to pick from. Suggestions are allowed as editable proposals; they become config only after the designer approves one. Do not draft a full proposal before intake unless the designer explicitly asks for suggestions or has already answered the relevant intake topics.",
@@ -572,12 +575,24 @@ const WORKFLOWS = [
         questionHelp: NEW_DS_SETUP_INTAKE_CONTRACT.questionHelp,
       },
       {
+        id: "motion-choice",
+        kind: "confirmation",
+        requiredBeforeTool: "create_ds_config_from_intake",
+        optionalFeature: true,
+        conditional: "During intake, before declaring intake complete or saving config, unless the designer already supplied a motion choice or an approved profile.",
+        designerMessage: "Include motion foundations?",
+        selectionPrompt: MOTION_INTAKE_SELECTION,
+        skipRule: "skip-motion records motion_choice: skip in the normal intake; it adds no motion defaults, calls no separate motion tools, and performs no motion writes.",
+        repeatRule: "Reuse an already supplied choice or existing approved profile; do not ask again.",
+        inputSource: "Pass the include/skip answer and any approved custom profile to create_ds_config_from_intake with the other intake answers.",
+      },
+      {
         id: "create-config-from-intake",
         kind: "read",
         tool: "create_ds_config_from_intake",
         localConfigWrite: true,
         requiresIntake: true,
-        designerMessage: "I'll save your design-system choices for Figlets to use. Nothing changes in Figma yet. If brand colors or font families are missing, I'll ask for those choices.",
+        designerMessage: "I'll prepare one full token plan from your completed intake, including the motion include/skip choice. Nothing changes in Figma yet.",
       },
       {
         id: "prepare",
@@ -596,49 +611,6 @@ const WORKFLOWS = [
         designerMessage: "If the preview finds contrast failures with exact repair options, I'll show those options, ask approval, apply only the approved local config alias repair, then rerun prepare_ds_config before any Figma write.",
       },
       {
-        id: "motion-choice",
-        kind: "confirmation",
-        conditional: "After base preparation, when motion is not already configured and the designer has not already requested or skipped it in this setup.",
-        designerMessage: "Include motion foundations?",
-        selectionPrompt: {
-          type: "single-choice",
-          message: "Include motion foundations?\n\n1. Review a motion proposal\n2. Skip for now",
-          choices: [
-            { id: "review-motion", label: "Review a motion proposal" },
-            { id: "skip-motion", label: "Skip for now" },
-          ],
-        },
-        skipRule: "skip-motion continues base setup with no motion tool calls, no motion defaults, and no motion writes.",
-        repeatRule: "If motion is already configured or the choice is already supplied, reviewed, or skipped in this setup, reuse that state instead of asking again.",
-      },
-      {
-        id: "preview-motion",
-        kind: "read",
-        tool: "prepare_ds_config",
-        conditional: "Only after review-motion or an explicit motion request; never after skip-motion. Reuse an existing profile unless the designer requests changes.",
-        optionsForNewProfile: { motion_profile: "default" },
-        existingProfileRule: "Preview the designer's existing or edited profile. Never replace an existing profile with default solely because Review was selected.",
-        designerMessage: "I'll show an editable motion proposal with durations, easing curves, and reduced-motion values. Reviewing it does not save or build it.",
-      },
-      {
-        id: "save-motion",
-        kind: "write-local",
-        tool: "prepare_ds_config",
-        localConfigWrite: true,
-        requiresApproval: true,
-        conditional: "Only after approval of the exact motion proposal.",
-        inputSource: "preview-motion.saveInput",
-        designerMessage: "I'll save only the approved motion choices. Figma changes still require separate approval.",
-      },
-      {
-        id: "reprepare-after-motion",
-        kind: "read",
-        tool: "prepare_ds_config",
-        conditional: "Only after save-motion succeeds.",
-        inputSource: "save-motion.nextInput",
-        designerMessage: "I'll refresh the setup preview with your approved motion choices before asking to build.",
-      },
-      {
         id: "approve-build",
         kind: "confirmation",
         designerMessage: "After you review the detailed setupApprovalPreview, I'll ask whether the plan looks right and whether you're ready to build it in Figma.",
@@ -648,7 +620,7 @@ const WORKFLOWS = [
         kind: "write",
         tool: "apply_ds_setup",
         requiresApproval: true,
-        designerMessage: "I'll create the approved variable collections in Figma.",
+        designerMessage: "I'll build all selected foundations in Figma, including motion when selected, under this one setup approval.",
       },
     ],
     next: ["build-showcase", "health-check", "export-design-md"],
@@ -663,8 +635,7 @@ const WORKFLOWS = [
       "If the designer authorizes an arbitrary/default monospace family, pick a concrete platform-appropriate default before create_ds_config_from_intake instead of passing vague prose into the config.",
       "If prepare_ds_config reports failing semantic color contrast, show semanticPairs.contrastRepairOptions or setupApprovalPreview.semanticColor.contrast.repairOptions as exact evaluated suggestions instead of asking whether to keep revising the palette broadly. Some options may include both suggestedBackground and suggestedText; present both together.",
       "If the designer approves a prepare_ds_config contrastRepairOptions item, call apply_ds_config_contrast_repairs with the approved option object(s), then rerun prepare_ds_config.",
-      "If prepare_ds_config reports contrast failures with zero contrastRepairOptions, do not ask for a prose-only repair direction such as preserve background or make text lighter. Rerun prepare_ds_config once on the current config; generated setup should self-correct. If the latest result still has failCount > 0 and no exact repair option, explain the exact blocker and ask for an executable choice such as a specific alias, a brand hex change, or a color scale change.",
-      "If the designer says go for Figma/build it, treat it as build approval only when the latest prepare_ds_config result has readyToBuild === true. If readyToBuild is false, do not call apply_ds_setup; run the appropriate contrast repair or give one concise blocker, not a new approval loop.",
+      "Semantic contrast repairs adapt aliases to existing primitive ramp steps. Never change source hex values, color scale, or primitive ramp values to resolve a semantic finding. Offer exact evaluated text/icon contrastRepairOptions, including paired suggestedBackground + suggestedText when present, only when the designer wants repairs; apply only approved options through apply_ds_config_contrast_repairs. Icon-only findings are advisory. If no existing alias satisfies all evaluated backgrounds, explain that once and offer continuation, not another unchanged repair or palette change. If the designer says continue anyway, ignore this, fuck it continue, or chooses Build with current colors, honor that instruction for the current contrast findings without another confirmation: call prepare_ds_config with continue_with_contrast_warnings: true, then perform the requested build when readyToBuild is true. The same decision persists across prepare/apply and rechecks. Report unresolved warnings truthfully, never as passing. Missing data and execution errors are separate from contrast warnings.",
       "Never present an abstract suggested contrast direction or an untested single-axis example as something Figlets can apply. If there is no structured repair payload, suggestions must be concrete executable setup inputs or exact aliases.",
     ],
   },

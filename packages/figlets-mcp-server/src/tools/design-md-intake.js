@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { getActiveFileConfigPath, getConfigPathGuardError } = require('../utils/paths.js');
 const { dsConfig } = require('../figlets-core.js');
+const { MOTION_INTAKE_SELECTION } = require('../agent-interface/setup-intake.js');
 
 const designMdIntakeTool = {
   name: 'create_ds_config_from_design_md',
@@ -63,7 +64,37 @@ const intakeConfigTool = {
         }
       },
       color_families: { type: 'array', items: { type: 'string' } },
-      typography: { type: 'object' },
+      typography: {
+        type: 'object',
+        description: 'Preserve every supplied font role. A display family is separate from sans and mono and applies to display styles only.',
+        properties: {
+          families: {
+            type: 'object',
+            properties: {
+              sans: { type: 'string' },
+              mono: { type: 'string' },
+              display: { type: 'string', description: 'Optional display typeface. Never replace sans with this value.' },
+              body: { type: 'string' },
+              ui: { type: 'string' },
+            },
+            additionalProperties: { type: 'string' },
+          },
+          sans: { type: 'string' },
+          mono: { type: 'string' },
+          display: { type: 'string' },
+          display_family: { type: 'string' },
+          body_family: { type: 'string' },
+          ui_family: { type: 'string' },
+          mono_family: { type: 'string' },
+          scalePreset: { type: 'string' },
+          scale: { type: 'object' },
+          roleFamilies: { type: 'object', additionalProperties: { type: 'string' } },
+        },
+        additionalProperties: true,
+      },
+      motion_choice: { type: 'string', enum: ['include', 'skip'], description: 'Required intake decision for optional motion. Ask before declaring intake complete. Skip creates no motion foundations.' },
+      motion_profile: { anyOf: [{ const: 'default' }, { type: 'object' }], description: 'Approved standard preset or exact custom profile, normalized by the shared motion library.' },
+      motion_collection: { type: 'string' },
       typography_preset: { type: 'string' },
       typography_scale: { type: 'object' },
       naming: { type: 'object' },
@@ -211,7 +242,7 @@ function _typography(args, needsDesignerInput) {
       ...families,
       sans: sans || 'Inter',
       mono: mono || 'JetBrains Mono',
-      ...(input.display_family ? { display: input.display_family } : {}),
+      ...(input.display_family || input.display ? { display: input.display_family || input.display } : {}),
       ...(input.body_family ? { body: input.body_family } : {}),
       ...(input.ui_family ? { ui: input.ui_family } : {}),
     },
@@ -348,8 +379,27 @@ function handleCreateDsConfigFromIntake(args) {
   if (!contrast) needsDesignerInput.push('contrast standard (APCA or WCAG 2.2)');
   if (!String(args.theme_behavior || '').trim()) needsDesignerInput.push('light/dark behavior');
   if (!String(args.color_scale || '').trim()) needsDesignerInput.push('color scale (for example 100-900, 50-950, or 0-100)');
+  let selectedScale;
+  if (args.color_scale) {
+    try { selectedScale = dsConfig.resolveColorScale({ scale: args.color_scale }); } catch (error) { needsDesignerInput.push(error.message); }
+  }
   const brand = _brandColors(args, needsDesignerInput);
+  if (selectedScale) for (const entry of brand) {
+    if (entry.step != null && !selectedScale.steps.includes(entry.step)) needsDesignerInput.push('a valid ' + entry.name + ' anchor step in the selected color scale');
+  }
   const typography = _typography(args, needsDesignerInput);
+  let previous;
+  try { if (fs.existsSync(configPath)) previous = dsConfig.readDsConfig(configPath); } catch (_) {}
+  const motionChoice = args.motion_choice || (args.motion_profile ? 'include' : previous && (previous.motion ? 'include' : previous.figlets && previous.figlets.motionChoice));
+  let motionProfile;
+  const missingMotionChoice = !['include', 'skip'].includes(motionChoice);
+  if (missingMotionChoice) needsDesignerInput.push('motion choice (include motion or skip for now)');
+  if (motionChoice === 'include') {
+    const supplied = args.motion_profile || previous && previous.motion || 'default';
+    const normalized = dsConfig.normalizeMotionProfile(supplied === 'default' ? dsConfig.defaultMotionProfile() : supplied);
+    if (normalized.errors.length) needsDesignerInput.push(...normalized.errors);
+    else motionProfile = normalized.profile;
+  }
 
   const modes = _breakpointModes(args);
   const tier = _breakpointTier(args, modes);
@@ -362,7 +412,7 @@ function handleCreateDsConfigFromIntake(args) {
     breakpoints: { modes, tier },
     typography,
     color: {
-      scale: args.color_scale || '50-950',
+      scale: selectedScale ? selectedScale.key : (args.color_scale || '50-950'),
       algorithm: args.color_algorithm || 'oklch',
       rampStrategy: args.ramp_strategy || 'standard',
       contrastAlgorithm: contrast || 'apca',
@@ -374,11 +424,21 @@ function handleCreateDsConfigFromIntake(args) {
     collections: _collections(args.collections),
     figlets: {
       source: 'designer-intake',
+      ...(motionChoice ? { motionChoice } : {}),
       themeBehavior: args.theme_behavior || 'light + dark',
       visualDirection: args.visual_direction || '',
       notes: args.notes || '',
     },
   };
+
+  if (motionProfile) {
+    ds.motion = motionProfile;
+    const configured = args.motion_collection || args.collections && args.collections.motion || previous && previous.collections && previous.collections.motion;
+    try {
+      ds.collections.motion = dsConfig.motionCollectionName({ ...ds.collections, ...(configured ? { motion: configured } : {}) });
+      dsConfig.motionProfilePreview(ds);
+    } catch (error) { needsDesignerInput.push(error.message); }
+  } else delete ds.collections.motion;
 
   const preview = {
     project: ds.project,
@@ -391,6 +451,8 @@ function handleCreateDsConfigFromIntake(args) {
     brandColors: ds.color.brand.map(item => ({ name: item.name, hex: item.hex, role: item.role || null })),
     typography: ds.typography,
     collections: ds.collections,
+    motionChoice: motionChoice || null,
+    ...(motionProfile && !needsDesignerInput.length ? { motion: dsConfig.motionProfilePreview(ds) } : {}),
   };
   const suggestions = {
     typography: _typographySuggestions(ds.typography),
@@ -402,6 +464,7 @@ function handleCreateDsConfigFromIntake(args) {
       configWritten: false,
       readyForPrepare: false,
       needsDesignerInput,
+      ...(missingMotionChoice && needsDesignerInput.length === 1 ? { selectionPrompt: MOTION_INTAKE_SELECTION } : {}),
       preview,
       suggestions,
       message: 'I can create the design-system.config.js after these concrete setup choices are provided. Nothing has been written and Figma has not been changed.',
@@ -459,6 +522,9 @@ function handleCreateDsConfigFromDesignMd(args) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(configPath, 'const DS = ' + JSON.stringify(result.ds, null, 2) + ';\n', 'utf8');
 
+  const needsDesignerInput = (result.needsDesignerInput || []).slice();
+  if (!result.ds.motion && !['include', 'skip'].includes(result.ds.figlets && result.ds.figlets.motionChoice)) needsDesignerInput.push('motion choice (include motion or skip for now)');
+
   const intakeMode = result.parsedFromFrontMatter
     ? 'front-matter'
     : (result.mapped && result.mapped.linkedConfigUsed ? 'markdown+linked-config' : 'markdown-only');
@@ -472,7 +538,7 @@ function handleCreateDsConfigFromDesignMd(args) {
     parsedFromMarkdown: result.parsedFromMarkdown,
     linkedConfigCandidates: result.linkedConfigCandidates || [],
     mapped: result.mapped,
-    needsDesignerInput: result.needsDesignerInput || [],
+    needsDesignerInput,
     warnings: result.warnings || [],
     message: result.parsedFromFrontMatter
       ? 'Starter design-system.config.js created from DESIGN.md front matter. Review any missing answers, then run prepare_ds_config.'

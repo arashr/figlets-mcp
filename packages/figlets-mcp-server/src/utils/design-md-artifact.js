@@ -20,7 +20,18 @@ async function prepareDesignMdArtifact({ ds, outputPath, renderOptions }) {
   const { lint } = await import('@google/design.md/linter');
   const googleReport = lint(artifacts.markdown);
   const figletsFindings = core.designSystemPolicy.validateDesignSystemPolicy(ds);
-  const findings = (googleReport.findings || []).concat(figletsFindings);
+  // Contrast readiness belongs to the shared setup policy. Keep the independent
+  // WCAG linter evidence visible without making artifact lint a second build gate.
+  const findings = (googleReport.findings || []).map(finding => finding.rule === 'contrast-ratio'
+    ? { ...finding, blocking: false } : finding).concat(figletsFindings);
+  if (ds.color && ds.color.ramps && ds.color.brand) {
+    const validation = core.validateSemanticPairs(ds);
+    const contrast = core.contrastReadiness(ds, validation);
+    findings.push(...contrast.warnings.map(warning => ({ rule: 'semantic-contrast', severity: 'warning', blocking: false,
+      path: warning.icon || warning.text, mode: warning.mode, accepted: warning.accepted,
+      message: 'Unresolved ' + warning.kind + ' contrast in ' + warning.mode + (warning.accepted ? '; designer chose to continue.' : '.'),
+    })));
+  }
   const blockingFindings = _blockingFindings(findings);
 
   return {

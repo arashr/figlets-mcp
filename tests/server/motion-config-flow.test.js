@@ -48,7 +48,8 @@ module.exports = (async () => {
     assert.ok(!prepared.error, prepared.error);
     assert.strictEqual(prepared.readyToBuild, true);
     assert.strictEqual(prepared.motion.profile.durations['motion/duration/standard'].Default, 250);
-    assert.strictEqual(prepared.motionPlanInput.motion_config_path, configPath);
+    assert.strictEqual(prepared.motionPlanInput, undefined, 'included motion belongs to the normal setup call');
+    assert.ok(prepared.setupApprovalPreview.collections.some(item => item.name === '6. Motion'));
 
     const snapshot = { capabilities: { variableResolvedTypes: ['TIMING', 'EASING'], atomicVariableValueBatches: true }, collections: Object.values(original.collections).map((name, index) => ({ id: `c${index}`, name, variableIds: [], modes: [{ name: 'Default', modeId: `m${index}` }] })), variables: [] };
     fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));

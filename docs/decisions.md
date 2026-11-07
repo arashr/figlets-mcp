@@ -1,5 +1,41 @@
 # Decisions
 
+## [2026-11-07] Requested scales and exact brand anchors are authoritative
+
+**Decision:** Reuse one core scale resolver across intake and generation. Support 0-100 explicitly; never silently substitute 50-950 for an unknown scale. Report the generated inventory and actual anchor paths. Preserve designer-supplied RGB under every ramp strategy. Generated main brand semantics use the primary anchor in both modes; contrast adaptation changes foreground aliases, not the main brand anchor or primitives. Retain unresolved contrast truthfully under existing continuation policy. Saved explicit mappings stay literal, and invalid references are reported rather than clamped.
+
+**Architecture and verification:** Extend existing intake, prepare, and readback surfaces without new tools or Bridge mutation branches. Regression coverage exercises supported ranges and strategies plus fresh MCP intake through actual Bridge setup code against a simulated Figma environment and subsequent bootstrap. Existing live files are unchanged; their migration is a separate reviewed repair.
+
+## [2026-11-07] Optional motion is an intake decision before config creation
+
+**Correction:** Integrating only the execution path left an add-on workflow after preparation. Motion include/skip belongs to the main intake before declaring intake complete. The optional feature can be skipped; its choice must be recorded unless an approved profile or prior choice already supplies it.
+
+**Implementation:** Extend the existing intake tool with motion choice/profile/collection inputs using shared core defaults, normalization, and naming. A missing choice returns one targeted question and no completed-config write. Save selected motion with all other intake choices. Remove new-setup preview/save/reprepare motion steps; retain standalone editing surfaces for separate requests. Partial Markdown intake reports an unanswered motion choice.
+
+**Verification:** 144/144 tests plus build/lint/package smoke/whitespace pass. Actual registered-tool integration begins with missing intake, records the answer, prepares all selected foundations, and completes one setup call. The running connection retains old ordering and needs refresh. No live Figma write for this correction.
+
+## [2026-11-07] Selected motion is part of the normal approved setup
+
+**Decision:** Optional motion appears in the full setup preview and is built by apply_ds_setup under the same Figma approval as the other selected foundations. Do not expose a second collection/mode/value approval sequence during normal setup. Standalone exact motion edits retain their scoped planner/apply workflow. This supersedes the separate full-setup approval sequence in the November 4 motion decision below.
+
+**Reuse:** Extract the existing pure config-backed motion planner rather than duplicate capability, identity, type, mode, or naming rules. Reuse the generic structural operation executor, atomic variable writer, and sync transport. The base Bridge setup remains unchanged. No new public tool or Bridge mutation branch.
+
+**Completion:** Preflight known conflicts before base mutation. Internally sync and stage prerequisites, then atomically write the configured values and verify fresh readback in both modes. Preserve existing IDs and unrelated tokens. Config/file changes, missing modes, failed batches, or incorrect readback produce accurate partial results. Never omit Reduced Motion or claim complete setup after only creating the collection. The execution stages have a fixed bound, not an open retry loop.
+
+**Verification:** 143/143 test files, build, lint, package smoke, and whitespace pass. A fresh stdio MCP integration executes one registered setup call against a simulated receiver and the existing Bridge operation handler. No live Figma write for this slice; refresh the currently stale agent-host server before manual use.
+
+## [2026-11-07] Semantic repairs preserve primitives and contrast decisions permit continuation
+
+**Decision:** Extend the existing preparation, semantic contrast repair, and setup apply surfaces. Icon contrast is advisory. An explicit designer instruction to continue with current contrast findings is represented by continue_with_contrast_warnings on prepare/apply and retained for those evaluated findings. Both surfaces and the detailed preview use the shared readiness policy. Do not demand another confirmation after the requested build-and-continue instruction.
+
+**Repair boundary:** Select existing primitive ramp steps for semantic aliases. Do not change source hex, scale, or primitive ramp values as a semantic contrast repair. Saved aliases are not silently repaired during validation. Exact icon options include the current alias, proposed step, actual background contexts, and evidence. Stale options or a combined repair that creates an icon failure are rejected without writing config. An impossible shared-context candidate becomes an advisory, not a repeated search or palette-edit prompt.
+
+**Truth and execution:** Accepted contrast findings remain unresolved warnings in results and DESIGN.md; they are not compliance passes. Missing references and actual execution failures are not hidden by contrast continuation. The Google contrast warning remains visible without acting as a second artifact build gate. Other validation behavior is preserved.
+
+**Architecture:** Shared pure readiness and repair-option helpers; no new public tool, bridge mutation branch, or designer-facing configuration flow. Update adapters, workflow contracts, root entrypoints, and packaged guidance together.
+
+**Verification:** 142/142 test files pass, including actual registered tools in a fresh stdio server and a simulated Bridge. Build, lint, package smoke, and whitespace checks pass. No live Figma writes or full manual designer conversation for this slice. The actual running Codex connection also passed an isolated prepare, explicit continuation, and persistent recheck sequence; its guide contains the updated policy. Cursor remains separately unverified.
+
 ## [2026-11-04] Optional motion config uses existing approval surfaces
 
 **Decision:** Extend `prepare_ds_config` for explicit motion requests with an editable read-only profile preview. Saving requires the exact approved proposal and a fingerprint of both the current config bytes and normalized proposal. Save only `DS.motion` and `DS.collections.motion`, then reprepare. Ordinary configs and intake receive no motion defaults or missing-motion defect.

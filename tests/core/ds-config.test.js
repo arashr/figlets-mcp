@@ -177,11 +177,12 @@ function makeDs(overrides) {
   }
 
   const validated = validateSemanticPairs(harmonized.ds);
-  assert.strictEqual(
-    validated.failCount,
-    0,
-    'contrast-harmonized generated role-based semantic pairs should pass APCA'
-  );
+  assert.strictEqual(validated.failCount, 2, 'the exact medium brand anchor retains two truthful APCA warnings');
+  assert.ok(validated.contrastFindings.every(finding => finding.background === 'color/bg/brand'), 'other harmonized semantic pairs should pass');
+  const brandAnchor = harmonized.brandAnchors.find(anchor => anchor.name === 'cobalt');
+  const brandPair = validated.ds.color.semantics.pairs.find(pair => pair.bg === 'color/bg/brand');
+  assert.strictEqual(brandPair.Light.bg, brandAnchor.path);
+  assert.strictEqual(brandPair.Dark.bg, brandAnchor.path);
 }
 
 // algorithm switch — default is oklch, hsl is selectable, the brand color
@@ -332,7 +333,7 @@ function makeDs(overrides) {
   assert.strictEqual(savedSuccessBorder.Light, 'color/green/300', 'manual unpaired values should win on re-run');
 }
 
-// neutral-variant backfills generated surface semantics without clobbering unrelated pairs
+// Saved surface semantics retain the designer's explicit aliases during validation.
 {
   let ds = computeDsConfig(makeDs({ color: {
     scale: '50-950',
@@ -350,8 +351,8 @@ function makeDs(overrides) {
   ds = generateColorRamps(ds).ds;
   ds = validateSemanticPairs(ds).ds;
   const pair = ds.color.semantics.pairs.find(p => p.bg === 'color/surface/variant');
-  assert.strictEqual(pair.Light.bg, 'color/neutral-variant/100', 'surface variant Light should backfill to neutral-variant');
-  assert.strictEqual(pair.Dark.bg, 'color/neutral-variant/900', 'surface variant Dark should backfill to neutral-variant');
+  assert.strictEqual(pair.Light.bg, 'color/neutral/100', 'saved Light alias must not be silently replaced by neutral-variant');
+  assert.strictEqual(pair.Dark.bg, 'color/neutral/900', 'saved Dark alias must not be silently replaced by neutral-variant');
 }
 
 // generated surface variants must get matching on-surface variant foregrounds.
@@ -398,9 +399,10 @@ function makeDs(overrides) {
   ds = generateColorRamps(ds).ds;
   const result = validateSemanticPairs(ds);
   const pair = result.ds.color.semantics.pairs.find(p => p.bg === 'color/surface/success');
-  assert.strictEqual(pair.Light.bg, 'color/green/700', 'surface success Light bg should darken when neutral/50 is unavailable');
-  assert.strictEqual(pair.Light.text, 'color/neutral/100', 'surface success Light text should resolve to the lightest available neutral foreground');
-  assert.strictEqual(result.failCount, 0, 'surface success backfill should clear the generated contrast failure');
+  assert.strictEqual(pair.Light.bg, 'color/green/600', 'validation must retain the saved semantic background until a repair is approved');
+  assert.strictEqual(pair.Light.text, 'color/neutral/900', 'validation must retain the saved foreground even if contrast fails');
+  assert.ok(result.failCount > 0, 'saved failing contrast must remain truthful rather than silently repaired');
+  assert.ok(result.pairRepairSuggestions['color/surface/success|color/on-surface/success'].Light, 'offer an evaluated alias repair instead');
 }
 
 // ── APCA contrast option ─────────────────────────────────────────────────────
@@ -445,8 +447,8 @@ function makeDs(overrides) {
   assert.strictEqual(result.failCount, 0, 'generated pink brand semantic pairs should self-correct to pass WCAG');
   assert.strictEqual(
     brandPair.Dark.text,
-    'color/neutral/50',
-    'generated dark on-brand text should auto-adjust to the nearest passing neutral alias'
+    'color/neutral/950',
+    'generated on-brand text should contrast with the exact supplied pink anchor'
   );
   assert.deepStrictEqual(
     result.pairSuggestions['color/bg/brand|color/text/on-brand'],
@@ -455,10 +457,8 @@ function makeDs(overrides) {
   );
 }
 
-// If a designer chooses a shorter 100-900 scale, a generated pair may have no
-// foreground-only fix because neutral/50 and neutral/950 do not exist. Generated
-// setup should still converge by making the smallest same-ramp background shift
-// and choosing the best available foreground instead of surfacing a repair loop.
+// A shorter scale still preserves the supplied brand anchor and selects an
+// available foreground. Missing canonical endpoints must not move the brand.
 {
   let ds = computeDsConfig(makeDs({
     color: {
@@ -479,12 +479,12 @@ function makeDs(overrides) {
   const result = validateSemanticPairs(ds);
   const brandPair = result.ds.color.semantics.pairs.find(pair => pair.bg === 'color/bg/brand');
   assert.strictEqual(result.failCount, 0, 'generated 100-900 pink brand semantic pairs should self-correct to pass WCAG');
-  assert.strictEqual(brandPair.Dark.bg, 'color/pink/600');
-  assert.strictEqual(brandPair.Dark.text, 'color/neutral/100');
+  assert.strictEqual(brandPair.Dark.bg, result.ds.color.brandAnchors.find(anchor => anchor.name === 'pink').path);
+  assert.strictEqual(brandPair.Dark.text, 'color/neutral/900');
   assert.deepStrictEqual(
     result.pairSuggestions['color/bg/brand|color/text/on-brand'],
     { Light: null, Dark: null },
-    'generated pair background shifts should not surface a designer repair suggestion'
+    'a passing foreground on the preserved brand anchor should need no repair'
   );
 }
 

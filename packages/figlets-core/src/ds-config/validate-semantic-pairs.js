@@ -1,5 +1,7 @@
 'use strict';
 
+const { canonicalColorStep, findBrandAnchor } = require('./color-scale');
+
 const {
   WCAG_NON_TEXT_THRESHOLD,
   relativeLuminance,
@@ -50,7 +52,17 @@ function validateSemanticPairs(ds) {
     }
   }
 
-  function resolve(ref) {
+  function templateRef(ref) {
+    const match = String(ref || '').match(/^(?:color\/)?([^/]+)\/(\d+)$/);
+    if (!match) return ref;
+    const name = match[1] === 'primary' ? PRIMARY : match[1];
+    const ramp = rampByName[name];
+    return ramp ? name + '/' + canonicalColorStep(ramp.map(row => row[0]), Number(match[2])) : ref;
+  }
+  const primaryAnchor = findBrandAnchor(primaryEntry, DS.color.ramps, DS.color.brandAnchors);
+
+  function resolve(ref, exact = false) {
+    if (typeof ref !== 'string') return null;
     let [rampName, stepStr] = ref.split('/');
     if (rampName === 'primary') rampName = PRIMARY;
     const desiredStep = parseInt(stepStr, 10);
@@ -59,6 +71,7 @@ function validateSemanticPairs(ds) {
     const [actualStep, r, g, b] = ramp.reduce((best, entry) =>
       Math.abs(entry[0] - desiredStep) < Math.abs(best[0] - desiredStep) ? entry : best
     );
+    if (exact && actualStep !== desiredStep) return null;
     const resolvedPath = `color/${rampName}/${actualStep}`;
     return { path: resolvedPath, rgb: { r, g, b }, clamped: actualStep !== desiredStep };
   }
@@ -360,20 +373,14 @@ function validateSemanticPairs(ds) {
       const row = {
         bg:    p.bg,
         text:  p.text,
-        min:   template.min   === null ? null : (template.min   || 4.5),
-        minLc: template.minLc === null ? null : (template.minLc || 75),
-        note:  template.note,
+        min: Object.prototype.hasOwnProperty.call(p, 'min') ? p.min : (template.min === null ? null : (template.min || 4.5)),
+        minLc: Object.prototype.hasOwnProperty.call(p, 'minLc') ? p.minLc : (template.minLc === null ? null : (template.minLc || 75)),
+        note:  p.note || template.note,
+        icon: p.icon,
         L: p.Light ? { bg: p.Light.bg.replace(/^color\//, ''), text: p.Light.text.replace(/^color\//, '') } : null,
         D: p.Dark  ? { bg: p.Dark.bg.replace(/^color\//, ''),  text: p.Dark.text.replace(/^color\//, '')  } : null,
       };
-      if (NEUTRAL_VARIANT !== 'neutral' && p.bg === 'color/surface/variant' && p.text === 'color/on-surface/default') {
-        if (row.L && row.L.bg === 'neutral/100') row.L.bg = `${NEUTRAL_VARIANT}/100`;
-        if (row.D && row.D.bg === 'neutral/900') row.D.bg = `${NEUTRAL_VARIANT}/900`;
-      }
-      if (p.bg === 'color/surface/success' && p.text === 'color/on-surface/success') {
-        if (row.L && row.L.bg === 'green/600' && row.L.text === 'neutral/900') row.L.text = 'neutral/50';
-      }
-      return contrastHarmonized ? applyContrastHarmonizedPair(row) : row;
+      return row;
     });
   } else {
     sourceTemplates = contrastHarmonized
@@ -391,7 +398,20 @@ function validateSemanticPairs(ds) {
       : pairTemplates;
   }
 
+  if (!existingPairs) sourceTemplates = sourceTemplates.map(template => {
+    const row = { ...template, L: { bg: templateRef(template.L.bg), text: templateRef(template.L.text) }, D: { bg: templateRef(template.D.bg), text: templateRef(template.D.text) } };
+    if (primaryAnchor && ['color/surface/brand', 'color/bg/brand'].includes(row.bg)) {
+      row.L.bg = primaryAnchor.path.replace(/^color\//, '');
+      row.D.bg = row.L.bg;
+      row.brandAnchor = true;
+    }
+    return row;
+  });
+
   let failCount = 0;
+  const contrastFindings = [];
+  const referenceErrors = [];
+  const iconRepairSuggestions = [];
   const resolvedPairs = [];
   const tableRows = [];
 
@@ -405,15 +425,16 @@ function validateSemanticPairs(ds) {
   }
 
   for (const tmpl of sourceTemplates) {
-    const row = { bg: tmpl.bg, text: tmpl.text, min: tmpl.min, minLc: tmpl.minLc, note: tmpl.note };
+    const row = { bg: tmpl.bg, text: tmpl.text, min: tmpl.min, minLc: tmpl.minLc, note: tmpl.note, icon: tmpl.icon };
 
     for (const [mode, side] of [['Light', tmpl.L], ['Dark', tmpl.D]]) {
       if (!side) { row[mode] = undefined; continue; }
-      let bgRes  = resolve(side.bg);
-      let txtRes = resolve(side.text);
+      let bgRes  = resolve(side.bg, Boolean(existingPairs));
+      let txtRes = resolve(side.text, Boolean(existingPairs));
 
       if (!bgRes || !txtRes) {
-        row[mode] = { bg: side.bg, text: side.text, error: 'ramp not found in DS.color.ramps' };
+        row[mode] = { bg: 'color/' + side.bg.replace(/^color\//, ''), text: 'color/' + side.text.replace(/^color\//, ''), error: 'ramp not found in DS.color.ramps' };
+        referenceErrors.push({ kind: 'text', background: tmpl.bg, text: tmpl.text, mode, aliases: { background: side.bg, text: side.text } });
         continue;
       }
 
@@ -427,12 +448,12 @@ function validateSemanticPairs(ds) {
       // the green ramp to a darker step and re-evaluate. Works under both
       // algorithms because gatePass returns the gated `pass` for the new bg.
       if (
-        pass === false &&
+        !existingPairs && pass === false &&
         mode === 'Light' &&
         tmpl.bg === 'color/surface/success' &&
         tmpl.text === 'color/on-surface/success'
       ) {
-        const darkerSuccessBg = resolve('green/700');
+        const darkerSuccessBg = resolve(templateRef('green/700'));
         if (darkerSuccessBg) {
           const darkerBgLum = luminance(darkerSuccessBg.rgb);
           const darkerRatio = wcagRatio(darkerBgLum, txtLum);
@@ -471,7 +492,7 @@ function validateSemanticPairs(ds) {
             side.text = suggestion.path.replace(/^color\//, '');
           }
         }
-        if (!existingPairs && pass === false && !suggestion) {
+        if (!existingPairs && !tmpl.brandAnchor && pass === false && !suggestion) {
           adjustmentSuggestion = suggestGeneratedPairAdjustment(side.bg, side.text, scorer, threshold);
           if (adjustmentSuggestion) {
             const adjustedBg = resolve(adjustmentSuggestion.bgPath.replace(/^color\//, ''));
@@ -492,10 +513,13 @@ function validateSemanticPairs(ds) {
             }
           }
         }
-        if (existingPairs && pass === false && !suggestion) {
+        if (existingPairs && !['color/surface/brand', 'color/bg/brand'].includes(tmpl.bg) && pass === false && !suggestion) {
           adjustmentSuggestion = suggestGeneratedPairAdjustment(side.bg, side.text, scorer, threshold);
         }
-        if (pass === false) failCount++;
+        if (pass === false) {
+          failCount++;
+          contrastFindings.push({ kind: 'text', background: tmpl.bg, text: tmpl.text, mode, algorithm, threshold, aliases: { background: bgRes.path, text: txtRes.path }, colors: { background: bgRes.rgb, text: txtRes.rgb }, score: scorer(txtRes.rgb, bgRes.rgb) });
+        }
       }
 
       const wcagLabel = ratio >= 7 ? 'AAA' : ratio >= 4.5 ? 'AA' : ratio >= 3 ? '3:1' : 'fail';
@@ -538,7 +562,7 @@ function validateSemanticPairs(ds) {
       return { token: u.token, Light: saved.Light || null, Dark: saved.Dark || null, note: saved.note || u.note };
     }
     if (u.scrim) return { token: u.token, Light: u.L, Dark: u.D, note: u.note };
-    const lRes = resolve(u.L), dRes = resolve(u.D);
+    const lRes = resolve(templateRef(u.L)), dRes = resolve(templateRef(u.D));
     return {
       token: u.token,
       Light: lRes ? lRes.path : `color/${u.L}`,
@@ -566,14 +590,21 @@ function validateSemanticPairs(ds) {
   const iconScorer    = wcagScorer;
   const iconThreshold = WCAG_NON_TEXT_THRESHOLD;
 
-  const resolvedIcons = wantsIconSemantics ? ROLE_ICONS.map(ic => {
+  const iconTemplates = ROLE_ICONS.slice();
+  for (const item of existingIcons || []) {
+    if (!iconTemplates.some(template => template.token === item.token)) iconTemplates.push({ token: item.token,
+      L: { icon: item.Light && item.Light.replace(/^color\//, ''), bg: 'neutral/50' },
+      D: { icon: item.Dark && item.Dark.replace(/^color\//, ''), bg: 'neutral/950' } });
+  }
+  const resolvedIcons = wantsIconSemantics ? iconTemplates.map(original => {
+    const ic = { ...original, L: { icon: templateRef(original.L.icon), bg: templateRef(original.L.bg) }, D: { icon: templateRef(original.D.icon), bg: templateRef(original.D.bg) } };
     // Prefer saved values from a previous run; fall back to template defaults.
     const saved = existingIconMap[ic.token];
     const lRef  = saved && saved.Light ? saved.Light.replace(/^color\//, '') : ic.L.icon;
     const dRef  = saved && saved.Dark  ? saved.Dark.replace(/^color\//, '')  : ic.D.icon;
 
-    const lIcon = resolve(lRef), lBg = resolve(ic.L.bg);
-    const dIcon = resolve(dRef), dBg = resolve(ic.D.bg);
+    const lIcon = resolve(lRef, Boolean(saved)), lBg = resolve(ic.L.bg);
+    const dIcon = resolve(dRef, Boolean(saved)), dBg = resolve(ic.D.bg);
 
     let lRatio = null, dRatio = null, lPass = null, dPass = null;
     if (lIcon && lBg) {
@@ -589,7 +620,7 @@ function validateSemanticPairs(ds) {
     // passing step in the same ramp. Handles light-dominant primaries (e.g. lime)
     // without a manual fix loop. Uses the chosen algorithm's scorer.
     let finalLIcon = lIcon, finalDIcon = dIcon;
-    if (lPass === false && lIcon && lBg) {
+    if (!existingIcons && lPass === false && lIcon && lBg) {
       const adj = suggestStepFor(lRef, lBg.rgb, iconScorer, iconThreshold);
       if (adj) {
         finalLIcon = resolve(adj.path.replace(/^color\//, ''));
@@ -597,7 +628,7 @@ function validateSemanticPairs(ds) {
         lPass  = true;
       }
     }
-    if (dPass === false && dIcon && dBg) {
+    if (!existingIcons && dPass === false && dIcon && dBg) {
       const adj = suggestStepFor(dRef, dBg.rgb, iconScorer, iconThreshold);
       if (adj) {
         finalDIcon = resolve(adj.path.replace(/^color\//, ''));
@@ -616,6 +647,7 @@ function validateSemanticPairs(ds) {
 
   function pairIconFor(row, iconNames) {
     if (!row || !row.bg || !row.text || !iconNames || !iconNames.size) return null;
+    if (row.icon && iconNames.has(row.icon)) return row.icon;
     const candidates = [];
     const textParts = String(row.text).split('/');
     for (let i = textParts.length - 1; i >= 0; i--) {
@@ -700,12 +732,28 @@ function validateSemanticPairs(ds) {
         }) : [];
       const adj = passing[0];
       if (adj) {
-        iconRow[modeKey] = `color/${info.rampName}/${adj.entry[0]}`;
-        icon = resolveColorPath(iconRow[modeKey]);
-        score = adj.score;
-        ratio = adj.ratio;
+        const suggestedIcon = `color/${info.rampName}/${adj.entry[0]}`;
+        if (!existingIcons) {
+          iconRow[modeKey] = suggestedIcon;
+          icon = resolveColorPath(suggestedIcon);
+          score = adj.score;
+          ratio = adj.ratio;
+        } else {
+          iconRepairSuggestions.push({
+            kind: 'icon', id: `${iconRow.token}|${modeKey}`, icon: iconRow.token,
+            mode: modeKey, currentIcon: iconRow[modeKey], suggestedIcon,
+            backgrounds: bgPaths.slice().sort(), ratio: adj.ratio, threshold: iconThreshold,
+            evidence: bgPaths.map(path => { const bg = resolveColorPath(path); return { background: path, rgb: bg.rgb, currentRatio: wcagContrastRatio(icon.rgb, bg.rgb), candidateRatio: wcagContrastRatio(adj.rgb, bg.rgb) }; }),
+          });
+        }
       }
     }
+    const contexts = bgPaths.map(path => {
+      const background = resolveColorPath(path);
+      return background ? { background: path, rgb: background.rgb, ratio: wcagContrastRatio(icon.rgb, background.rgb) } : null;
+    }).filter(Boolean);
+    if (!iconRow.contexts) iconRow.contexts = {};
+    iconRow.contexts[modeKey] = contexts;
 
     const ratioKey = modeKey === 'Light' ? 'lRatio' : 'dRatio';
     const passKey = modeKey === 'Light' ? 'lPass' : 'dPass';
@@ -727,13 +775,23 @@ function validateSemanticPairs(ds) {
     if (row.Dark && row.Dark.bg) context.Dark.push(row.Dark.bg);
   }
 
-  for (const [icon, context] of iconContexts.entries()) {
-    const iconRow = iconByToken.get(icon);
-    updateIconModeMetrics(iconRow, 'Light', context.Light);
-    updateIconModeMetrics(iconRow, 'Dark', context.Dark);
-  }
-
   for (const ic of resolvedIcons) {
+    const template = iconTemplates.find(item => item.token === ic.token);
+    const context = iconContexts.get(ic.token) || { Light: [], Dark: [] };
+    for (const mode of ['Light', 'Dark']) {
+      const paths = context[mode].length ? [...new Set(context[mode])].sort()
+        : ['color/' + templateRef(mode === 'Light' ? template.L.bg : template.D.bg)];
+      if (!ic[mode] || !resolveColorPath(ic[mode]) || paths.some(path => !resolveColorPath(path))) {
+        referenceErrors.push({ kind: 'icon', icon: ic.token, mode, alias: ic[mode], backgrounds: paths });
+        continue;
+      }
+      updateIconModeMetrics(ic, mode, paths);
+      const pass = ic[mode === 'Light' ? 'lPass' : 'dPass'];
+      if (pass === false) contrastFindings.push({
+        kind: 'icon', icon: ic.token, mode, algorithm: 'wcag', threshold: iconThreshold,
+        alias: ic[mode], rgb: resolveColorPath(ic[mode]).rgb, contexts: ic.contexts[mode],
+      });
+    }
     if (ic.lPass === false || ic.dPass === false) failCount++;
   }
 
@@ -802,7 +860,7 @@ function validateSemanticPairs(ds) {
   };
 
   const passLabel = algorithm === 'apca' ? 'APCA Lc minimum' : 'AA minimum';
-  const failBlock = failCount
+  const failBlock = referenceErrors.length ? '\nSome semantic color references are unresolved; contrast is unverified for those contexts.' : failCount
     ? `\n⚠️  ${failCount} pair(s) fail ${passLabel} — see "suggest" column for nearest passing step.`
     : `\n✓ All pairs pass ${passLabel}.`;
 
@@ -847,7 +905,12 @@ function validateSemanticPairs(ds) {
     };
   }
 
-  return { ds: DS, markdownTable, iconTable, failCount, summary, pairSuggestions, pairRepairSuggestions };
+  return {
+    ds: DS, markdownTable, iconTable, failCount, summary, pairSuggestions, pairRepairSuggestions,
+    contrastFindings, referenceErrors, iconRepairSuggestions,
+    textFailCount: contrastFindings.filter(item => item.kind === 'text').length,
+    iconFailCount: resolvedIcons.filter(item => item.lPass === false || item.dPass === false).length,
+  };
 }
 
 module.exports = { validateSemanticPairs };

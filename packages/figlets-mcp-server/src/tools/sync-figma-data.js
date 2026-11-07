@@ -116,21 +116,26 @@ function _syncSuccessPayload(parsed, beforeFileKey) {
   };
 }
 
-function handleSyncFigmaData(args = {}) {
-  const beforeFileKey = getActiveFileKey();
+function requestFigmaSync(args = {}) {
   return requestBridgePost("/request-sync", {}, {
     bridgeHookFile: args.bridgeHookFile,
     transport: args.bridgeTransport,
     receiverUrl: args.receiverUrl,
   }).then((response) => {
     if (response.statusCode === 200) {
-      return _syncSuccessPayload(response.data || {}, beforeFileKey);
+      return response.data || {};
     }
     throw new Error(_syncErrorMessage(response));
   });
 }
 
+function handleSyncFigmaData(args = {}) {
+  const beforeFileKey = getActiveFileKey();
+  return requestFigmaSync(args).then(parsed => _syncSuccessPayload(parsed, beforeFileKey));
+}
+
 module.exports = {
   syncFigmaDataTool,
-  handleSyncFigmaData
+  handleSyncFigmaData,
+  requestFigmaSync
 };

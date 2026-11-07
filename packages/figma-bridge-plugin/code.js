@@ -2,7 +2,7 @@ figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
 var _bridgeBuild = '1.3.0';
 // Local build metadata. Remove this suffix when preparing the next release.
-_bridgeBuild += '+dev.20261106.5';
+_bridgeBuild += '+dev.20261106.8';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -302,6 +302,20 @@ figma.ui.onmessage = async (msg) => {
         source: 'figma-plugin',
         bridgeBuild: _bridgeBuild,
         variableResolvedTypes: ['BOOLEAN', 'COLOR', 'EASING', 'FLOAT', 'STRING', 'TIMING'],
+        nativeSpecs: (function () {
+          try {
+            const spec = figma.spec;
+            return {
+              available: !!spec,
+              createOnCanvas: !!spec && typeof spec.createOnCanvasAsync === 'function',
+              read: !!spec && typeof spec.getContent === 'function',
+              edit: !!spec && typeof spec.editContent === 'function',
+              replace: !!spec && typeof spec.setContent === 'function'
+            };
+          } catch (error) {
+            return { available: false, reason: 'Native Specs API is not exposed to this plugin session.' };
+          }
+        })(),
         composedColorVariables: true,
         exactVariableWriteSupport: true,
         atomicVariableValueBatches: true
@@ -3580,7 +3594,6 @@ async function _buildShowcase(opts) {
 
   const _PRIMITIVE_COLOR_DESC = 'Primitive ramp values used to construct semantic color roles and visual states.';
   const _SEMANTIC_COLOR_DESC = 'Semantic color tokens mapped to UI roles, foreground pairings, and accessibility checks.';
-  const _SCRIM_TABLE_DESC = 'Overlay opacity tokens for dimming background content behind modal surfaces.';
 
   function _buildTable(title, description) {
     const table = _f('Table 1.0.0', 'VERTICAL');
@@ -3893,7 +3906,8 @@ async function _buildShowcase(opts) {
     container.strokeAlign = 'INSIDE';
 
     if (scrimBackground) {
-      container.layoutMode = 'NONE';
+      container.paddingTop = 8; container.paddingRight = 8;
+      container.paddingBottom = 8; container.paddingLeft = 8;
       container.fills = [];
       const background = figma.createFrame();
       background.name = 'Neutral background';
@@ -3901,17 +3915,19 @@ async function _buildShowcase(opts) {
       background.resize(56, 64);
       background.fills = [_paint({ r: scrimBackground.rgb.r, g: scrimBackground.rgb.g, b: scrimBackground.rgb.b }, scrimBackground.variable)];
       container.appendChild(background);
+      background.layoutPositioning = 'ABSOLUTE';
       background.x = 0; background.y = 0;
       background.constraints = { horizontal: 'STRETCH', vertical: 'STRETCH' };
       const overlay = figma.createFrame();
       overlay.name = 'Scrim overlay';
       overlay.layoutMode = 'NONE';
-      overlay.resize(56, 64);
+      overlay.resize(40, 48);
+      overlay.cornerRadius = 4;
       // Binding the COLOR variable supplies its alpha; do not multiply paint opacity again.
       overlay.fills = [_paint(swatchRGB, swatchVar)];
       container.appendChild(overlay);
-      overlay.x = 0; overlay.y = 0;
-      overlay.constraints = { horizontal: 'STRETCH', vertical: 'STRETCH' };
+      overlay.layoutSizingHorizontal = 'FILL';
+      overlay.layoutSizingVertical = 'FILL';
     } else {
       const topHalf = _f('Neutral on swatch', 'HORIZONTAL');
       topHalf.primaryAxisAlignItems = 'CENTER';
@@ -4809,6 +4825,21 @@ async function _buildShowcase(opts) {
         }
       }
 
+      // Primitive scrims use the same table and appear after every ordinary ramp.
+      const _primitiveScrims = _primColls.flatMap(coll => coll.vars.filter(_isShowcaseScrim));
+      const _scrimGroups = groupByPath(_primitiveScrims);
+      for (const groupPath of Object.keys(_scrimGroups).sort()) {
+        const groupVars = _scrimGroups[groupPath].slice().sort(function (a, b) {
+          const av = _resolveShowcaseScrim(a), bv = _resolveShowcaseScrim(b);
+          return av && bv && av.a !== bv.a ? av.a - bv.a : a.name.localeCompare(b.name);
+        });
+        const row = _buildPrimSwatchRow(groupPath, groupVars, true);
+        if (!row) continue;
+        _primTable.appendChild(row);
+        row.layoutSizingHorizontal = 'FILL';
+        _addTableDivider(_primTable);
+      }
+
       _appendFill(_primTable, _primitiveColorsFrame);
       _placeShowcaseSection('Primitive Colors', _primitiveColorsFrame, _myColorsX);
     }
@@ -5696,34 +5727,6 @@ async function _buildShowcase(opts) {
 
     _appendFill(_elevTable, _elevFrame);
     _placeShowcaseSection('Elevation', _elevFrame, _myElevationX);
-  }
-
-  // ── Scrims section ───────────────────────────────────────────────────────────
-
-  const _scrimVars = Object.values(varByName).filter(_isShowcaseScrim);
-  const _prevScrims = _page.children.find(n =>
-    (n.type === 'FRAME' || n.type === 'SECTION') && n.name === 'Token Showcase — Scrims'
-  );
-  if (_scrimVars.length) {
-    if (_prevScrims) _prevScrims.remove();
-    const _scrimFrame = _makeShowcaseFrame('Scrims');
-    _addToFrame(_buildSectionHeader('Overlays & Scrims', 'Scrim and overlay opacity tokens.'), _scrimFrame);
-    const _scrimTable = _buildTable('Overlays & Scrims', _SCRIM_TABLE_DESC);
-    const _scrimGroups = groupByPath(_scrimVars);
-    for (const groupPath of Object.keys(_scrimGroups).sort()) {
-      const groupVars = _scrimGroups[groupPath].slice().sort(function (a, b) {
-        const av = _resolveShowcaseScrim(a), bv = _resolveShowcaseScrim(b);
-        return av && bv && av.a !== bv.a ? av.a - bv.a : a.name.localeCompare(b.name);
-      });
-      const row = _buildPrimSwatchRow(groupPath, groupVars, true);
-      if (!row) continue;
-      _scrimTable.appendChild(row);
-      row.layoutSizingHorizontal = 'FILL';
-      _addTableDivider(_scrimTable);
-    }
-    _appendFill(_scrimTable, _scrimFrame);
-    // Always place after all other generated sections, including on regeneration.
-    _placeShowcaseSection('Scrims', _scrimFrame, null);
   }
 
   // ── Finale ───────────────────────────────────────────────────────────────────

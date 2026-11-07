@@ -1,6 +1,6 @@
 "use strict";
 
-const { getTouchSemanticDefaults } = require('../figlets-core.js').dsConfig;
+const { getTouchSemanticDefaults, COLOR_SCALES, nearestColorStep } = require('../figlets-core.js').dsConfig;
 
 /**
  * Build a starter DS shape from a synced Figma snapshot. This is used both as
@@ -139,8 +139,19 @@ function detectBrand(ramps, figmaData) {
   const byShortName = (shortName) => ramps.find(r => r.folder === "color/" + shortName);
   const candidate = byShortName("primary") || byShortName("brand") || _semanticBrandRamp(figmaData, ramps) || ramps[0];
   const name = candidate.folder.replace(/^color\//, "");
-  const anchor = candidate.steps.reduce((best, entry) =>
-    !best || Math.abs(entry[0] - 500) < Math.abs(best[0] - 500) ? entry : best, null);
+  const variables = figmaData && figmaData.variables || [];
+  const byId = new Map(variables.map(variable => [variable.id, variable]));
+  const semanticSteps = new Set();
+  for (const variable of variables.filter(item => /^color\/(?:surface|bg)\/brand$/.test(item.name))) {
+    for (const value of Object.values(variable.valuesByMode || {})) {
+      const target = value && value.type === 'VARIABLE_ALIAS' && byId.get(value.id);
+      const prefix = candidate.folder + '/';
+      if (target && target.name.startsWith(prefix)) semanticSteps.add(Number(target.name.slice(prefix.length)));
+    }
+  }
+  const steps = candidate.steps.map(entry => entry[0]);
+  const selected = semanticSteps.size === 1 ? [...semanticSteps][0] : nearestColorStep(steps, (steps[0] + steps[steps.length - 1]) / 2);
+  const anchor = candidate.steps.find(entry => entry[0] === selected);
   const hex = anchor
     ? '#' + anchor.slice(1, 4).map(value => Math.round(Math.max(0, Math.min(1, value)) * 255).toString(16).padStart(2, '0')).join('').toUpperCase()
     : null;
@@ -638,6 +649,8 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
       unpaired: templateSemantics.unpaired || [],
     }
     : inferredSemantics;
+  const observedSteps = ramps[0] && ramps[0].steps.map(row => row[0]);
+  const observedScale = observedSteps && Object.keys(COLOR_SCALES).find(key => JSON.stringify(COLOR_SCALES[key]) === JSON.stringify(observedSteps));
   const ds = {
     project: {
       name: opts.projectName || (figmaData && figmaData.fileName) || "Imported Figma design system",
@@ -648,6 +661,7 @@ function bootstrapDsFromSnapshot(figmaData, opts) {
     spacing: spacingInfo.spacing,
     typography,
     color: {
+      ...(observedSteps && observedSteps.length >= 2 ? { scale: observedScale || 'custom', steps: observedSteps } : {}),
       ramps: ramps,
       brand: brand,
       contrastAlgorithm: opts.algorithm === "apca" ? "apca" : "wcag",

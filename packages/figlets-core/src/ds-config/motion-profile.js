@@ -91,4 +91,34 @@ function motionProfilePreview(ds) {
   return { collection, modes: result.profile.modes, profile: result.profile, tokens, accessibilityNote: 'Reduced-motion variables do not prove runtime accessibility. Implementations must respect user motion preferences.' };
 }
 
-module.exports = { defaultMotionProfile, normalizeMotionProfile, normalizeMotionEasing, motionCollectionName, motionProfilePreview };
+function motionProfileStatus(motion, snapshot) {
+  const errors = [];
+  const collections = (snapshot.collections || []).filter(item => item.name === motion.collection);
+  if (collections.length !== 1) return { complete: false, errors: ['Expected one configured motion collection.'] };
+  const collection = collections[0];
+  const variables = snapshot.variables || [];
+  function native(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? Math.fround(value) : null;
+    if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, native(value[key])]));
+    return value;
+  }
+  for (const token of motion.tokens) {
+    const matches = variables.filter(item => item.name === token.name);
+    const variable = matches[0];
+    if (matches.length !== 1 || variable.variableCollectionId !== collection.id || variable.resolvedType !== token.type) {
+      errors.push('Missing or conflicting motion token: ' + token.name);
+      continue;
+    }
+    for (const name of motion.modes) {
+      const mode = collection.modes.find(item => item.name === name);
+      const actual = mode && variable.valuesByMode && variable.valuesByMode[mode.modeId];
+      const expected = token.values[name];
+      const a = token.type === 'EASING' ? normalizeMotionEasing(actual) : actual;
+      const b = token.type === 'EASING' ? normalizeMotionEasing(expected) : expected / 1000;
+      if (!mode || a == null || JSON.stringify(native(a)) !== JSON.stringify(native(b))) errors.push(token.name + ' does not match the approved value in ' + name + '.');
+    }
+  }
+  return { complete: errors.length === 0, errors, collectionId: collection.id, tokenCount: motion.tokens.length };
+}
+
+module.exports = { defaultMotionProfile, normalizeMotionProfile, normalizeMotionEasing, motionCollectionName, motionProfilePreview, motionProfileStatus };

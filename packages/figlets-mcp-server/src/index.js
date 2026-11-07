@@ -325,6 +325,9 @@ server.tool(
     })).optional().describe("Brand/source colors with concrete #RRGGBB hex values."),
     color_families: z.array(z.string()).optional().describe("Color families named by the designer when exact hexes still need confirmation."),
     typography: z.any().optional().describe("Typography intake answers, including families.sans and families.mono when available."),
+    motion_choice: z.enum(["include", "skip"]).optional().describe("Ask this optional-feature decision during intake, before declaring intake complete or creating config."),
+    motion_profile: z.union([z.literal("default"), z.record(z.string(), z.any())]).optional().describe("Approved motion preset or custom profile, included in the normal setup."),
+    motion_collection: z.string().optional(),
     typography_preset: z.string().optional().describe("Typography scale preset."),
     typography_scale: z.any().optional().describe("Explicit typography scale object for custom type scales."),
     naming: z.any().optional().describe("Optional naming templates."),
@@ -501,6 +504,7 @@ server.tool(
   "Prepare an existing design-system.config.js for setup. On explicit motion requests, motion_profile previews an editable optional profile without writes; only the separately approved saveInput saves it locally. Ordinary preparation computes spacing, color, contrast, primitives, setupApprovalPreview, and configured motion handoff. Must be called after intake and before apply_ds_setup.",
   {
     config_path: z.string().describe("Absolute path to design-system.config.js (created during intake)."),
+    continue_with_contrast_warnings: z.boolean().optional().describe("Set true only when the designer explicitly says to continue or ignore current contrast findings. Remembers those findings without changing colors; do not ask for another confirmation."),
     motion_profile: z.union([z.literal("default"), z.record(z.string(), z.any())]).optional().describe("Explicit optional motion request: preview the lean default or an edited profile. Preview does not write config or Figma."),
     motion_collection: z.string().optional().describe("Optional collection name for the motion proposal; follows the configured naming pattern by default."),
     save_motion_profile: z.boolean().optional().describe("Save only after approval of the motion preview, using its exact saveInput. This writes local config only."),
@@ -534,9 +538,15 @@ server.tool(
     repairs: z.array(z.object({
       id: z.string().optional(),
       mode: z.string().describe("Semantic mode to update, usually Light or Dark."),
-      background: z.string().describe("Semantic background token from the approved repair option."),
-      text: z.string().describe("Semantic text token from the approved repair option."),
-      suggestedText: z.string().describe("Approved primitive text alias target from the repair option."),
+      kind: z.literal("icon").optional(),
+      icon: z.string().optional(),
+      currentIcon: z.string().optional(),
+      suggestedIcon: z.string().optional(),
+      backgrounds: z.array(z.string()).optional(),
+      evidence: z.array(z.record(z.string(), z.any())).optional(),
+      background: z.string().optional().describe("Semantic background token from the approved text repair option."),
+      text: z.string().optional().describe("Semantic text token from the approved text repair option."),
+      suggestedText: z.string().optional().describe("Approved primitive text alias target from the repair option."),
     }).passthrough()).describe("Designer-approved repair options copied from prepare_ds_config.semanticPairs.contrastRepairOptions or setupApprovalPreview.semanticColor.contrast.repairOptions."),
   },
   async (args) => {
@@ -561,9 +571,10 @@ server.tool(
 // --- apply_ds_setup ---
 server.tool(
   "apply_ds_setup",
-  "Build all 5 Figma variable collections from a prepared design-system.config.js. Creates: Primitives (color ramps, scrims, type + spacing floats), Color Semantics (Light/Dark aliases), Typography (responsive type vars per breakpoint), Spacing (responsive semantic spacing), and Elevation (shadow floats + Effect Styles). Requires the Figlets Bridge plugin open in Figma Desktop. Call prepare_ds_config first.",
+  "Build all selected Figma foundations from a prepared design-system.config.js, including optional configured motion in the same approved setup. Creates: Primitives (color ramps, scrims, type + spacing floats), Color Semantics (Light/Dark aliases), Typography (responsive type vars per breakpoint), Spacing (responsive semantic spacing), and Elevation (shadow floats + Effect Styles). Requires the Figlets Bridge plugin open in Figma Desktop. Call prepare_ds_config first.",
   {
-    config_path: z.string().describe("Absolute path to design-system.config.js (must have been prepared by prepare_ds_config).")
+    config_path: z.string().describe("Absolute path to design-system.config.js (must have been prepared by prepare_ds_config)."),
+    continue_with_contrast_warnings: z.boolean().optional().describe("Honor an explicit designer instruction to continue with current contrast warnings. Preserve current colors and retain unresolved warnings in the result.")
   },
   async (args) => {
     try {

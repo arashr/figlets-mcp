@@ -74,6 +74,7 @@ function ensureActiveDsConfig(input = {}) {
     createdAt: input.createdAt,
   });
   if (existingDs) {
+    if (existingDs.figlets && Array.isArray(existingDs.figlets.contrastAcknowledgments)) ds.figlets.contrastAcknowledgments = existingDs.figlets.contrastAcknowledgments.slice();
     const { mergeFoundationRequirements } = require('./foundation-requirements');
     ds.figlets.foundationRequirements = mergeFoundationRequirements(existingDs.figlets && existingDs.figlets.foundationRequirements, ds.figlets.foundationRequirements);
     if (existingDs.figlets && existingDs.figlets.foundationRequirementsApproved === true) ds.figlets.foundationRequirementsApproved = true;

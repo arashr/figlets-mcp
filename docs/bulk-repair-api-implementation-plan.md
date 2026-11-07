@@ -1,5 +1,9 @@
 # Bulk Repair API Implementation Plan
 
+## November 7 shared setup integration
+
+Selected optional motion now belongs to the normal apply_ds_setup approval and build. Reuse the extracted config-motion planner, generic structural executor, atomic variable writer, and sync transport. No public tool or Bridge mutation branch was added. Fresh readback verifies both configured modes before setup is complete. Separate staged approvals in older notes apply to standalone exact motion edits, not motion included in a full setup plan. See [the current decision and verification](reviews/unified-optional-motion-setup.md).
+
 ## Status
 
 Planning artifact and roadmap for bulk-repair API work. This document is intentionally explicit so a less capable agent can continue the feature without inventing new product rules.

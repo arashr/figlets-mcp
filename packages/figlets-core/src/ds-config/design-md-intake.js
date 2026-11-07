@@ -1336,7 +1336,7 @@ function _bodyComponents(DS) {
   const pairs = DS.color && DS.color.semantics && Array.isArray(DS.color.semantics.pairs)
     ? DS.color.semantics.pairs
     : [];
-  if (!pairs.length) return null;
+  if (!pairs.length) return _bodyContrastWarnings(DS);
   const algo = DS.color && DS.color.contrastAlgorithm ? DS.color.contrastAlgorithm.toUpperCase() : 'WCAG';
   const rgbByAlias = _rgbByAlias(DS);
   const lines = [
@@ -1357,6 +1357,20 @@ function _bodyComponents(DS) {
       lines.push('| ' + _tableCell(name) + ' | ' + modeName + ' | ' + _tableCell((aliases.bg || '-') + ' / ' + (aliases.text || '-')) + ' | ' + wcag + ' | ' + apca + ' | ' + _tableCell(_selectedContrastStatus(DS, pair, evidence)) + ' |');
     }
   }
+  const warnings = _bodyContrastWarnings(DS);
+  if (warnings) lines.push('', warnings);
+  return lines.join('\n');
+}
+
+function _bodyContrastWarnings(DS) {
+  if (!DS.color || !DS.color.ramps || !DS.color.brand) return null;
+  const { validateSemanticPairs } = require('./validate-semantic-pairs');
+  const { contrastReadiness } = require('./contrast-readiness');
+  const validation = validateSemanticPairs(DS);
+  const contrast = contrastReadiness(DS, validation);
+  if (!contrast.warnings.length) return null;
+  const lines = ['These contrast findings remain unresolved. Continuing the build does not make them pass.', '', '| Token | Mode | Finding | Decision |', '|---|---|---|---|'];
+  for (const warning of contrast.warnings) lines.push('| ' + _tableCell(warning.icon || warning.text) + ' | ' + warning.mode + ' | Unresolved ' + warning.kind + ' contrast | ' + (warning.accepted ? 'Designer chose to continue' : 'Review later') + ' |');
   return lines.join('\n');
 }
 

@@ -26,13 +26,13 @@ function prepareMotionConfig(configPath, args) {
   if (args.save_motion_profile) {
     if (args.motion_profile_fingerprint !== fingerprint) return { error: 'The motion proposal or config changed. Preview again and approve the fresh proposal before saving.' };
     core.writeDsConfig(configPath, candidate);
-    return { phase: 'motion_config_saved', configPath, motion: preview, figmaChanged: false, nextInput: { config_path: configPath }, message: 'Saved only the approved motion profile and collection name to the local config. Run prepare_ds_config again, then review and separately approve the Figma motion plan.' };
+    return { phase: 'motion_config_saved', configPath, motion: preview, figmaChanged: false, nextInput: { config_path: configPath }, message: 'Saved only the approved motion profile and collection name to the local config. Run prepare_ds_config again to include motion in the full setup preview. One Figma setup approval covers all selected collections.' };
   }
   return {
     phase: 'review_motion_profile', configPath, motion: preview, fingerprint, configChanged: false, figmaChanged: false,
     saveInput: { config_path: configPath, motion_profile: normalized.profile, motion_collection: collection, save_motion_profile: true, motion_profile_fingerprint: fingerprint },
     approvalRequired: true,
-    message: 'Review or edit the exact collection, modes, token names, millisecond durations, and easing curves. Approve saving the local config first. Figma changes require a separate preview and approval.',
+    message: 'Review or edit the exact collection, modes, token names, millisecond durations, and easing curves. Approve saving the local config first. The selected profile is included in the normal setup preview and Figma build approval.',
   };
 }
 

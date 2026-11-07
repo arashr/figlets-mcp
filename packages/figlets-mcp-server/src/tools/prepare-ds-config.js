@@ -35,13 +35,20 @@ const applyDsConfigContrastRepairsTool = {
           type: 'object',
           properties: {
             id: { type: 'string' },
+            kind: { type: 'string', enum: ['icon'] },
+            icon: { type: 'string' },
+            currentIcon: { type: 'string' },
+            suggestedIcon: { type: 'string' },
+            backgrounds: { type: 'array', items: { type: 'string' } },
+            evidence: { type: 'array', items: { type: 'object' } },
             mode: { type: 'string', description: 'Semantic mode to update, usually Light or Dark.' },
             background: { type: 'string', description: 'Semantic background token from the approved repair option.' },
             text: { type: 'string', description: 'Semantic text token from the approved repair option.' },
             suggestedBackground: { type: 'string', description: 'Approved primitive background alias target from the repair option, when the evaluated repair changes background.' },
             suggestedText: { type: 'string', description: 'Approved primitive text alias target from the repair option, when the evaluated repair changes text.' }
           },
-          required: ['mode', 'background', 'text'],
+          required: ['mode'],
+          anyOf: [{ required: ['background', 'text'] }, { required: ['kind', 'icon', 'currentIcon', 'suggestedIcon', 'backgrounds', 'evidence'] }],
           additionalProperties: true
         }
       }
@@ -116,41 +123,7 @@ function _semanticPairExample(pair) {
   };
 }
 
-function _contrastRepairOptions(pairSuggestions) {
-  const options = [];
-  for (const key of Object.keys(pairSuggestions || {})) {
-    const suggestion = pairSuggestions[key] || {};
-    const parts = key.split('|');
-    const background = parts[0];
-    const text = parts[1];
-    for (const mode of ['Light', 'Dark']) {
-      const rawSuggestion = suggestion[mode];
-      if (!rawSuggestion) continue;
-      const suggestionObject = typeof rawSuggestion === 'string'
-        ? { suggestedText: rawSuggestion }
-        : rawSuggestion;
-      const suggestedText = suggestionObject.suggestedText || suggestionObject.text;
-      const suggestedBackground = suggestionObject.suggestedBackground || suggestionObject.background || null;
-      if (!suggestedText && !suggestedBackground) continue;
-      options.push({
-        id: `${background}|${text}|${mode}`,
-        mode,
-        background,
-        text,
-        suggestedBackground,
-        suggestedText,
-        wcag: suggestionObject.wcag || null,
-        action: suggestedBackground
-          ? 'Update the semantic pair background and text aliases for this mode to the evaluated passing combination, then rerun prepare_ds_config.'
-          : 'Update the semantic pair text alias for this mode to the suggested passing step, then rerun prepare_ds_config.',
-        approvalLabel: suggestedBackground
-          ? `${mode}: ${background} -> ${suggestedBackground}; ${text} -> ${suggestedText}`
-          : `${mode}: ${text} on ${background} -> ${suggestedText}`,
-      });
-    }
-  }
-  return options;
-}
+const { contrastRepairOptions: _contrastRepairOptions, contrastReadiness } = require('../figlets-core.js').dsConfig;
 
 function _textStyleName(pattern, role) {
   const stylePattern = pattern || 'type/{role}/{size}';
@@ -162,7 +135,7 @@ function _textStyleName(pattern, role) {
   return stylePattern.replace('{role}', roleName).replace('{size}', size);
 }
 
-function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount, apcaFailCount, staleSemantics, needsDesignerInput, derivedColors, pairSuggestions }) {
+function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount, apcaFailCount, staleSemantics, needsDesignerInput, derivedColors, pairSuggestions, iconRepairSuggestions, contrast }) {
   const collections = ds && ds.collections ? ds.collections : {};
   const breakpoints = ds && ds.breakpoints && Array.isArray(ds.breakpoints.modes) && ds.breakpoints.modes.length
     ? ds.breakpoints.modes.slice()
@@ -174,7 +147,7 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
   const semantics = color.semantics || {};
   const semanticPairs = _asArray(semantics.pairs);
   const semanticIcons = _asArray(semantics.icons);
-  const contrastRepairOptions = _contrastRepairOptions(pairSuggestions);
+  const contrastRepairOptions = _contrastRepairOptions(pairSuggestions, iconRepairSuggestions);
   const primitiveFloats = _asArray(primitivesData && primitivesData.floats);
   const spacingPrimitiveExamples = primitiveFloats
     .filter(item => /^space\//.test(String(item.name || '')))
@@ -197,7 +170,7 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
   const textStyleExamples = typographyRoles.slice(0, 8).map(role => _textStyleName(typeStylePattern, role));
   const spacingSemantic = ds && ds.spacing && ds.spacing.semantic ? ds.spacing.semantic : {};
   const spacingSemanticNames = Object.keys(spacingSemantic);
-  const status = failCount === 0 && (!staleSemantics || staleSemantics.length === 0) && (!needsDesignerInput || needsDesignerInput.length === 0)
+  const status = (contrast ? contrast.ready : failCount === 0) && (!staleSemantics || staleSemantics.length === 0) && (!needsDesignerInput || needsDesignerInput.length === 0)
     ? 'ready'
     : 'needs-review';
 
@@ -207,7 +180,7 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
     approvalBoundary: {
       previewOnly: true,
       writeTool: 'apply_ds_setup',
-      requiredBeforeWrite: 'Explicit designer approval after reviewing this detailed preview.',
+      requiredBeforeWrite: 'Designer approval of the requested build. Honor an explicit build-and-continue instruction already given; do not ask again.',
       message: 'Nothing has been changed in Figma. Do not call apply_ds_setup until the designer approves this build plan.',
     },
     collections: [
@@ -292,6 +265,7 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
       rampCount: ramps.length,
       rampNames,
       steps: rampSteps,
+      brandAnchors: _asArray(color.brandAnchors),
       brandInputs: _asArray(color.brand).map(item => ({
         name: item.name,
         role: item.role || null,
@@ -311,14 +285,17 @@ function _buildSetupApprovalPreview({ configPath, ds, primitivesData, failCount,
       iconCount: semanticIcons.length,
       contrast: {
         algorithm: color.contrastAlgorithm || 'wcag',
-        failedPairs: failCount || 0,
+        failedPairs: contrast ? contrast.textFailureCount : (failCount || 0),
+        iconAdvisories: contrast ? contrast.iconFailureCount : 0,
+        readiness: contrast,
         apcaFailedPairs: apcaFailCount || 0,
         repairTool: applyDsConfigContrastRepairsTool.name,
         repairOptions: contrastRepairOptions,
         repairApplyInput: contrastRepairOptions.length ? { config_path: configPath, repairs: contrastRepairOptions } : null,
-        message: contrastRepairOptions.length
-          ? 'Contrast failed for one or more semantic pairs. Review these exact alias suggestions before changing Figma.'
-          : (failCount ? 'Contrast failed, but no exact alias repair option was found. Do not ask for a prose-only repair approval; ask for a concrete alias, brand hex, or color scale change.' : 'All semantic pairs pass.'),
+        message: contrast && contrast.warnings.length
+          ? 'Contrast findings remain unresolved. Review existing semantic alias suggestions or build with current colors. Primitive colors stay unchanged.'
+          : 'All semantic pairs pass.',
+
       },
       samplePairs: semanticPairs.slice(0, 10).map(_semanticPairExample),
       sampleIcons: semanticIcons.slice(0, 8).map(icon => ({
@@ -457,6 +434,8 @@ async function handlePrepareDsConfig(args) {
     primitivesData,
     ds,
   } = result;
+  const contrast = contrastReadiness(ds, result, args.continue_with_contrast_warnings);
+  if (args.continue_with_contrast_warnings === true) _loadDsConfigCore().writeDsConfig(resolvedPath, ds);
   const previewPath = _writeSetupPreview(resolvedPath, ds);
   const setupApprovalPreview = _buildSetupApprovalPreview({
     configPath: resolvedPath,
@@ -468,13 +447,15 @@ async function handlePrepareDsConfig(args) {
     needsDesignerInput: needsDesignerInput || [],
     derivedColors,
     pairSuggestions: pairRepairSuggestions || pairSuggestions,
+    iconRepairSuggestions: result.iconRepairSuggestions,
+    contrast,
   });
   const motion = require('../figlets-core.js').dsConfig.motionProfilePreview(ds);
   if (motion) {
     setupApprovalPreview.motion = motion;
-    setupApprovalPreview.collections.push({ name: motion.collection, purpose: 'Optional motion variables, built through separate approved collection/mode and atomic value stages.', modes: motion.modes, tokens: motion.tokens });
+    setupApprovalPreview.collections.push({ name: motion.collection, purpose: 'Selected motion durations and easing curves, included in this setup build.', modes: motion.modes, tokens: motion.tokens });
   }
-  const contrastRepairOptions = _contrastRepairOptions(pairRepairSuggestions || pairSuggestions);
+  const contrastRepairOptions = _contrastRepairOptions(pairRepairSuggestions || pairSuggestions, result.iconRepairSuggestions);
   let designMdExport = null;
   try {
     const artifact = await prepareAndWriteDesignMdArtifact({
@@ -504,6 +485,8 @@ async function handlePrepareDsConfig(args) {
     computed,
     needsDesignerInput,
     colorRamps: {
+      steps: result.colorSteps,
+      brandAnchors: result.brandAnchors,
       summary:     colorRampsSummary,
       table:       colorRampsTable,
       contrasts:   contrastAnnotations,
@@ -514,6 +497,9 @@ async function handlePrepareDsConfig(args) {
       table:          semanticPairsTable,
       iconTable,
       failCount,
+      textFailCount: result.textFailCount,
+      iconFailCount: result.iconFailCount,
+      contrast,
       apcaFailCount:  apcaFailCount || 0,
       pairSuggestions: pairSuggestions || {},
       pairRepairSuggestions: pairRepairSuggestions || {},
@@ -523,7 +509,7 @@ async function handlePrepareDsConfig(args) {
         ? { config_path: resolvedPath, repairs: contrastRepairOptions }
         : null,
       staleSemantics: staleSemantics || [],
-      ready:          failCount === 0 && (!staleSemantics || staleSemantics.length === 0),
+      ready:          contrast.ready && (!staleSemantics || staleSemantics.length === 0),
     },
     primitives: {
       collectionName: primitivesData.collectionName,
@@ -537,22 +523,24 @@ async function handlePrepareDsConfig(args) {
       },
     },
     setupApprovalPreview,
-    ...(motion ? { motion, motionPlanInput: { motion_config_path: resolvedPath } } : {}),
+    ...(motion ? { motion } : {}),
     setupPreview: previewPath ? { svgPath: previewPath } : null,
     designMdExport,
     configPath: resolvedPath,
-    readyToBuild: failCount === 0 && needsDesignerInput.length === 0 && (!staleSemantics || staleSemantics.length === 0) && !designMdBlocked,
+    contrast,
+    continueInput: contrast.blockingCount ? { config_path: resolvedPath, continue_with_contrast_warnings: true } : null,
+    readyToBuild: contrast.ready && needsDesignerInput.length === 0 && (!staleSemantics || staleSemantics.length === 0) && !designMdBlocked,
     message: staleWarning
       ? staleWarning
-      : failCount > 0
-      ? (contrastRepairOptions.length
-        ? `Config computed but ${failCount} semantic pair(s) fail contrast. Review semanticPairs.contrastRepairOptions before building.`
-        : `Config computed but ${failCount} semantic pair(s) fail contrast and no exact contrastRepairOptions were found. Do not build yet; rerun prepare_ds_config once, then ask for a concrete alias, brand hex, or color scale change if it still fails.`)
+      : contrast.referenceErrors.length
+      ? 'Some semantic color references cannot be resolved. Contrast continuation does not replace missing color data.'
+      : contrast.blockingCount > 0
+      ? 'Review semanticPairs.contrastRepairOptions or continue with current colors using continueInput. Do not change primitives or repeat an unchanged repair.'
       : needsDesignerInput.length > 0
       ? `Config computed but ${needsDesignerInput.join(', ')} need designer input before building.`
       : designMdBlocked
       ? 'Config computed but DESIGN.md validation failed. Resolve designMdExport.lint.blockingFindings before building.'
-      : 'Config ready. Call apply_ds_setup to build all collections in Figma.',
+      : (contrast.warnings.length ? 'Config ready with unresolved contrast warnings. Continue the approved build with current colors; do not repeat the repair menu.' : 'Config ready. Call apply_ds_setup to build all collections in Figma.'),
   };
 }
 
@@ -566,6 +554,7 @@ function _loadDsConfigCore() {
 
 function _normalizeRepair(raw) {
   const item = raw && typeof raw === 'object' ? raw : {};
+  if (item.kind === 'icon') return { ...item, kind: 'icon' };
   let background = String(item.background || '').trim();
   let text = String(item.text || '').trim();
   let mode = String(item.mode || '').trim();
@@ -646,6 +635,19 @@ function handleApplyDsConfigContrastRepairs(args) {
   const blocked = [];
 
   for (const repair of repairs) {
+    if (repair.kind === 'icon') {
+      const expected = (validated.iconRepairSuggestions || []).find(item => item.icon === repair.icon && item.mode === repair.mode);
+      const icon = (ds.color.semantics.icons || []).find(item => item.token === repair.icon);
+      const fields = ['currentIcon', 'suggestedIcon', 'backgrounds', 'evidence'];
+      if (!expected || !icon || !fields.every(field => JSON.stringify(expected[field]) === JSON.stringify(repair[field])) || icon[repair.mode] !== repair.currentIcon) {
+        blocked.push({ repair, reason: 'This icon repair does not match the current evaluated alias and background contexts. Prepare again and copy the exact current option.' });
+        continue;
+      }
+      const before = icon[repair.mode];
+      icon[repair.mode] = repair.suggestedIcon;
+      applied.push({ kind: 'icon', icon: repair.icon, mode: repair.mode, before, after: repair.suggestedIcon });
+      continue;
+    }
     if (!repair.background || !repair.text || !repair.mode || (!repair.suggestedText && !repair.suggestedBackground)) {
       blocked.push({
         repair,
@@ -721,6 +723,18 @@ function handleApplyDsConfigContrastRepairs(args) {
       before,
       after,
     });
+  }
+
+  // A text/background repair in the same batch can alter an icon's contexts.
+  // Validate the projected combination before any config write.
+  if (!blocked.length && applied.some(item => item.kind === 'icon')) {
+    const projected = core.validateSemanticPairs(ds);
+    for (const item of applied.filter(entry => entry.kind === 'icon')) {
+      if (projected.contrastFindings.some(finding => finding.kind === 'icon' && finding.icon === item.icon && finding.mode === item.mode)
+        || projected.referenceErrors.some(finding => finding.icon === item.icon && finding.mode === item.mode)) {
+        blocked.push({ repair: item, reason: 'The combined semantic repairs do not pass for this icon in the resulting background contexts. No changes were saved. Review the current combination or continue with current colors.' });
+      }
+    }
   }
 
   if (blocked.length) {

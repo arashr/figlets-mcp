@@ -32,6 +32,22 @@ module.exports = (async () => {
   vm.createContext(context);
   await vm.runInContext("(async () => {\n" + source.slice(start, end) + "\n})()", context);
   assert.strictEqual(payload.variables[0].variableCollectionId, "prim");
+  assert.strictEqual(payload.capabilities.nativeSpecs.available, false, 'Missing Specs API must be reported without failing sync');
+  assert.strictEqual(payload.capabilities.nativeSpecs.createOnCanvas, false);
+  context.figma.spec = {
+    createOnCanvasAsync() { throw new Error('Probe must not create'); },
+    getContent() { throw new Error('Probe must not read content'); },
+    editContent() { throw new Error('Probe must not edit'); },
+    setContent() { throw new Error('Probe must not replace'); },
+  };
+  await vm.runInContext("(async () => {\n" + source.slice(start, end) + "\n})()", context);
+  assert.deepStrictEqual(payload.capabilities.nativeSpecs, { available: true, createOnCanvas: true, read: true, edit: true, replace: true });
+  context.figma.spec = { getContent() {} };
+  await vm.runInContext("(async () => {\n" + source.slice(start, end) + "\n})()", context);
+  assert.strictEqual(payload.capabilities.nativeSpecs.createOnCanvas, false, 'A partial API cannot be assumed writable');
+  Object.defineProperty(context.figma, 'spec', { get() { throw new Error('Access denied'); } });
+  await vm.runInContext("(async () => {\n" + source.slice(start, end) + "\n})()", context);
+  assert.strictEqual(payload.capabilities.nativeSpecs.available, false, 'A restricted API getter must not break sync');
   const plan = planPrimitiveOpacityRepairs({ collections: { primitives: "1. Primitives" } }, payload);
   assert.deepStrictEqual(plan.blocked, []);
   assert.strictEqual(plan.entries.find(entry => entry.scrim.name === variables[0].name).scrim.id, "scrim");

@@ -559,9 +559,9 @@ try {
     assert.ok(guide.workflow.errors.some(item => item.includes("contrastRepairOptions")));
     assert.ok(guide.workflow.errors.some(item => item.includes("apply_ds_config_contrast_repairs")));
     assert.ok(guide.workflow.errors.some(item => item.includes("suggestedBackground") && item.includes("suggestedText")));
-    assert.ok(guide.workflow.errors.some(item => item.includes("prose-only repair direction")));
+    assert.ok(guide.workflow.errors.some(item => item.includes("continue_with_contrast_warnings")));
     assert.ok(guide.workflow.errors.some(item => item.includes("untested single-axis example")));
-    assert.ok(guide.workflow.errors.some(item => item.includes("go for Figma")));
+    assert.ok(guide.workflow.errors.some(item => item.includes("Never change source hex values")));
 
     assertDocsIncludeAny(
       DESIGNER_DOC_PATHS,

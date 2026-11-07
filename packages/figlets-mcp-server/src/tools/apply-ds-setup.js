@@ -8,11 +8,15 @@
  * in core/server code, and sends a setup execution payload to the bridge plugin
  * via /request-ds-setup. Returns the list of built collection names.
  *
- * Precondition: prepare_ds_config must have been called first (failCount === 0).
+ * Precondition: preparation is complete; contrast warnings may be acknowledged by the designer.
  */
 
 const path = require('path');
+const fs = require('fs');
 const { getConfigPathGuardError } = require('../utils/paths.js');
+const { loadFigmaDataSource } = require('../bridges/figma-data-source.js');
+const { requestFigmaSync } = require('./sync-figma-data.js');
+const { planMotionProfileOperationsFromFigmaData, handleApplyDsFigmaOperations } = require('./figma-operations.js');
 const {
   prepareDesignMdArtifact,
   writePreparedDesignMdArtifact,
@@ -27,27 +31,7 @@ function _loadDsConfigCore() {
   }
 }
 
-function _contrastRepairOptions(pairSuggestions) {
-  const options = [];
-  for (const key of Object.keys(pairSuggestions || {})) {
-    const suggestion = pairSuggestions[key] || {};
-    const parts = String(key || "").split("|");
-    const background = parts[0] || suggestion.bg || "";
-    const text = parts[1] || suggestion.text || "";
-    for (const mode of Object.keys(suggestion)) {
-      const suggestedText = suggestion[mode];
-      if (!background || !text || !suggestedText) continue;
-      options.push({
-        id: `${background}|${text}|${mode}`,
-        background,
-        text,
-        mode,
-        suggestedText,
-      });
-    }
-  }
-  return options;
-}
+const { contrastReadiness, contrastRepairOptions: _contrastRepairOptions } = require('../figlets-core.js').dsConfig;
 
 function _staleSemanticRefs(ds) {
   const staleSemantics = [];
@@ -208,7 +192,52 @@ function _buildDsSetupPayload(core, ds) {
   };
 }
 
-async function handleApplyDsSetup({ config_path }) {
+async function _setupSnapshot(expectedFileKey) {
+  const result = await requestFigmaSync();
+  if (!result.dataPath || !result.fileKey) throw new Error('Setup sync did not establish the current Figma file.');
+  const source = loadFigmaDataSource({ figmaDataPath: result.dataPath });
+  if (source.figmaData.fileKey !== result.fileKey || (expectedFileKey && expectedFileKey !== result.fileKey)) throw new Error('The connected Figma file changed during setup.');
+  return { data: source.figmaData, path: source.meta.path, fileKey: result.fileKey };
+}
+
+function _setupMotionPlan(snapshot, motion) {
+  const plan = planMotionProfileOperationsFromFigmaData(snapshot.data, motion);
+  if (plan.error) throw new Error(plan.error);
+  if (plan.repairPlan.counts.blocked || plan.repairPlan.counts.ready !== plan.requestedCount) {
+    throw new Error('Configured motion could not be fully planned: ' + JSON.stringify(plan.repairPlan.designerPresentation.blocked));
+  }
+  return plan;
+}
+
+async function _completeSetupMotion(core, motion, fileKey, checkConfig) {
+  const stages = [];
+  try {
+    let snapshot = await _setupSnapshot(fileKey);
+    // The normal setup approval covers this exact profile. Reuse the existing
+    // structural planner and atomic variable writer for its internal stages.
+    for (let stage = 0; stage < 2; stage++) {
+      checkConfig();
+      const verification = core.motionProfileStatus(motion, snapshot.data);
+      if (verification.complete) return { complete: true, verification, stages };
+      const plan = _setupMotionPlan(snapshot, motion);
+      if (stage && plan.phase !== 'motion_variables') throw new Error('Required motion modes are still missing after collection setup.');
+      checkConfig();
+      const result = await handleApplyDsFigmaOperations({ ...plan.repairPlan.applyInput, figmaDataPath: snapshot.path });
+      stages.push({ phase: plan.phase, result });
+      if (result.error || result.unresolved.length || result.failed.length || (plan.phase === 'motion_variables' && result.batchStatus !== 'committed')) throw new Error(result.error || 'A required motion setup stage did not complete.');
+      snapshot = await _setupSnapshot(fileKey);
+    }
+    checkConfig();
+    const verification = core.motionProfileStatus(motion, snapshot.data);
+    if (!verification.complete) throw new Error(verification.errors.join(' '));
+    return { complete: true, verification, stages };
+  } catch (error) {
+    return { complete: false, error: error.message, stages };
+  }
+}
+
+async function handleApplyDsSetup(args = {}) {
+  const { config_path } = args;
   const resolvedPath = path.resolve(config_path);
   const guardError = getConfigPathGuardError(resolvedPath);
   if (guardError) return guardError;
@@ -249,15 +278,20 @@ async function handleApplyDsSetup({ config_path }) {
       hint: 'Run prepare_ds_config and resolve setup readiness findings before apply_ds_setup.',
     };
   }
-  if ((validation.failCount || 0) > 0) {
+  const contrast = contrastReadiness(ds, validation, args.continue_with_contrast_warnings);
+  if (args.continue_with_contrast_warnings === true) core.writeDsConfig(resolvedPath, ds);
+  if (!contrast.ready) {
     return {
-      error: `Config is not ready to build: ${validation.failCount} semantic color pair(s) fail contrast.`,
+      error: contrast.referenceErrors.length ? 'Config is not ready to build: some semantic color references cannot be resolved.' : `Config is not ready to build: review or acknowledge ${contrast.blockingCount} text contrast finding(s).`,
+      contrast,
+      continueInput: contrast.referenceErrors.length ? null : { config_path: resolvedPath, continue_with_contrast_warnings: true },
       failCount: validation.failCount,
       contrastRepairTool: 'apply_ds_config_contrast_repairs',
-      contrastRepairOptions: _contrastRepairOptions(validation.pairSuggestions || {}),
-      hint: 'Apply approved semanticPairs.contrastRepairOptions to the config, rerun prepare_ds_config, and call apply_ds_setup only when readyToBuild is true.',
+      contrastRepairOptions: _contrastRepairOptions(validation.pairRepairSuggestions || validation.pairSuggestions || {}, validation.iconRepairSuggestions),
+      hint: 'Offer existing semantic alias repairs or use continueInput if the designer already said to continue with the current contrast warnings. Do not ask again, change primitives, or repeat an unchanged repair.',
     };
   }
+  if (ds.figlets) validation.ds.figlets = ds.figlets;
   const staleSemantics = _staleSemanticRefs(validation.ds || ds);
   if (staleSemantics.length) {
     return {
@@ -278,6 +312,10 @@ async function handleApplyDsSetup({ config_path }) {
     };
   }
 
+  const approvedConfig = fs.readFileSync(resolvedPath, 'utf8');
+  const checkConfig = () => {
+    if (fs.readFileSync(resolvedPath, 'utf8') !== approvedConfig) throw new Error('The approved setup config changed during the build. Review the updated setup before continuing.');
+  };
   let preparedArtifact;
   try {
     preparedArtifact = await prepareDesignMdArtifact({
@@ -299,21 +337,37 @@ async function handleApplyDsSetup({ config_path }) {
     };
   }
 
+  try { checkConfig(); } catch (error) { return { error: error.message, collections: [] }; }
+  let motionSnapshot;
+  if (motion) {
+    try {
+      motionSnapshot = await _setupSnapshot();
+      _setupMotionPlan(motionSnapshot, motion);
+      checkConfig();
+    } catch (error) { return { error: error.message, motionPending: true, collections: [] }; }
+  }
+
   const response = await requestBridgePost('/request-ds-setup', setupPayload, { timeoutMs: 185000 });
   if (response.statusCode === 200) {
     const parsed = response.data || {};
     const result = parsed.result || {};
     if (result.error) return { error: result.error, fontLoadFailures: result.fontLoadFailures || [], collections: result.collections || [], motionPending: Boolean(motion) };
+    let motionResult;
+    if (motion) {
+      motionResult = await _completeSetupMotion(core, motion, motionSnapshot.fileKey, checkConfig);
+      if (!motionResult.complete) return { error: motionResult.error, partial: true, collections: result.collections || [], motionPending: true, motion: motionResult };
+    }
     if (ds.figlets && ds.figlets.source === 'figma-snapshot-bootstrap') {
       ds.figlets.foundationRequirementsApproved = true;
       core.writeDsConfig(resolvedPath, ds);
     }
     const written = writePreparedDesignMdArtifact(preparedArtifact, { includeSidecar: true });
     return {
-      collections: result.collections || [],
+      collections: [...new Set([...(result.collections || []), ...(motion ? [motion.collection] : [])])],
+      contrast,
       skipped:     result.skipped || [],
-      message:     motion ? 'Base foundations are set up. Continue the configured motion collection/modes and variable stages before reporting the full setup complete.' : (result.message || 'DS setup complete.'),
-      ...(motion ? { motionPending: true, motion, nextStep: { tool: 'plan_ds_figma_operations', input: { motion_config_path: resolvedPath }, approvalRequired: true } } : {}),
+      message: motion ? 'DS setup complete, including the selected motion foundations.' : (result.message || 'DS setup complete.'),
+      ...(motion ? { motionPending: false, motion: { ...motion, ...motionResult } } : {}),
       designMdExport: {
         path: written.path,
         sidecarPath: written.sidecarPath,

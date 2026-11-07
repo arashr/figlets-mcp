@@ -175,10 +175,10 @@ assert.ok(
     collection.sampleAliases.some(alias =>
       alias.background === "color/bg/brand" &&
       alias.text === "color/text/on-brand" &&
-      alias.Dark && alias.Dark.text === "color/neutral/50"
+      alias.Dark && alias.Dark.text === "color/neutral/950"
     )
   ),
-  "setup preview should show the corrected generated dark on-brand alias"
+  "setup preview should show a passing foreground on the supplied brand anchor"
 );
 
 const generatedShortScalePinkPath = path.join(tmp, "generated-short-scale-pink.config.js");
@@ -228,11 +228,11 @@ assert.ok(
       alias.background === "color/bg/brand" &&
       alias.text === "color/text/on-brand" &&
       alias.Dark &&
-      alias.Dark.background === "color/pink/600" &&
-      alias.Dark.text === "color/neutral/100"
+      alias.Dark.background === generatedShortScalePink.setupApprovalPreview.colorSystem.brandAnchors.find(anchor => anchor.name === "pink").path &&
+      alias.Dark.text === "color/neutral/900"
     )
   ),
-  "setup preview should show the generated background shift when no foreground-only fix exists"
+  "setup preview should preserve the exact brand anchor and adapt the foreground"
 );
 
 const noOptionManualContrastPath = path.join(tmp, "no-option-manual-contrast.config.js");
@@ -250,7 +250,7 @@ fs.writeFileSync(noOptionManualContrastPath, `const DS = {
     semantics: {
       convention: 'role-based',
       pairs: [{
-        bg: 'color/bg/brand',
+        bg: 'color/bg/brand-variant',
         text: 'color/text/on-brand',
         Light: { bg: 'color/pink/500', text: 'color/neutral/900' },
         Dark: { bg: 'color/pink/500', text: 'color/neutral/900' }
@@ -272,7 +272,7 @@ assert.strictEqual(noOptionManualContrast.readyToBuild, false);
 assert.ok(noOptionManualContrast.semanticPairs.contrastRepairOptions.length > 0);
 const combinedManualRepair = noOptionManualContrast.semanticPairs.contrastRepairOptions.find(option =>
   option.mode === "Dark" &&
-  option.background === "color/bg/brand" &&
+  option.background === "color/bg/brand-variant" &&
   option.text === "color/text/on-brand" &&
   option.suggestedBackground === "color/pink/600" &&
   option.suggestedText === "color/neutral/100"

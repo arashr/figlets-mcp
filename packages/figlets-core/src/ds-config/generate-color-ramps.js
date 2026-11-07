@@ -1,5 +1,6 @@
 'use strict';
 
+const { resolveColorScale, nearestColorStep } = require('./color-scale');
 const { srgbToOklch, oklchToSrgbClipped } = require('./oklch');
 
 /**
@@ -18,7 +19,8 @@ function generateColorRamps(ds) {
     throw new Error('DS.color.brand is missing or empty. Add brand colors to config first.');
   }
 
-  const scaleKey    = DS.color.scale || '50-950';
+  const { key: scaleKey, steps } = resolveColorScale(DS.color);
+  DS.color.scale = scaleKey;
   const algorithm   = (DS.color.algorithm || 'oklch').toLowerCase();
   if (algorithm !== 'oklch' && algorithm !== 'hsl') {
     throw new Error(`DS.color.algorithm must be "oklch" or "hsl" (got "${DS.color.algorithm}")`);
@@ -33,25 +35,13 @@ function generateColorRamps(ds) {
   const brandColors = DS.color.brand.slice();
 
   // ── Scale steps ─────────────────────────────────────────────────────────────
-  const SCALES = {
-    '50-950':  [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950],
-    '100-900': [100, 200, 300, 400, 500, 600, 700, 800, 900],
-    '0-1000':  [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
-  };
-
-  const steps = Array.isArray(DS.color.steps) ? DS.color.steps : (SCALES[scaleKey] || SCALES['50-950']);
-
-  const midIdx = (() => {
-    const exact = steps.indexOf(500);
-    if (exact !== -1) return exact;
-    return steps.reduce((best, v, i) =>
-      Math.abs(v - 500) < Math.abs(steps[best] - 500) ? i : best, 0);
-  })();
+  const midIdx = steps.indexOf(nearestColorStep(steps, (steps[0] + steps[steps.length - 1]) / 2));
 
   // Returns { idx, step, isAuto }
   function brandAnchorIdx(brand) {
     if (brand.step != null) {
       const target = Number(brand.step);
+      if (!steps.includes(target)) throw new Error('Brand anchor step ' + target + ' for ' + brand.name + ' is not in the selected scale.');
       const exact = steps.indexOf(target);
       const idx = exact !== -1 ? exact : steps.reduce(function(best, v, i) {
         return Math.abs(v - target) < Math.abs(steps[best] - target) ? i : best;
@@ -196,10 +186,10 @@ function generateColorRamps(ds) {
     return targets[lo] + (targets[hi] - targets[lo]) * t;
   }
 
-  function generateRampOklchContrastHarmonized(baseHex, anchorIdx) {
+  function generateRampOklchContrastHarmonized(baseHex, anchorIdx, preserveAnchor = false) {
     if (anchorIdx === undefined) anchorIdx = midIdx;
     const base = hexToRgb(baseHex);
-    const { C: baseC, H } = srgbToOklch(base);
+    const { C: baseC, H, L: baseL } = srgbToOklch(base);
     const minLStep = 0.024;
     const out = steps.map((step, i) => {
       const C = Math.max(0, contrastChroma(baseC, i, anchorIdx));
@@ -207,6 +197,7 @@ function generateColorRamps(ds) {
       const rgb = oklchToSrgbClipped(L, C, H);
       return { step, L, C, ...rgb };
     });
+    if (preserveAnchor) Object.assign(out[anchorIdx], base, { L: baseL });
     for (let i = anchorIdx - 1; i >= 0; i--) {
       if (out[i].L <= out[i + 1].L + minLStep) {
         out[i].L = Math.min(OKLCH_LIGHT_TARGET, out[i + 1].L + minLStep);
@@ -381,7 +372,7 @@ function generateColorRamps(ds) {
     const midVsWhite = wcagRatio(LUM_WHITE, luminance(mid));
     const midVsBlack = wcagRatio(LUM_BLACK, luminance(mid));
     if (midVsWhite < 3 && midVsBlack < 3) {
-      warnings.push(`  ${folder}/500: below 3:1 on both white and black — consider a different anchor hex`);
+      warnings.push(`  ${folder}/${mid.step}: below 3:1 on both white and black — review semantic foreground pairings`);
     }
     return warnings;
   }
@@ -435,12 +426,16 @@ function generateColorRamps(ds) {
   for (const brand of brandColors) {
     if (!brand.hex || brand.hex === 'TBD') continue;
     const anchorInfo = brandAnchorIdx(brand);
-    const stepsData  = generateRamp(brand.hex, anchorInfo.idx);
+    const stepsData  = generateRamp(brand.hex, anchorInfo.idx, true);
+    // Every strategy must preserve the designer's exact source color.
+    Object.assign(stepsData[anchorInfo.idx], hexToRgb(brand.hex));
     const folder     = `color/${brand.name}`;
     allRamps.push({ folder, steps: stepsData.map(({ step, r, g, b }) => [step, r, g, b]) });
     allAnalysis.push({ folder, rows: analyzeRamp(folder, stepsData), rangeWarns: checkRange(folder, stepsData) });
     brandAnchorReport.push({ name: brand.name, hex: brand.hex, step: anchorInfo.step, isAuto: anchorInfo.isAuto });
   }
+
+  DS.color.brandAnchors = brandAnchorReport.map(item => ({ ...item, path: `color/${item.name}/${item.step}` }));
 
   for (const u of UTILITY_BASES) {
     const stepsData = u.fn === 'neutral' ? generateNeutralRamp(primaryHex) : generateRamp(u.hex);
@@ -516,7 +511,7 @@ function generateColorRamps(ds) {
     `Generated ${allRamps.length} ramps (${steps.length} steps each, ${scaleKey} scale, ${algorithm} algorithm${strategyLabel}):\n` +
     rampList + anchorBlock + derivedBlock + warnBlock;
 
-  return { ds: DS, markdownTable, contrastAnnotations, derivedColors, summary };
+  return { ds: DS, markdownTable, contrastAnnotations, derivedColors, summary, brandAnchors: DS.color.brandAnchors, steps: steps.slice() };
 }
 
 module.exports = { generateColorRamps };

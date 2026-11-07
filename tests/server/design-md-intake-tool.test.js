@@ -46,6 +46,7 @@ const result = handleCreateDsConfigFromDesignMd({
 });
 
 assert.ok(!result.error, 'DESIGN.md intake should succeed');
+assert.ok(result.needsDesignerInput.includes('motion choice (include motion or skip for now)'), 'a partial import must not mark motion intake complete');
 assert.strictEqual(result.configPath, configPath);
 assert.strictEqual(result.intakeMode, 'front-matter');
 assert.strictEqual(result.parsedFromFrontMatter, true);
@@ -93,6 +94,7 @@ fs.writeFileSync(path.join(tmp, 'active-file.json'), JSON.stringify({ fileKey: i
 const intakeConfigPath = path.join(intakeScopedDir, 'design-system.config.js');
 const outsideActiveConfigPath = path.join(scopedDir, 'intake-design-system.config.js');
 const outsideActiveResult = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: outsideActiveConfigPath,
   project_name: 'Case study',
   platform: 'Web',
@@ -117,6 +119,7 @@ assert.strictEqual(outsideActiveResult.configWritten, false);
 assert.ok(!fs.existsSync(outsideActiveConfigPath), 'intake config should not write outside the active file-scoped path');
 
 const completeIntakeResult = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: intakeConfigPath,
   project_name: 'Complete intake',
   platform: 'Web',
@@ -152,7 +155,31 @@ assert.ok(
 );
 fs.unlinkSync(intakeConfigPath);
 
+// Reproduce the designer's three-role answer in the same flat form supported
+// for sans and mono. Persist it before testing the generated primitive payload.
+const confirmedFonts = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
+  project_name: 'Confirmed font roles', platform: 'Web', grid_base: 8,
+  breakpoint_tier: '3-tier', semantic_color_grammar: 'intent/emphasis',
+  contrast_standard: 'WCAG 2.2', theme_behavior: 'light + dark', color_scale: '50-950',
+  brand_colors: [{ name: 'pink', hex: '#FF5FA2', role: 'primary' }],
+  typography: { scalePreset: 'material3', display: 'BBH Bogle', sans: 'Inconsolata', mono: 'SF Mono' },
+});
+assert.strictEqual(confirmedFonts.configWritten, true);
+const confirmedConfig = readDsConfig(intakeConfigPath);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(confirmedConfig.typography.families)), {
+  sans: 'Inconsolata', mono: 'SF Mono', display: 'BBH Bogle',
+});
+const coreConfig = require('../../packages/figlets-core/src/ds-config');
+const computedFonts = coreConfig.computeDsConfig(confirmedConfig);
+const fontPayload = coreConfig.generatePrimitivesData(computedFonts.ds, { includeColors: false, includeSpacing: false });
+assert.deepStrictEqual(fontPayload.strings.filter(item => item.name.startsWith('font/')).map(item => [item.name, item.value]).sort(), [
+  ['font/display', 'BBH Bogle'], ['font/mono', 'SF Mono'], ['font/sans', 'Inconsolata'],
+]);
+fs.unlinkSync(intakeConfigPath);
+
 const vagueMonoResult = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: intakeConfigPath,
   project_name: 'Concrete mono intake',
   platform: 'cross-platform',
@@ -185,6 +212,7 @@ assert.ok(
 fs.unlinkSync(intakeConfigPath);
 
 const missingIntakeResult = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: intakeConfigPath,
   project_name: 'Case study',
   platform: 'Web',
@@ -220,6 +248,7 @@ assert.ok(
 );
 
 const vagueIntakeResult = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: intakeConfigPath,
   project_name: 'Case study',
   platform: 'Web',
@@ -245,6 +274,7 @@ assert.ok(vagueIntakeResult.needsDesignerInput.includes('valid breakpoint tier o
 assert.ok(vagueIntakeResult.needsDesignerInput.includes('semantic color naming grammar'));
 
 const customPresetWithoutScale = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: intakeConfigPath,
   project_name: 'Case study',
   platform: 'Web',
@@ -277,6 +307,7 @@ assert.ok(
 );
 
 const intakeResult = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: intakeConfigPath,
   project_name: 'Case study',
   platform: 'Web',
@@ -321,6 +352,7 @@ assert.ok(intakeWritten.includes('"contrastAlgorithm": "wcag"'), 'config should 
 assert.ok(intakeWritten.includes('"portfolio-blue"'), 'config should slug brand colors');
 
 const customScaleResult = handleCreateDsConfigFromIntake({
+  motion_choice: 'skip',
   config_path: intakeConfigPath,
   project_name: 'Case study',
   platform: 'Web',

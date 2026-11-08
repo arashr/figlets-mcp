@@ -8,7 +8,7 @@ The 1.4.0 candidate contains the approved naming, imported-foundation, prompt/re
 
 The Bridge and release packages identify as 1.4.0. Generated specs/ and component-specs/ are local outputs, not release content. Native Specs replacement is shelved and its disposable tooling is removed. No current file's incorrect token inventory was silently migrated by these code fixes.
 
-Still open: refresh the normal Bridge/host, verify the latest font fallback and setup flow live, and replay the six designer workflows. Publication was explicitly approved and completed November 8. Release commit 62a557a and tag v1.4.0 are pushed; published asset downloads match their checksums. Historical entries below retain their original test counts and runtime observations; they are not claims about the current running host. Later corrections supersede earlier motion staging and scrim placement proposals.
+Font-fallback issue closed November 8 after the user confirmed success on the previously failing component. The remaining six-workflow replay and setup checks are separate historical tasks. Publication was explicitly approved and completed November 8. Release commit 62a557a and tag v1.4.0 are pushed; published asset downloads match their checksums. Historical entries below retain their original test counts and runtime observations; they are not claims about the current running host. Later corrections supersede earlier motion staging and scrim placement proposals.
 
 ## Goal and approval rules
 

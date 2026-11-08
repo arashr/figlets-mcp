@@ -1,5 +1,9 @@
 # Project Memory
 
+## November 8 font-fallback issue closed
+
+After publication, the user confirmed that component documentation works on the same component that previously failed with Inconsolata Regular and requested closure. Close that issue and remove the pending-live-verification statement from public release notes. This is user-reported live success for the affected component; do not claim independent observation or exhaustive coverage. Other historical workflow replay tasks are separate and are not automatically verified by this result. No code or release asset changes are needed.
+
 ## November 8 release 1.4.0 published
 
 Published https://github.com/arashr/figlets-mcp/releases/tag/v1.4.0 after explicit user instruction to commit, push, and release. Release commit 62a557a and annotated tag v1.4.0 are pushed to origin. GitHub reports a published non-draft, non-prerelease with server tarball, Bridge ZIP, and SHA256SUMS. Downloaded all published assets and verified both archives match the local checked files and checksums. Tagged source archive excludes specs/, component-specs/, and discarded experiments. Local generated documentation remains intact.

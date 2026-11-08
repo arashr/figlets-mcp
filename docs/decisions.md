@@ -1,5 +1,9 @@
 # Decisions
 
+## November 8 font-fallback issue closed
+
+After publication, the user confirmed that component documentation works on the same component that previously failed with Inconsolata Regular and requested closure. Close that issue and remove the pending-live-verification statement from public release notes. This is user-reported live success for the affected component; do not claim independent observation or exhaustive coverage. Other historical workflow replay tasks are separate and are not automatically verified by this result. No code or release asset changes are needed.
+
 ## [2026-11-08] Release 1.4.0 publication completed
 
 **Authorization and result:** User explicitly approved commit, push, and release. Commit 62a557a and annotated tag v1.4.0 are pushed. GitHub release is published with verified server/Bridge archives and checksums. Downloaded published copies match local validated bytes. Generated specs/, component-specs/, and discarded experiments are excluded from source and release archives; local project output is preserved.

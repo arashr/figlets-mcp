@@ -47,6 +47,8 @@ variables.push(...semanticVariables);
 collections.push({ id: 'semantics', name: '2. Color', variableIds: semanticVariables.map(v => v.id), defaultModeId: 'd', modes: [{ modeId: 'd', name: 'Light' }] });
 
 const root = node('DOCUMENT');
+let failInconsolata = false;
+const loadedFonts = new Set();
 const figma = {
   root, currentPage: node('PAGE'),
   variables: {
@@ -55,14 +57,31 @@ const figma = {
     getVariableById: id => variables.find(v => v.id === id),
     setBoundVariableForPaint: (paint, property, v) => ({ ...paint, boundVariables: { [property]: { type: 'VARIABLE_ALIAS', id: v.id } } }),
   },
-  getLocalTextStylesAsync: async () => [], getLocalEffectStylesAsync: async () => [],
-  loadFontAsync: async () => {},
+  getLocalTextStylesAsync: async () => [{ id: 'body-style', name: 'type/body/md', fontName: { family: 'Inconsolata', style: 'Regular' }, fontSize: 16, lineHeight: { unit: 'PIXELS', value: 24 }, letterSpacing: { unit: 'PIXELS', value: 0 } }], getLocalEffectStylesAsync: async () => [],
+  loadFontAsync: async font => {
+    if (failInconsolata && font.family === 'Inconsolata') throw new Error('Cannot load Inconsolata');
+    loadedFonts.add(JSON.stringify(font));
+  },
   createPage() { const page = node('PAGE'); root.appendChild(page); return page; },
   async setCurrentPageAsync(page) { this.currentPage = page; },
   viewport: { scrollAndZoomIntoView() {} },
 };
 for (const [method, type] of Object.entries({ createFrame: 'FRAME', createText: 'TEXT', createRectangle: 'RECTANGLE', createEllipse: 'ELLIPSE', createSection: 'SECTION' })) {
-  figma[method] = () => { const result = node(type); figma.currentPage.appendChild(result); return result; };
+  figma[method] = () => {
+    const result = node(type);
+    if (type === 'TEXT') {
+      let font = { family: 'Inter', style: 'Regular' };
+      Object.defineProperty(result, 'fontName', {
+        get: () => font,
+        set: value => {
+          assert.ok(loadedFonts.has(JSON.stringify(value)), 'render must use a verified font');
+          assert.ok(!(failInconsolata && value.family === 'Inconsolata'), 'failed family must not be reapplied');
+          font = value;
+        }
+      });
+    }
+    figma.currentPage.appendChild(result); return result;
+  };
 }
 const context = vm.createContext({ figma, setTimeout,
   _createDsBindingContext: async () => ({ pickFloatByValue: () => null, bindVar: () => false }),
@@ -71,13 +90,16 @@ const context = vm.createContext({ figma, setTimeout,
 // Use the actual composed-value resolver, not a test replacement.
 const resolverStart = code.indexOf('function _docResolveVariableValue(');
 const resolverEnd = code.indexOf('\nfunction _docFormatResolvedVariableValue', resolverStart);
-vm.runInContext(code.slice(resolverStart, resolverEnd) + '\n' + code.slice(start, end), context);
+vm.runInContext(code.slice(code.indexOf('function _createRenderFontResolver('), start) + '\n' + code.slice(resolverStart, resolverEnd) + '\n' + code.slice(start, end), context);
 function descendants(parent) { return parent.children.flatMap(child => [child, ...descendants(child)]); }
 module.exports = (async () => {
-  for (let generation = 0; generation < 2; generation++) {
+  for (let generation = 0; generation < 3; generation++) {
+    failInconsolata = generation === 2;
+    loadedFonts.clear();
     const legacy = node('SECTION'); legacy.name = 'Token Showcase — Scrims'; figma.currentPage.appendChild(legacy);
     const result = await context._buildShowcase({ DS: { collections: { primitives: '1. Primitives' } } });
     assert.ok(!result.sections.includes('Scrims'), 'scrims must not create a separate section');
+    if (failInconsolata) assert.ok(result.fontFallbacks.some(item => item.requested.family === 'Inconsolata'));
     assert.ok(!result.bindingWarnings.some(warning => /Cannot demonstrate/.test(warning)));
     const sections = figma.currentPage.children.filter(n => n.name.startsWith('Token Showcase'));
     assert.strictEqual(sections.filter(n => n.name.endsWith('Scrims')).length, 0, 'remove legacy separate scrim sections');

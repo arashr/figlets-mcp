@@ -1,6 +1,14 @@
 # Figlets improvement task list
 
-Updated November 6, 2026.
+Updated November 8, 2026.
+
+## Current status since 1.3.0
+
+The 1.4.0 candidate contains the approved naming, imported-foundation, prompt/readability, QA, display-font, scrim, contrast-continuation, unified-motion, color-scale/brand-anchor, and rendering-font-fallback changes. See the [complete release summary](releases/1.4.0.md). The latest full suite has 146 passing test files; build, lint, version alignment, packed-release verification, plugin smoke, and archive checks pass.
+
+The Bridge and release packages identify as 1.4.0. Generated specs/ and component-specs/ are local outputs, not release content. Native Specs replacement is shelved and its disposable tooling is removed. No current file's incorrect token inventory was silently migrated by these code fixes.
+
+Still open: refresh the normal Bridge/host, verify the latest font fallback and setup flow live, and replay the six designer workflows. Publication was explicitly approved by the user on November 8; release execution and remote verification are in progress. Historical entries below retain their original test counts and runtime observations; they are not claims about the current running host. Later corrections supersede earlier motion staging and scrim placement proposals.
 
 ## Goal and approval rules
 
@@ -21,9 +29,9 @@ The user must explicitly approve each proposed change before implementation. App
 
 **Status: user-approved fix implemented November 7. Automated verification complete. Existing Figma file unchanged.**
 
-Saved dummy_ds_4 intake correctly records 0-100, #FFC850, and #B52840. The generator lacks a 0-100 scale and silently falls back to 50-950 while retaining the requested label. Read-only reproduction yields the agent's contradictory anchors at 200 and 600. Separately, the main brand semantic template starts at primary/500 rather than the supplied anchor; initial contrast adjustment can move it. The active saved snapshot shows the reported primary/400 binding. The exact historical selection of 400 is not attributed without an operation log.
+Saved dummy_ds_4 intake correctly records 0-100, #FFC850, and #B52840. The confirmed defect was a missing 0-100 scale and silent fallback to 50-950 while retaining the requested label. Read-only reproduction yields the agent's contradictory anchors at 200 and 600. Separately, the main brand semantic template starts at primary/500 rather than the supplied anchor; initial contrast adjustment can move it. The active saved snapshot shows the reported primary/400 binding. The exact historical selection of 400 is not attributed without an operation log.
 
-Implemented repair: shared scale-aware generation/reference resolution, anchor-based default main brand semantics, unchanged exact primitive colors, and truthful output/readback. Tests must cover all supported ranges, valid anchor steps, foreground/icon adaptation without moving the brand anchor, preserved explicit mappings, and rejection of unsupported silent fallback. See [evidence and proposed test scope](reviews/brand-anchor-scale-investigation.md).
+Implemented repair: shared scale-aware generation/reference resolution, anchor-based default main brand semantics, unchanged exact primitive colors, and truthful output/readback. Tests cover all supported ranges, valid anchor steps, foreground/icon adaptation without moving the brand anchor, preserved explicit mappings, and rejection of unsupported silent fallback. See [implementation and regression evidence](reviews/brand-anchor-scale-investigation.md).
 
 ### Motion intake correction
 
@@ -79,9 +87,7 @@ Remaining limits: native build results confirm section generation, not visual si
 
 ### Investigation: native Figma Specs
 
-**Status: parked by the user. Future implementation must use Figlets Bridge only.**
-
-See [native Specs investigation](reviews/native-figma-specs-investigation.md). Specs use Markdown and support visuals. User-confirmed scope: native Specs replace only the custom in-Figma documentation sheet. Local component-specs Markdown and the component description/SPEC block retain their existing behavior. Existing demos stay; separate them only where needed. No permanent alternative-output menu or redesign of other documentation. A fresh sync after user reload of bridge 1.3.0+dev.20261106.6 confirms native Specs methods are unavailable to this plugin. The read-only capability check is implemented and tested, with full suite 140/140 passing. The user rejected mixing official Figma MCP into Figlets. Resume bridge-only investigation only after the current regressions are resolved and the user resumes this task. A concrete preview and implementation approval remain required. No native Spec or demo writes were performed. Approved work preceding this investigation is committed as ac9aa54.
+**Status: shelved by the user November 8.** Native Markdown import from Finder works, but the tested Bridge routes do not provide native creation or content updates. The current documentation workflow stays. Disposable experiment code and generated manifests were removed during release cleanup. Keep only the [research outcome](reviews/native-figma-specs-investigation.md). Resume only on explicit request.
 
 ### Additional request: discoverable optional motion setup
 
@@ -168,7 +174,7 @@ Verification: full suite 135/135 test files passes; whitespace check passes. The
 
 ### 5. Replay all six designer workflows
 
-**Status: pending approved changes and a current connection.**
+**Status: current-candidate live replay pending. Automated coverage passes; the six manual workflows below are not yet signed off.**
 
 QA container exclusion approved and implemented: COMPONENT_SET properties are skipped while every variant and nested layer remains in scope. The regression failed before the fix and passed afterward for selection/page audits, contiguous numbering, automatic fixes, and stale container approvals. Full suite 136/136 passes. A fresh read-only live audit of Notification toggle reports only two variant itemSpacing findings, no set findings, and no writes. The two 16px values are stored on State=Off 9:9 and State=On 9:13, rows containing Label and Track. Current inspection does not expose primary-axis alignment, so whether those stored gaps control visible spacing remains unverified. Do not apply their suggested bindings yet. Further inactive-property filtering requires a separate proposal and approval. Local bridge marker is now 1.3.0+dev.20261106.2.
 
@@ -185,14 +191,17 @@ For each flow, record the input, visible response, approval point, resulting art
 
 ### 6. Prepare the next release
 
-**Status: pending workflow verification and release approval.**
+**Status: 1.4.0 prepared locally; commit, push, and publication approved November 8.**
 
-- [ ] Present the final short changelog and remaining limitations.
-- [ ] Obtain approval for version and distribution changes.
-- [ ] Remove the local bridge build suffix `+dev.20261106.6` when preparing the approved release version.
-- [ ] Run required package, test, and plugin checks on the approved release candidate.
-- [ ] Obtain explicit publishing approval before release.
+- [x] Record the short changelog and remaining limitations.
+- [x] Prepare version/distribution updates under the user's release-preparation instruction.
+- [x] Remove the development suffix and align all product surfaces to 1.4.0.
+- [x] Run package, test, version, and plugin checks on the candidate.
+- [x] Remove disposable experiment files and exclude generated documentation from releases.
+- [x] Review the designer README and update decisions, project memory, and release records.
+- [ ] Complete current-candidate live workflow verification.
+- [x] Obtain explicit publishing approval before release.
 
 ## Verification already recorded
 
-The review recorded 133 passing test files, release-package verification, and plugin smoke checks. It also reproduced two logic gaps outside that coverage. No new implementation, runtime restart, or live Figma mutation is authorized by those results.
+The original November 6 review recorded 133 passing test files and reproduced two logic gaps. Those approved fixes and later additions are covered by the current 146-file passing suite. Historical review evidence remains useful, but current readiness is defined by the status above and the 1.4.0 release record. Automated checks do not authorize new Figma writes or publication.

@@ -1,5 +1,25 @@
 # Decisions
 
+## [2026-11-08] Current 1.4.0 candidate and release boundaries
+
+**Scope since 1.3.0:** Modern variables and rollback-aware value updates; DESIGN.md 0.4.0; richer library-backed component handoffs; confirmed-name preservation; valid raw primitives and optional imported defaults; shared readable prompts; component-set and inactive Auto-gap QA exclusions; distinct optional display fonts; scrims at the end of Primitive Colors with inset neutral backplates; semantic-only contrast repair and honored continuation; motion in ordinary intake/setup; authoritative color ranges and brand anchors; failure-only rendering-font substitution and independent Markdown completion. Detailed decisions and checkpoint evidence below remain historical records.
+
+**Supersession:** Motion's earlier separate setup/approval stages are superseded for full setup. Scrims use the existing Primitive Colors swatches, not a separate section. Native Specs replacement is shelved; keep the existing documentation outputs and Bridge-only integration. Preserve old decisions as history rather than presenting them as current instructions.
+
+**Distribution:** Version 1.4.0 is prepared locally across product packages, manifests, links, and Bridge metadata. Generated root specs/ and component-specs/ are project outputs and must not be tracked or distributed. Ignore both, explicitly exclude both from source archives, and reject those directory names during server-package verification. Local files remain intact. Retain useful regression tests and concise research outcomes; remove discarded experimental code/manifests/plans.
+
+**Documentation:** Keep the README's established designer-facing structure. Add only necessary capability/reliability wording and correct release labels; place implementation details and release limitations in internal logs and release notes. The release summary is docs/releases/1.4.0.md. The November 6 review is marked historical and the task list now distinguishes current completion from checkpoint evidence.
+
+**Readiness:** 146/146 test files, build, lint, package smoke, version alignment, and release/archive verification pass. This is automated evidence, not complete live workflow sign-off. Current-candidate font/setup live checks and six-workflow replay remain. No commit, tag, push, publication, or additional Figma cleanup is authorized by the records themselves.
+
+## [2026-11-08] Font failures use verified substitutes for generated output only
+
+**Decision:** Reuse a single cached font resolver across component documentation and showcase rendering. Try the exact requested font first and retain available font/style/binding behavior. On load failure only, verify a fallback before use. Never rewrite configured fonts, source tokens, source styles, or component bindings as a rendering remedy. Do not attach failed font-family/weight bindings to fallback previews. Recorded source typography facts remain unchanged.
+
+**Completion:** Generate Markdown and component description independently of visual sheet success. A failed visual result is partial, not a failed handoff or a successful sheet. Prevent unchanged automatic retries. Preserve prior sheets until successful replacement. If every font fails, report that visual limitation and keep the completed Markdown usable.
+
+**Verification:** Actual renderer failure injection and receiver-to-local-file integration cover failure-only substitution, unchanged source style definitions and Markdown facts, old-sheet preservation, and truthful partial results. No new public tool or Bridge command. Live verification is separate. See docs/reviews/render-font-fallback.md.
+
 ## [2026-11-07] Requested scales and exact brand anchors are authoritative
 
 **Decision:** Reuse one core scale resolver across intake and generation. Support 0-100 explicitly; never silently substitute 50-950 for an unknown scale. Report the generated inventory and actual anchor paths. Preserve designer-supplied RGB under every ramp strategy. Generated main brand semantics use the primary anchor in both modes; contrast adaptation changes foreground aliases, not the main brand anchor or primitives. Retain unresolved contrast truthfully under existing continuation policy. Saved explicit mappings stay literal, and invalid references are reported rather than clamped.

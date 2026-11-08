@@ -10,7 +10,7 @@ How to wire `figlets-mcp` into your AI agent host.
 For normal use, install the released Figlets command from the GitHub release tarball:
 
 ```bash
-npm install -g https://github.com/arashr/figlets-mcp/releases/download/v1.3.0/figlets-mcp-server-1.3.0.tgz
+npm install -g https://github.com/arashr/figlets-mcp/releases/download/v1.4.0/figlets-mcp-server-1.4.0.tgz
 ```
 
 For local development from this repo checkout, link the server globally instead:

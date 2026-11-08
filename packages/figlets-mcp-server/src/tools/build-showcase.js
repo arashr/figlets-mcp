@@ -74,6 +74,7 @@ function handleBuildShowcase(args = {}) {
             sections: result.sections || [],
             layout: result.layout || "horizontal",
             bindingWarnings: Array.isArray(result.bindingWarnings) ? result.bindingWarnings : [],
+            fontFallbacks: Array.isArray(result.fontFallbacks) ? result.fontFallbacks : [],
             config: {
               path: configStatus.configPath || null,
               created: Boolean(configStatus.created),

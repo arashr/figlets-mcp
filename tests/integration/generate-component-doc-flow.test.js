@@ -53,7 +53,7 @@ const FAKE_DOC_RESULT = {
  *   3. GET /poll → expects { command: 'build-doc', data: { componentId, componentName, ... } }
  *   4. POST /sync-doc-build with the simulated plugin output
  */
-function simulatePluginDocBuild(baseUrl, capturedRef) {
+function simulatePluginDocBuild(baseUrl, capturedRef, docResult = FAKE_DOC_RESULT) {
   return new Promise((resolve, reject) => {
     http.get(baseUrl + "/poll", (pollRes) => {
       let body = "";
@@ -81,7 +81,7 @@ function simulatePluginDocBuild(baseUrl, capturedRef) {
                 if (buildCmd.command !== "build-doc") return reject(new Error("Plugin expected build-doc, got: " + buildCmd.command));
                 capturedRef.command = buildCmd;
 
-                const payload = JSON.stringify(FAKE_DOC_RESULT);
+                const payload = JSON.stringify(docResult);
                 const postReq = http.request(baseUrl + "/sync-doc-build", {
                   method: "POST",
                   headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
@@ -127,7 +127,7 @@ module.exports = new Promise((resolve, reject) => {
         variant_descriptions: { "Type=Primary": "High-emphasis" }
       }))
     ])
-      .then(([pluginAck, toolResult]) => {
+      .then(async ([pluginAck, toolResult]) => {
         // --- plugin received the right payload via the poll ---
         assert.strictEqual(pluginAck.success, true, "/sync-doc-build ack should succeed");
         assert.ok(captured.command, "plugin should have received a build-doc command");
@@ -156,6 +156,25 @@ module.exports = new Promise((resolve, reject) => {
         assert.strictEqual(parsed.bindingsCount, 12);
         assert.strictEqual(parsed.anatomyCount, 3);
         assert.deepStrictEqual(parsed.specSheet, { page: "Components", frame: "Button · Spec" });
+
+        const partialResult = { ...FAKE_DOC_RESULT, specSheet: { status: 'failed', error: 'No loadable font', retryable: false } };
+        const simulator = simulatePluginDocBuild(baseUrl, {}, partialResult);
+        const [, partialResponse] = await Promise.all([
+          simulator,
+          new Promise(r => setTimeout(r, 50)).then(() => handleGenerateComponentDoc({
+            component_name: 'Button', description: 'Purpose',
+            usage_do: ['Use for the primary CTA', 'Keep the label action-oriented'],
+            usage_dont: ["Don't truncate the label", "Don't use for secondary actions"]
+          }))
+        ]);
+        const partial = JSON.parse(partialResponse.content[0].text);
+        assert.ok(!partialResponse.isError);
+        assert.strictEqual(partial.status, 'partial');
+        assert.strictEqual(partial.retryable, false);
+        assert.strictEqual(partial.pathWritten, true);
+        assert.strictEqual(fs.readFileSync(expectedWrittenPath, 'utf8'), FAKE_DOC_RESULT.markdown);
+        assert.ok(!partial.message.includes('Spec sheet rendered'));
+        assert.ok(partial.message.includes('Do not repeat'));
 
         cleanup(receiver, resolve);
       })

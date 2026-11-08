@@ -160,7 +160,7 @@ assert.ok(
   code.includes("const _vBadgeText = _ds.colorRoles.dangerText") &&
     code.includes("const _cBadgeText = _ds.resolvedOrFallback(_vBadgeText") &&
     code.includes("_applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, _cBadgeText, _vBadgeText)") &&
-    code.includes("badgeTextVariable: _vBadgeText ? _vBadgeText.name : null") &&
+    code.includes("_docBindingDiagnostics.badgeTextVariable = _vBadgeText ? _vBadgeText.name : null") &&
     code.includes("firstBadgeTextFillVariable = _boundPaintColorVarName(_fill)") &&
     code.includes("bindingDiagnostics: _docBindingDiagnostics") &&
     !code.includes("_applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, { r: 1, g: 1, b: 1 }, null)"),

@@ -166,12 +166,14 @@ function handleGenerateComponentDoc(args) {
           return {
             content: [{
               type: 'text',
-              text: `Error: Spec sheet rendered in Figma, but Figlets could not write the markdown handoff file: ${writeErr.message}`
+              text: `Error: Figma spec sheet status: ${(result.specSheet && result.specSheet.status) || 'complete'}. Figlets could not write the markdown handoff file: ${writeErr.message}`
             }],
             isError: true
           };
         }
         const responsePayload = {
+          status: result.specSheet && result.specSheet.status === 'failed' ? 'partial' : 'complete',
+          retryable: false,
           componentName: result.componentName || componentName,
           path: result.path,
           markdown: markdown,
@@ -186,7 +188,9 @@ function handleGenerateComponentDoc(args) {
           pathWritten: true,
           selectionContext: result.selectionContext || selectionContext,
           specSheet: result.specSheet || {},
-          message: `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Markdown handoff written to '${writtenMarkdown.relativePath}'.`
+          message: result.specSheet && result.specSheet.status === 'failed'
+            ? `Markdown handoff written to '${writtenMarkdown.relativePath}'. The visual spec sheet failed: ${result.specSheet.error}. Do not repeat the same render without a changed condition.`
+            : `Spec sheet rendered for ${result.componentName || componentName} on ${(result.selectionContext && result.selectionContext.fileName) || selectionContext.fileName || 'current file'} / ${(result.selectionContext && result.selectionContext.pageName) || selectionContext.pageName || 'current page'}. Markdown handoff written to '${writtenMarkdown.relativePath}'.`
         };
         if (selectionInfo && selectionInfo.nestedComponentSummary) {
           responsePayload.nestedComponents = nestedComponents;

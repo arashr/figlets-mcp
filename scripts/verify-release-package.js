@@ -49,6 +49,10 @@ function listTarball(tarballPath) {
 }
 
 function assertTarballContents(entries) {
+  assert.ok(
+    !entries.some(entry => /(?:^|\/)(?:component-specs|specs)\//.test(entry)),
+    "release tarball must exclude generated project documentation folders"
+  );
   const required = [
     "package/package.json",
     "package/bin/figlets-mcp.js",

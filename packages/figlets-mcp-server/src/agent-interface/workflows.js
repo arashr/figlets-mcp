@@ -745,6 +745,7 @@ const WORKFLOWS = [
       "Never expand documentation recursively. Full documentation may execute the exact approved finite leaf-first list automatically by component ID; newly discovered dependencies require a new decision. In one-by-one review mode, require separate confirmation for each component.",
       "A skipped dependency is skipped only for the current conversation run. Do not call a tool, write a preference, mark it documented, or suppress it from future inspections.",
       "If inspect_component or generate_component_doc cannot resolve a returned component ID on the current page, stop that item and ask for manual selection as a fallback instead of guessing by name.",
+      "Generated documentation uses verified font fallbacks only when requested fonts cannot load. Preserve the source component and recorded typography. If generate_component_doc returns status partial with pathWritten true, the Markdown handoff is complete even if specSheet.status is failed. Report those outcomes separately. When retryable is false, do not repeat the unchanged render or block the designer from using the completed Markdown.",
     ],
   },
   {

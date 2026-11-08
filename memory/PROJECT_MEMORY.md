@@ -1,5 +1,33 @@
 # Project Memory
 
+## November 8 publication authorized
+
+The user explicitly requested commit, push, and release of 1.4.0. Automated candidate checks remain passing. Final remote fetch shows the local history ahead of origin/main without remote-only commits. GitHub authentication is available and v1.4.0 does not already exist. Proceed with the verified server and Bridge archives and checksums. Preserve the known limit: current-candidate font fallback/setup and six-flow live replay were not completed. Publication approval does not imply live verification. Final publication outcome will be recorded after remote verification.
+
+## Current handoff: changes since 1.3.0, November 8
+
+Current local candidate: 1.4.0. Last committed checkpoint: c013b82. Font fallback, release preparation, generated-output exclusions, and documentation reconciliation remain pending commit. No tag, push, or published 1.4.0 release exists from this work. README download links point at the intended release destination and become usable when the approved tag/assets are published.
+
+Since 1.3.0: modern variable/opacity support, validated value-batch rollback and accurate outcomes, DESIGN.md 0.4.0, library alias documentation, confirmed-name preservation, primitive inventory/internal preparation corrections, optional imported defaults, readable prompt guidance, authoring-container/Auto-gap QA filtering, optional display fonts, inset scrims at the end of Primitive Colors, semantic-only contrast repairs with continuation, integrated motion intake/setup, exact requested scale/brand anchors, and failure-only document/showcase font fallback. See docs/releases/1.4.0.md for the consolidated human changelog and docs/decisions.md for current boundaries. Earlier separate-motion and standalone-scrim notes are superseded.
+
+Cleanup removed native Specs experiment code/generated plugin copies, the superseded plan, and old tarballs. Native Specs is shelved, current documentation remains, and the imported disposable Figma Spec was left intact. Root specs/ and component-specs/ are generated local output, excluded from tracking and source/server/Bridge releases. Existing local files and file-scoped .local design-system configs/snapshots are preserved. Pending index removals of the old tracked Figlets Test Make bundle are intentional, not lost source.
+
+Latest complete automated evidence: 146/146 files pass, build/lint, packed package, plugin smoke, version alignment, archive integrity, and output-exclusion checks pass. dist has the 1.4.0 server tarball, Bridge ZIP, and SHA256SUMS. Live font-failure/current setup verification and all six designer-flow replay remain. Refresh the normal Bridge and host before testing; cached experimental/development sessions are not the release runtime. Do not claim the source fixes migrated an existing file or that fallback visual behavior has been verified live.
+
+README was read in full and kept in its existing structure. Only setup wording, fallback explanation, plain-language version guidance, and stale source labels were changed. Historical project logs retain their checkpoints; the current task/release summary supersedes stale status claims. User approval is still required for publication and new designer-facing changes.
+
+## November 8 release preparation and cleanup
+
+User requested project cleanup and release preparation. Removed disposable native Specs experiment code and generated plugin directory, superseded implementation plan, and old local dist tarballs. Preserved file-scoped design-system data and the Figma test artifact. Condensed native Specs research into a shelved outcome. Synced product version to 1.4.0 across packages, lockfile, host plugin manifests/install links, and Bridge. Removed development suffix from normal Bridge. Retained approved font fallback and its tests.
+
+Local verification: 146/146 test files, build, lint, version alignment, packed-release verification, plugin-host smoke, whitespace, and Bridge archive integrity pass. dist contains verified server tarball, Bridge zip, and SHA256SUMS. See docs/releases/1.4.0.md. Manual host refresh and live font-failure/setup verification remain before publication. No commit, tag, push, or publish was performed. Do not confuse local candidate preparation with a public release.
+
+## November 8 generated documentation and showcase font fallback
+
+User approved verified failure-only fallbacks for any requested rendering font. Shared _createRenderFontResolver caches exact attempts, retains successful requests, and falls back through same-family Regular, Inter/Roboto/Arial Regular, then a loadable listed font. Documentation preflights actual style and variable role fonts. Generated text starts with a loaded font. Failed family/weight references are not rebound onto fallback previews; source component, token, and style definitions are not rewritten. Showcase reuses the same resolver. Setup typography and explicit source style edits remain exact and unchanged.
+
+Visual documentation rendering is separated from Markdown/description generation. A failed sheet returns partial status with completed local handoff and retryable false. Keep an old sheet until its replacement succeeds; remove a failed new sheet. Actual renderer and receiver integration regressions cover exact Markdown parity, missing faces/families/default fonts, enumerated fallback, exhausted fonts, source style preservation, and truthful partial outcomes. See docs/reviews/render-font-fallback.md. Verification: 146/146 test files, build, lint, plugin packaging smoke, and whitespace pass. Live verification needs the normal Bridge reloaded; no live generation, commit, or release in this task.
+
 ## November 7 requested color scale and exact brand anchor corrected
 
 User approved fixing ignored 0-100 intake and main brand aliases. Shared core color-scale resolver now supports 0-100 as 0,10,...100, normalizes intake labels, rejects unsupported silent fallback and conflicting steps. Generator preserves exact brand RGB under standard and contrast-harmonized strategies and reports actual anchor paths. Generated main surface/bg brand aliases use that primary anchor in both modes. Template references adapt to the actual range; saved explicit assignments remain literal and missing steps produce reference errors. Semantic contrast never moves the main brand background. Other semantic variants retain evaluated adaptation. Readback detects observed scale and semantic brand anchor rather than assuming 500.

@@ -1,8 +1,6 @@
 figma.showUI(__html__, { width: 296, height: 348, themeColors: true });
 
-var _bridgeBuild = '1.3.0';
-// Local build metadata. Remove this suffix when preparing the next release.
-_bridgeBuild += '+dev.20261106.8';
+var _bridgeBuild = '1.4.0';
 var _sessionLog = [];
 var _sessionId = 'figlets-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 
@@ -2571,6 +2569,60 @@ async function _runQaBindingAudit(opts) {
 // ── Showcase implementation ──────────────────────────────────────────────────
 // Ported from figlets skills/fig-ds-showcase — all rendering via Figma Plugin API.
 
+// Rendering only. Setup and source typography keep their exact-font requirements.
+function _createRenderFontResolver() {
+  const attempts = {};
+  const resolved = {};
+  const warnings = [];
+  let availableFonts = null;
+  function key(font) { return JSON.stringify(font); }
+  async function load(font) {
+    const id = key(font);
+    if (!attempts[id]) attempts[id] = (async function () {
+      try { await figma.loadFontAsync(font); return true; } catch (error) { return false; }
+    })();
+    return attempts[id];
+  }
+  async function prepare(font) {
+    const id = key(font);
+    if (resolved[id]) return resolved[id];
+    if (await load(font)) { resolved[id] = font; return font; }
+    const candidates = [
+      { family: font.family, style: 'Regular' },
+      { family: 'Inter', style: 'Regular' },
+      { family: 'Roboto', style: 'Regular' },
+      { family: 'Arial', style: 'Regular' }
+    ];
+    let fallback = null;
+    for (let i = 0; i < candidates.length; i++) {
+      if (await load(candidates[i])) { fallback = candidates[i]; break; }
+    }
+    if (!fallback && typeof figma.listAvailableFontsAsync === 'function') {
+      if (!availableFonts) availableFonts = figma.listAvailableFontsAsync().catch(function () { return []; });
+      const fonts = await availableFonts;
+      for (let i = 0; i < fonts.length; i++) {
+        if (fonts[i].fontName && await load(fonts[i].fontName)) { fallback = fonts[i].fontName; break; }
+      }
+    }
+    if (!fallback) throw new Error('No loadable font is available for generated text.');
+    resolved[id] = fallback;
+    warnings.push({ requested: font, fallback: fallback });
+    return fallback;
+  }
+  function get(font) {
+    const value = resolved[key(font)];
+    if (!value) throw new Error('Render font was not prepared: ' + font.family + ' ' + font.style);
+    return value;
+  }
+  function exact(font) { return JSON.stringify(get(font)) === JSON.stringify(font); }
+  function text() {
+    const node = figma.createText();
+    node.fontName = get({ family: 'Inter', style: 'Regular' });
+    return node;
+  }
+  return { load: load, prepare: prepare, get: get, exact: exact, text: text, warnings: warnings };
+}
+
 async function _buildShowcase(opts) {
   opts = opts || {};
   const _numericFallback = opts.numericFallback || {};
@@ -2897,6 +2949,7 @@ async function _buildShowcase(opts) {
 
   const _sortedStyles  = textStyles.slice().sort((a, b) => b.fontSize - a.fontSize);
 
+  const _renderFonts = _createRenderFontResolver();
   const _fontSet = new Map();
   for (const s of textStyles) {
     const k = `${s.fontName.family}::${s.fontName.style}`;
@@ -2913,12 +2966,12 @@ async function _buildShowcase(opts) {
   const _SEMIBOLD_CANDIDATES = ['SemiBold', 'Semi Bold', 'Semibold', 'Demi Bold', 'DemiBold', 'Bold'];
   let _semiboldStyle = 'Regular';
   for (const _sc of _SEMIBOLD_CANDIDATES) {
-    try { await figma.loadFontAsync({ family: _dsFamily, style: _sc }); _semiboldStyle = _sc; break; } catch (_) {}
+    if (await _renderFonts.load({ family: _dsFamily, style: _sc })) { _semiboldStyle = _sc; break; }
   }
   _fontSet.set(`${_dsFamily}::${_semiboldStyle}`, { family: _dsFamily, style: _semiboldStyle });
 
   // Load all remaining fonts — individual failures are silently skipped.
-  await Promise.all([..._fontSet.values()].map(f => figma.loadFontAsync(f).catch(() => {})));
+  for (const font of _fontSet.values()) await _renderFonts.prepare(font);
 
   const _C = {
     outlineSubtle:  { r: 0.894, g: 0.894, b: 0.906 },
@@ -3285,19 +3338,19 @@ async function _buildShowcase(opts) {
   }
 
   function _t(str, size, color, medium, v) {
-    const t = figma.createText();
+    const t = _renderFonts.text();
     t.characters = String(str);
     t.fontSize = size;
-    t.fontName = { family: 'Inter', style: medium ? 'Medium' : 'Regular' };
+    t.fontName = _renderFonts.get({ family: 'Inter', style: medium ? 'Medium' : 'Regular' });
     t.fills = _textFill(color, v);
     return t;
   }
 
   function _tDS(str, size, color, semibold, v) {
-    const t = figma.createText();
+    const t = _renderFonts.text();
     t.characters = String(str);
     t.fontSize = size;
-    t.fontName = { family: _dsFamily, style: semibold ? _semiboldStyle : 'Regular' };
+    t.fontName = _renderFonts.get({ family: _dsFamily, style: semibold ? _semiboldStyle : 'Regular' });
     t.fills = _textFill(color, v);
     return t;
   }
@@ -3373,7 +3426,7 @@ async function _buildShowcase(opts) {
   function _applyTextStyleBinding(node) {
     if (!node || node.type !== 'TEXT' || node.textStyleId) return false;
     const style = _pickTextStyleForText(node);
-    if (!style) {
+    if (!style || !_renderFonts.exact(style.fontName)) {
       _bindNumericProp(node, 'fontSize', node.fontSize, 'typography');
       if (node.lineHeight && typeof node.lineHeight === 'object' && node.lineHeight.unit === 'PIXELS') {
         _bindNumericProp(node, 'lineHeight', node.lineHeight.value, 'typography');
@@ -4310,8 +4363,14 @@ async function _buildShowcase(opts) {
     sampleCell.primaryAxisAlignItems = 'CENTER';
     sampleCell.counterAxisAlignItems = 'MIN';
     sampleCell.clipsContent = true;
-    const sampleText = figma.createText();
-    sampleText.textStyleId    = style.id;
+    const sampleText = _renderFonts.text();
+    if (_renderFonts.exact(style.fontName)) sampleText.textStyleId = style.id;
+    else {
+      sampleText.fontName = _renderFonts.get(style.fontName);
+      sampleText.fontSize = style.fontSize;
+      if (style.lineHeight) sampleText.lineHeight = style.lineHeight;
+      if (style.letterSpacing) sampleText.letterSpacing = style.letterSpacing;
+    }
     sampleText.characters     = 'The quick brown fox jumps over the lazy dog';
     sampleText.fills          = _textFill(_textColor, _V.text);
     sampleText.maxLines       = 1;
@@ -4383,12 +4442,12 @@ async function _buildShowcase(opts) {
     sampleCell.primaryAxisAlignItems = 'CENTER';
     sampleCell.counterAxisAlignItems = 'MIN';
     sampleCell.clipsContent = true;
-    const sampleText = figma.createText();
+    const sampleText = _renderFonts.text();
     // Resolve the effective family variable: per-token first, shared fallback second.
     var _effFamVar = familyVar || _sharedFamilyVar;
     var _effFamRaw = _effFamVar ? resolveVarValue(_effFamVar) : null;
     var _effFamStr = (typeof _effFamRaw === 'string') ? _effFamRaw : _dsFamily;
-    sampleText.fontName  = { family: _effFamStr, style: 'Regular' };
+    sampleText.fontName = _renderFonts.get({ family: _effFamStr, style: 'Regular' });
     sampleText.characters = 'The quick brown fox';
     sampleText.fontSize   = sizeVal ? Math.min(Math.max(Math.round(sizeVal), 8), 60) : 16;
     sampleText.fills      = _textFill(_textColor, _V.text);
@@ -4401,8 +4460,8 @@ async function _buildShowcase(opts) {
         sampleText.setBoundVariable('lineHeight', lhVar);
       } catch (_) {}
     }
-    if (_effFamVar) { try { sampleText.setBoundVariable('fontFamily', _effFamVar); } catch (_) {} }
-    if (weightVar)  { try { sampleText.setBoundVariable('fontWeight',  weightVar);  } catch (_) {} }
+    if (_effFamVar && _renderFonts.exact({ family: _effFamStr, style: 'Regular' })) { try { sampleText.setBoundVariable('fontFamily', _effFamVar); } catch (_) {} }
+    if (weightVar && _renderFonts.exact({ family: _effFamStr, style: 'Regular' })) { try { sampleText.setBoundVariable('fontWeight', weightVar); } catch (_) {} }
     sampleCell.appendChild(sampleText);
     row.appendChild(sampleCell);
     sampleCell.layoutSizingHorizontal = 'FILL';
@@ -5497,7 +5556,7 @@ async function _buildShowcase(opts) {
     }
   }
   if (_familyFontsToLoad.length) {
-    await Promise.all(_familyFontsToLoad.map(function(f) { return figma.loadFontAsync(f).catch(function() {}); }));
+    for (const font of _familyFontsToLoad) await _renderFonts.prepare(font);
   }
 
   const _prevTypography = _page.children.find(n =>
@@ -5764,6 +5823,7 @@ async function _buildShowcase(opts) {
   }
 
   return {
+    fontFallbacks: _renderFonts.warnings,
     sections: _builtSections,
     layout: 'horizontal, 100px gap between Figma sections',
     bindingWarnings: _showcaseBindingWarnings
@@ -12180,6 +12240,23 @@ async function _buildComponentDoc(opts) {
     _defaultAccessibilityNotes(_defaultV, _slotDocs, resolved.length > 0 || _conditionalLayerRows.length > 0)
   );
 
+  const _docBindingWarnings = [];
+  const _docBindingWarningSet = {};
+  const _docBindingDiagnostics = {
+    implementation: 'bnn-40-shared-color-role-bindings-v2',
+    variableValueImplementation: 'native-variable-values-v1',
+    missingAliasIds: _missingAliasIds,
+    badgeTextVariable: null,
+    firstBadgeTextFillVariable: null,
+    firstBadgeTextFillColor: null
+  };
+
+  const _propKeys = Object.keys(compMeta.componentPropertyDefinitions);
+  function _hasMeaningfulAnatomy() { return _docAnatomyNodes.length > 0; }
+  let _pendingDoc = null;
+  let _renderResult;
+  try {
+    _renderResult = await (async function () {
   // ── Fonts ──────────────────────────────────────────────────────────────────
   let _fam = 'Inter', _fReg = 'Regular', _fSemi = 'Semi Bold', _fBold = 'Bold';
   if (_allTextStyles.length > 0) {
@@ -12196,22 +12273,18 @@ async function _buildComponentDoc(opts) {
     _fBold = _findStyle(/^bold$/i) || 'Bold';
     _fReg  = _findStyle(/^regular$/i) || 'Regular';
   }
+  const _renderFonts = _createRenderFontResolver();
+  await _renderFonts.prepare({ family: 'Inter', style: 'Regular' });
   async function _loadFontSafe(family, candidates) {
     for (let i = 0; i < candidates.length; i++) {
-      try { await figma.loadFontAsync({ family: family, style: candidates[i] }); return candidates[i]; } catch (e) {}
+      if (await _renderFonts.load({ family: family, style: candidates[i] })) return candidates[i];
     }
-    return null;
+    return candidates[0];
   }
-  try { await figma.loadFontAsync({ family: 'Inter', style: 'Regular' }); } catch (e) {}
-  const _regOk  = await _loadFontSafe(_fam, [_fReg, 'Regular']);
-  const _semOk  = await _loadFontSafe(_fam, [_fSemi, 'Semi Bold', 'SemiBold', 'Demi Bold', 'DemiBold', 'Bold']);
-  const _boldOk = await _loadFontSafe(_fam, [_fBold, 'Bold']);
-  if (_regOk)  _fReg = _regOk;
-  if (_semOk)  _fSemi = _semOk;
-  if (_boldOk) _fBold = _boldOk;
-  if (!_regOk && !_semOk && !_boldOk) {
-    return { error: 'Could not load any font for "' + _fam + '". Spec sheet aborted.' };
-  }
+  _fReg = await _loadFontSafe(_fam, [_fReg, 'Regular']);
+  _fSemi = await _loadFontSafe(_fam, [_fSemi, 'Semi Bold', 'SemiBold', 'Demi Bold', 'DemiBold', 'Bold']);
+  _fBold = await _loadFontSafe(_fam, [_fBold, 'Bold']);
+  for (const style of [_fReg, _fSemi, _fBold]) await _renderFonts.prepare({ family: _fam, style: style });
 
   // ── DS-adaptive palette ────────────────────────────────────────────────────
   const _vPaper   = _ds.colorRoles.surfaceDefault || _ds.colorRoles.bg;
@@ -12225,6 +12298,7 @@ async function _buildComponentDoc(opts) {
   const _vDoText  = _ds.colorRoles.successText || _ds.colorRoles.onSurface || _ds.colorRoles.text;
   const _vDontText = _ds.colorRoles.dangerText || _ds.colorRoles.onSurface || _ds.colorRoles.text;
   const _vBadgeText = _ds.colorRoles.dangerText || _ds.colorRoles.onSurface || _ds.colorRoles.text;
+  _docBindingDiagnostics.badgeTextVariable = _vBadgeText ? _vBadgeText.name : null;
   const _cPaper   = _ds.resolvedOrFallback(_vPaper, { r: 0.961, g: 0.941, b: 0.922 });
   const _cSurface = _ds.resolvedOrFallback(_vSurface, { r: 0.937, g: 0.918, b: 0.898 });
   const _cInk     = _ds.resolvedOrFallback(_vInk, { r: 0.071, g: 0.071, b: 0.078 });
@@ -12261,17 +12335,14 @@ async function _buildComponentDoc(opts) {
   Object.keys(_docTextRoles).forEach(function (role) {
     _docTypeBindings[role] = _ds.pickTypographyBinding(role, _docTextRoles[role]);
   });
-  const _docBindingWarnings = [];
-  const _docBindingWarningSet = {};
-  const _docBindingDiagnostics = {
-    implementation: 'bnn-40-shared-color-role-bindings-v2',
-    variableValueImplementation: 'native-variable-values-v1',
-    missingAliasIds: _missingAliasIds,
-    badgeTextVariable: _vBadgeText ? _vBadgeText.name : null,
-    firstBadgeTextFillVariable: null,
-    firstBadgeTextFillColor: null
-  };
-
+  for (const role of Object.keys(_docTypeBindings)) {
+    const binding = _docTypeBindings[role];
+    if (binding.kind === 'style' && binding.style && binding.style.fontName) {
+      await _renderFonts.prepare(binding.style.fontName);
+    } else if (binding.kind === 'variables' && binding.variables && binding.variables.familyValue) {
+      for (const style of [_fReg, _fSemi, _fBold]) await _renderFonts.prepare({ family: binding.variables.familyValue, style: style });
+    }
+  }
   function _warnBinding(message) {
     if (!message || _docBindingWarningSet[message]) return;
     _docBindingWarningSet[message] = true;
@@ -12307,14 +12378,21 @@ async function _buildComponentDoc(opts) {
   function _applyTextRole(t, role, fallbackSize, fallbackStyle, fallbackColor, colorVar) {
     const binding = _docTypeBindings[role] || { kind: 'raw', warning: 'No typography style or typography variables found for ' + role + '; using raw text values.' };
     if (binding.kind === 'style' && binding.style) {
-      try { t.textStyleId = binding.style.id; } catch (e) {}
+      if (_renderFonts.exact(binding.style.fontName)) {
+        t.textStyleId = binding.style.id;
+      } else {
+        t.fontName = _renderFonts.get(binding.style.fontName);
+        ['fontSize', 'lineHeight', 'letterSpacing', 'textCase', 'textDecoration'].forEach(function (property) {
+          if (binding.style[property] !== undefined) t[property] = binding.style[property];
+        });
+      }
     } else {
       const vars = binding.kind === 'variables' && binding.variables ? binding.variables : null;
-      t.fontName = { family: _fam, style: fallbackStyle };
+      t.fontName = _renderFonts.get({ family: _fam, style: fallbackStyle });
       t.fontSize = fallbackSize;
       if (vars) {
         if (vars.familyValue && typeof vars.familyValue === 'string') {
-          try { t.fontName = { family: vars.familyValue, style: fallbackStyle }; } catch (e) {}
+          try { t.fontName = _renderFonts.get({ family: vars.familyValue, style: fallbackStyle }); } catch (e) {}
         }
         if (typeof vars.sizeValue === 'number') t.fontSize = vars.sizeValue;
         if (typeof vars.lineHeightValue === 'number') t.lineHeight = { value: vars.lineHeightValue, unit: 'PIXELS' };
@@ -12322,8 +12400,11 @@ async function _buildComponentDoc(opts) {
         if (vars.sizeVar) _bindVar(t, 'fontSize', vars.sizeVar);
         if (vars.lineHeightVar) _bindVar(t, 'lineHeight', vars.lineHeightVar);
         if (vars.trackingVar) _bindVar(t, 'letterSpacing', vars.trackingVar);
-        if (vars.weightVar) _bindVar(t, 'fontWeight', vars.weightVar);
-        if (vars.familyVar) _bindVar(t, 'fontFamily', vars.familyVar);
+        const requestedFont = { family: vars.familyValue || _fam, style: fallbackStyle };
+        if (_renderFonts.exact(requestedFont)) {
+          if (vars.weightVar) _bindVar(t, 'fontWeight', vars.weightVar);
+          if (vars.familyVar) _bindVar(t, 'fontFamily', vars.familyVar);
+        }
       } else {
         _warnBinding(binding.warning);
       }
@@ -12353,9 +12434,7 @@ async function _buildComponentDoc(opts) {
     }
   }
   const _replacementPosition = _old ? { x: _old.x, y: _old.y } : null;
-  if (_old) {
-    _old.remove();
-  }
+
   const _existingDocSheets = [];
   const _remainingDocChildren = _docSec.children ? _docSec.children.slice() : [];
   for (let i = 0; i < _remainingDocChildren.length; i++) {
@@ -12371,6 +12450,7 @@ async function _buildComponentDoc(opts) {
   }
 
   const doc = figma.createFrame();
+  _pendingDoc = doc;
   doc.name = compName + ' · Spec';
   doc.layoutMode = 'VERTICAL';
   doc.resize(1400, 100);
@@ -12390,7 +12470,7 @@ async function _buildComponentDoc(opts) {
   }, _docSectionExisted, _replacementPosition, _existingDocSheets);
 
   function _mkLabel(parent, text) {
-    const t = figma.createText();
+    const t = _renderFonts.text();
     t.characters = text;
     t.letterSpacing = { value: 2, unit: 'PIXELS' };
     _applyTextRole(t, 'sectionLabel', 11, _fSemi, _cSubtle, _vSubtle);
@@ -12417,7 +12497,7 @@ async function _buildComponentDoc(opts) {
     _bindVar(cell, 'paddingRight', _docSpace.padL);
     cell.fills = []; row.appendChild(cell); cell.resize(width, 1);
     cell.primaryAxisSizingMode = 'AUTO'; cell.counterAxisSizingMode = 'FIXED';
-    const t = figma.createText();
+    const t = _renderFonts.text();
     t.characters = String(text);
     _applyTextRole(t, isH ? 'sectionLabel' : isMono ? 'mono' : 'body', 12, isH ? _fSemi : _fReg, isH ? _cInk : isMono ? _cSubtle : _cInk, isH ? _vInk : isMono ? _vSubtle : _vInk);
     cell.appendChild(t); t.textAutoResize = 'HEIGHT';
@@ -12435,7 +12515,7 @@ async function _buildComponentDoc(opts) {
     return t;
   }
   function _mkPreviewText(parent, text, role, style, color, colorVar) {
-    const t = figma.createText();
+    const t = _renderFonts.text();
     t.characters = String(text);
     _applyTextRole(t, role || 'body', role === 'sectionLabel' ? 11 : 12, style || _fReg, color || _cInk, colorVar || _vInk);
     parent.appendChild(t);
@@ -12512,14 +12592,14 @@ async function _buildComponentDoc(opts) {
       );
     }
 
-    const variantLabel = figma.createText();
+    const variantLabel = _renderFonts.text();
     variantLabel.characters = String(label).replace(/,\s*/g, '\n');
     _applyTextRole(variantLabel, 'sectionLabel', 11, _fSemi, _cInk, _vInk);
     variantLabel.textAlignHorizontal = 'CENTER';
     preview.appendChild(variantLabel);
     variantLabel.textAutoResize = 'WIDTH_AND_HEIGHT';
     if (description) {
-      const detail = figma.createText();
+      const detail = _renderFonts.text();
       detail.characters = String(description);
       _applyTextRole(detail, 'body', 10, _fReg, _cSubtle, _vSubtle);
       detail.textAlignHorizontal = 'CENTER';
@@ -12638,7 +12718,7 @@ async function _buildComponentDoc(opts) {
   _bindVar(_secA, 'itemSpacing', _docSpace.padS);
   doc.appendChild(_secA); _secA.layoutSizingHorizontal = 'FILL';
 
-  const _tTitle = figma.createText();
+  const _tTitle = _renderFonts.text();
   _tTitle.characters = compName;
   _applyTextRole(_tTitle, 'title', 40, _fBold, _cInk, _vInk);
   _secA.appendChild(_tTitle); _tTitle.textAutoResize = 'WIDTH_AND_HEIGHT';
@@ -12654,7 +12734,7 @@ async function _buildComponentDoc(opts) {
   if (!_subtitleText) {
     _subtitleText = '_[Add a 1-2 sentence description: what this component is and when to use it]_';
   }
-  const _tSub = figma.createText();
+  const _tSub = _renderFonts.text();
   _tSub.characters = _subtitleText;
   _applyTextRole(_tSub, 'subtitle', 16, _fReg, _cSubtle, _vSubtle);
   _secA.appendChild(_tSub);
@@ -12809,7 +12889,6 @@ async function _buildComponentDoc(opts) {
   }
 
   // Section D — Properties table
-  const _propKeys = Object.keys(compMeta.componentPropertyDefinitions);
   if (_propKeys.length > 0) {
     _mkLabel(doc, 'COMPONENT PROPERTIES');
     const _tblD = _mkTable(doc, 'Properties Table');
@@ -12987,7 +13066,7 @@ async function _buildComponentDoc(opts) {
       _b.fills = [_paint(_cBadge, _vBadge)];
       _wrapper.appendChild(_b);
       _b.layoutPositioning = 'ABSOLUTE'; _b.x = bx; _b.y = by;
-      const _nt = figma.createText();
+      const _nt = _renderFonts.text();
       _nt.characters = String(n);
       _applyTextRole(_nt, 'sectionLabel', n >= 10 ? 8 : 9, _fBold, _cBadgeText, _vBadgeText);
       if (n === 1) {
@@ -13040,12 +13119,12 @@ async function _buildComponentDoc(opts) {
     _bindVar(panel, 'cornerRadius', _docSpace.radius);
     _bindVar(panel, 'strokeWeight', _docSpace.borderStrong);
     parent.appendChild(panel); panel.layoutSizingHorizontal = 'FILL';
-    const lbl = figma.createText();
+    const lbl = _renderFonts.text();
     lbl.characters = label;
     _applyTextRole(lbl, 'bodyStrong', 13, _fSemi, label === 'Do' ? _cDoText : _cDontText, label === 'Do' ? _vDoText : _vDontText);
     panel.appendChild(lbl); lbl.textAutoResize = 'WIDTH_AND_HEIGHT';
     for (let i = 0; i < rules.length; i++) {
-      const rt = figma.createText();
+      const rt = _renderFonts.text();
       rt.characters = '• ' + rules[i];
       _applyTextRole(rt, 'body', 12, _fReg, _cInk, _vInk);
       panel.appendChild(rt); rt.layoutSizingHorizontal = 'FILL'; rt.textAutoResize = 'HEIGHT';
@@ -13074,11 +13153,21 @@ async function _buildComponentDoc(opts) {
     _bindVar(_secI, 'strokeWeight', _docSpace.border);
     doc.appendChild(_secI); _secI.layoutSizingHorizontal = 'FILL';
     for (let i = 0; i < _accessibilityNotes.length; i++) {
-      const note = figma.createText();
+      const note = _renderFonts.text();
       note.characters = '• ' + _accessibilityNotes[i];
       _applyTextRole(note, 'body', 12, _fReg, _cInk, _vInk);
       _secI.appendChild(note); note.layoutSizingHorizontal = 'FILL'; note.textAutoResize = 'HEIGHT';
     }
+  }
+
+  _syncDocumentationSectionBounds(_docSec, _docPlacement.padding);
+  if (_old) _old.remove();
+  try { figma.viewport.scrollAndZoomIntoView([doc]); } catch (e) {}
+  return { status: 'complete', page: figma.currentPage.name, frame: compName + ' · Spec', fontFallbacks: _renderFonts.warnings };
+    })();
+  } catch (error) {
+    if (_pendingDoc) { try { _pendingDoc.remove(); } catch (cleanupError) {} }
+    _renderResult = { status: 'failed', page: figma.currentPage.name, error: String(error.message || error), retryable: false };
   }
 
   // ── Update component description with [SPEC] block ─────────────────────────
@@ -13616,10 +13705,6 @@ async function _buildComponentDoc(opts) {
   _md.push('- **ComponentSet ID:** ' + compSet.id);
   _md.push('- **Spec Frame:** Documentation · ' + compName + ' · Spec');
 
-  _syncDocumentationSectionBounds(_docSec, _docPlacement.padding);
-
-  try { figma.viewport.scrollAndZoomIntoView([doc]); } catch (e) {}
-
   return {
     componentName: compName,
     markdown: _md.join('\n'),
@@ -13676,6 +13761,6 @@ async function _buildComponentDoc(opts) {
     },
     documentedVariantSelection: documentedVariantSelection,
     selectedVariantName: selectedVariantName,
-    specSheet: { page: figma.currentPage.name, frame: compName + ' · Spec' }
+    specSheet: _renderResult
   };
 }

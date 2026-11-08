@@ -1,5 +1,11 @@
 # Decisions
 
+## [2026-11-08] Release 1.4.0 publication completed
+
+**Authorization and result:** User explicitly approved commit, push, and release. Commit 62a557a and annotated tag v1.4.0 are pushed. GitHub release is published with verified server/Bridge archives and checksums. Downloaded published copies match local validated bytes. Generated specs/, component-specs/, and discarded experiments are excluded from source and release archives; local project output is preserved.
+
+**Evidence boundary:** 146/146 test files and the recorded release checks pass. Current-candidate live font/setup and six-flow replay remain pending and are disclosed in release notes. Publication approval does not turn those checks into completed verification. Earlier preparation statuses below are historical. See docs/releases/1.4.0.md and https://github.com/arashr/figlets-mcp/releases/tag/v1.4.0.
+
 ## [2026-11-08] Current 1.4.0 candidate and release boundaries
 
 **Scope since 1.3.0:** Modern variables and rollback-aware value updates; DESIGN.md 0.4.0; richer library-backed component handoffs; confirmed-name preservation; valid raw primitives and optional imported defaults; shared readable prompts; component-set and inactive Auto-gap QA exclusions; distinct optional display fonts; scrims at the end of Primitive Colors with inset neutral backplates; semantic-only contrast repair and honored continuation; motion in ordinary intake/setup; authoritative color ranges and brand anchors; failure-only rendering-font substitution and independent Markdown completion. Detailed decisions and checkpoint evidence below remain historical records.

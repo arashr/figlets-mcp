@@ -1,5 +1,11 @@
 # Project Memory
 
+## November 8 release 1.4.0 published
+
+Published https://github.com/arashr/figlets-mcp/releases/tag/v1.4.0 after explicit user instruction to commit, push, and release. Release commit 62a557a and annotated tag v1.4.0 are pushed to origin. GitHub reports a published non-draft, non-prerelease with server tarball, Bridge ZIP, and SHA256SUMS. Downloaded all published assets and verified both archives match the local checked files and checksums. Tagged source archive excludes specs/, component-specs/, and discarded experiments. Local generated documentation remains intact.
+
+146/146 test files and all recorded build/package/version checks pass. Latest font fallback/setup and six-flow live replay remain uncompleted; that limit is stated in public release notes. Publication is not a live Figma sign-off. Earlier candidate/preparation entries below are historical and superseded by this outcome. No npm registry publication was needed; distribution uses the GitHub release tarball.
+
 ## November 8 publication authorized
 
 The user explicitly requested commit, push, and release of 1.4.0. Automated candidate checks remain passing. Final remote fetch shows the local history ahead of origin/main without remote-only commits. GitHub authentication is available and v1.4.0 does not already exist. Proceed with the verified server and Bridge archives and checksums. Preserve the known limit: current-candidate font fallback/setup and six-flow live replay were not completed. Publication approval does not imply live verification. Final publication outcome will be recorded after remote verification.

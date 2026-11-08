@@ -8,7 +8,7 @@ The 1.4.0 candidate contains the approved naming, imported-foundation, prompt/re
 
 The Bridge and release packages identify as 1.4.0. Generated specs/ and component-specs/ are local outputs, not release content. Native Specs replacement is shelved and its disposable tooling is removed. No current file's incorrect token inventory was silently migrated by these code fixes.
 
-Still open: refresh the normal Bridge/host, verify the latest font fallback and setup flow live, and replay the six designer workflows. Publication was explicitly approved by the user on November 8; release execution and remote verification are in progress. Historical entries below retain their original test counts and runtime observations; they are not claims about the current running host. Later corrections supersede earlier motion staging and scrim placement proposals.
+Still open: refresh the normal Bridge/host, verify the latest font fallback and setup flow live, and replay the six designer workflows. Publication was explicitly approved and completed November 8. Release commit 62a557a and tag v1.4.0 are pushed; published asset downloads match their checksums. Historical entries below retain their original test counts and runtime observations; they are not claims about the current running host. Later corrections supersede earlier motion staging and scrim placement proposals.
 
 ## Goal and approval rules
 
@@ -191,7 +191,7 @@ For each flow, record the input, visible response, approval point, resulting art
 
 ### 6. Prepare the next release
 
-**Status: 1.4.0 prepared locally; commit, push, and publication approved November 8.**
+**Status: 1.4.0 published November 8. Commit/tag pushed and remote downloads verified.**
 
 - [x] Record the short changelog and remaining limitations.
 - [x] Prepare version/distribution updates under the user's release-preparation instruction.
